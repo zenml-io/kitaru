@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
@@ -156,6 +156,22 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
             self._session, statement, worker_filter, id_column=WorkerORM.id
         )
         return [row.to_domain() for row in rows], next_cursor
+
+    async def count_live_by_pool(self, pool_id: uuid.UUID, cutoff: datetime) -> int:
+        """Count the pool's workers last seen at or after a cutoff.
+
+        Args:
+            pool_id: Id of the worker pool.
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Count of live workers in the pool.
+        """
+        statement = select(func.count(WorkerORM.id)).where(
+            WorkerORM.pool_id == pool_id, WorkerORM.last_seen_at >= cutoff
+        )
+        result = await self._session.scalar(statement)
+        return result if result is not None else 0
 
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.

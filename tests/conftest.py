@@ -220,6 +220,7 @@ from kitaru.server.domain.task import (
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
+    QueueStats,
     Task,
     TaskNotFound,
 )
@@ -3144,6 +3145,22 @@ class FakeWorkerRepository:
         page, next_cursor = _paginate_fake(workers, worker_filter)
         return [worker.model_copy() for worker in page], next_cursor
 
+    async def count_live_by_pool(self, pool_id: uuid.UUID, cutoff: datetime) -> int:
+        """Count the pool's workers last seen at or after a cutoff.
+
+        Args:
+            pool_id: Id of the worker pool.
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Count of live workers in the pool.
+        """
+        return sum(
+            1
+            for worker in self._workers.values()
+            if worker.pool_id == pool_id and worker.last_seen_at >= cutoff
+        )
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 
@@ -5183,6 +5200,36 @@ class FakeTaskRepository:
             claimed_task.claim(worker_id, now)
             claimed.append(await self.update(claimed_task))
         return claimed
+
+    async def get_queue_stats(self, scope: WorkerScope) -> QueueStats:
+        """Count pending and in-flight tasks matching a scope.
+
+        Args:
+            scope: Claim scope narrowing the queue.
+
+        Returns:
+            Queue stats matching the scope.
+        """
+        pending = [
+            task
+            for task in self._tasks.values()
+            if task.status is TaskStatus.PENDING and self._matches_scope(task, scope)
+        ]
+        in_flight = sum(
+            1
+            for task in self._tasks.values()
+            if task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            and self._matches_scope(task, scope)
+        )
+        oldest_pending_created = min(
+            (task.created for task in pending if task.created is not None),
+            default=None,
+        )
+        return QueueStats(
+            pending=len(pending),
+            in_flight=in_flight,
+            oldest_pending_created=oldest_pending_created,
+        )
 
     async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
         """Lock one task by id if it is still in flight and older than a cutoff.

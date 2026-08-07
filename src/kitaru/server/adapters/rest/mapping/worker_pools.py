@@ -16,6 +16,7 @@
 from kitaru.api_models.v1.worker_pool import (
     WorkerPoolListParams,
     WorkerPoolResponse,
+    WorkerPoolStatsResponse,
     WorkerPoolUpdateRequest,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
@@ -23,7 +24,7 @@ from kitaru.server.application.models.worker_pool import (
     WorkerPoolFilter,
     WorkerPoolUpdate,
 )
-from kitaru.server.domain.worker_pool import WorkerPool
+from kitaru.server.domain.worker_pool import WorkerPool, WorkerPoolStats
 
 
 def worker_pool_to_response(worker_pool: WorkerPool) -> WorkerPoolResponse:
@@ -44,6 +45,23 @@ def worker_pool_to_response(worker_pool: WorkerPool) -> WorkerPoolResponse:
         scope=worker_pool.scope,
         created=worker_pool.created,
         updated=worker_pool.updated,
+    )
+
+
+def worker_pool_stats_to_response(stats: WorkerPoolStats) -> WorkerPoolStatsResponse:
+    """Convert worker pool stats to their response DTO.
+
+    Args:
+        stats: Computed worker pool stats.
+
+    Returns:
+        Worker pool stats response.
+    """
+    return WorkerPoolStatsResponse(
+        pending_tasks=stats.pending_tasks,
+        in_flight_tasks=stats.in_flight_tasks,
+        oldest_pending_seconds=stats.oldest_pending_seconds,
+        live_workers=stats.live_workers,
     )
 
 

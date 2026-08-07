@@ -22,6 +22,7 @@ from kitaru.api_models.v1.worker_pool import (
     WorkerPoolCreateRequest,
     WorkerPoolListParams,
     WorkerPoolResponse,
+    WorkerPoolStatsResponse,
     WorkerPoolUpdateRequest,
 )
 from kitaru.client.resources.pagination import iterate_pages
@@ -76,6 +77,22 @@ class WorkerPoolsResource:
         """
         response = await self._client.request("GET", f"/v1/worker-pools/{pool_id}")
         return WorkerPoolResponse.model_validate(response.json())
+
+    async def stats(self, pool: uuid.UUID | str) -> WorkerPoolStatsResponse:
+        """Get a worker pool's queue depth and live worker count.
+
+        Args:
+            pool: Id or name of the worker pool.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing
+                worker pool.
+
+        Returns:
+            Computed worker pool stats.
+        """
+        response = await self._client.request("GET", f"/v1/worker-pools/{pool}/stats")
+        return WorkerPoolStatsResponse.model_validate(response.json())
 
     async def list(
         self,

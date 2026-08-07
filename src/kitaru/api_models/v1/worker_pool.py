@@ -17,7 +17,7 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel, ResponseModel
 from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.worker import WorkerScope
 
@@ -48,3 +48,16 @@ class WorkerPoolResponse(OwnedResponseModel):
     id: uuid.UUID = Field(description="Worker pool id.")
     name: str = Field(description="Worker pool name.")
     scope: WorkerScope = Field(description="Tasks this pool's workers claim.")
+
+
+class WorkerPoolStatsResponse(ResponseModel):
+    """Worker pool stats response."""
+
+    pending_tasks: int = Field(description="Pending tasks the pool's scope matches.")
+    in_flight_tasks: int = Field(
+        description="Claimed or running tasks the pool's scope matches."
+    )
+    oldest_pending_seconds: float | None = Field(
+        default=None, description="Age of the oldest matching pending task."
+    )
+    live_workers: int = Field(description="Pool workers inside the liveness window.")

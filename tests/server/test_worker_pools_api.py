@@ -20,7 +20,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeWorkerPoolRepository
+from conftest import FakeTaskRepository, FakeWorkerPoolRepository, FakeWorkerRepository
 from kitaru.server.adapters.rest.dependencies import authorize, get_worker_pool_service
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -29,6 +29,7 @@ from kitaru.server.application.services.worker_pool_service import WorkerPoolSer
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
+LIVENESS_TIMEOUT_SECONDS = 60
 
 
 @pytest.fixture
@@ -38,8 +39,22 @@ def worker_pool_repository() -> FakeWorkerPoolRepository:
 
 
 @pytest.fixture
+def task_repository() -> FakeTaskRepository:
+    """Provide the fake task repository backing the app."""
+    return FakeTaskRepository()
+
+
+@pytest.fixture
+def worker_repository() -> FakeWorkerRepository:
+    """Provide the fake worker repository backing the app."""
+    return FakeWorkerRepository()
+
+
+@pytest.fixture
 async def client(
     worker_pool_repository: FakeWorkerPoolRepository,
+    task_repository: FakeTaskRepository,
+    worker_repository: FakeWorkerRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with a fake-backed worker pool service."""
     app = create_app(
@@ -49,7 +64,12 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    worker_pool_service = WorkerPoolService(repository=worker_pool_repository)
+    worker_pool_service = WorkerPoolService(
+        repository=worker_pool_repository,
+        task_repository=task_repository,
+        worker_repository=worker_repository,
+        liveness_timeout_seconds=LIVENESS_TIMEOUT_SECONDS,
+    )
     app.dependency_overrides[get_worker_pool_service] = lambda: worker_pool_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     transport = httpx.ASGITransport(app=app)
@@ -106,6 +126,39 @@ async def test_get_worker_pool(client: httpx.AsyncClient) -> None:
 async def test_get_worker_pool_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing worker pool."""
     response = await client.get(f"/v1/worker-pools/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+async def test_get_worker_pool_stats_by_id(client: httpx.AsyncClient) -> None:
+    """Get a worker pool's stats by id with the full response shape."""
+    created = (
+        await client.post("/v1/worker-pools", json={"name": "pool-1", "scope": {}})
+    ).json()
+    response = await client.get(f"/v1/worker-pools/{created['id']}/stats")
+    assert response.status_code == 200
+    assert response.json() == {
+        "pending_tasks": 0,
+        "in_flight_tasks": 0,
+        "oldest_pending_seconds": None,
+        "live_workers": 0,
+    }
+
+
+async def test_get_worker_pool_stats_by_name(client: httpx.AsyncClient) -> None:
+    """Get a worker pool's stats by name."""
+    created = (
+        await client.post("/v1/worker-pools", json={"name": "pool-1", "scope": {}})
+    ).json()
+    response = await client.get(f"/v1/worker-pools/{created['name']}/stats")
+    assert response.status_code == 200
+    assert response.json()["live_workers"] == 0
+
+
+async def test_get_worker_pool_stats_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for a missing worker pool, by id and by name."""
+    response = await client.get(f"/v1/worker-pools/{uuid.uuid4()}/stats")
+    assert response.status_code == 404
+    response = await client.get("/v1/worker-pools/missing/stats")
     assert response.status_code == 404
 
 

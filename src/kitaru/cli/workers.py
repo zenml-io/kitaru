@@ -492,6 +492,12 @@ async def get_worker_pool(client: Any, reference: str) -> CommandResult:
     return CommandResult(item=worker_pool.model_dump(mode="json"))
 
 
+async def get_worker_pool_stats(client: Any, reference: str) -> CommandResult:
+    """Get one worker pool's queue depth and live worker count."""
+    stats = await client.worker_pools.stats(reference)
+    return CommandResult(item=stats.model_dump(mode="json"))
+
+
 async def update_worker_pool(
     client: Any,
     reference: str,

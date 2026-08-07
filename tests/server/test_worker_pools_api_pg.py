@@ -89,3 +89,51 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
 
     response = await client.get(f"/v1/worker-pools/{created['id']}")
     assert response.status_code == 404
+
+
+async def test_stats_reflects_registered_worker_and_pending_task(
+    client: httpx.AsyncClient,
+) -> None:
+    """Compute live worker and queue counts from real tables."""
+    pool = (
+        await client.post(
+            "/v1/worker-pools",
+            json={"name": "pool-1", "scope": {"kinds": ["agent"]}},
+        )
+    ).json()
+
+    await client.post(
+        "/v1/workers",
+        json={
+            "name": "worker-1",
+            "pool": pool["name"],
+            "scope": {},
+            "runtime": {"platform": "bare"},
+            "metadata": {},
+        },
+    )
+
+    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    version = (
+        await client.post(
+            f"/v1/agents/{agent['id']}/versions",
+            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+        )
+    ).json()
+    await client.post(
+        "/v1/session-runs",
+        json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
+    )
+
+    response = await client.get(f"/v1/worker-pools/{pool['id']}/stats")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["pending_tasks"] == 1
+    assert body["in_flight_tasks"] == 0
+    assert body["oldest_pending_seconds"] >= 0
+    assert body["live_workers"] == 1
+
+    by_name = await client.get(f"/v1/worker-pools/{pool['name']}/stats")
+    assert by_name.status_code == 200
+    assert by_name.json()["pending_tasks"] == 1
+    assert by_name.json()["live_workers"] == 1

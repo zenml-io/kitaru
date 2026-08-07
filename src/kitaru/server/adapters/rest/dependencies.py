@@ -791,16 +791,23 @@ def get_tag_service(
 
 def get_worker_pool_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> WorkerPoolService:
     """Return a worker pool service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
-        Worker pool service bound to the SQL repository.
+        Worker pool service bound to the SQL repositories.
     """
-    return WorkerPoolService(repository=SQLWorkerPoolRepository(session))
+    return WorkerPoolService(
+        repository=SQLWorkerPoolRepository(session),
+        task_repository=SQLTaskRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
 
 
 def get_worker_service(

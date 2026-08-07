@@ -53,7 +53,7 @@ class StubModel:
 
 @dataclass
 class StubWorkerPools:
-    """Worker pool resource fake for create, list, get, update, and delete."""
+    """Worker pool resource fake for create, list, get, stats, update, and delete."""
 
     items: list[StubModel]
     created: list[WorkerPoolCreateRequest] = field(default_factory=list)
@@ -62,6 +62,18 @@ class StubWorkerPools:
         default_factory=list
     )
     deleted: list[uuid.UUID] = field(default_factory=list)
+    stats_calls: list[Any] = field(default_factory=list)
+    stats_response: StubModel = field(
+        default_factory=lambda: StubModel(
+            uuid.uuid4(),
+            {
+                "pending_tasks": 0,
+                "in_flight_tasks": 0,
+                "oldest_pending_seconds": None,
+                "live_workers": 0,
+            },
+        )
+    )
 
     async def create(self, request: WorkerPoolCreateRequest) -> StubModel:
         self.created.append(request)
@@ -69,6 +81,10 @@ class StubWorkerPools:
 
     async def get(self, pool_id: uuid.UUID) -> StubModel:
         return next(item for item in self.items if item.id == pool_id)
+
+    async def stats(self, pool: Any) -> StubModel:
+        self.stats_calls.append(pool)
+        return self.stats_response
 
     async def list(self, params: Any = None) -> Any:
         self.list_calls.append(params)
@@ -173,6 +189,18 @@ async def test_get_by_name_not_found() -> None:
     assert error.value.kind == "not_found"
 
 
+async def test_worker_pool_stats_passes_the_raw_reference() -> None:
+    """The reference passes straight to the SDK, with no client-side resolution."""
+    client = SimpleNamespace(worker_pools=StubWorkerPools([_pool_response("pool-1")]))
+
+    result = await workers.get_worker_pool_stats(client, "pool-1")
+
+    assert client.worker_pools.stats_calls == ["pool-1"]
+    assert client.worker_pools.list_calls == []
+    assert result.item["pending_tasks"] == 0
+    assert result.item["live_workers"] == 0
+
+
 async def test_worker_pool_update_is_sparse() -> None:
     """Omitted fields stay unset, and touching kinds or selectors sends the scope."""
     pool = _pool_response("pool-1")
@@ -271,6 +299,11 @@ def test_public_worker_pool_argv_covers_all_commands(
 
     assert app_module.main(["worker", "pool", "get", "pool-1", "--output", "text"]) == 0
     assert "pool-1" in capsys.readouterr().out
+
+    assert app_module.main(["worker", "pool", "stats", "pool-1"]) == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["command"] == "worker.pool.stats"
+    assert payload["item"]["live_workers"] == 0
 
     assert (
         app_module.main(["worker", "pool", "update", "pool-1", "--name", "renamed"])

@@ -8138,6 +8138,45 @@
         "title": "WorkerPoolResponse",
         "type": "object"
       },
+      "WorkerPoolStatsResponse": {
+        "description": "Worker pool stats response.",
+        "properties": {
+          "in_flight_tasks": {
+            "description": "Claimed or running tasks the pool's scope matches.",
+            "title": "In Flight Tasks",
+            "type": "integer"
+          },
+          "live_workers": {
+            "description": "Pool workers inside the liveness window.",
+            "title": "Live Workers",
+            "type": "integer"
+          },
+          "oldest_pending_seconds": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Age of the oldest matching pending task.",
+            "title": "Oldest Pending Seconds"
+          },
+          "pending_tasks": {
+            "description": "Pending tasks the pool's scope matches.",
+            "title": "Pending Tasks",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "pending_tasks",
+          "in_flight_tasks",
+          "live_workers"
+        ],
+        "title": "WorkerPoolStatsResponse",
+        "type": "object"
+      },
       "WorkerPoolUpdateRequest": {
         "additionalProperties": false,
         "description": "Worker pool update request.",
@@ -15938,6 +15977,49 @@
           }
         },
         "summary": "Update Worker Pool",
+        "tags": [
+          "worker-pools"
+        ]
+      }
+    },
+    "/v1/worker-pools/{pool}/stats": {
+      "get": {
+        "description": "Get a worker pool's queue depth and live worker count.\n\nThe path segment accepts either a worker pool id or its name. Clients\nobserve HTTP 200 on success and 404 when no worker pool matches either\nform.\n\nArgs:\n    pool: Id or name of the worker pool.\n    service: Worker pool service.\n    actor: Caller context.\n\nReturns:\n    Computed worker pool stats.",
+        "operationId": "get_worker_pool_stats_v1_worker_pools__pool__stats_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pool",
+            "required": true,
+            "schema": {
+              "title": "Pool",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerPoolStatsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Worker Pool Stats",
         "tags": [
           "worker-pools"
         ]

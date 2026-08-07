@@ -74,6 +74,18 @@ class WorkerRepository(Protocol):
         """
         ...
 
+    async def count_live_by_pool(self, pool_id: uuid.UUID, cutoff: datetime) -> int:
+        """Count the pool's workers last seen at or after a cutoff.
+
+        Args:
+            pool_id: Id of the worker pool.
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Count of live workers in the pool.
+        """
+        ...
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 

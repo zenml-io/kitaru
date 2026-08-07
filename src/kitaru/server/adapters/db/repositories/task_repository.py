@@ -34,6 +34,7 @@ from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import (
     DuplicateEvaluationTask,
+    QueueStats,
     Task,
     TaskNotFound,
 )
@@ -281,6 +282,31 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             row.apply(task)
         await self._flush()
         return [row.to_domain() for row in rows]
+
+    async def get_queue_stats(self, scope: WorkerScope) -> QueueStats:
+        """Count pending and in-flight tasks matching a scope.
+
+        Args:
+            scope: Claim scope narrowing the queue.
+
+        Returns:
+            Queue stats matching the scope.
+        """
+        pending_statement = select(
+            func.count(TaskORM.id), func.min(TaskORM.created)
+        ).where(TaskORM.status == TaskStatus.PENDING.value, *_scope_conditions(scope))
+        pending, oldest_pending_created = (
+            await self._session.execute(pending_statement)
+        ).one()
+        in_flight_statement = select(func.count(TaskORM.id)).where(
+            TaskORM.status.in_(IN_FLIGHT_STATUS_VALUES), *_scope_conditions(scope)
+        )
+        in_flight = await self._session.scalar(in_flight_statement)
+        return QueueStats(
+            pending=pending,
+            in_flight=in_flight if in_flight is not None else 0,
+            oldest_pending_created=oldest_pending_created,
+        )
 
     async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
         """Lock one task by id if it is still in flight and older than a cutoff.

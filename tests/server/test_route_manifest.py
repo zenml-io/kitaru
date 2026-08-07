@@ -104,6 +104,7 @@ def test_route_manifest_is_registered() -> None:
         "/v1/tasks/{task_id}/spec",
         "/v1/worker-pools",
         "/v1/worker-pools/{pool_id}",
+        "/v1/worker-pools/{pool}/stats",
         "/v1/workers",
         "/v1/workers/{worker_id}",
         "/v1/workers/{worker_id}/heartbeat",

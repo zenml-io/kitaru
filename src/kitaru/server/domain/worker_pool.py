@@ -19,6 +19,7 @@ from datetime import datetime
 from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.worker import WorkerScope
+from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -118,3 +119,12 @@ class WorkerPool(DomainModel):
             scope: New scope.
         """
         self.scope = scope
+
+
+class WorkerPoolStats(FrozenModel):
+    """Worker pool stats."""
+
+    pending_tasks: int
+    in_flight_tasks: int
+    oldest_pending_seconds: float | None
+    live_workers: int

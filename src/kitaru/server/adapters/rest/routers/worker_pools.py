@@ -23,12 +23,14 @@ from kitaru.api_models.v1.worker_pool import (
     WorkerPoolCreateRequest,
     WorkerPoolListParams,
     WorkerPoolResponse,
+    WorkerPoolStatsResponse,
     WorkerPoolUpdateRequest,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import authorize, get_worker_pool_service
 from kitaru.server.adapters.rest.mapping.worker_pools import (
     worker_pool_list_params_to_filter,
+    worker_pool_stats_to_response,
     worker_pool_to_response,
     worker_pool_update_to_command,
 )
@@ -114,6 +116,34 @@ async def get_worker_pool(
     """
     worker_pool = await service.get_worker_pool(pool_id, actor=actor)
     return worker_pool_to_response(worker_pool)
+
+
+@router.get("/{pool}/stats")
+async def get_worker_pool_stats(
+    pool: str,
+    service: Annotated[WorkerPoolService, Depends(get_worker_pool_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> WorkerPoolStatsResponse:
+    """Get a worker pool's queue depth and live worker count.
+
+    The path segment accepts either a worker pool id or its name. Clients
+    observe HTTP 200 on success and 404 when no worker pool matches either
+    form.
+
+    Args:
+        pool: Id or name of the worker pool.
+        service: Worker pool service.
+        actor: Caller context.
+
+    Returns:
+        Computed worker pool stats.
+    """
+    try:
+        reference: uuid.UUID | str = uuid.UUID(pool)
+    except ValueError:
+        reference = pool
+    _, stats = await service.get_worker_pool_stats(reference, actor=actor)
+    return worker_pool_stats_to_response(stats)
 
 
 @router.patch("/{pool_id}")

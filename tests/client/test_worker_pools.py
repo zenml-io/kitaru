@@ -18,7 +18,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeWorkerPoolRepository, asgi_api_client
+from conftest import (
+    FakeTaskRepository,
+    FakeWorkerPoolRepository,
+    FakeWorkerRepository,
+    asgi_api_client,
+)
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.api_models.v1.worker_pool import (
@@ -51,7 +56,10 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     worker_pool_repository = FakeWorkerPoolRepository()
     app.dependency_overrides[get_worker_pool_service] = lambda: WorkerPoolService(
-        repository=worker_pool_repository
+        repository=worker_pool_repository,
+        task_repository=FakeTaskRepository(),
+        worker_repository=FakeWorkerRepository(),
+        liveness_timeout_seconds=60,
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     async with asgi_api_client(app) as client:
@@ -102,6 +110,28 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 404 as a typed error."""
     with pytest.raises(NotFoundError):
         await api_client.worker_pools.get(uuid.uuid4())
+
+
+async def test_stats(api_client: KitaruAPIClient) -> None:
+    """Get a worker pool's stats by id and by name through the SDK."""
+    created = await api_client.worker_pools.create(
+        WorkerPoolCreateRequest(name="pool-1")
+    )
+
+    stats = await api_client.worker_pools.stats(created.id)
+    assert stats.pending_tasks == 0
+    assert stats.in_flight_tasks == 0
+    assert stats.oldest_pending_seconds is None
+    assert stats.live_workers == 0
+
+    stats = await api_client.worker_pools.stats("pool-1")
+    assert stats.live_workers == 0
+
+
+async def test_stats_not_found(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 404 as a typed error."""
+    with pytest.raises(NotFoundError):
+        await api_client.worker_pools.stats(uuid.uuid4())
 
 
 async def test_list(api_client: KitaruAPIClient) -> None:

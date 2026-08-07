@@ -20,7 +20,7 @@ from typing import Protocol
 
 from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.application.models.task import TaskFilter
-from kitaru.server.domain.task import Task
+from kitaru.server.domain.task import QueueStats, Task
 
 
 class TaskRepository(Protocol):
@@ -149,6 +149,17 @@ class TaskRepository(Protocol):
 
         Returns:
             Claimed tasks carrying their incremented attempt.
+        """
+        ...
+
+    async def get_queue_stats(self, scope: WorkerScope) -> QueueStats:
+        """Count pending and in-flight tasks matching a scope.
+
+        Args:
+            scope: Claim scope narrowing the queue.
+
+        Returns:
+            Queue stats matching the scope.
         """
         ...
 

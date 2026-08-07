@@ -3878,6 +3878,25 @@ async def worker_pool_get(pool: str, /) -> CommandResult:
 @_register(
     worker_pool_app,
     _spec(
+        ("worker", "pool", "stats"),
+        "Get a worker pool's queue depth and live worker count.",
+        parameters=(
+            ParameterSpec(
+                "POOL", "reference", "argument", True, "Worker pool UUID or name."
+            ),
+        ),
+        errors=_ASSET_READ_ERRORS,
+    ),
+)
+async def worker_pool_stats(pool: str, /) -> CommandResult:
+    """Get one worker pool's queue depth and live worker count."""
+    async with _open_asset_client() as client:
+        return await workers.get_worker_pool_stats(client, pool)
+
+
+@_register(
+    worker_pool_app,
+    _spec(
         ("worker", "pool", "update"),
         "Update selected fields on an exact worker pool.",
         parameters=(
