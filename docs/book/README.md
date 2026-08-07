@@ -19,6 +19,10 @@ machinery that makes them runnable — a debugger with a memory, sitting
 beside your observability stack. Traces tell you what happened; Kitaru
 re-runs it.
 
+Kitaru comes from the team behind [ZenML](https://zenml.io): ZenML is
+for ML pipelines, Kitaru is for agents. The full split is in
+[Where ZenML fits](#where-zenml-fits).
+
 ## The loop
 
 * **Record** — wrap the agent you already have with an
