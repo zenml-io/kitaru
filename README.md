@@ -58,8 +58,7 @@ it.
 
 ```bash
 pip install "kitaru[cli,worker,pydantic-ai]"
-docker compose up -d          # server, from this repo — or your team's server
-export KITARU_API_URL=http://localhost:8000
+kitaru login --local          # provisions a local server (Docker) — or: kitaru login <your-team-url>
 kitaru agent register support-agent --command "python support.py"
 ```
 
