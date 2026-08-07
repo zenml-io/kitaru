@@ -15,7 +15,7 @@
 
 from functools import partial
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.server.adapters.db.repositories.evaluation_repository import (
     SQLEvaluationRepository,
@@ -30,11 +30,15 @@ from kitaru.server.adapters.db.repositories.job_repository import SQLJobReposito
 from kitaru.server.adapters.db.repositories.replay_repository import (
     SQLReplayRepository,
 )
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
+)
 from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.events import (
     EventDispatcher,
     JobsSettled,
     ReplaysSettled,
+    SessionImportFinalized,
     TaskTerminal,
 )
 from kitaru.server.application.interfaces.evaluation_repository import (
@@ -48,6 +52,7 @@ from kitaru.server.application.interfaces.experiment_run_repository import (
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
+from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import (
     evaluation_recording,
@@ -55,6 +60,7 @@ from kitaru.server.application.services import (
     run_finalization,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.task_transitions import TaskTransitions
 
 
 def register_subscribers(
@@ -62,6 +68,7 @@ def register_subscribers(
     job_repository: JobRepository,
     task_repository: TaskRepository,
     replay_repository: ReplayRepository,
+    session_repository: SessionRepository,
     experiment_repository: ExperimentRepository,
     experiment_run_repository: ExperimentRunRepository,
     evaluation_repository: EvaluationRepository,
@@ -78,6 +85,7 @@ def register_subscribers(
         job_repository: Job repository.
         task_repository: Task repository.
         replay_repository: Replay repository.
+        session_repository: Session repository.
         experiment_repository: Experiment repository, for replay configs.
         experiment_run_repository: Experiment run repository.
         evaluation_repository: Evaluation repository.
@@ -98,6 +106,20 @@ def register_subscribers(
             replay_repository=replay_repository,
             experiment_repository=experiment_repository,
             task_repository=task_repository,
+            session_repository=session_repository,
+        ),
+    )
+    dispatcher.register(
+        SessionImportFinalized,
+        partial(
+            replay_pipeline.complete_import_wait,
+            task_repository=task_repository,
+            transitions=TaskTransitions(
+                task_repository=task_repository,
+                job_repository=job_repository,
+                dispatcher=dispatcher,
+                analytics=analytics,
+            ),
         ),
     )
     dispatcher.register(
@@ -120,7 +142,9 @@ def register_subscribers(
 
 
 def build_event_dispatcher(
-    session: AsyncSession, analytics: ServerAnalytics | None = None
+    session: AsyncSession,
+    engine: AsyncEngine,
+    analytics: ServerAnalytics | None = None,
 ) -> EventDispatcher:
     """Build the event dispatcher every subscriber of one request shares.
 
@@ -130,6 +154,7 @@ def build_event_dispatcher(
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker, None skips tracking.
 
     Returns:
@@ -141,6 +166,7 @@ def build_event_dispatcher(
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
         replay_repository=SQLReplayRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         experiment_repository=SQLExperimentRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
         evaluation_repository=SQLEvaluationRepository(session),

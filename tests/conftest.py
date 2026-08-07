@@ -50,7 +50,7 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
-from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
@@ -198,6 +198,7 @@ from kitaru.server.domain.secret import (
     SecretNotFound,
 )
 from kitaru.server.domain.session import (
+    DuplicatePendingImportSession,
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
@@ -218,6 +219,7 @@ from kitaru.server.domain.task import (
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
+    ImportWaitTask,
     Task,
     TaskNotFound,
 )
@@ -2126,17 +2128,24 @@ class FakeSessionRepository:
         self._cohort_membership_counts[session_id] -= 1
 
     def _check_duplicate_external_id(self, session: Session) -> None:
-        if session.imported_from is None or session.external_id is None:
+        if session.external_id is None:
             return
         for other in self._sessions.values():
+            if other.id == session.id or other.external_id != session.external_id:
+                continue
             if (
-                other.id != session.id
+                session.imported_from is not None
                 and other.imported_from == session.imported_from
-                and other.external_id == session.external_id
             ):
                 raise DuplicateSessionExternalId(
                     session.imported_from, session.external_id
                 )
+            if (
+                session.status is SessionStatus.PENDING_IMPORT
+                and other.status is SessionStatus.PENDING_IMPORT
+                and other.owner_id == session.owner_id
+            ):
+                raise DuplicatePendingImportSession(session.external_id)
 
     async def allocate_session_number(self, agent_id: uuid.UUID) -> int:
         """Bump the agent's session counter and return the new value.
@@ -2190,6 +2199,30 @@ class FakeSessionRepository:
         if session is None:
             raise SessionNotFound(session_id)
         return session.model_copy()
+
+    async def get_pending_import_by_external_id(
+        self, owner_id: uuid.UUID, external_id: str, exclusive: bool = False
+    ) -> Session | None:
+        """Load an account's pending-import session by external id.
+
+        Args:
+            owner_id: Id of the owning account.
+            external_id: Id from the source system.
+            exclusive: Ignored, the fake has no concurrent callers to lock
+                against.
+
+        Returns:
+            Stored session, or ``None`` when no placeholder matches.
+        """
+        _ = exclusive
+        for session in self._sessions.values():
+            if (
+                session.owner_id == owner_id
+                and session.external_id == external_id
+                and session.status is SessionStatus.PENDING_IMPORT
+            ):
+                return session.model_copy()
+        return None
 
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
         """Resolve the ids of sessions linked to a tag by name.
@@ -5194,6 +5227,7 @@ class FakeTaskRepository:
                 task
                 for task in self._tasks.values()
                 if task.status is TaskStatus.PENDING
+                and task.kind is not TaskKind.IMPORT_WAIT
                 and self._matches_residual(task, scope)
             ),
             key=lambda task: task.id,
@@ -5246,6 +5280,58 @@ class FakeTaskRepository:
             ),
         )
         return stale[:limit]
+
+    def _is_expired_import_wait(self, task: Task, now: datetime) -> bool:
+        """Report whether a task is a pending import wait past its deadline.
+
+        Args:
+            task: Candidate task.
+            now: Current time.
+
+        Returns:
+            Whether the task is expired.
+        """
+        if not isinstance(task, ImportWaitTask):
+            return False
+        if task.status is not TaskStatus.PENDING or task.created is None:
+            return False
+        return now - task.created > timedelta(seconds=task.import_deadline_seconds)
+
+    async def list_expired_import_wait_ids(
+        self, now: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending import wait tasks past their import deadline.
+
+        Args:
+            now: Current time.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the expired tasks in ascending order.
+        """
+        expired = sorted(
+            task.id
+            for task in self._tasks.values()
+            if self._is_expired_import_wait(task, now)
+        )
+        return expired[:limit]
+
+    async def claim_expired_import_wait(
+        self, task_id: uuid.UUID, now: datetime
+    ) -> Task | None:
+        """Lock one import wait task by id if it is still pending and expired.
+
+        Args:
+            task_id: Id of the candidate task.
+            now: Current time.
+
+        Returns:
+            Locked expired task, or ``None`` when it is no longer pending.
+        """
+        task = self._tasks.get(task_id)
+        if task is None or not self._is_expired_import_wait(task, now):
+            return None
+        return task.model_copy()
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
@@ -5773,6 +5859,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         job_repository=jobs,
         task_repository=tasks,
         replay_repository=replays,
+        session_repository=sessions,
         experiment_repository=experiments,
         experiment_run_repository=experiment_runs,
         evaluation_repository=evaluations,

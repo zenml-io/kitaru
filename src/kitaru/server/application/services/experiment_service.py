@@ -430,7 +430,7 @@ class ExperimentService:
 
         await create_replay_pipelines(
             baselines=sessions,
-            agent_version_id=agent_version.id,
+            agent_version=agent_version,
             config=config,
             evaluate_baselines=command.evaluate_baselines,
             experiment_run_id=run.id,

@@ -16,6 +16,7 @@
 import uuid
 
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.server.application.events import EventDispatcher, SessionImportFinalized
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
@@ -39,6 +40,7 @@ from kitaru.server.application.services.resource_access import (
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.session import (
+    TERMINAL_SESSION_STATUSES,
     Session,
     SessionAgentMismatch,
     SessionAgentRequired,
@@ -64,6 +66,7 @@ class SessionService:
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
         replay_repository: ReplayRepository,
+        dispatcher: EventDispatcher | None = None,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -74,12 +77,14 @@ class SessionService:
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
             replay_repository: Replay repository, for the baseline lookup.
+            dispatcher: Event dispatcher, None skips event publication.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
         self._replays = replay_repository
+        self._dispatcher = dispatcher
         self._analytics = analytics
 
     async def create_session(
@@ -133,6 +138,10 @@ class SessionService:
             task.check_attempt(actor.principal.attempt)
             if isinstance(task, AgentTask) and task.result_session_id is not None:
                 raise TaskResultSessionAlreadyLinked(task.id)
+        if isinstance(task, ImportTask) and command.external_id is not None:
+            adopted = await self._adopt_placeholder(command, actor)
+            if adopted is not None:
+                return adopted
         agent_id, agent_version_id = await self._resolve_agent(command, task)
         number = await self._repository.allocate_session_number(agent_id)
         session = Session(
@@ -161,13 +170,53 @@ class SessionService:
         if isinstance(task, AgentTask):
             task.link_result_session(stored.id)
             await self._tasks.update(task)
-        if self._analytics is not None and stored.status != SessionStatus.IN_PROGRESS:
+        if self._analytics is not None and stored.status in TERMINAL_SESSION_STATUSES:
             self._analytics.track(
                 stored.owner_id,
                 AnalyticsEvent.SESSION_COMPLETED,
                 analytics_events.build_session_completed_properties(stored),
             )
         return stored
+
+    async def _adopt_placeholder(
+        self, command: SessionCreate, actor: AuthContext
+    ) -> Session | None:
+        """Fill the account's pending-import placeholder matching the external id.
+
+        The placeholder keeps its id, agent, agent version, task link, and
+        pending-import status, so node ingestion can land before the
+        finalizing status update.
+
+        Args:
+            command: Fields for the imported session.
+            actor: Caller context.
+
+        Raises:
+            DuplicateSessionExternalId: The imported_from and external id pair is
+                already registered.
+
+        Returns:
+            Adopted session, or ``None`` when no placeholder matches.
+        """
+        assert command.external_id is not None
+        placeholder = await self._repository.get_pending_import_by_external_id(
+            actor.account.id, command.external_id, exclusive=True
+        )
+        if placeholder is None:
+            return None
+        placeholder.adopt_import(
+            name=command.name,
+            inputs=command.inputs,
+            outputs=command.outputs,
+            error=command.error,
+            started_at=command.started_at,
+            ended_at=command.ended_at,
+            metadata=command.metadata,
+            imported_from=command.imported_from,
+            framework=command.framework,
+            adapter_version=command.adapter_version,
+        )
+        return await self._repository.update(placeholder)
 
     async def _resolve_agent(
         self, command: SessionCreate, task: Task | None
@@ -320,11 +369,11 @@ class SessionService:
             Updated session.
         """
         session = await self._repository.get(session_id, exclusive=True)
-        check_task_session_write(session_id, session.task_id, actor)
+        await check_task_session_write(session, actor, self._tasks)
         await check_task_attempt(actor, self._tasks)
         fields = command.model_fields_set
+        previous_status = session.status
         if {"status", "outputs", "error", "ended_at"} & fields:
-            previous_status = session.status
             target_status = session.status
             if "status" in fields:
                 if command.status is None:
@@ -338,8 +387,8 @@ class SessionService:
             )
             if (
                 self._analytics is not None
-                and previous_status == SessionStatus.IN_PROGRESS
-                and session.status != SessionStatus.IN_PROGRESS
+                and previous_status not in TERMINAL_SESSION_STATUSES
+                and session.status in TERMINAL_SESSION_STATUSES
             ):
                 self._analytics.track(
                     session.owner_id,
@@ -352,7 +401,14 @@ class SessionService:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}
             )
-        return await self._repository.update(session)
+        stored = await self._repository.update(session)
+        if (
+            self._dispatcher is not None
+            and previous_status is SessionStatus.PENDING_IMPORT
+            and stored.status is not SessionStatus.PENDING_IMPORT
+        ):
+            await self._dispatcher.dispatch(SessionImportFinalized(session=stored))
+        return stored
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

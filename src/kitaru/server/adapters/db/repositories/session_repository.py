@@ -21,6 +21,7 @@ from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
@@ -37,6 +38,7 @@ from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+    SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX,
     SessionORM,
 )
 from kitaru.server.adapters.db.orm.task import (
@@ -50,6 +52,7 @@ from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.session import (
+    DuplicatePendingImportSession,
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
@@ -243,10 +246,37 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             {
                 SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
-                )
+                ),
+                SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX: lambda: (
+                    DuplicatePendingImportSession(session.external_id)
+                ),
             },
         )
         return row.to_domain()
+
+    async def get_pending_import_by_external_id(
+        self, owner_id: uuid.UUID, external_id: str, exclusive: bool = False
+    ) -> Session | None:
+        """Load an account's pending-import session by external id.
+
+        Args:
+            owner_id: Id of the owning account.
+            external_id: Id from the source system.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
+
+        Returns:
+            Stored session, or ``None`` when no placeholder matches.
+        """
+        statement = select(SessionORM).where(
+            SessionORM.owner_id == owner_id,
+            SessionORM.external_id == external_id,
+            SessionORM.status == SessionStatus.PENDING_IMPORT.value,
+        )
+        if exclusive:
+            statement = statement.with_for_update()
+        row = (await self._session.scalars(statement)).first()
+        return row.to_domain() if row is not None else None
 
     async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
         """Load a session by id.
@@ -349,7 +379,10 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             {
                 SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
-                )
+                ),
+                SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX: lambda: (
+                    DuplicatePendingImportSession(session.external_id)
+                ),
             }
         )
         return row.to_domain()

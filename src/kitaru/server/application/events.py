@@ -20,6 +20,7 @@ from typing import Any, TypeVar
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import Task
 
 
@@ -34,6 +35,13 @@ class TaskTerminal(Event):
 
     task: Task
     previous_status: TaskStatus
+
+
+@dataclass(frozen=True)
+class SessionImportFinalized(Event):
+    """Session import finalized event."""
+
+    session: Session
 
 
 @dataclass(frozen=True)

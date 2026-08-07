@@ -25,6 +25,7 @@ from kitaru.server.application.models.task import TaskPolicy
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
+from kitaru.server.domain.agent_version import TriggerRunSpec
 from kitaru.server.domain.plugin import PluginVersion, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -40,6 +41,7 @@ from kitaru.server.domain.task import (
     Task,
     TaskRunSpec,
     TaskSpec,
+    TriggerTaskDetails,
 )
 
 
@@ -117,6 +119,20 @@ class TaskSpecBuilder:
             for key, value in secret.values.items():
                 secret_env[key] = value.get_secret_value()
         replay = await self._replays.get_by_job_id(task.job_id)
+        replay_id = replay.id if replay is not None else None
+        if isinstance(run_spec, TriggerRunSpec):
+            return TaskSpec(
+                task_id=task.id,
+                kind=TaskKind.TRIGGER,
+                timeout_seconds=run_spec.timeout_seconds,
+                env={**run_spec.env, **task.env},
+                secret_env=secret_env,
+                details=TriggerTaskDetails(
+                    entrypoint=run_spec.entrypoint,
+                    inputs=task.inputs,
+                    replay_id=replay_id,
+                ),
+            )
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.AGENT,
@@ -130,7 +146,7 @@ class TaskSpecBuilder:
             secret_env=secret_env,
             details=AgentTaskDetails(
                 inputs=task.inputs,
-                replay_id=replay.id if replay is not None else None,
+                replay_id=replay_id,
             ),
         )
 

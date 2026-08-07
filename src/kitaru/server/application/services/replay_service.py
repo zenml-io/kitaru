@@ -180,7 +180,7 @@ class ReplayService:
         config = await self._experiments.create_replay_config(config)
         replays = await create_replay_pipelines(
             baselines=[baseline],
-            agent_version_id=agent_version.id,
+            agent_version=agent_version,
             config=config,
             evaluate_baselines=command.evaluate_baselines,
             experiment_run_id=None,

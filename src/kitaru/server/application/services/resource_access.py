@@ -15,6 +15,7 @@
 
 import uuid
 
+from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -22,9 +23,10 @@ from kitaru.server.application.models.auth import (
     TaskPrincipal,
 )
 from kitaru.server.domain.blob import BlobAccessDenied
-from kitaru.server.domain.session import SessionAccessDenied
+from kitaru.server.domain.session import Session, SessionAccessDenied
 from kitaru.server.domain.task import (
     EvaluationTaskDetails,
+    ImportTask,
     ImportTaskDetails,
     ScriptPluginSpec,
     TaskSpec,
@@ -109,25 +111,33 @@ def check_task_session_read(
     raise SessionAccessDenied(session_id)
 
 
-def check_task_session_write(
-    session_id: uuid.UUID, session_task_id: uuid.UUID | None, actor: AuthContext
+async def check_task_session_write(
+    session: Session, actor: AuthContext, tasks: TaskRepository
 ) -> None:
     """Require a task principal to own the session being written.
+
+    An import task principal additionally writes any pending-import session
+    of the account, the adopted placeholder it fills.
 
     An account principal always passes.
 
     Args:
-        session_id: Id of the session being written.
-        session_task_id: Id of the task the session is linked to, if any.
+        session: Session being written.
         actor: Caller context.
+        tasks: Task repository.
 
     Raises:
         SessionAccessDenied: A task principal does not own the session.
     """
     if not isinstance(actor.principal, TaskPrincipal):
         return
-    if session_task_id != actor.principal.task_id:
-        raise SessionAccessDenied(session_id)
+    if session.task_id == actor.principal.task_id:
+        return
+    if session.status is SessionStatus.PENDING_IMPORT:
+        task = await tasks.get(actor.principal.task_id)
+        if isinstance(task, ImportTask):
+            return
+    raise SessionAccessDenied(session.id)
 
 
 def check_task_blob_read(blob_id: uuid.UUID, actor: AuthContext) -> None:

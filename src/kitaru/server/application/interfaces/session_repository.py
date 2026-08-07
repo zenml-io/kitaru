@@ -72,6 +72,22 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def get_pending_import_by_external_id(
+        self, owner_id: uuid.UUID, external_id: str, exclusive: bool = False
+    ) -> Session | None:
+        """Load an account's pending-import session by external id.
+
+        Args:
+            owner_id: Id of the owning account.
+            external_id: Id from the source system.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
+
+        Returns:
+            Stored session, or ``None`` when no placeholder matches.
+        """
+        ...
+
     async def query(
         self, session_filter: SessionFilter
     ) -> tuple[list[Session], str | None]:

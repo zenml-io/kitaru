@@ -15,13 +15,16 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
+from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import (
     EventDispatcher,
     JobsSettled,
     ReplaysSettled,
+    SessionImportFinalized,
     TaskTerminal,
 )
 from kitaru.server.application.interfaces.experiment_repository import (
@@ -29,20 +32,23 @@ from kitaru.server.application.interfaces.experiment_repository import (
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
+from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.task_transitions import TaskTransitions
+from kitaru.server.domain.agent_version import AgentVersion, TriggerRunSpec
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
+from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportWaitTask, Task
 
 AGENT_VERSION_LABEL = "agent_version"
 
 
 async def create_replay_pipelines(
     baselines: Sequence[Session],
-    agent_version_id: uuid.UUID,
+    agent_version: AgentVersion,
     config: ReplayConfig,
     evaluate_baselines: bool,
     experiment_run_id: uuid.UUID | None,
@@ -54,13 +60,15 @@ async def create_replay_pipelines(
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
     Each agent task carries its baseline session's inputs and the agent
-    version as a label. With ``evaluate_baselines``, one baseline evaluator
+    version as a label. A trigger-mode agent version adds one import wait
+    task per job, completed by the server when the placeholder session's
+    import finalizes. With ``evaluate_baselines``, one baseline evaluator
     task is appended per evaluator that has not already scored the baseline
     session.
 
     Args:
         baselines: Sessions being replayed.
-        agent_version_id: Agent version to replay with.
+        agent_version: Agent version to replay with.
         config: Replay config every created replay points at.
         evaluate_baselines: Whether to also score the baseline sessions.
         experiment_run_id: Run the replays belong to, ``None`` for
@@ -92,17 +100,26 @@ async def create_replay_pipelines(
         scored_by_session = await task_repository.get_scored_evaluator_version_ids_many(
             [baseline.id for baseline in baselines]
         )
+    run_spec = agent_version.run_spec
     tasks: list[Task] = []
     for job, baseline in zip(jobs, baselines, strict=True):
         tasks.append(
             AgentTask(
                 job_id=job.id,
-                agent_version_id=agent_version_id,
+                agent_version_id=agent_version.id,
                 inputs=baseline.inputs,
-                labels={AGENT_VERSION_LABEL: str(agent_version_id)},
+                labels={AGENT_VERSION_LABEL: str(agent_version.id)},
                 on_failure=TaskOnFailure.ABORT,
             )
         )
+        if isinstance(run_spec, TriggerRunSpec):
+            tasks.append(
+                ImportWaitTask(
+                    job_id=job.id,
+                    import_deadline_seconds=run_spec.import_deadline_seconds,
+                    on_failure=TaskOnFailure.ABORT,
+                )
+            )
         if not evaluate_baselines:
             continue
         scored = scored_by_session.get(baseline.id, set())
@@ -129,30 +146,42 @@ async def append_result_evaluations(
     replay_repository: ReplayRepository,
     experiment_repository: ExperimentRepository,
     task_repository: TaskRepository,
+    session_repository: SessionRepository,
 ) -> None:
-    """Append the replay's result evaluator tasks when its agent task completes.
+    """Append the replay's result evaluator tasks when its result session is ready.
 
-    A no-op when the terminal task is not an agent task, did not complete, or
-    does not belong to a replay's job. Inserts the evaluator tasks without
-    locking the job row. The completing task's own transition settles the
-    job afterward, in the same transaction, and its drained scan reads every
-    task including these, so the job can never be judged drained before they
-    exist.
+    Fires on the completion of an agent task with a terminal result session,
+    or of an import wait task once the placeholder's import finalized. A
+    completed agent task whose result session is still pending import defers
+    to the wait task's completion. A no-op when the terminal task is not one
+    of those, did not complete, or does not belong to a replay's job.
+    Inserts the evaluator tasks without locking the job row. The completing
+    task's own transition settles the job afterward, in the same
+    transaction, and its drained scan reads every task including these, so
+    the job can never be judged drained before they exist.
 
     Args:
         event: TaskTerminal event.
         replay_repository: Replay repository.
         experiment_repository: Experiment repository, for the replay config.
         task_repository: Task repository.
+        session_repository: Session repository, for the result session status.
     """
     task = event.task
-    if not isinstance(task, AgentTask) or task.status is not TaskStatus.COMPLETED:
+    if (
+        not isinstance(task, AgentTask | ImportWaitTask)
+        or task.status is not TaskStatus.COMPLETED
+    ):
         return
     replay = await replay_repository.get_by_job_id(task.job_id)
     if replay is None:
         return
-    config = await experiment_repository.get_replay_config(replay.replay_config_id)
     assert task.result_session_id is not None
+    if isinstance(task, AgentTask):
+        session = await session_repository.get(task.result_session_id)
+        if session.status is SessionStatus.PENDING_IMPORT:
+            return
+    config = await experiment_repository.get_replay_config(replay.replay_config_id)
     evaluator_tasks: list[Task] = [
         EvaluationTask(
             job_id=task.job_id,
@@ -167,6 +196,53 @@ async def append_result_evaluations(
         await task_repository.create_many(evaluator_tasks)
     replay.start_evaluating()
     await replay_repository.update(replay)
+
+
+async def complete_import_wait(
+    event: SessionImportFinalized,
+    task_repository: TaskRepository,
+    transitions: TaskTransitions,
+) -> None:
+    """Complete the job's pending import wait task when its placeholder finalizes.
+
+    A no-op when the finalized session was not produced by a task, its job
+    holds no import wait task, or the wait task already went terminal
+    through cancellation or the import deadline.
+
+    Args:
+        event: SessionImportFinalized event.
+        task_repository: Task repository.
+        transitions: Task transition dispatch.
+    """
+    session = event.session
+    if session.task_id is None:
+        return
+    producer = await task_repository.get(session.task_id)
+    siblings = await task_repository.list_by_job(producer.job_id)
+    candidate = next(
+        (
+            sibling
+            for sibling in siblings
+            if isinstance(sibling, ImportWaitTask) and not sibling.terminal
+        ),
+        None,
+    )
+    if candidate is None:
+        return
+    # Re-read under the row lock so a concurrent cancellation or deadline
+    # sweep cannot race the completion.
+    wait = await task_repository.get(candidate.id, exclusive=True)
+    if not isinstance(wait, ImportWaitTask) or wait.terminal:
+        return
+    if wait.result_session_id is None:
+        wait.link_result_session(session.id)
+    now = datetime.now(UTC)
+
+    def transition(task: Task) -> None:
+        assert isinstance(task, ImportWaitTask)
+        task.complete_pending(now)
+
+    await transitions.apply_status(wait, transition)
 
 
 def _apply_job_settlement(replay: Replay, job: Job) -> bool:
