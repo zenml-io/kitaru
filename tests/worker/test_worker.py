@@ -673,3 +673,30 @@ async def test_run_pins_the_api_url_to_the_registration_server(
     await Worker(config).run(stop=stop)
 
     assert os.environ["KITARU_API_URL"] == "https://stored.example.com"
+
+
+async def test_run_registration_carries_the_configured_pool(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """run() carries the configured pool on the registration request."""
+    client = FakeKitaruAPIClient()
+
+    def _fake_client(*args: object, **kwargs: object) -> FakeKitaruAPIClient:
+        return client
+
+    monkeypatch.setattr(worker_module, "KitaruAPIClient", _fake_client)
+
+    config = WorkerConfig(
+        name="worker-under-test",
+        pool="team-a",
+        poll_interval=0.01,
+        blob_cache_root=tmp_path / "blobs",
+        payload_cache_root=tmp_path / "payloads",
+    )
+    stop = asyncio.Event()
+    stop.set()
+
+    await Worker(config).run(stop=stop)
+
+    assert len(client.workers.created) == 1
+    assert client.workers.created[0].pool == "team-a"

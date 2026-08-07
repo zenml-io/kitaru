@@ -161,6 +161,7 @@ class Worker:
 
         registration = WorkerCreateRequest(
             name=name,
+            pool=self._config.pool,
             scope=self._config.scope,
             runtime=detect_runtime(),
             metadata=self._config.metadata,

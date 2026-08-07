@@ -37,6 +37,8 @@ from kitaru.server.domain.worker import Worker
 WORKER_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("worker", ["name"])
 WORKER_OWNER_ID_FOREIGN_KEY = foreign_key_name("worker", ["owner_id"])
 WORKER_OWNER_ID_INDEX = index_name("worker", ["owner_id"])
+WORKER_POOL_ID_FOREIGN_KEY = foreign_key_name("worker", ["pool_id"])
+WORKER_POOL_ID_INDEX = index_name("worker", ["pool_id"])
 
 
 class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -48,11 +50,16 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=WORKER_OWNER_ID_FOREIGN_KEY
         ),
+        ForeignKeyConstraint(
+            ["pool_id"], ["worker_pool.id"], name=WORKER_POOL_ID_FOREIGN_KEY
+        ),
         Index(WORKER_OWNER_ID_INDEX, "owner_id"),
+        Index(WORKER_POOL_ID_INDEX, "pool_id"),
     )
 
     owner_id: Mapped[uuid.UUID]
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
+    pool_id: Mapped[uuid.UUID | None]
     scope: Mapped[dict] = mapped_column(JSONB)
     runtime: Mapped[dict] = mapped_column(JSONB)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
@@ -75,6 +82,7 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "id": worker.id,
             "owner_id": worker.owner_id,
             "name": worker.name,
+            "pool_id": worker.pool_id,
             "scope": worker.scope.model_dump(mode="json"),
             "runtime": worker.runtime.model_dump(mode="json"),
             "last_seen_at": worker.last_seen_at,
@@ -103,6 +111,7 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             id=self.id,
             owner_id=self.owner_id,
             name=self.name,
+            pool_id=self.pool_id,
             scope=WorkerScope.model_validate(self.scope),
             runtime=WorkerRuntime.model_validate(self.runtime),
             last_seen_at=self.last_seen_at,

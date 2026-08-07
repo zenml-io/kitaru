@@ -31,10 +31,12 @@ from conftest import (
     FakeSecretRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    FakeWorkerPoolRepository,
     FakeWorkerRepository,
     create_agent_task,
     create_job,
     create_worker,
+    create_worker_pool,
     local_settings,
     mint_worker_token,
 )
@@ -64,6 +66,12 @@ def repository() -> FakeWorkerRepository:
 
 
 @pytest.fixture
+def worker_pool_repository() -> FakeWorkerPoolRepository:
+    """Provide the fake worker pool repository backing the app."""
+    return FakeWorkerPoolRepository()
+
+
+@pytest.fixture
 def task_repository() -> FakeTaskRepository:
     """Provide the fake task repository backing the app."""
     return FakeTaskRepository(sessions=FakeSessionRepository())
@@ -84,6 +92,7 @@ async def account_token(auth_service: AuthService, account: Account) -> str:
 @pytest.fixture
 async def client(
     repository: FakeWorkerRepository,
+    worker_pool_repository: FakeWorkerPoolRepository,
     task_repository: FakeTaskRepository,
     job_repository: FakeJobRepository,
     auth_service: AuthService,
@@ -91,7 +100,9 @@ async def client(
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client authenticated as the fixture account by default."""
     app = create_app(local_settings())
-    service = WorkerService(repository=repository)
+    service = WorkerService(
+        repository=repository, worker_pool_repository=worker_pool_repository
+    )
     transitions = TaskTransitions(
         task_repository=task_repository,
         job_repository=job_repository,
@@ -110,6 +121,7 @@ async def client(
     task_service = TaskService(
         repository=task_repository,
         worker_repository=repository,
+        worker_pool_repository=worker_pool_repository,
         session_repository=FakeSessionRepository(),
         job_repository=job_repository,
         spec_builder=spec_builder,
@@ -188,6 +200,59 @@ async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
     response = await client.post(
         "/v1/workers",
         json={"name": "in valid", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+    )
+    assert response.status_code == 422
+
+
+async def test_register_worker_with_pool_returns_pool_id(
+    client: httpx.AsyncClient,
+    worker_pool_repository: FakeWorkerPoolRepository,
+    account: Account,
+) -> None:
+    """Register with a pool name returns the resolved pool_id."""
+    pool = await create_worker_pool(worker_pool_repository, account.id, name="pool-1")
+    response = await client.post(
+        "/v1/workers",
+        json={
+            "name": "worker-1",
+            "scope": {},
+            "runtime": RUNTIME,
+            "metadata": {},
+            "pool": "pool-1",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["worker"]["pool_id"] == str(pool.id)
+
+
+async def test_register_worker_unknown_pool(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when the pool does not resolve."""
+    response = await client.post(
+        "/v1/workers",
+        json={
+            "name": "worker-1",
+            "scope": {},
+            "runtime": RUNTIME,
+            "metadata": {},
+            "pool": "missing",
+        },
+    )
+    assert response.status_code == 404
+
+
+async def test_register_worker_pool_and_scope_is_invalid(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 when both pool and a non-empty scope are set."""
+    response = await client.post(
+        "/v1/workers",
+        json={
+            "name": "worker-1",
+            "scope": {"kinds": ["agent"]},
+            "runtime": RUNTIME,
+            "metadata": {},
+            "pool": "pool-1",
+        },
     )
     assert response.status_code == 422
 

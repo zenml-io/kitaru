@@ -74,6 +74,7 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         statement = statement.on_conflict_do_update(
             constraint=WORKER_NAME_UNIQUE_CONSTRAINT,
             set_={
+                "pool_id": statement.excluded.pool_id,
                 "scope": statement.excluded.scope,
                 "runtime": statement.excluded.runtime,
                 "last_seen_at": statement.excluded.last_seen_at,

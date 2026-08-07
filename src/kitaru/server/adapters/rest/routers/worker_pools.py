@@ -151,8 +151,8 @@ async def delete_worker_pool(
 ) -> None:
     """Delete a worker pool.
 
-    Clients observe HTTP 204 on success and 404 when no worker pool has
-    this id.
+    Clients observe HTTP 204 on success, 404 when no worker pool has this
+    id, and 409 when a worker still references it.
 
     Args:
         pool_id: Id of the worker pool.

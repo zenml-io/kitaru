@@ -94,6 +94,7 @@ def load_worker_runtime() -> tuple[type[Any], type[Any]]:
 def build_worker_config(
     *,
     name: str | None = None,
+    pool: str | None = None,
     kinds: list[TaskKind] | None = None,
     selectors: list[str] | None = None,
     job_id: uuid.UUID | None = None,
@@ -126,6 +127,7 @@ def build_worker_config(
     updates: dict[str, Any] = {"scope": scope}
     explicit = {
         "name": name,
+        "pool": pool,
         "concurrency": concurrency,
         "claim_batch_size": claim_batch_size,
         "poll_interval": poll_interval,
@@ -321,6 +323,7 @@ def _worker_summary(config: Any) -> dict[str, Any]:
     """Return a non-secret lifecycle projection of worker configuration."""
     return {
         "name": config.name,
+        "pool": config.pool,
         "kinds": (
             [kind.value for kind in config.scope.kinds]
             if config.scope.kinds is not None

@@ -227,6 +227,7 @@ from kitaru.server.domain.worker import Worker, WorkerNotFound
 from kitaru.server.domain.worker_pool import (
     DuplicateWorkerPoolName,
     WorkerPool,
+    WorkerPoolInUse,
     WorkerPoolNotFound,
 )
 from kitaru.server.filtering import (
@@ -3063,7 +3064,11 @@ class FakeWorkerRepository:
             if stored.name == worker.name:
                 refreshed = stored.model_copy()
                 refreshed.refresh(
-                    worker.scope, worker.runtime, worker.metadata, worker.last_seen_at
+                    worker.pool_id,
+                    worker.scope,
+                    worker.runtime,
+                    worker.metadata,
+                    worker.last_seen_at,
                 )
                 refreshed = refreshed.model_copy(
                     update={"updated": _renewed_timestamp(stored.updated)}
@@ -3157,6 +3162,7 @@ async def create_worker(
     repository: FakeWorkerRepository,
     owner_id: uuid.UUID,
     name: str = "worker-1",
+    pool_id: uuid.UUID | None = None,
     scope: WorkerScope | None = None,
     runtime: WorkerRuntime | None = None,
     metadata: dict[str, str] | None = None,
@@ -3168,6 +3174,7 @@ async def create_worker(
         repository: Fake worker repository.
         owner_id: Id of the owning account.
         name: Worker name.
+        pool_id: Pool the worker joined.
         scope: Claim scope the worker reports.
         runtime: Runtime the worker reports.
         metadata: Arbitrary metadata.
@@ -3180,6 +3187,7 @@ async def create_worker(
         Worker(
             owner_id=owner_id,
             name=name,
+            pool_id=pool_id,
             scope=scope if scope is not None else WorkerScope(),
             runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
             metadata=metadata if metadata is not None else {},
@@ -3193,9 +3201,15 @@ async def create_worker(
 class FakeWorkerPoolRepository:
     """In-memory worker pool repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, worker_repository: FakeWorkerRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            worker_repository: Worker repository, restricting the delete
+                when a worker references the pool.
+        """
         self._worker_pools: dict[uuid.UUID, WorkerPool] = {}
+        self._worker_repository = worker_repository
 
     def _check_duplicate_name(self, worker_pool: WorkerPool) -> None:
         for other in self._worker_pools.values():
@@ -3309,9 +3323,15 @@ class FakeWorkerPoolRepository:
 
         Raises:
             WorkerPoolNotFound: No worker pool has this id.
+            WorkerPoolInUse: A worker references the worker pool.
         """
         if worker_pool_id not in self._worker_pools:
             raise WorkerPoolNotFound(worker_pool_id)
+        if self._worker_repository is not None and any(
+            worker.pool_id == worker_pool_id
+            for worker in self._worker_repository._workers.values()
+        ):
+            raise WorkerPoolInUse(worker_pool_id)
         del self._worker_pools[worker_pool_id]
 
 
@@ -5537,6 +5557,7 @@ class TaskSubstrate(NamedTuple):
     plugins: FakePluginRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    worker_pools: FakeWorkerPoolRepository
     tasks: FakeTaskRepository
     jobs: FakeJobRepository
 
@@ -5554,6 +5575,7 @@ def _build_task_substrate() -> TaskSubstrate:
     plugins = FakePluginRepository(blob_repository=blobs)
     secrets = FakeSecretRepository()
     workers = FakeWorkerRepository()
+    worker_pools = FakeWorkerPoolRepository(worker_repository=workers)
     tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
     tasks.jobs = jobs
@@ -5565,6 +5587,7 @@ def _build_task_substrate() -> TaskSubstrate:
         plugins=plugins,
         secrets=secrets,
         workers=workers,
+        worker_pools=worker_pools,
         tasks=tasks,
         jobs=jobs,
     )
@@ -5584,6 +5607,7 @@ class JobAndTaskServices(NamedTuple):
     blobs: FakeBlobRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    worker_pools: FakeWorkerPoolRepository
 
 
 def build_job_and_task_services(
@@ -5619,6 +5643,7 @@ def build_job_and_task_services(
     task_service = TaskService(
         repository=substrate.tasks,
         worker_repository=substrate.workers,
+        worker_pool_repository=substrate.worker_pools,
         session_repository=substrate.sessions,
         job_repository=substrate.jobs,
         spec_builder=spec_builder,
@@ -5648,6 +5673,7 @@ def build_job_and_task_services(
         blobs=substrate.blobs,
         secrets=substrate.secrets,
         workers=substrate.workers,
+        worker_pools=substrate.worker_pools,
     )
 
 
@@ -5674,6 +5700,7 @@ class ReplayServices(NamedTuple):
     blobs: FakeBlobRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    worker_pools: FakeWorkerPoolRepository
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
 
@@ -5702,6 +5729,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     plugins = substrate.plugins
     secrets = substrate.secrets
     workers = substrate.workers
+    worker_pools = substrate.worker_pools
     tasks = substrate.tasks
     jobs = substrate.jobs
     tags = FakeTagRepository()
@@ -5746,6 +5774,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     task_service = TaskService(
         repository=tasks,
         worker_repository=workers,
+        worker_pool_repository=worker_pools,
         session_repository=sessions,
         job_repository=jobs,
         spec_builder=spec_builder,
@@ -5813,6 +5842,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         blobs=blobs,
         secrets=secrets,
         workers=workers,
+        worker_pools=worker_pools,
         evaluations=evaluations,
         tags=tags,
     )

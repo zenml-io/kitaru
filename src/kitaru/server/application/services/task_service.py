@@ -25,6 +25,9 @@ from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
+from kitaru.server.application.interfaces.worker_pool_repository import (
+    WorkerPoolRepository,
+)
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -63,6 +66,7 @@ class TaskService:
         self,
         repository: TaskRepository,
         worker_repository: WorkerRepository,
+        worker_pool_repository: WorkerPoolRepository,
         session_repository: SessionRepository,
         job_repository: JobRepository,
         spec_builder: TaskSpecBuilder,
@@ -74,6 +78,7 @@ class TaskService:
         Args:
             repository: Task repository.
             worker_repository: Worker repository.
+            worker_pool_repository: Worker pool repository.
             session_repository: Session repository.
             job_repository: Job repository.
             spec_builder: Task execution spec builder.
@@ -82,6 +87,7 @@ class TaskService:
         """
         self._repository = repository
         self._workers = worker_repository
+        self._worker_pools = worker_pool_repository
         self._sessions = session_repository
         self._jobs = job_repository
         self._spec_builder = spec_builder
@@ -91,7 +97,7 @@ class TaskService:
     async def claim_tasks(
         self, max_tasks: int, actor: WorkerAuthContext
     ) -> list[ClaimedTask]:
-        """Claim pending tasks matching the worker's scope.
+        """Claim pending tasks matching the worker's effective scope.
 
         Args:
             max_tasks: Maximum number of tasks to claim.
@@ -100,6 +106,7 @@ class TaskService:
         Raises:
             WorkerCredentialRequired: The caller holds no worker token.
             WorkerNotFound: No worker has the claiming principal's id.
+            WorkerPoolNotFound: The worker's joined pool no longer exists.
 
         Returns:
             Claimed tasks paired with their execution specs and job owners.
@@ -110,9 +117,10 @@ class TaskService:
         worker = await self._workers.get(worker_id)
         now = datetime.now(UTC)
         await self._workers.update_last_seen_at(worker_id, now)
-        claimed = await self._repository.claim_pending(
-            worker.scope, worker_id, max_tasks, now
-        )
+        scope = worker.scope
+        if worker.pool_id is not None:
+            scope = (await self._worker_pools.get(worker.pool_id)).scope
+        claimed = await self._repository.claim_pending(scope, worker_id, max_tasks, now)
         job_ids = sorted({task.job_id for task in claimed})
         owners = await self._jobs.get_many(job_ids)
         # Start the jobs in ascending id order so this transaction locks job

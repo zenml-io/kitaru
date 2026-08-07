@@ -106,3 +106,33 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
 
     response = await client.get(f"/v1/workers/{created['id']}")
     assert response.status_code == 404
+
+
+async def test_register_with_pool_persists_across_requests(
+    client: httpx.AsyncClient,
+) -> None:
+    """Persist a pool-joined registration, resolving the pool's id."""
+    pool = (
+        await client.post(
+            "/v1/worker-pools",
+            json={"name": "pool-1", "scope": {"kinds": ["agent"]}},
+        )
+    ).json()
+
+    response = await client.post(
+        "/v1/workers",
+        json={
+            "name": "worker-1",
+            "scope": {},
+            "runtime": RUNTIME,
+            "metadata": {},
+            "pool": "pool-1",
+        },
+    )
+    assert response.status_code == 200
+    created = response.json()["worker"]
+    assert created["pool_id"] == pool["id"]
+
+    response = await client.get(f"/v1/workers/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["pool_id"] == pool["id"]

@@ -159,6 +159,19 @@ def test_drain_timeout_merges_explicit_over_environment(
     assert from_env.drain_timeout == 5.0
 
 
+def test_pool_merges_explicit_over_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """--pool overrides KITARU_WORKER_POOL when both are set."""
+    monkeypatch.setenv("KITARU_WORKER_POOL", "env-pool")
+
+    explicit = workers.build_worker_config(pool="cli-pool")
+    assert explicit.pool == "cli-pool"
+
+    from_env = workers.build_worker_config()
+    assert from_env.pool == "env-pool"
+
+
 def test_selector_shorthand_and_json_cover_required_behavior() -> None:
     """Compact selectors stay convenient while JSON exposes `required`."""
     config = workers.build_worker_config(
@@ -551,6 +564,8 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
                 "--server",
                 "https://api.example.com",
                 "--machine",
+                "--pool",
+                "team-a",
                 "--kinds",
                 "agent",
                 "--kinds",
@@ -574,6 +589,7 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
     assert payload["event"] == "stopped"
     target, options = calls[0]
     assert target.server_url == "https://api.example.com"
+    assert options["pool"] == "team-a"
     assert options["kinds"] == [TaskKind.AGENT, TaskKind.IMPORTER]
     assert options["job_id"] == job_id
     assert options["concurrency"] == 3

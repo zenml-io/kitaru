@@ -101,11 +101,26 @@ class WorkerCreateRequest(RequestModel):
     """Worker create request."""
 
     name: str = Field(description="Worker name.")
+    pool: str | None = Field(default=None, description="Pool the worker joins.")
     scope: WorkerScope = Field(description="Tasks this worker is willing to claim.")
     runtime: WorkerRuntime = Field(description="Runtime the worker reports.")
     metadata: dict[str, str] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
+
+    @model_validator(mode="after")
+    def _validate_pool_scope(self) -> Self:
+        """Reject a request that sets both pool and a non-empty scope.
+
+        Raises:
+            ValueError: pool is set and scope is not empty.
+
+        Returns:
+            The validated request.
+        """
+        if self.pool is not None and self.scope != WorkerScope():
+            raise ValueError("scope must be empty when pool is set")
+        return self
 
 
 class WorkerListParams(FilterableListParams):
@@ -131,6 +146,9 @@ class WorkerResponse(OwnedResponseModel):
 
     id: uuid.UUID = Field(description="Worker id.")
     name: str = Field(description="Worker name.")
+    pool_id: uuid.UUID | None = Field(
+        default=None, description="Pool the worker joined."
+    )
     scope: WorkerScope = Field(description="Tasks this worker is willing to claim.")
     runtime: WorkerRuntime = Field(description="Runtime the worker reports.")
     last_seen_at: datetime = Field(description="Time of the worker's last heartbeat.")

@@ -53,6 +53,20 @@ class DuplicateWorkerPoolName(ConflictError):
         super().__init__(f"Worker pool name '{name}' is already registered")
 
 
+class WorkerPoolInUse(ConflictError):
+    """Raised when a worker pool is referenced by a registered worker."""
+
+    def __init__(self, worker_pool_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            worker_pool_id: Id of the worker pool in use.
+        """
+        super().__init__(
+            f"Worker pool {worker_pool_id} is in use by a registered worker"
+        )
+
+
 class WorkerPoolScopePinsJob(ValidationError):
     """Raised when a worker pool's scope names a job."""
 

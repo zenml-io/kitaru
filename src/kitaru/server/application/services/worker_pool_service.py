@@ -138,6 +138,7 @@ class WorkerPoolService:
 
         Raises:
             WorkerPoolNotFound: No worker pool has this id.
+            WorkerPoolInUse: A worker references the worker pool.
         """
         _ = actor
         await self._repository.delete(worker_pool_id)

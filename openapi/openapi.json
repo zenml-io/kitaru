@@ -8002,6 +8002,18 @@
             "title": "Name",
             "type": "string"
           },
+          "pool": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pool the worker joins.",
+            "title": "Pool"
+          },
           "runtime": {
             "$ref": "#/components/schemas/WorkerRuntime",
             "description": "Runtime the worker reports."
@@ -8230,6 +8242,19 @@
             "format": "uuid",
             "title": "Owner Id",
             "type": "string"
+          },
+          "pool_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pool the worker joined.",
+            "title": "Pool Id"
           },
           "runtime": {
             "$ref": "#/components/schemas/WorkerRuntime",
@@ -15789,7 +15814,7 @@
     },
     "/v1/worker-pools/{pool_id}": {
       "delete": {
-        "description": "Delete a worker pool.\n\nClients observe HTTP 204 on success and 404 when no worker pool has\nthis id.\n\nArgs:\n    pool_id: Id of the worker pool.\n    service: Worker pool service.\n    actor: Caller context.",
+        "description": "Delete a worker pool.\n\nClients observe HTTP 204 on success, 404 when no worker pool has this\nid, and 409 when a worker still references it.\n\nArgs:\n    pool_id: Id of the worker pool.\n    service: Worker pool service.\n    actor: Caller context.",
         "operationId": "delete_worker_pool_v1_worker_pools__pool_id__delete",
         "parameters": [
           {
@@ -16024,7 +16049,7 @@
         ]
       },
       "post": {
-        "description": "Register a worker, upserting by name.\n\nRe-registration refreshes the scope, runtime, and metadata, stamps\nlast_seen_at, and mints a fresh token, keeping the id and created time.\nRe-registering with a fresh token is how a worker renews before its\ncurrent token expires. Clients observe HTTP 200 on both the first\nregistration and every re-registration, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
+        "description": "Register a worker, upserting by name.\n\nRe-registration refreshes the pool, scope, runtime, and metadata,\nstamps last_seen_at, and mints a fresh token, keeping the id and\ncreated time. Re-registering with a fresh token is how a worker\nrenews before its current token expires. Clients observe HTTP 200 on\nboth the first registration and every re-registration, 404 when the\npool does not resolve, and 422 when both pool and scope are set or on\nother invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
         "operationId": "register_worker_v1_workers_post",
         "requestBody": {
           "content": {

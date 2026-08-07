@@ -528,6 +528,7 @@ def get_task_service(
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
+        worker_pool_repository=SQLWorkerPoolRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
         spec_builder=spec_builder,
@@ -813,7 +814,10 @@ def get_worker_service(
     Returns:
         Worker service bound to the SQL repository.
     """
-    return WorkerService(repository=SQLWorkerRepository(session))
+    return WorkerService(
+        repository=SQLWorkerRepository(session),
+        worker_pool_repository=SQLWorkerPoolRepository(session),
+    )
 
 
 def get_auth_service(

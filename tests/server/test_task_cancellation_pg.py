@@ -51,6 +51,9 @@ from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
+from kitaru.server.adapters.db.repositories.worker_pool_repository import (
+    SQLWorkerPoolRepository,
+)
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
@@ -101,6 +104,7 @@ def _build_task_service(
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
+        worker_pool_repository=SQLWorkerPoolRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
         spec_builder=spec_builder,

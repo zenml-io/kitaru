@@ -15,31 +15,44 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import pytest
 
-from conftest import FakeWorkerPoolRepository, pg_session, postgres_available
+from conftest import (
+    FakeWorkerPoolRepository,
+    FakeWorkerRepository,
+    pg_session,
+    postgres_available,
+)
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.worker import WorkerScope
+from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.worker_pool_repository import (
     SQLWorkerPoolRepository,
 )
+from kitaru.server.adapters.db.repositories.worker_repository import (
+    SQLWorkerRepository,
+)
 from kitaru.server.application.interfaces.worker_pool_repository import (
     WorkerPoolRepository,
 )
+from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.worker_pool import WorkerPoolFilter
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.worker import Worker
 from kitaru.server.domain.worker_pool import (
     DuplicateWorkerPoolName,
     WorkerPool,
+    WorkerPoolInUse,
     WorkerPoolNotFound,
 )
 from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[WorkerPoolRepository, uuid.UUID]
+WorkerSetup = tuple[WorkerPoolRepository, WorkerRepository, uuid.UUID]
 
 
 @pytest.fixture(params=["fake", "postgres"])
@@ -54,6 +67,23 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         yield SQLWorkerPoolRepository(session), owner.id
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def worker_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[WorkerSetup, None]:
+    """Provide a worker pool repository wired to a worker repository and an owner id."""
+    if request.param == "fake":
+        workers = FakeWorkerRepository()
+        yield FakeWorkerPoolRepository(worker_repository=workers), workers, uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        yield SQLWorkerPoolRepository(session), SQLWorkerRepository(session), owner.id
 
 
 def _worker_pool(
@@ -75,6 +105,26 @@ def _worker_pool(
         owner_id=owner_id,
         name=name,
         scope=scope if scope is not None else WorkerScope(),
+    )
+
+
+def _referencing_worker(owner_id: uuid.UUID, pool_id: uuid.UUID) -> Worker:
+    """Build a worker joined to a pool for repository tests.
+
+    Args:
+        owner_id: Id of the owning account.
+        pool_id: Pool the worker joins.
+
+    Returns:
+        Unstored worker.
+    """
+    return Worker(
+        owner_id=owner_id,
+        name="worker-1",
+        pool_id=pool_id,
+        scope=WorkerScope(),
+        runtime=WorkerRuntime(platform="bare"),
+        last_seen_at=datetime.now(UTC),
     )
 
 
@@ -228,3 +278,29 @@ async def test_delete_not_found(setup: Setup) -> None:
         WorkerPoolNotFound, match=f"Worker pool {missing_id} was not found"
     ):
         await repository.delete(missing_id)
+
+
+async def test_delete_in_use(worker_setup: WorkerSetup) -> None:
+    """Reject deleting a worker pool a worker references."""
+    repository, worker_repository, owner_id = worker_setup
+    worker_pool = await repository.create(_worker_pool(owner_id))
+    await worker_repository.register(_referencing_worker(owner_id, worker_pool.id))
+
+    with pytest.raises(
+        WorkerPoolInUse, match=f"Worker pool {worker_pool.id} is in use"
+    ):
+        await repository.delete(worker_pool.id)
+
+
+async def test_delete_after_the_worker_is_deleted(worker_setup: WorkerSetup) -> None:
+    """Delete a worker pool once the referencing worker is gone."""
+    repository, worker_repository, owner_id = worker_setup
+    worker_pool = await repository.create(_worker_pool(owner_id))
+    worker = await worker_repository.register(
+        _referencing_worker(owner_id, worker_pool.id)
+    )
+    await worker_repository.delete(worker.id)
+
+    await repository.delete(worker_pool.id)
+    with pytest.raises(WorkerPoolNotFound):
+        await repository.get(worker_pool.id)

@@ -62,6 +62,7 @@ class Worker(DomainModel):
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
     name: Name
+    pool_id: uuid.UUID | None = None
     scope: WorkerScope
     runtime: WorkerRuntime
     last_seen_at: datetime
@@ -71,19 +72,22 @@ class Worker(DomainModel):
 
     def refresh(
         self,
+        pool_id: uuid.UUID | None,
         scope: WorkerScope,
         runtime: WorkerRuntime,
         metadata: dict[str, str],
         now: datetime,
     ) -> None:
-        """Replace the reported scope, runtime, and metadata, and stamp last_seen_at.
+        """Replace the pool, scope, runtime, and metadata, and stamp last_seen_at.
 
         Args:
+            pool_id: New pool the worker joined, None to leave every pool.
             scope: New claim scope.
             runtime: New reported runtime.
             metadata: New metadata.
             now: Current time.
         """
+        self.pool_id = pool_id
         self.scope = scope
         self.runtime = runtime
         self.metadata = metadata

@@ -39,6 +39,7 @@ from conftest import (
     create_secret,
     create_session,
     create_worker,
+    create_worker_pool,
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.job import JobStatus
@@ -264,6 +265,54 @@ async def test_claim_scope_non_required_selector_matches_unlabeled(
         10, actor=build_worker_actor(ACTOR.account, worker.id)
     )
     assert {item.task.id for item in claimed} == {matching.id, unlabeled.id}
+
+
+async def test_claim_uses_the_pool_scope_not_the_workers_stored_scope(
+    services: JobAndTaskServices,
+) -> None:
+    """A worker joined to a pool claims by the pool's scope, not its own."""
+    job_id = await _pending_job(services)
+    import_task = await _claimable_import_task(services, job_id)
+    await _claimable_agent_task(services, job_id)
+    pool = await create_worker_pool(
+        services.worker_pools,
+        ACTOR.account.id,
+        scope=WorkerScope(kinds=[TaskKind.IMPORTER]),
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id, pool_id=pool.id)
+
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert [item.task.id for item in claimed] == [import_task.id]
+
+
+async def test_claim_pool_scope_update_retargets_without_reregistration(
+    services: JobAndTaskServices,
+) -> None:
+    """Updating a pool's scope retargets the next claim without re-registering."""
+    job_id = await _pending_job(services)
+    agent_task = await _claimable_agent_task(services, job_id)
+    import_task = await _claimable_import_task(services, job_id)
+    pool = await create_worker_pool(
+        services.worker_pools,
+        ACTOR.account.id,
+        scope=WorkerScope(kinds=[TaskKind.AGENT]),
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id, pool_id=pool.id)
+
+    first_claim = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert [item.task.id for item in first_claim] == [agent_task.id]
+
+    pool.update_scope(WorkerScope(kinds=[TaskKind.IMPORTER]))
+    await services.worker_pools.update(pool)
+
+    second_claim = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert [item.task.id for item in second_claim] == [import_task.id]
 
 
 async def test_sweep_requeues_a_stale_task_for_a_later_claim(

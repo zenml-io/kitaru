@@ -18,7 +18,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import FakeWorkerRepository, create_worker
+from conftest import (
+    FakeWorkerPoolRepository,
+    FakeWorkerRepository,
+    create_worker,
+    create_worker_pool,
+)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
 from kitaru.server.application.models.auth import AuthContext
@@ -26,6 +31,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.worker import WorkerNotFound
+from kitaru.server.domain.worker_pool import WorkerPoolNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -38,9 +44,20 @@ def repository() -> FakeWorkerRepository:
 
 
 @pytest.fixture
-def service(repository: FakeWorkerRepository) -> WorkerService:
-    """Provide a worker service backed by the fake repository."""
-    return WorkerService(repository=repository)
+def worker_pool_repository() -> FakeWorkerPoolRepository:
+    """Provide a fake worker pool repository."""
+    return FakeWorkerPoolRepository()
+
+
+@pytest.fixture
+def service(
+    repository: FakeWorkerRepository,
+    worker_pool_repository: FakeWorkerPoolRepository,
+) -> WorkerService:
+    """Provide a worker service backed by the fake repositories."""
+    return WorkerService(
+        repository=repository, worker_pool_repository=worker_pool_repository
+    )
 
 
 async def test_register_worker(service: WorkerService) -> None:
@@ -50,6 +67,7 @@ async def test_register_worker(service: WorkerService) -> None:
         scope=WorkerScope(),
         runtime=WorkerRuntime(platform="bare"),
         metadata={"region": "eu"},
+        pool=None,
         actor=ACTOR,
     )
     assert worker.name == "worker-1"
@@ -68,6 +86,7 @@ async def test_register_worker_upsert_keeps_id_and_renews_timestamps(
         scope=WorkerScope(kinds=["agent"]),
         runtime=WorkerRuntime(platform="bare"),
         metadata={"region": "eu"},
+        pool=None,
         actor=ACTOR,
     )
     second = await service.register_worker(
@@ -75,6 +94,7 @@ async def test_register_worker_upsert_keeps_id_and_renews_timestamps(
         scope=WorkerScope(kinds=["importer"]),
         runtime=WorkerRuntime(platform="docker"),
         metadata={"region": "us"},
+        pool=None,
         actor=ACTOR,
     )
     assert second.id == first.id
@@ -95,6 +115,7 @@ async def test_get_worker(service: WorkerService) -> None:
         scope=WorkerScope(),
         runtime=WorkerRuntime(platform="bare"),
         metadata={},
+        pool=None,
         actor=ACTOR,
     )
     loaded = await service.get_worker(created.id, actor=ACTOR)
@@ -116,6 +137,7 @@ async def test_list_workers(service: WorkerService) -> None:
             scope=WorkerScope(),
             runtime=WorkerRuntime(platform="bare"),
             metadata={},
+            pool=None,
             actor=ACTOR,
         )
 
@@ -163,6 +185,7 @@ async def test_delete_worker(service: WorkerService) -> None:
         scope=WorkerScope(),
         runtime=WorkerRuntime(platform="bare"),
         metadata={},
+        pool=None,
         actor=ACTOR,
     )
     await service.delete_worker(created.id, actor=ACTOR)
@@ -188,6 +211,7 @@ async def test_worker_scope_round_trip(service: WorkerService) -> None:
         scope=scope,
         runtime=WorkerRuntime(platform="kubernetes", namespace="default"),
         metadata={},
+        pool=None,
         actor=ACTOR,
     )
     loaded = await service.get_worker(created.id, actor=ACTOR)
@@ -201,6 +225,7 @@ async def test_is_live_true(service: WorkerService) -> None:
         scope=WorkerScope(),
         runtime=WorkerRuntime(platform="bare"),
         metadata={},
+        pool=None,
         actor=ACTOR,
     )
     assert created.is_live(datetime.now(UTC), timeout_seconds=60) is True
@@ -216,3 +241,77 @@ async def test_is_live_false(
         last_seen_at=datetime.now(UTC) - timedelta(minutes=5),
     )
     assert stale.is_live(datetime.now(UTC), timeout_seconds=60) is False
+
+
+async def test_register_worker_with_pool_resolves_and_stamps_pool_id(
+    service: WorkerService, worker_pool_repository: FakeWorkerPoolRepository
+) -> None:
+    """Registering with a pool name resolves it and stamps pool_id."""
+    pool = await create_worker_pool(
+        worker_pool_repository, ACTOR.account.id, name="pool-1"
+    )
+    worker = await service.register_worker(
+        name="worker-1",
+        scope=WorkerScope(),
+        runtime=WorkerRuntime(platform="bare"),
+        metadata={},
+        pool="pool-1",
+        actor=ACTOR,
+    )
+    assert worker.pool_id == pool.id
+
+
+async def test_register_worker_unknown_pool(service: WorkerService) -> None:
+    """Raise for an unknown pool name."""
+    with pytest.raises(WorkerPoolNotFound):
+        await service.register_worker(
+            name="worker-1",
+            scope=WorkerScope(),
+            runtime=WorkerRuntime(platform="bare"),
+            metadata={},
+            pool="missing",
+            actor=ACTOR,
+        )
+
+
+async def test_register_worker_reregistration_moves_between_pools(
+    service: WorkerService, worker_pool_repository: FakeWorkerPoolRepository
+) -> None:
+    """Re-registration moves a worker between pools and back to no pool."""
+    pool_a = await create_worker_pool(
+        worker_pool_repository, ACTOR.account.id, name="pool-a"
+    )
+    pool_b = await create_worker_pool(
+        worker_pool_repository, ACTOR.account.id, name="pool-b"
+    )
+    first = await service.register_worker(
+        name="worker-1",
+        scope=WorkerScope(),
+        runtime=WorkerRuntime(platform="bare"),
+        metadata={},
+        pool="pool-a",
+        actor=ACTOR,
+    )
+    assert first.pool_id == pool_a.id
+
+    moved = await service.register_worker(
+        name="worker-1",
+        scope=WorkerScope(),
+        runtime=WorkerRuntime(platform="bare"),
+        metadata={},
+        pool="pool-b",
+        actor=ACTOR,
+    )
+    assert moved.id == first.id
+    assert moved.pool_id == pool_b.id
+
+    unset = await service.register_worker(
+        name="worker-1",
+        scope=WorkerScope(),
+        runtime=WorkerRuntime(platform="bare"),
+        metadata={},
+        pool=None,
+        actor=ACTOR,
+    )
+    assert unset.id == first.id
+    assert unset.pool_id is None

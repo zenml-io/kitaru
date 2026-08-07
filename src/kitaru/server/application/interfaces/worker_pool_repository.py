@@ -101,5 +101,6 @@ class WorkerPoolRepository(Protocol):
 
         Raises:
             WorkerPoolNotFound: No worker pool has this id.
+            WorkerPoolInUse: A worker references the worker pool.
         """
         ...

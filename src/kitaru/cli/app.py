@@ -3637,6 +3637,7 @@ async def evaluation_get(evaluation: uuid.UUID, /) -> CommandResult:
 
 _WORKER_START_PARAMETERS = (
     ParameterSpec("--name", "string", "option", False, "Ephemeral worker name."),
+    ParameterSpec("--pool", "string", "option", False, "Worker pool to join by name."),
     ParameterSpec(
         "--kinds", "agent|evaluator|importer[]", "option", False, "Task kinds to claim."
     ),
@@ -3707,6 +3708,7 @@ _WORKER_START_PARAMETERS = (
 async def worker_start(
     *,
     name: str | None = None,
+    pool: str | None = None,
     kinds: list[TaskKind] | None = None,
     selectors: Annotated[
         list[str] | None,
@@ -3729,6 +3731,7 @@ async def worker_start(
     return await workers.start_worker(
         target,
         name=name,
+        pool=pool,
         kinds=kinds,
         selectors=selectors,
         job_id=job_id,

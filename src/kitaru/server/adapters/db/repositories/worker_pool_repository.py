@@ -19,6 +19,7 @@ from collections.abc import Mapping
 from sqlalchemy import select
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.orm.worker import WORKER_POOL_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.orm.worker_pool import (
     WORKER_POOL_NAME_UNIQUE_CONSTRAINT,
     WorkerPoolORM,
@@ -30,6 +31,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.worker_pool import (
     DuplicateWorkerPoolName,
     WorkerPool,
+    WorkerPoolInUse,
     WorkerPoolNotFound,
 )
 
@@ -166,5 +168,9 @@ class SQLWorkerPoolRepository(BaseSQLRepository[WorkerPoolORM]):
 
         Raises:
             WorkerPoolNotFound: No worker pool has this id.
+            WorkerPoolInUse: A worker references the worker pool.
         """
-        await self._delete_row(worker_pool_id)
+        await self._delete_row(
+            worker_pool_id,
+            {WORKER_POOL_ID_FOREIGN_KEY: lambda: WorkerPoolInUse(worker_pool_id)},
+        )

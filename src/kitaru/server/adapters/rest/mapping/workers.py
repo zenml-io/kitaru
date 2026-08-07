@@ -40,6 +40,7 @@ def worker_to_response(
         id=worker.id,
         owner_id=worker.owner_id,
         name=worker.name,
+        pool_id=worker.pool_id,
         scope=worker.scope,
         runtime=worker.runtime,
         last_seen_at=worker.last_seen_at,

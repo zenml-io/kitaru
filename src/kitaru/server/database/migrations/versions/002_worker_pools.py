@@ -11,11 +11,11 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Worker pool table.
+"""Worker pool table and worker pool membership.
 
 Revision ID: 002_worker_pools
 Revises: 001_initial
-Create Date: 2026-08-07 20:38:25.179310
+Create Date: 2026-08-07 22:02:16.798826
 
 """
 
@@ -49,9 +49,21 @@ def upgrade() -> None:
     with op.batch_alter_table("worker_pool", schema=None) as batch_op:
         batch_op.create_index("ix_worker_pool_owner_id", ["owner_id"], unique=False)
 
+    with op.batch_alter_table("worker", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("pool_id", sa.Uuid(), nullable=True))
+        batch_op.create_index("ix_worker_pool_id", ["pool_id"], unique=False)
+        batch_op.create_foreign_key(
+            "fk_worker_pool_id", "worker_pool", ["pool_id"], ["id"]
+        )
+
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
+    with op.batch_alter_table("worker", schema=None) as batch_op:
+        batch_op.drop_constraint("fk_worker_pool_id", type_="foreignkey")
+        batch_op.drop_index("ix_worker_pool_id")
+        batch_op.drop_column("pool_id")
+
     with op.batch_alter_table("worker_pool", schema=None) as batch_op:
         batch_op.drop_index("ix_worker_pool_owner_id")
 

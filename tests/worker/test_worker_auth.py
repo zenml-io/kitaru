@@ -19,6 +19,7 @@ from conftest import (
     FakeAccountRepository,
     FakeApiKeyRepository,
     FakePasswordHasher,
+    FakeWorkerPoolRepository,
     FakeWorkerRepository,
     asgi_api_client,
     local_settings,
@@ -72,7 +73,7 @@ async def _registration_app() -> tuple[FastAPI, _CountingWorkerRepository, str]:
     repository = _CountingWorkerRepository()
     app = create_app(local_settings())
     app.dependency_overrides[get_worker_service] = lambda: WorkerService(
-        repository=repository
+        repository=repository, worker_pool_repository=FakeWorkerPoolRepository()
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     return app, repository, account_token
