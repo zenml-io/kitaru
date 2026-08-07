@@ -316,7 +316,7 @@ examples:
       live_provider:
         status: smoke_only
         provider: openai
-        command: gh workflow run llm-integration.yml -f suite=provider-extended -f kitaru_ref=<RELEASE_REF_OR_SHA> -f include_openai=true -f include_anthropic=false -f include_research_bot=false -f include_google_adk=false
+        command: gh workflow run llm-integration.yml -f suite=provider-extended -f kitaru_ref=<RELEASE_REF_OR_SHA> -f include_openai=true -f include_anthropic=false -f include_google_adk=false
         weekly_workflow: false
         local_release_smoke: false
         manual_command_available: true
@@ -329,7 +329,6 @@ examples:
           kitaru_ref: <RELEASE_REF_OR_SHA>
           include_openai: true
           include_anthropic: false
-          include_research_bot: false
           include_google_adk: false
           marker_expression: (live_openai) and provider_extended
           scope: full provider-extended marker group
@@ -430,122 +429,36 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
-  - id: openai-agents-adapter
-    path: examples/integrations/openai_agents_agent/openai_agents_adapter.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
-    owner_area: OpenAI Agents SDK adapter
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/test_openai_agents_adapter_foundation.py
-      local_smoke:
-        status: smoke_only
-        command: uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
-        requires_server: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 120
-      live_provider:
-        status: smoke_only
-        provider: openai
-        command: uv run python examples/integrations/openai_agents_agent/openai_agents_adapter.py
-        weekly_workflow: false
-        local_release_smoke: true
-        manual_command_available: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 120
-        cost_class: low
-        manual_github_workflow:
-          workflow: .github/workflows/llm-integration.yml
-          suite: provider-extended
-          kitaru_ref: <RELEASE_REF_OR_SHA>
-          include_openai: true
-          include_anthropic: false
-          include_research_bot: false
-          include_google_adk: false
-          marker_expression: (live_openai) and provider_extended
-          scope: full provider-extended marker group
-          test_file: tests/live/test_openai_adapter_behavior.py
-          test_names:
-            - test_openai_agents_live_tool_call_records_result_evidence
-        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
-          provider-extended marker group; the listed test is the relevant evidence
-          for this example. It is not part of the weekly provider-core workflow.
-    release_policy:
-      required_when_changed: true
-      waiver_allowed: true
-  - id: openai-agents-sandbox-tool
-    path: examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+  - id: openai-agents-v2
+    path: examples/integrations/openai_agents_v2/agent.py
     public_docs:
       - examples/README.md
       - docs/book/getting-started/examples.md
       - docs/book/adapters/openai-agents.md
-    owner_area: OpenAI Agents SDK active-stack sandbox command tool
+    owner_area: source-only OpenAI Agents SDK v2 adapter
     coverage:
       deterministic_pytest:
         status: covered
-        test_file: tests/test_openai_agents_calls_strategy.py
-        notes: covers the sandbox_command_tool factory, model-visible JSON, timeout wiring, input validation, and tool-call checkpoint cache identity with fakes
+        test_file: plugins/tests/adapters/openai_agents/test_runner.py
+        notes: covers the native result, identity, non-streaming runner surface, forwarding, and synchronous execution contract
       local_smoke:
-        status: smoke_only
-        command: uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
-        requires_server: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 120
-        notes: Requires an active Kitaru stack with exactly one sandbox component.
+        status: help_only
+        command: uv run --project plugins python -m examples.integrations.openai_agents_v2.agent --help
+        requires_server: false
+        timeout_seconds: 30
       live_provider:
-        status: smoke_only
+        status: manual_only
+        waiver:
+          reason: The example intentionally calls a real OpenAI model and records to a connected Kitaru server, so it is not safe as an unattended local smoke.
+          reviewer_action: Run the documented command with disposable credentials and inspect the completed session and child nodes, or record a release waiver.
         provider: openai
-        command: uv run python examples/integrations/openai_agents_agent/openai_agents_sandbox_tool.py
+        command: uv run --project plugins python -m examples.integrations.openai_agents_v2.agent "Use the order lookup tool for ORD-1007"
         weekly_workflow: false
         local_release_smoke: false
         manual_command_available: true
-        required_env: [OPENAI_API_KEY]
+        required_env: [OPENAI_API_KEY, KITARU_AGENT_ID]
         timeout_seconds: 120
         cost_class: low
-        notes: Requires an active Kitaru stack with exactly one sandbox component.
-    release_policy:
-      required_when_changed: true
-      waiver_allowed: true
-  - id: openai-agents-streaming
-    path: examples/integrations/openai_agents_agent/openai_agents_streaming.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
-    owner_area: OpenAI Agents SDK streaming events
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/test_openai_agents_streaming.py
-      local_smoke:
-        status: smoke_only
-        command: uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
-        requires_server: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 120
-      live_provider:
-        status: smoke_only
-        provider: openai
-        command: uv run python examples/integrations/openai_agents_agent/openai_agents_streaming.py
-        weekly_workflow: false
-        local_release_smoke: true
-        manual_command_available: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 120
-        cost_class: low
-        manual_github_workflow:
-          workflow: .github/workflows/llm-integration.yml
-          suite: provider-extended
-          kitaru_ref: <RELEASE_REF_OR_SHA>
-          include_openai: true
-          include_anthropic: false
-          include_research_bot: false
-          include_google_adk: false
-          marker_expression: (live_openai) and provider_extended
-          scope: full provider-extended marker group
-          test_file: tests/live/test_openai_adapter_behavior.py
-          test_names:
-            - test_openai_agents_live_streaming_records_lifecycle_evidence
-        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
-          provider-extended marker group; the listed test is the relevant evidence
-          for this example. It is not part of the weekly provider-core workflow.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -581,7 +494,6 @@ examples:
           kitaru_ref: <RELEASE_REF_OR_SHA>
           include_openai: false
           include_anthropic: true
-          include_research_bot: false
           include_google_adk: false
           marker_expression: (live_anthropic) and provider_extended
           scope: full provider-extended marker group
@@ -663,7 +575,6 @@ examples:
           kitaru_ref: <RELEASE_REF_OR_SHA>
           include_openai: false
           include_anthropic: true
-          include_research_bot: false
           include_google_adk: false
           marker_expression: (live_anthropic) and provider_extended
           scope: full provider-extended marker group
@@ -755,7 +666,6 @@ examples:
           kitaru_ref: <RELEASE_REF_OR_SHA>
           include_openai: false
           include_anthropic: false
-          include_research_bot: false
           include_google_adk: true
           marker_expression: live_gemini and provider_extended
           scope: full provider-extended marker group
@@ -870,7 +780,6 @@ examples:
           kitaru_ref: <RELEASE_REF_OR_SHA>
           include_openai: true
           include_anthropic: false
-          include_research_bot: false
           include_google_adk: false
           marker_expression: (live_openai) and provider_extended
           scope: full provider-extended marker group
@@ -934,37 +843,6 @@ examples:
         required: false
     release_policy:
       required_when_changed: true
-  - id: openai-research-bot
-    path: examples/end_to_end/openai_research_bot/research_bot.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
-    owner_area: OpenAI Agents end-to-end research bot
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/test_openai_research_bot_example.py
-        notes: fake runner and artifact contract checks; no live web search
-      local_smoke:
-        status: help_only
-        command: uv run python examples/end_to_end/openai_research_bot/research_bot.py
-          --help
-        requires_server: false
-        timeout_seconds: 30
-      live_provider:
-        status: opt_in_extended
-        provider: openai
-        command: uv run python examples/end_to_end/openai_research_bot/research_bot.py
-          "AI agent durability in one paragraph" --max-searches 2 --fail-on-search-error
-        weekly_workflow: false
-        manual_workflow_opt_in: true
-        local_release_smoke: true
-        manual_command_available: true
-        required_env: [OPENAI_API_KEY, KITARU_SMOKE_RESEARCH_BOT]
-        opt_in_env: [KITARU_SMOKE_RESEARCH_BOT]
-        timeout_seconds: 180
-        cost_class: medium
-    release_policy:
-      required_when_changed: true
-      waiver_allowed: true
   - id: coding-agent
     path: examples/end_to_end/coding_agent/agent.py
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]

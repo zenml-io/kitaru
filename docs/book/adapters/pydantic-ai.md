@@ -403,11 +403,12 @@ All adapters use `checkpoint_strategy`, but the values name the real boundary ea
 | Adapter | Per-call strategy | Coarse strategy | What the coarse name means |
 |---|---|---|---|
 | PydanticAI | `"calls"` | `"turn"` | One PydanticAI agent run/turn |
-| OpenAI Agents | `"calls"` | `"runner_call"` | One outer OpenAI `Runner.run(...)` call |
 | LangGraph | `"calls"` where sync middleware owns the handler call | `"graph_call"` | One outer graph invocation; LangGraph still owns graph-internal state |
 | Claude Agent SDK | Not supported | `"invocation"` | One Claude SDK query/invocation |
 
 So `"calls"` is a shared idea, not a promise of identical mechanics. It means Kitaru can create per-call checkpoints only where the adapter physically owns a replay-safe call body.
+
+The source-only OpenAI Agents v2 adapter uses a different model: one Kitaru session contains nodes that observe the native SDK run. It does not expose `checkpoint_strategy`, `"calls"`, or `"runner_call"`.
 
 ## Streaming
 
