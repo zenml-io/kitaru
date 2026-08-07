@@ -14,7 +14,7 @@
 """Worker use cases."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.application.interfaces.worker_pool_repository import (
@@ -33,15 +33,22 @@ class WorkerService:
         self,
         repository: WorkerRepository,
         worker_pool_repository: WorkerPoolRepository,
+        retention_seconds: int,
+        sweep_batch_limit: int,
     ) -> None:
         """Initialize the service.
 
         Args:
             repository: Worker repository.
             worker_pool_repository: Worker pool repository.
+            retention_seconds: Retention window in seconds before a dead
+                worker is pruned.
+            sweep_batch_limit: Maximum workers pruned per sweep tick.
         """
         self._repository = repository
         self._worker_pools = worker_pool_repository
+        self._retention_seconds = retention_seconds
+        self._sweep_batch_limit = sweep_batch_limit
 
     async def register_worker(
         self,
@@ -133,3 +140,15 @@ class WorkerService:
         """
         _ = actor
         await self._repository.delete(worker_id)
+
+    async def prune_dead_workers(self, now: datetime) -> int:
+        """Delete workers past the retention window with no in-flight task.
+
+        Args:
+            now: Current time.
+
+        Returns:
+            Number of deleted workers.
+        """
+        cutoff = now - timedelta(seconds=self._retention_seconds)
+        return await self._repository.delete_stale(cutoff, self._sweep_batch_limit)

@@ -16,19 +16,30 @@
 import asyncio
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 import pytest
 from asyncpg.exceptions import LockNotAvailableError
 from sqlalchemy.exc import DBAPIError
 
-from conftest import build_job_and_task_services, local_settings
+from conftest import (
+    FakeWorkerPoolRepository,
+    FakeWorkerRepository,
+    build_job_and_task_services,
+    create_worker,
+    local_settings,
+)
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.api import task_sweeper
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
+from kitaru.server.domain.worker import WorkerNotFound
+
+RETENTION_SECONDS = 86400
+SWEEP_BATCH_LIMIT = 100
 
 
 def _lock_not_available_error() -> DBAPIError:
@@ -87,6 +98,32 @@ def _stub_sweeper_wiring(monkeypatch: pytest.MonkeyPatch, service: TaskService) 
     monkeypatch.setattr(task_sweeper, "get_task_service", lambda *args: service)
 
 
+def _stub_worker_sweeper_wiring(
+    monkeypatch: pytest.MonkeyPatch, service: WorkerService
+) -> None:
+    """Bind the sweeper's worker service build to one fake-backed service.
+
+    Args:
+        monkeypatch: Patcher for the sweeper module.
+        service: Service the worker prune unit runs against.
+    """
+    monkeypatch.setattr(task_sweeper, "get_worker_service", lambda *args: service)
+
+
+def _empty_worker_service() -> WorkerService:
+    """Build a worker service backed by fresh, empty fake repositories.
+
+    Returns:
+        Worker service whose prune finds nothing to delete.
+    """
+    return WorkerService(
+        repository=FakeWorkerRepository(),
+        worker_pool_repository=FakeWorkerPoolRepository(),
+        retention_seconds=RETENTION_SECONDS,
+        sweep_batch_limit=SWEEP_BATCH_LIMIT,
+    )
+
+
 async def test_sweep_once_propagates_before_rescuing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -115,6 +152,7 @@ async def test_sweep_once_propagates_before_rescuing(
     monkeypatch.setattr(TaskService, "propagate_job_cancel", record_propagate)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
     _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_worker_sweeper_wiring(monkeypatch, _empty_worker_service())
 
     await task_sweeper.sweep_once(
         cast(DatabaseService, _StubDatabase()),
@@ -146,6 +184,7 @@ async def test_sweep_once_continues_after_a_failing_item(
     monkeypatch.setattr(TaskService, "sweep_stale_task", failing_sweep)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
     _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_worker_sweeper_wiring(monkeypatch, _empty_worker_service())
     database = _StubDatabase()
 
     await task_sweeper.sweep_once(
@@ -155,8 +194,8 @@ async def test_sweep_once_continues_after_a_failing_item(
     )
 
     assert swept == [first, second]
-    assert [session.rollbacks for session in database.sessions] == [1, 0]
-    assert [session.commits for session in database.sessions] == [0, 1]
+    assert [session.rollbacks for session in database.sessions] == [1, 0, 0]
+    assert [session.commits for session in database.sessions] == [0, 1, 1]
 
 
 async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
@@ -178,6 +217,7 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
     monkeypatch.setattr(TaskService, "propagate_job_cancel", failing_propagate)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
     _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_worker_sweeper_wiring(monkeypatch, _empty_worker_service())
     database = _StubDatabase()
 
     await task_sweeper.sweep_once(
@@ -187,8 +227,43 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
     )
 
     assert propagated == [held, free]
-    assert [session.rollbacks for session in database.sessions] == [1, 0]
-    assert [session.commits for session in database.sessions] == [0, 1]
+    assert [session.rollbacks for session in database.sessions] == [1, 0, 0]
+    assert [session.commits for session in database.sessions] == [0, 1, 1]
+
+
+async def test_sweep_once_prunes_dead_workers(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The worker prune unit deletes a dead worker each tick."""
+    services = build_job_and_task_services()
+    workers = FakeWorkerRepository()
+    worker_service = WorkerService(
+        repository=workers,
+        worker_pool_repository=FakeWorkerPoolRepository(),
+        retention_seconds=RETENTION_SECONDS,
+        sweep_batch_limit=SWEEP_BATCH_LIMIT,
+    )
+    stale = await create_worker(
+        workers,
+        uuid.uuid4(),
+        last_seen_at=datetime.now(UTC) - timedelta(seconds=RETENTION_SECONDS + 1),
+    )
+
+    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        return [], []
+
+    monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
+    _stub_sweeper_wiring(monkeypatch, services.task_service)
+    _stub_worker_sweeper_wiring(monkeypatch, worker_service)
+
+    await task_sweeper.sweep_once(
+        cast(DatabaseService, _StubDatabase()),
+        local_settings(),
+        AnalyticsClient(enabled=False),
+    )
+
+    with pytest.raises(WorkerNotFound):
+        await workers.get(stale.id)
 
 
 async def test_start_task_sweeper_returns_none_when_interval_is_zero() -> None:

@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     SKIP_DB_MIGRATION: bool = False
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
+    WORKER_RETENTION_SECONDS: int = 86400
     MAX_BLOB_SIZE_BYTES: int = 100 * 1024 * 1024
 
     LIST_QUERY_TIMEOUT_SECONDS: int = 10

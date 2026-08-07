@@ -3048,9 +3048,15 @@ async def create_cohort_version(
 class FakeWorkerRepository:
     """In-memory worker repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tasks: Fake task repository, restricting the stale prune when a
+                task still references the worker.
+        """
         self._workers: dict[uuid.UUID, Worker] = {}
+        self._tasks = tasks
 
     async def register(self, worker: Worker) -> Worker:
         """Persist a worker, refreshing an existing row with the same name.
@@ -3173,6 +3179,37 @@ class FakeWorkerRepository:
         if worker_id not in self._workers:
             raise WorkerNotFound(worker_id)
         del self._workers[worker_id]
+
+    async def delete_stale(self, cutoff: datetime, limit: int) -> int:
+        """Delete workers last seen before a cutoff with no in-flight task.
+
+        Terminal tasks referencing a pruned worker keep their rows and lose
+        the reference through the foreign key's SET NULL.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of workers to delete.
+
+        Returns:
+            Number of deleted workers.
+        """
+        referenced = (
+            {
+                task.worker_id
+                for task in self._tasks._tasks.values()
+                if task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            }
+            if self._tasks is not None
+            else set()
+        )
+        stale = sorted(
+            worker.id
+            for worker in self._workers.values()
+            if worker.last_seen_at < cutoff and worker.id not in referenced
+        )[:limit]
+        for worker_id in stale:
+            del self._workers[worker_id]
+        return len(stale)
 
 
 async def create_worker(

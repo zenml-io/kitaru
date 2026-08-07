@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The background sweep prunes worker rows past a retention window with no in-flight task, so autoscaling churn does not accumulate dead workers. Configured through `KITARU_SERVER_WORKER_RETENTION_SECONDS` (default 86400). A terminal task referencing a pruned worker keeps its row and loses the reference.
 - `kitaru session import --join-on /json/pointer` groups provider traces into sessions by a scalar selected with an RFC 6901 JSON Pointer. The CLI passes the pointer through importer parameters, and Braintrust, Langfuse, LangSmith, and OpenTelemetry importers support the same `join_on` parameter.
 - A Kitaru v2 LangGraph adapter, shipped as the independently versioned `kitaru-langgraph` distribution with the `kitaru_langgraph` import package, for synchronous and asynchronous invocation recording across compiled LangGraph runnables, LangChain agents, and Deep Agents. Factory-built agents support live model-request overrides and capability-gated static or recorded-history tool-result substitution; streaming, batch invocation, native checkpoint reconstruction, and worker-managed interrupt resume remain unsupported.
 - A non-streaming OpenAI Agents adapter, shipped as the independently versioned `kitaru-openai-agents` distribution with the `kitaru_openai_agents` import package, that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.

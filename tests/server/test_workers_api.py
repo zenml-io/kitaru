@@ -57,6 +57,8 @@ from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 
 RUNTIME = {"platform": "bare"}
+RETENTION_SECONDS = 86400
+SWEEP_BATCH_LIMIT = 100
 
 
 @pytest.fixture
@@ -101,7 +103,10 @@ async def client(
     """Provide an HTTP client authenticated as the fixture account by default."""
     app = create_app(local_settings())
     service = WorkerService(
-        repository=repository, worker_pool_repository=worker_pool_repository
+        repository=repository,
+        worker_pool_repository=worker_pool_repository,
+        retention_seconds=RETENTION_SECONDS,
+        sweep_batch_limit=SWEEP_BATCH_LIMIT,
     )
     transitions = TaskTransitions(
         task_repository=task_repository,

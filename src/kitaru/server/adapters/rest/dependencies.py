@@ -812,11 +812,13 @@ def get_worker_pool_service(
 
 def get_worker_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> WorkerService:
     """Return a worker service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
         Worker service bound to the SQL repository.
@@ -824,6 +826,8 @@ def get_worker_service(
     return WorkerService(
         repository=SQLWorkerRepository(session),
         worker_pool_repository=SQLWorkerPoolRepository(session),
+        retention_seconds=settings.WORKER_RETENTION_SECONDS,
+        sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
     )
 
 

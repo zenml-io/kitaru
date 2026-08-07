@@ -96,3 +96,18 @@ class WorkerRepository(Protocol):
             WorkerNotFound: No worker has this id.
         """
         ...
+
+    async def delete_stale(self, cutoff: datetime, limit: int) -> int:
+        """Delete workers last seen before a cutoff with no in-flight task.
+
+        Terminal tasks referencing a pruned worker keep their rows and lose
+        the reference through the foreign key's SET NULL.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of workers to delete.
+
+        Returns:
+            Number of deleted workers.
+        """
+        ...

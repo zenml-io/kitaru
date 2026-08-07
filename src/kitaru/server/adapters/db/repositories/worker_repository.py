@@ -17,10 +17,11 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import CursorResult, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.orm.task import IN_FLIGHT_PREDICATE, TaskORM
 from kitaru.server.adapters.db.orm.worker import (
     WORKER_NAME_UNIQUE_CONSTRAINT,
     WorkerORM,
@@ -183,3 +184,31 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
             WorkerNotFound: No worker has this id.
         """
         await self._delete_row(worker_id)
+
+    async def delete_stale(self, cutoff: datetime, limit: int) -> int:
+        """Delete workers last seen before a cutoff with no in-flight task.
+
+        The staleness check and the delete run as one statement, so a
+        worker claimed between the check and the delete is never removed.
+        Terminal tasks referencing a pruned worker keep their rows and lose
+        the reference through the foreign key's SET NULL.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of workers to delete.
+
+        Returns:
+            Number of deleted workers.
+        """
+        in_flight = select(TaskORM.id).where(
+            TaskORM.worker_id == WorkerORM.id, text(IN_FLIGHT_PREDICATE)
+        )
+        stale_ids = (
+            select(WorkerORM.id)
+            .where(WorkerORM.last_seen_at < cutoff, ~in_flight.exists())
+            .order_by(WorkerORM.id.asc())
+            .limit(limit)
+        )
+        statement = delete(WorkerORM).where(WorkerORM.id.in_(stale_ids))
+        result = await self._session.execute(statement)
+        return result.rowcount if isinstance(result, CursorResult) else 0

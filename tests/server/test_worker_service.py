@@ -19,8 +19,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from conftest import (
+    FakeTaskRepository,
     FakeWorkerPoolRepository,
     FakeWorkerRepository,
+    create_agent_task,
     create_worker,
     create_worker_pool,
 )
@@ -35,12 +37,20 @@ from kitaru.server.domain.worker_pool import WorkerPoolNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+RETENTION_SECONDS = 86400
+SWEEP_BATCH_LIMIT = 100
 
 
 @pytest.fixture
-def repository() -> FakeWorkerRepository:
+def task_repository() -> FakeTaskRepository:
+    """Provide a fake task repository."""
+    return FakeTaskRepository()
+
+
+@pytest.fixture
+def repository(task_repository: FakeTaskRepository) -> FakeWorkerRepository:
     """Provide a fake worker repository."""
-    return FakeWorkerRepository()
+    return FakeWorkerRepository(tasks=task_repository)
 
 
 @pytest.fixture
@@ -56,7 +66,10 @@ def service(
 ) -> WorkerService:
     """Provide a worker service backed by the fake repositories."""
     return WorkerService(
-        repository=repository, worker_pool_repository=worker_pool_repository
+        repository=repository,
+        worker_pool_repository=worker_pool_repository,
+        retention_seconds=RETENTION_SECONDS,
+        sweep_batch_limit=SWEEP_BATCH_LIMIT,
     )
 
 
@@ -315,3 +328,56 @@ async def test_register_worker_reregistration_moves_between_pools(
     )
     assert unset.id == first.id
     assert unset.pool_id is None
+
+
+async def test_prune_dead_workers_deletes_a_stale_unreferenced_worker(
+    service: WorkerService, repository: FakeWorkerRepository
+) -> None:
+    """A stale worker holding no in-flight task is pruned."""
+    now = datetime.now(UTC)
+    stale = await create_worker(
+        repository,
+        ACTOR.account.id,
+        last_seen_at=now - timedelta(seconds=RETENTION_SECONDS + 1),
+    )
+
+    deleted = await service.prune_dead_workers(now)
+
+    assert deleted == 1
+    with pytest.raises(WorkerNotFound):
+        await repository.get(stale.id)
+
+
+async def test_prune_dead_workers_keeps_a_worker_with_an_in_flight_task(
+    service: WorkerService,
+    repository: FakeWorkerRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """A stale worker still claimed by an in-flight task survives the prune."""
+    now = datetime.now(UTC)
+    stale = await create_worker(
+        repository,
+        ACTOR.account.id,
+        last_seen_at=now - timedelta(seconds=RETENTION_SECONDS + 1),
+    )
+    task = await create_agent_task(task_repository, uuid.uuid4())
+    task.claim(stale.id, now)
+    await task_repository.update(task)
+
+    deleted = await service.prune_dead_workers(now)
+
+    assert deleted == 0
+    assert await repository.get(stale.id) == stale
+
+
+async def test_prune_dead_workers_keeps_a_live_worker(
+    service: WorkerService, repository: FakeWorkerRepository
+) -> None:
+    """A worker seen within the retention window survives the prune."""
+    now = datetime.now(UTC)
+    live = await create_worker(repository, ACTOR.account.id, last_seen_at=now)
+
+    deleted = await service.prune_dead_workers(now)
+
+    assert deleted == 0
+    assert await repository.get(live.id) == live
