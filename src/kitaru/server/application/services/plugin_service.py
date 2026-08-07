@@ -14,13 +14,13 @@
 """Plugin registry use cases, bound to one plugin kind."""
 
 import uuid
-from typing import Any
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import (
+    PluginCreate,
     PluginFilter,
     PluginUpdate,
     PluginVersionFilter,
@@ -61,41 +61,32 @@ class PluginService:
         self._blob_repository = blob_repository
         self._analytics = analytics
 
-    async def create_plugin(
-        self,
-        name: str,
-        description: str | None,
-        provider: str | None,
-        metadata: dict[str, Any],
-        actor: AuthContext,
-    ) -> Plugin:
+    async def create_plugin(self, command: PluginCreate, actor: AuthContext) -> Plugin:
         """Create a plugin owned by the caller.
 
         Args:
-            name: Plugin name.
-            description: Plugin description.
-            provider: Source system, evaluators must leave this unset.
-            metadata: Arbitrary metadata.
+            command: Fields for the new plugin.
             actor: Caller context.
 
         Raises:
             DuplicatePluginName: The (kind, name) pair is already registered.
             InvalidPluginProvider: The kind is evaluator and provider is set.
-            ReservedPluginName: ``name`` starts with the reserved default-plugin
+            ReservedPluginName: The name starts with the reserved default-plugin
                 prefix.
 
         Returns:
             Created plugin.
         """
-        if name.startswith(RESERVED_PLUGIN_NAME_PREFIX):
-            raise ReservedPluginName(name)
+        if command.name.startswith(RESERVED_PLUGIN_NAME_PREFIX):
+            raise ReservedPluginName(command.name)
         plugin = Plugin(
             owner_id=actor.account.id,
             kind=self.kind,
-            name=name,
-            description=description,
-            provider=provider,
-            metadata=metadata,
+            name=command.name,
+            description=command.description,
+            provider=command.provider,
+            logo_url=command.logo_url,
+            metadata=command.metadata,
         )
         return await self._repository.create(plugin)
 
@@ -150,6 +141,8 @@ class PluginService:
         plugin = await self._repository.get(plugin_id)
         if "description" in update.model_fields_set:
             plugin.update_description(update.description)
+        if "logo_url" in update.model_fields_set:
+            plugin.update_logo_url(update.logo_url)
         if "metadata" in update.model_fields_set:
             assert update.metadata is not None
             plugin.update_metadata(update.metadata)

@@ -555,6 +555,7 @@ jobs:
             python -c "import kitaru"
           docker run --rm kitaru-server-release-dry-run \
             python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
+          docker build --check -f docker/release-worker.Dockerfile .
       - name: Build and publish public client Docker image
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -571,6 +572,25 @@ jobs:
           labels: |
             org.opencontainers.image.title=kitaru
             org.opencontainers.image.description=Kitaru client
+            org.opencontainers.image.version=${{ env.VERSION }}
+            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
+            org.opencontainers.image.licenses=Apache-2.0
+      - name: Build and publish public worker Docker image
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: docker/release-worker.Dockerfile
+          target: worker
+          push: true
+          build-args: |
+            KITARU_VERSION=${{ env.VERSION }}
+          tags: |
+            zenmldocker/kitaru-worker:${{ env.VERSION }}
+            zenmldocker/kitaru-worker:latest
+          labels: |
+            org.opencontainers.image.title=kitaru-worker
+            org.opencontainers.image.description=Kitaru worker
             org.opencontainers.image.version=${{ env.VERSION }}
             org.opencontainers.image.source=https://github.com/zenml-io/kitaru
             org.opencontainers.image.licenses=Apache-2.0
@@ -650,6 +670,7 @@ jobs:
             echo "### Docker image"
             echo "Built from candidate wheels: kitaru-release-dry-run"
             echo "Built from candidate wheels: kitaru-server-release-dry-run"
+            echo "Statically validated: docker/release-worker.Dockerfile"
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""

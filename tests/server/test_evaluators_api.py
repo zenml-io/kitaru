@@ -423,3 +423,40 @@ async def test_update_evaluator_version_not_found(client: httpx.AsyncClient) -> 
         f"/v1/evaluators/{created['id']}/versions/1", json={"display_version": "v1"}
     )
     assert response.status_code == 404
+
+
+async def test_create_evaluator_with_logo_url(client: httpx.AsyncClient) -> None:
+    """Round-trip the logo URL through create and get."""
+    response = await client.post(
+        "/v1/evaluators",
+        json={"name": "accuracy", "logo_url": "https://example.com/accuracy.svg"},
+    )
+    assert response.status_code == 201
+    assert response.json()["logo_url"] == "https://example.com/accuracy.svg"
+
+    evaluator_id = response.json()["id"]
+    fetched = await client.get(f"/v1/evaluators/{evaluator_id}")
+    assert fetched.json()["logo_url"] == "https://example.com/accuracy.svg"
+
+
+async def test_create_evaluator_without_logo_url(client: httpx.AsyncClient) -> None:
+    """Return a null logo URL when none was given."""
+    response = await client.post("/v1/evaluators", json={"name": "accuracy"})
+    assert response.status_code == 201
+    assert response.json()["logo_url"] is None
+
+
+async def test_update_evaluator_logo_url(client: httpx.AsyncClient) -> None:
+    """Update the logo URL through the evaluator update endpoint."""
+    created = await client.post(
+        "/v1/evaluators",
+        json={"name": "accuracy", "logo_url": "https://example.com/old.svg"},
+    )
+    evaluator_id = created.json()["id"]
+
+    updated = await client.patch(
+        f"/v1/evaluators/{evaluator_id}",
+        json={"logo_url": "https://example.com/new.svg"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["logo_url"] == "https://example.com/new.svg"

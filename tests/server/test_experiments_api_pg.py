@@ -31,6 +31,13 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         yield client
 
 
+@pytest.fixture
+async def agent_id(client: httpx.AsyncClient) -> str:
+    """Provide the id of an agent for experiments to belong to."""
+    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    return created["id"]
+
+
 async def _create_evaluator(client: httpx.AsyncClient, name: str = "accuracy") -> None:
     evaluator = (await client.post("/v1/evaluators", json={"name": name})).json()
     await client.post(
@@ -45,12 +52,18 @@ async def _create_evaluator(client: httpx.AsyncClient, name: str = "accuracy") -
     )
 
 
-async def test_experiments_persist_across_requests(client: httpx.AsyncClient) -> None:
+async def test_experiments_persist_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
     """Prove the per-request commit through separate requests."""
     await _create_evaluator(client)
     response = await client.post(
         "/v1/experiments",
-        json={"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]},
+        json={
+            "name": "exp1",
+            "agent_id": agent_id,
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
     )
     assert response.status_code == 201
     created = response.json()
@@ -66,10 +79,16 @@ async def test_experiments_persist_across_requests(client: httpx.AsyncClient) ->
     assert body["items"][0] == created
 
 
-async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
+async def test_duplicate_name_conflict(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
     """Translate the database constraint into HTTP 409."""
     await _create_evaluator(client)
-    body = {"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]}
+    body = {
+        "name": "exp1",
+        "agent_id": agent_id,
+        "evaluators": [{"evaluator": "accuracy"}],
+    }
     response = await client.post("/v1/experiments", json=body)
     assert response.status_code == 201
     response = await client.post("/v1/experiments", json=body)
@@ -77,13 +96,19 @@ async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     assert response.json() == {"detail": "Experiment name 'exp1' is already registered"}
 
 
-async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
+async def test_update_persists_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
     """Persist an update across requests."""
     await _create_evaluator(client)
     created = (
         await client.post(
             "/v1/experiments",
-            json={"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]},
+            json={
+                "name": "exp1",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
         )
     ).json()
     response = await client.patch(
@@ -99,7 +124,7 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
 
 
 async def test_update_new_evaluators_replaces_config_across_requests(
-    client: httpx.AsyncClient,
+    client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Persist a new replay config across requests when evaluators change."""
     await _create_evaluator(client, name="accuracy")
@@ -107,7 +132,11 @@ async def test_update_new_evaluators_replaces_config_across_requests(
     created = (
         await client.post(
             "/v1/experiments",
-            json={"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]},
+            json={
+                "name": "exp1",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
         )
     ).json()
 
@@ -125,13 +154,19 @@ async def test_update_new_evaluators_replaces_config_across_requests(
     ]
 
 
-async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> None:
+async def test_delete_persists_across_requests(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
     """Persist a deletion across requests."""
     await _create_evaluator(client)
     created = (
         await client.post(
             "/v1/experiments",
-            json={"name": "exp1", "evaluators": [{"evaluator": "accuracy"}]},
+            json={
+                "name": "exp1",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
         )
     ).json()
     response = await client.delete(f"/v1/experiments/{created['id']}")
@@ -141,18 +176,26 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
     assert response.status_code == 404
 
 
-async def test_query_by_tag(client: httpx.AsyncClient) -> None:
+async def test_query_by_tag(client: httpx.AsyncClient, agent_id: str) -> None:
     """Filter experiments by a tag linked to the resource."""
     await _create_evaluator(client)
     tagged = (
         await client.post(
             "/v1/experiments",
-            json={"name": "tagged-exp", "evaluators": [{"evaluator": "accuracy"}]},
+            json={
+                "name": "tagged-exp",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
         )
     ).json()
     await client.post(
         "/v1/experiments",
-        json={"name": "untagged-exp", "evaluators": [{"evaluator": "accuracy"}]},
+        json={
+            "name": "untagged-exp",
+            "agent_id": agent_id,
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
     )
 
     tag = (await client.post("/v1/tags", json={"name": "smoke"})).json()
