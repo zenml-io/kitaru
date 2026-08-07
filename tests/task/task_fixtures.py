@@ -26,6 +26,8 @@ import uuid
 from collections.abc import AsyncGenerator
 from typing import NamedTuple
 
+from fastapi import FastAPI
+
 from conftest import (
     FakeReplayRepository,
     FakeSessionNodeRepository,
@@ -73,6 +75,7 @@ class TaskAppFixture(NamedTuple):
     client: KitaruAPIClient
     services: JobAndTaskServices
     agent: Agent
+    app: FastAPI
 
 
 async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
@@ -103,7 +106,7 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
     agent = await create_agent(services.agents, ACCOUNT.id)
     async with asgi_api_client(app) as client:
-        yield TaskAppFixture(client=client, services=services, agent=agent)
+        yield TaskAppFixture(client=client, services=services, agent=agent, app=app)
 
 
 async def start_task(fixture: TaskAppFixture, task_id: uuid.UUID) -> None:

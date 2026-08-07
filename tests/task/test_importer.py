@@ -22,6 +22,7 @@ from typing import Any
 import httpx
 import pytest
 from task_fixtures import (
+    ACCOUNT,
     TaskAppFixture,
     build_task_app,
     create_script_plugin_version,
@@ -34,6 +35,8 @@ from conftest import (
     create_blob,
     create_import_task,
     create_job,
+    create_session,
+    create_worker,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportFailure, ImportStats
@@ -45,6 +48,8 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru.api_models.v1.task import ImportTaskDetails
 from kitaru.client.exceptions import APIError
+from kitaru.server.adapters.rest.dependencies import authorize_with_task
+from kitaru.server.application.models.auth import TaskAuthContext, TaskPrincipal
 from kitaru.server.domain.agent_version import CommandRunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
@@ -527,6 +532,64 @@ async def test_importer_flow_records_ingest_nodes_error(
     assert written.created == 0
     assert written.failed == 1
     assert written.failures[0].external_id == "session-1"
+
+
+async def test_importer_flow_adopts_a_pending_import_placeholder(
+    task_app: TaskAppFixture, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Adopt a pending-import placeholder, ingest its nodes, then PATCH it terminal."""
+    placeholder = await create_session(
+        task_app.services.sessions,
+        task_app.agent.owner_id,
+        task_app.agent.id,
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        external_id="session-1",
+    )
+    task_id, plugin_path = await _create_importer_task(
+        task_app, _SINGLE_SESSION_WITH_NODE_PARSER_SCRIPT, tmp_path
+    )
+    task = await task_app.services.tasks.get(task_id)
+    worker = await create_worker(task_app.services.workers, task_app.agent.owner_id)
+    account_only_override = task_app.app.dependency_overrides[authorize_with_task]
+    # The fixture's authorize_with_task override grants blanket account
+    # access, which never satisfies the adoption path's task-principal gate.
+    # Impersonate this importer task for the duration of the run.
+    monkeypatch.setitem(
+        task_app.app.dependency_overrides,
+        authorize_with_task,
+        lambda: TaskAuthContext(
+            account=ACCOUNT,
+            principal=TaskPrincipal(
+                task_id=task_id, attempt=1, worker_id=worker.id, job_id=task.job_id
+            ),
+        ),
+    )
+    payload_path = tmp_path / "payload.json"
+    payload_path.write_text(json.dumps({}))
+    result_path = tmp_path / "result.json"
+
+    monkeypatch.setenv("KITARU_TASK_PLUGIN_PATH", str(plugin_path))
+    monkeypatch.setenv("KITARU_TASK_PAYLOAD_PATH", str(payload_path))
+    monkeypatch.setenv("KITARU_TASK_RESULT_PATH", str(result_path))
+
+    await run(task_app.client, str(task_id))
+    monkeypatch.setitem(
+        task_app.app.dependency_overrides, authorize_with_task, account_only_override
+    )
+
+    written = ImportStats.model_validate(json.loads(result_path.read_text()))
+    assert written.created == 1
+    assert written.skipped == 0
+    assert written.failed == 0
+
+    adopted = await task_app.services.sessions.get(placeholder.id)
+    assert adopted.id == placeholder.id
+    assert adopted.status == SessionStatus.COMPLETED
+    nodes_page = await task_app.client.sessions.list_nodes(
+        placeholder.id, SessionNodeListParams(size=10)
+    )
+    assert len(nodes_page.items) == 1
 
 
 async def test_run_caps_failure_samples_without_losing_count(

@@ -107,6 +107,7 @@ from kitaru.server.application.services.experiment_run_service import (
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
@@ -5791,6 +5792,7 @@ class ReplayServices(NamedTuple):
     replay_service: ReplayService
     job_service: JobService
     task_service: TaskService
+    session_service: SessionService
     experiments: FakeExperimentRepository
     experiment_runs: FakeExperimentRunRepository
     replays: FakeReplayRepository
@@ -5925,12 +5927,20 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         job_repository=jobs,
         transitions=transitions,
     )
+    session_service = SessionService(
+        repository=sessions,
+        task_repository=tasks,
+        agent_version_repository=agent_versions,
+        replay_repository=replays,
+        dispatcher=dispatcher,
+    )
     return ReplayServices(
         experiment_service=experiment_service,
         experiment_run_service=experiment_run_service,
         replay_service=replay_service,
         job_service=job_service,
         task_service=task_service,
+        session_service=session_service,
         experiments=experiments,
         experiment_runs=experiment_runs,
         replays=replays,

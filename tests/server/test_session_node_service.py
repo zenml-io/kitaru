@@ -351,6 +351,22 @@ async def test_ingest_into_terminal_imported_session_allowed(
     assert len(stored) == 1
 
 
+async def test_ingest_into_pending_import_session_allowed(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+) -> None:
+    """Allow node ingest into a pending-import placeholder before it finalizes."""
+    session = await create_session(
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+    )
+    stored = await service.ingest_nodes(session.id, [_llm_node(0)], actor=ACTOR)
+    assert len(stored) == 1
+
+
 async def test_ingest_into_terminal_recorded_session_rejected(
     service: SessionNodeService,
     session_service: SessionService,

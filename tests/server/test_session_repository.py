@@ -101,6 +101,7 @@ from kitaru.server.domain.replay_config import (
     ToolPolicy,
 )
 from kitaru.server.domain.session import (
+    DuplicatePendingImportSession,
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
@@ -256,6 +257,60 @@ async def test_create_allows_null_imported_from_and_external_id_repeatedly(
         )
     )
     assert first.id != second.id
+
+
+async def test_create_duplicate_pending_import_external_id(setup: Setup) -> None:
+    """Reject a second pending-import session with the same owner and external id."""
+    repository, owner_id, agent_id, _, _ = setup
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        )
+    )
+    with pytest.raises(DuplicatePendingImportSession):
+        await repository.create(
+            Session(
+                owner_id=owner_id,
+                agent_id=agent_id,
+                number=2,
+                origin=SessionOrigin.REPLAY,
+                status=SessionStatus.PENDING_IMPORT,
+                external_id="ext-1",
+            )
+        )
+
+
+async def test_create_terminal_session_coexists_with_a_pending_import_external_id(
+    setup: Setup,
+) -> None:
+    """A terminal session sharing a placeholder's external id coexists fine."""
+    repository, owner_id, agent_id, _, _ = setup
+    await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-2",
+        )
+    )
+    terminal = await repository.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.IMPORTED,
+            status=SessionStatus.COMPLETED,
+            external_id="ext-2",
+        )
+    )
+    assert terminal.external_id == "ext-2"
 
 
 async def test_get(setup: Setup) -> None:

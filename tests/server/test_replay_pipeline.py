@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import UTC, datetime
 
 import pytest
 
@@ -29,6 +30,7 @@ from conftest import (
     create_cohort,
     create_cohort_version,
     create_evaluation_task,
+    create_import_task,
     create_job,
     create_plugin,
     create_replay,
@@ -49,19 +51,26 @@ from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
+from kitaru.server.application.models.session import SessionCreate, SessionUpdate
 from kitaru.server.application.models.task import TaskFilter, TaskUpdate
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionAgentMismatch,
     CommandRunSpec,
+    TriggerRunSpec,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
 from kitaru.server.domain.session import Session
-from kitaru.server.domain.task import AgentTask, AgentTaskDetails, EvaluationTask
+from kitaru.server.domain.task import (
+    AgentTask,
+    AgentTaskDetails,
+    EvaluationTask,
+    ImportWaitTask,
+)
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -80,6 +89,22 @@ async def _agent_version_with_run_spec(services: ReplayServices) -> AgentVersion
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
         run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
+    )
+
+
+async def _trigger_agent_version(
+    services: ReplayServices, import_deadline_seconds: int = 3600
+) -> AgentVersion:
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    return await create_agent_version(
+        services.agent_versions,
+        agent_id=agent.id,
+        owner_id=ACTOR.account.id,
+        run_spec=TriggerRunSpec(
+            entrypoint="pkg.mod:trigger",
+            timeout_seconds=60,
+            import_deadline_seconds=import_deadline_seconds,
+        ),
     )
 
 
@@ -258,6 +283,339 @@ async def test_standalone_replay_stamps_the_job_kind_replay(
     )
     job = await services.jobs.get(bundle.replay.job_id)
     assert job.kind is JobKind.REPLAY
+
+
+async def test_trigger_mode_replay_creates_an_import_wait_task_per_job(
+    services: ReplayServices,
+) -> None:
+    """A trigger-mode replay's job gets an import wait task alongside the agent task."""
+    agent_version = await _trigger_agent_version(services, import_deadline_seconds=1800)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert len(tasks) == 2
+    agent_task = next(task for task in tasks if isinstance(task, AgentTask))
+    wait_task = next(task for task in tasks if isinstance(task, ImportWaitTask))
+    assert agent_task.job_id == bundle.replay.job_id
+    assert wait_task.job_id == bundle.replay.job_id
+    assert wait_task.import_deadline_seconds == 1800
+    assert wait_task.status is TaskStatus.PENDING
+
+
+async def test_command_mode_replay_creates_no_import_wait_task(
+    services: ReplayServices,
+) -> None:
+    """A command-mode agent version's replay creates only the agent task."""
+    agent_version = await _agent_version_with_run_spec(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert len(tasks) == 1
+    assert isinstance(tasks[0], AgentTask)
+
+
+async def test_append_result_evaluations_defers_a_pending_import_result_session(
+    services: ReplayServices,
+) -> None:
+    """A completed agent task with a pending-import session appends nothing yet."""
+    agent_version = await _trigger_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    trigger_task = next(task for task in tasks if isinstance(task, AgentTask))
+
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    trigger_actor = build_task_actor(ACTOR.account, trigger_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        trigger_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=trigger_actor
+    )
+    await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=trigger_actor,
+    )
+
+    await services.task_service.update_task(
+        trigger_task.id, TaskUpdate(status=TaskStatus.COMPLETED), actor=trigger_actor
+    )
+
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert not any(isinstance(task, EvaluationTask) for task in tasks_after)
+    replay_after = await services.replays.get(bundle.replay.id)
+    assert replay_after.status is ReplayStatus.PENDING
+
+
+async def _run_trigger_task_to_a_pending_import_placeholder(
+    services: ReplayServices,
+    job_id: uuid.UUID,
+    external_id: str,
+    worker_id: uuid.UUID,
+) -> tuple[AgentTask, Session]:
+    """Claim, run, and complete a job's trigger task against a fresh placeholder."""
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=job_id), actor=ACTOR
+    )
+    trigger_task = next(task for task in tasks if isinstance(task, AgentTask))
+    trigger_actor = build_task_actor(ACTOR.account, trigger_task.id, 1, worker_id)
+    await services.task_service.update_task(
+        trigger_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=trigger_actor
+    )
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id=external_id,
+        ),
+        actor=trigger_actor,
+    )
+    await services.task_service.update_task(
+        trigger_task.id, TaskUpdate(status=TaskStatus.COMPLETED), actor=trigger_actor
+    )
+    return trigger_task, placeholder
+
+
+async def _adopt_via_import_task(
+    services: ReplayServices,
+    agent_id: uuid.UUID,
+    external_id: str,
+    worker_id: uuid.UUID,
+) -> Session:
+    """Adopt a pending-import placeholder through a fresh, running import task."""
+    import_task = await create_import_task(
+        services.tasks, uuid.uuid4(), agent_id=agent_id
+    )
+    now = datetime.now(UTC)
+    import_task.claim(worker_id, now)
+    import_task.start(now)
+    await services.tasks.update(import_task)
+    return await services.session_service.create_session(
+        SessionCreate(origin=SessionOrigin.IMPORTED, external_id=external_id),
+        actor=build_task_actor(ACTOR.account, import_task.id, 1, worker_id),
+    )
+
+
+async def test_complete_import_wait_completes_the_wait_task_and_advances_the_replay(
+    services: ReplayServices,
+) -> None:
+    """Finalizing the placeholder completes the wait task and starts evaluating."""
+    agent_version = await _trigger_agent_version(services)
+    evaluator = await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    wait_task = next(task for task in tasks if isinstance(task, ImportWaitTask))
+
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_trigger_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+
+    finalized = await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    stored_wait = await services.tasks.get(wait_task.id)
+    assert stored_wait.status is TaskStatus.COMPLETED
+    assert stored_wait.result_session_id == finalized.id
+
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    eval_tasks = [task for task in tasks_after if isinstance(task, EvaluationTask)]
+    assert len(eval_tasks) == 1
+    assert eval_tasks[0].input_session_id == finalized.id
+    assert eval_tasks[0].plugin_version_id == evaluator.id
+
+    replay_after = await services.replays.get(bundle.replay.id)
+    assert replay_after.status is ReplayStatus.EVALUATING
+
+
+async def test_complete_import_wait_leaves_an_already_terminal_wait_task_alone(
+    services: ReplayServices,
+) -> None:
+    """A finalized import for a job whose wait task already failed is a no-op."""
+    agent_version = await _trigger_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    wait_task = next(task for task in tasks if isinstance(task, ImportWaitTask))
+
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_trigger_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-2", worker.id
+    )
+
+    # The deadline sweep beat the import: fail the wait task directly, the
+    # way sweep_expired_import_wait would through TaskTransitions.
+    stored_wait = await services.tasks.get(wait_task.id)
+    assert isinstance(stored_wait, ImportWaitTask)
+    stored_wait.fail_pending("no import arrived in time", datetime.now(UTC))
+    await services.tasks.update(stored_wait)
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-2", worker.id
+    )
+    assert adopted.id == placeholder.id
+
+    await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    unchanged = await services.tasks.get(wait_task.id)
+    assert unchanged.status is TaskStatus.FAILED
+    assert unchanged.error == "no import arrived in time"
+
+
+async def test_trigger_mode_replay_end_to_end(services: ReplayServices) -> None:
+    """A trigger-mode replay adopts its placeholder and completes like a command one."""
+    agent_version = await _trigger_agent_version(services, import_deadline_seconds=3600)
+    evaluator = await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    assert bundle.replay.status is ReplayStatus.PENDING
+
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    trigger_task = next(task for task in tasks if isinstance(task, AgentTask))
+    wait_task = next(task for task in tasks if isinstance(task, ImportWaitTask))
+
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    # The wait task sits pending, unclaimable until its placeholder is adopted.
+    assert [item.task.id for item in claimed] == [trigger_task.id]
+
+    _, placeholder = await _run_trigger_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    assert placeholder.status == SessionStatus.PENDING_IMPORT
+
+    replay_after_trigger = await services.replays.get(bundle.replay.id)
+    assert replay_after_trigger.status is ReplayStatus.PENDING
+    tasks_after_trigger, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert not any(isinstance(task, EvaluationTask) for task in tasks_after_trigger)
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    assert adopted.status == SessionStatus.PENDING_IMPORT
+
+    finalized = await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    stored_wait = await services.tasks.get(wait_task.id)
+    assert stored_wait.status is TaskStatus.COMPLETED
+    assert stored_wait.result_session_id == finalized.id
+
+    replay_evaluating = await services.replays.get(bundle.replay.id)
+    assert replay_evaluating.status is ReplayStatus.EVALUATING
+
+    tasks_after_finalize, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    eval_task = next(
+        task for task in tasks_after_finalize if isinstance(task, EvaluationTask)
+    )
+    assert eval_task.input_session_id == finalized.id
+    assert eval_task.plugin_version_id == evaluator.id
+
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert [item.task.id for item in claimed] == [eval_task.id]
+    eval_actor = build_task_actor(ACTOR.account, eval_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        eval_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=eval_actor
+    )
+    await services.task_service.update_task(
+        eval_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=eval_actor,
+    )
+
+    job_after = await services.jobs.get(bundle.replay.job_id)
+    assert job_after.status is JobStatus.COMPLETED
+
+    replay_final = await services.replays.get(bundle.replay.id)
+    assert replay_final.status is ReplayStatus.COMPLETED
+
+    final_bundle = await services.replay_service.get_replay(
+        bundle.replay.id, actor=ACTOR
+    )
+    assert final_bundle.result_session_id == finalized.id
 
 
 async def test_evaluate_baselines_skips_already_scored_pairs(

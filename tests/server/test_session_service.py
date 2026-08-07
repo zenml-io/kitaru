@@ -34,6 +34,7 @@ from conftest import (
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
+from kitaru.server.application.events import EventDispatcher, SessionImportFinalized
 from kitaru.server.application.models.auth import (
     AuthContext,
     GrantKind,
@@ -464,6 +465,60 @@ async def test_update_session_rejects_terminal_back_to_in_progress(
         )
 
 
+async def test_update_session_pending_import_to_completed(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Move a pending-import placeholder to completed via the update endpoint."""
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+    )
+    updated = await service.update_session(
+        placeholder.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    assert updated.status == SessionStatus.COMPLETED
+
+
+async def test_update_session_pending_import_to_failed(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Move a pending-import placeholder to failed via the update endpoint."""
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+    )
+    updated = await service.update_session(
+        placeholder.id,
+        SessionUpdate(status=SessionStatus.FAILED, error="boom"),
+        actor=ACTOR,
+    )
+    assert updated.status == SessionStatus.FAILED
+    assert updated.error == "boom"
+
+
+async def test_update_session_rejects_pending_import_back_to_in_progress(
+    service: SessionService, repository: FakeSessionRepository
+) -> None:
+    """Reject moving a pending-import placeholder back to in_progress."""
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+    )
+    with pytest.raises(IllegalSessionStatusTransition):
+        await service.update_session(
+            placeholder.id, SessionUpdate(status=SessionStatus.IN_PROGRESS), actor=ACTOR
+        )
+
+
 async def test_update_session_rejects_terminal_to_other_terminal(
     service: SessionService,
 ) -> None:
@@ -654,6 +709,81 @@ async def test_update_session_transition_with_analytics_none_is_safe(
     assert updated.status == SessionStatus.FAILED
 
 
+async def test_update_session_finalizing_a_placeholder_dispatches_import_finalized(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Moving a pending-import session to a terminal status dispatches the event."""
+    dispatched: list[Session] = []
+
+    async def record(event: SessionImportFinalized) -> None:
+        dispatched.append(event.session)
+
+    dispatcher = EventDispatcher()
+    dispatcher.register(SessionImportFinalized, record)
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        replay_repository=replay_repository,
+        dispatcher=dispatcher,
+    )
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        external_id="run-1",
+    )
+
+    updated = await service.update_session(
+        placeholder.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    assert len(dispatched) == 1
+    assert dispatched[0].id == updated.id
+    assert dispatched[0].status == SessionStatus.COMPLETED
+
+
+async def test_update_session_non_terminal_update_dispatches_nothing(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Leave a pending-import session's own transition undispatched."""
+    dispatched: list[Session] = []
+
+    async def record(event: SessionImportFinalized) -> None:
+        dispatched.append(event.session)
+
+    dispatcher = EventDispatcher()
+    dispatcher.register(SessionImportFinalized, record)
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        replay_repository=replay_repository,
+        dispatcher=dispatcher,
+    )
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+    )
+
+    await service.update_session(
+        placeholder.id, SessionUpdate(name="renamed"), actor=ACTOR
+    )
+
+    assert dispatched == []
+
+
 async def test_update_session_not_found(service: SessionService) -> None:
     """Raise for an unknown session id."""
     with pytest.raises(SessionNotFound):
@@ -820,6 +950,93 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     assert second.task_id == task.id
     stored_task = await task_repository.get(task.id)
     assert stored_task.result_session_id is None
+
+
+async def test_create_session_adopts_a_matching_pending_import_placeholder(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """An import create matching a placeholder's external id adopts it."""
+    trigger_task = await task_repository.create(
+        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
+    )
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        external_id="run-1",
+        task_id=trigger_task.id,
+    )
+    import_task = await _start(
+        task_repository, await create_import_task(task_repository, uuid.uuid4())
+    )
+    started_at = datetime.now(UTC)
+    ended_at = started_at + timedelta(seconds=5)
+    # The placeholder is scoped to ACTOR's account, so the adopting import
+    # task's principal must resolve to that same account.
+    actor = AuthContext(
+        account=ACTOR.account,
+        principal=TaskPrincipal(
+            task_id=import_task.id,
+            attempt=import_task.attempt,
+            worker_id=uuid.uuid4(),
+            job_id=import_task.job_id,
+        ),
+    )
+
+    adopted = await service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.IMPORTED,
+            external_id="run-1",
+            name="run-name",
+            inputs={"q": "hi"},
+            outputs={"a": "bye"},
+            error="boom",
+            started_at=started_at,
+            ended_at=ended_at,
+            metadata={"k": "v"},
+            imported_from="acme",
+            framework="langgraph",
+            adapter_version="1.2.3",
+            status=SessionStatus.COMPLETED,
+        ),
+        actor=actor,
+    )
+
+    assert adopted.id == placeholder.id
+    assert adopted.status == SessionStatus.PENDING_IMPORT
+    assert adopted.name == "run-name"
+    assert adopted.inputs == {"q": "hi"}
+    assert adopted.outputs == {"a": "bye"}
+    assert adopted.error == "boom"
+    assert adopted.started_at == started_at
+    assert adopted.ended_at == ended_at
+    assert adopted.metadata == {"k": "v"}
+    assert adopted.imported_from == "acme"
+    assert adopted.framework == "langgraph"
+    assert adopted.adapter_version == "1.2.3"
+    assert adopted.task_id == trigger_task.id
+    assert adopted.agent_id == placeholder.agent_id
+    assert adopted.agent_version_id == placeholder.agent_version_id
+
+
+async def test_create_session_without_a_matching_placeholder_creates_fresh(
+    service: SessionService, task_repository: FakeTaskRepository
+) -> None:
+    """An import create with an external id matching no placeholder creates fresh."""
+    task = await _start(
+        task_repository, await create_import_task(task_repository, uuid.uuid4())
+    )
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.IMPORTED, external_id="unmatched"),
+        actor=_task_principal(task.id),
+    )
+    assert session.external_id == "unmatched"
+    assert session.status == SessionStatus.IN_PROGRESS
+    assert session.task_id == task.id
 
 
 async def test_create_session_infers_agent_and_version_from_an_agent_task(
@@ -1148,4 +1365,50 @@ async def test_update_session_denies_a_task_principal_for_its_input_session(
     with pytest.raises(SessionAccessDenied):
         await service.update_session(
             session.id, SessionUpdate(name="renamed"), actor=actor
+        )
+
+
+async def test_update_session_allows_a_non_owning_import_task_for_pending_import(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """An import task principal may update a pending-import session it does not own."""
+    placeholder = await create_session(
+        repository,
+        uuid.uuid4(),
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    import_task = await _start(
+        task_repository, await create_import_task(task_repository, uuid.uuid4())
+    )
+    actor = _task_principal(import_task.id)
+    updated = await service.update_session(
+        placeholder.id, SessionUpdate(name="renamed"), actor=actor
+    )
+    assert updated.name == "renamed"
+
+
+async def test_update_session_denies_a_non_import_task_for_pending_import(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """A non-owning, non-import task principal is still denied for pending import."""
+    placeholder = await create_session(
+        repository,
+        uuid.uuid4(),
+        uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    other_task = await _running_agent_task(task_repository)
+    actor = _task_principal(other_task.id)
+    with pytest.raises(SessionAccessDenied):
+        await service.update_session(
+            placeholder.id, SessionUpdate(name="renamed"), actor=actor
         )
