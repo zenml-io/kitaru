@@ -475,10 +475,10 @@ async def test_update_version_not_found(evaluator_service: PluginService) -> Non
         )
 
 
-async def test_create_version_tracks_plugin_registered(
+async def test_create_version_tracks_plugin_version_registered(
     repository: FakePluginRepository, blob_repository: FakeBlobRepository
 ) -> None:
-    """Fire PLUGIN_REGISTERED with the plugin kind and source type."""
+    """Fire PLUGIN_VERSION_REGISTERED with the plugin kind and source type."""
     analytics = _RecordingAnalytics()
     service = PluginService(
         kind=PluginKind.EVALUATOR,
@@ -501,7 +501,7 @@ async def test_create_version_tracks_plugin_registered(
     assert len(analytics.tracked) == 1
     user_id, event, properties = analytics.tracked[0]
     assert user_id == ACTOR.account.id
-    assert event == AnalyticsEvent.PLUGIN_REGISTERED
+    assert event == AnalyticsEvent.PLUGIN_VERSION_REGISTERED
     assert properties == {"kind": "evaluator", "plugin_source": "package"}
 
 

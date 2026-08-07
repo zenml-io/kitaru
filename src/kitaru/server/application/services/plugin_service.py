@@ -192,8 +192,10 @@ class PluginService:
         if self._analytics is not None:
             self._analytics.track(
                 actor.account.id,
-                AnalyticsEvent.PLUGIN_REGISTERED,
-                analytics_events.build_plugin_registered_properties(self.kind, source),
+                AnalyticsEvent.PLUGIN_VERSION_REGISTERED,
+                analytics_events.build_plugin_version_registered_properties(
+                    self.kind, source
+                ),
             )
         return version
 

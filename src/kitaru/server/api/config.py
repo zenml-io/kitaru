@@ -55,6 +55,10 @@ class APISettings(Settings):
     SERVER_ID: uuid.UUID | None = None
     SERVER_URL: str = ""
 
+    ORGANIZATION_ID: uuid.UUID | None = None
+    ORGANIZATION_NAME: str = ""
+    WORKSPACE_NAME: str = ""
+
     CONTROL_PLANE_API_URL: str = ""
     CONTROL_PLANE_TIMEOUT_SECONDS: float = 10.0
     CONTROL_PLANE_CONNECTION_POOL_SIZE: int = 20
