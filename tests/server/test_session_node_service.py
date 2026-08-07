@@ -502,7 +502,7 @@ async def test_ingest_nodes_allows_a_task_principal_for_its_own_session(
     assert len(stored) == 1
 
 
-async def test_get_index_by_id_denies_a_task_principal_for_another_tasks_session(
+async def test_get_indexes_by_ids_denies_a_task_principal_for_another_tasks_session(
     service: SessionNodeService, session_repository: FakeSessionRepository
 ) -> None:
     """Reject a task principal reading the index of a session it does not own."""
@@ -511,10 +511,10 @@ async def test_get_index_by_id_denies_a_task_principal_for_another_tasks_session
     )
     actor = _task_principal(uuid.uuid4())
     with pytest.raises(SessionAccessDenied):
-        await service.get_index_by_id(session.id, actor=actor)
+        await service.get_indexes_by_ids(session.id, [], actor=actor)
 
 
-async def test_get_index_by_id_allows_a_task_principal_for_its_input_session(
+async def test_get_indexes_by_ids_allows_a_task_principal_for_its_input_session(
     service: SessionNodeService, session_repository: FakeSessionRepository
 ) -> None:
     """Allow a task principal to read the index of its input session."""
@@ -522,15 +522,15 @@ async def test_get_index_by_id_allows_a_task_principal_for_its_input_session(
         session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
     )
     actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
-    index_by_id = await service.get_index_by_id(session.id, actor=actor)
+    index_by_id = await service.get_indexes_by_ids(session.id, [], actor=actor)
     assert index_by_id == {}
 
 
-async def test_get_index_by_id_skips_the_ownership_check_for_an_account_principal(
+async def test_get_indexes_by_ids_skips_the_ownership_check_for_an_account_principal(
     service: SessionNodeService,
 ) -> None:
     """Preserve the existing empty-dict result for an unknown session id."""
-    index_by_id = await service.get_index_by_id(uuid.uuid4(), actor=ACTOR)
+    index_by_id = await service.get_indexes_by_ids(uuid.uuid4(), [], actor=ACTOR)
     assert index_by_id == {}
 
 

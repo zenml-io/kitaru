@@ -14,6 +14,7 @@
 """Session node use cases."""
 
 import uuid
+from collections.abc import Collection
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -117,7 +118,7 @@ class SessionNodeService:
             referenced_indexes.update(item.secondary_parent_indexes)
 
         existing_by_index = await self._repository.get_by_indexes(
-            session_id, sorted(referenced_indexes)
+            session_id, sorted(referenced_indexes), include_payloads=False
         )
         id_by_index = {index: node.id for index, node in existing_by_index.items()}
 
@@ -208,16 +209,18 @@ class SessionNodeService:
             check_task_session_read(session.id, session.task_id, actor)
         return await self._repository.query(session_node_filter)
 
-    async def get_index_by_id(
-        self, session_id: uuid.UUID, actor: AuthContext
-    ) -> dict[uuid.UUID, int]:
-        """Look up the index of every node in a session, keyed by node id.
+    async def list_all_nodes(
+        self, session_id: uuid.UUID, include_payloads: bool, actor: AuthContext
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
 
         A task principal reads only a session it owns or holds as its
         task's input session.
 
         Args:
-            session_id: Id of the session whose nodes to look up.
+            session_id: Id of the session whose nodes to read.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
             actor: Caller context.
 
         Raises:
@@ -227,9 +230,39 @@ class SessionNodeService:
                 holds it as its task's input session.
 
         Returns:
-            Every node id in the session mapped to its index.
+            Every node of the session.
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
             check_task_session_read(session_id, session.task_id, actor)
-        return await self._repository.get_index_by_id(session_id)
+        return await self._repository.list_all(session_id, include_payloads)
+
+    async def get_indexes_by_ids(
+        self,
+        session_id: uuid.UUID,
+        node_ids: Collection[uuid.UUID],
+        actor: AuthContext,
+    ) -> dict[uuid.UUID, int]:
+        """Look up the index of the named nodes of a session, keyed by node id.
+
+        A task principal reads only a session it owns or holds as its
+        task's input session.
+
+        Args:
+            session_id: Id of the session whose nodes to look up.
+            node_ids: Ids to look up.
+            actor: Caller context.
+
+        Raises:
+            SessionNotFound: A task principal names a session that does not
+                exist.
+            SessionAccessDenied: A task principal owns neither the session nor
+                holds it as its task's input session.
+
+        Returns:
+            Each requested node id mapped to its index, missing ids omitted.
+        """
+        if isinstance(actor.principal, TaskPrincipal):
+            session = await self._sessions.get(session_id)
+            check_task_session_read(session_id, session.task_id, actor)
+        return await self._repository.get_indexes_by_ids(session_id, node_ids)

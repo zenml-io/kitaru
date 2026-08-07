@@ -15,11 +15,12 @@
 
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from typing import Generic, NoReturn, TypeVar
+from typing import Any, Generic, NoReturn, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute, defer
 
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.orm.base import UUIDPrimaryKeyMixin
@@ -76,14 +77,21 @@ class BaseSQLRepository(Generic[RowT]):
         return row
 
     async def _load_by_ids(
-        self, ids: Sequence[uuid.UUID], exclusive: bool = False
+        self,
+        ids: Sequence[uuid.UUID],
+        exclusive: bool = False,
+        deferred_columns: Sequence[InstrumentedAttribute[Any]] = (),
     ) -> dict[uuid.UUID, RowT]:
         """Load rows by id into a dict keyed by id, missing ids omitted.
+
+        A deferred column is left out of the select and loads on first read,
+        so only a caller that overwrites it without reading it should defer.
 
         Args:
             ids: Ids of the rows.
             exclusive: Whether to lock the rows in id order for the duration
                 of the transaction.
+            deferred_columns: Columns to leave out of the select.
 
         Returns:
             Rows keyed by id.
@@ -91,6 +99,10 @@ class BaseSQLRepository(Generic[RowT]):
         if not ids:
             return {}
         statement = select(self.orm_class).where(self.orm_class.id.in_(ids))
+        if deferred_columns:
+            statement = statement.options(
+                *(defer(column) for column in deferred_columns)
+            )
         if exclusive:
             statement = statement.order_by(self.orm_class.id.asc()).with_for_update()
         rows = (await self._session.scalars(statement)).all()
