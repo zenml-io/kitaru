@@ -7,7 +7,7 @@
 <h3 align="center">Traces you can run, not just read.</h3>
 
 <p align="center">
-  Kitaru (来る, "to arrive") is replay-based evals for AI agents. It records every agent run as a session — every model call, tool call, and decision — and replays it against your real code: tool calls answered from the recording, nothing touching real systems. Reproduce a run exactly. Fork it with one thing changed. Trust the diff. Open source, self-hosted, framework-agnostic.
+  Kitaru (来る, "to arrive") is replay-based evals for AI agents. It records every agent run as a session — every model call, tool call, and decision — and replays it against your real code: tool calls answered from the recording, nothing touching real systems. Reproduce a run exactly. Fork it with one thing changed. Trust the diff. Open source, self-hosted, framework-agnostic. From the team behind <a href="https://zenml.io">ZenML</a>: ZenML is for ML pipelines, Kitaru is for agents.
 </p>
 
 <p align="center">
