@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Build the client development image from the locked repository source.
+# Build the worker development image from the locked repository source.
 
 ARG PYTHON_VERSION=3.13
 ARG UV_VERSION=0.12.1
@@ -64,14 +64,14 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 USER $USERNAME
 
-# Install the repository project and its client dependencies from the lockfile.
+# Install the repository project and its worker dependencies from the lockfile.
 # Keep a snapshot of the resulting environment for external inspection.
-RUN uv sync --locked --no-dev --no-editable && \
+RUN uv sync --locked --no-dev --no-editable --extra worker && \
   uv pip check && \
   python -c "import kitaru" && \
   uv pip freeze > requirements.txt
 
-FROM base AS client
+FROM base AS worker
 
 ARG PYTHON_VERSION
 ARG UV_VERSION
@@ -80,6 +80,7 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 
+COPY --from=uv /uv /bin/
 COPY --chown=$USERNAME:$USER_GID \
   --from=builder $VIRTUAL_ENV $VIRTUAL_ENV
 COPY --chown=$USERNAME:$USER_GID \
