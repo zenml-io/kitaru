@@ -55,6 +55,7 @@
 
 * [Docker](deploy/docker.md)
 * [Helm](deploy/helm.md)
+* [Worker Pools and Autoscaling](deploy/worker-autoscaling.md)
 
 ## Agent Runtime (Stacks)
 
