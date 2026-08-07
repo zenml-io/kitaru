@@ -132,11 +132,11 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
             "nodes": [
                 _node(
                     0,
-                    input_text="hi",
-                    output_text="hello",
-                    system_prompt="Follow policy.",
+                    input_text_selector='$["q"]',
+                    output_text_selector='$["answer"]',
+                    system_prompt_selector='$["system"]',
                     reasoning="The greeting matches the request.",
-                    inputs={"q": "hi"},
+                    inputs={"q": "hi", "system": "Follow policy."},
                 ),
                 _node(
                     1,
@@ -153,12 +153,12 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert len(items) == 2
     assert items[1]["parent_id"] == items[0]["id"]
     assert items[1]["cache_key"] is not None
-    assert items[0]["input_text"] == "hi"
-    assert items[0]["output_text"] == "hello"
-    assert items[0]["system_prompt"] == "Follow policy."
+    assert items[0]["input_text_selector"] == '$["q"]'
+    assert items[0]["output_text_selector"] == '$["answer"]'
+    assert items[0]["system_prompt_selector"] == '$["system"]'
     assert items[0]["reasoning"] == "The greeting matches the request."
     # Ingest responses populate payloads even without include_payloads.
-    assert items[0]["inputs"] == {"q": "hi"}
+    assert items[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
 
 
 async def test_ingest_nodes_unresolved_parent_index(
@@ -216,11 +216,11 @@ async def test_list_nodes_include_payloads_default_false(
             "nodes": [
                 _node(
                     0,
-                    input_text="hi",
-                    output_text="hello",
-                    system_prompt="Follow policy.",
+                    input_text_selector='$["q"]',
+                    output_text_selector='$["answer"]',
+                    system_prompt_selector='$["system"]',
                     reasoning="The greeting matches the request.",
-                    inputs={"q": "hi"},
+                    inputs={"q": "hi", "system": "Follow policy."},
                     attributes={"k": 1},
                 )
             ]
@@ -231,26 +231,42 @@ async def test_list_nodes_include_payloads_default_false(
     item = response.json()["items"][0]
     assert item["inputs"] is None
     assert item["attributes"] is None
-    assert item["input_text"] == "hi"
-    assert item["output_text"] == "hello"
-    assert item["system_prompt"] == "Follow policy."
-    assert item["reasoning"] == "The greeting matches the request."
+    assert item["input_text_selector"] == '$["q"]'
+    assert item["output_text_selector"] == '$["answer"]'
+    assert item["system_prompt_selector"] == '$["system"]'
+    assert item["reasoning"] is None
 
 
 async def test_list_nodes_include_payloads_true(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Populate inputs, outputs, and attributes when requested."""
+    """Populate reasoning, inputs, outputs, and attributes when requested."""
     await client.post(
         f"/v1/sessions/{session_id}/nodes",
-        json={"nodes": [_node(0, inputs={"q": "hi"}, attributes={"k": 1})]},
+        json={
+            "nodes": [
+                _node(
+                    0,
+                    input_text_selector='$["q"]',
+                    output_text_selector='$["answer"]',
+                    system_prompt_selector='$["system"]',
+                    reasoning="Visible reasoning.",
+                    inputs={"q": "hi", "system": "Follow policy."},
+                    attributes={"k": 1},
+                )
+            ]
+        },
     )
     response = await client.get(
         f"/v1/sessions/{session_id}/nodes", params={"include_payloads": "true"}
     )
     assert response.status_code == 200
     item = response.json()["items"][0]
-    assert item["inputs"] == {"q": "hi"}
+    assert item["input_text_selector"] == '$["q"]'
+    assert item["output_text_selector"] == '$["answer"]'
+    assert item["system_prompt_selector"] == '$["system"]'
+    assert item["reasoning"] == "Visible reasoning."
+    assert item["inputs"] == {"q": "hi", "system": "Follow policy."}
     assert item["attributes"] == {"k": 1}
 
 

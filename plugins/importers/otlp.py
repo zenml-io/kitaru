@@ -34,10 +34,8 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import (
-    ParsedNode,
-    ParsedSession,
-    detect_framework,
-    populate_node_display_fields,
+    ImportedNode,
+    ImportedSession,
 )
 
 MAX_UPLOAD_BYTES = 64 * 1024 * 1024
@@ -113,6 +111,271 @@ _LLM_OPERATIONS = {
     "generate_content",
     "text_completion",
 }
+
+
+_FRAMEWORK_PATTERNS = (
+    (re.compile(r"pydantic[._ -]?ai", re.IGNORECASE), "pydantic-ai"),
+    (re.compile(r"langgraph", re.IGNORECASE), "langgraph"),
+    (re.compile(r"openai[._ -]?agents?", re.IGNORECASE), "openai-agents"),
+    (re.compile(r"google[._ -]?adk", re.IGNORECASE), "google-adk"),
+    (
+        re.compile(r"claude[._ -]?agent[._ -]?sdk|claudeagentsdk", re.IGNORECASE),
+        "claude-agent-sdk",
+    ),
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _TextMatch:
+    """Text selected from a provider payload."""
+
+    selector: str
+    text: str
+
+
+def _child_selector(selector: str, key: str | int) -> str:
+    """Append a child segment to an RFC 9535 JSONPath."""
+    if isinstance(key, int):
+        return f"{selector}[{key}]"
+    return f"{selector}[{json.dumps(key, ensure_ascii=False)}]"
+
+
+def _role(value: dict[str, Any]) -> str | None:
+    """Return a normalized message role."""
+    candidates = [
+        value.get("role"),
+        value.get("type"),
+        value.get("part_kind"),
+        value.get("kind"),
+    ]
+    event_name = value.get("event.name")
+    if isinstance(event_name, str):
+        candidates.append(event_name.removeprefix("gen_ai.").removesuffix(".message"))
+    identifier = value.get("id")
+    if isinstance(identifier, list) and identifier:
+        candidates.append(identifier[-1])
+    for candidate in candidates:
+        if not isinstance(candidate, str):
+            continue
+        normalized = candidate.lower().replace("_", "-")
+        if normalized in {"user", "human", "humanmessage", "user-prompt"}:
+            return "user"
+        if normalized in {"system", "systemmessage", "system-prompt"}:
+            return "system"
+        if normalized in {
+            "assistant",
+            "ai",
+            "aimessage",
+            "model",
+            "response",
+            "model-response",
+        }:
+            return "assistant"
+    return None
+
+
+def _content_match(
+    value: Any, selector: str = "$", depth: int = 0
+) -> _TextMatch | None:
+    """Return one scalar text value and its selector."""
+    if depth > 8:
+        return None
+    if isinstance(value, str):
+        text = value.strip()
+        return _TextMatch(selector, text) if text else None
+    if isinstance(value, list):
+        matches = [
+            match
+            for index, item in enumerate(value)
+            if (
+                match := _content_match(
+                    item, _child_selector(selector, index), depth + 1
+                )
+            )
+            is not None
+        ]
+        return matches[-1] if matches else None
+    if not isinstance(value, dict):
+        return None
+    for key in ("text", "content", "parts", "kwargs", "data"):
+        if key in value and (
+            match := _content_match(
+                value[key], _child_selector(selector, key), depth + 1
+            )
+        ):
+            return match
+    return None
+
+
+def _message_matches(
+    value: Any, target_role: str, selector: str = "$", depth: int = 0
+) -> list[_TextMatch]:
+    """Return text matches for one nested message role."""
+    if depth > 12:
+        return []
+    if isinstance(value, list):
+        return [
+            match
+            for index, item in enumerate(value)
+            for match in _message_matches(
+                item, target_role, _child_selector(selector, index), depth + 1
+            )
+        ]
+    if not isinstance(value, dict):
+        return []
+    if _role(value) == target_role:
+        for key in ("content", "text", "parts", "kwargs", "data"):
+            if key in value and (
+                match := _content_match(
+                    value[key], _child_selector(selector, key), depth + 1
+                )
+            ):
+                return [match]
+    matches: list[_TextMatch] = []
+    for key, child in value.items():
+        matches.extend(
+            _message_matches(
+                child, target_role, _child_selector(selector, key), depth + 1
+            )
+        )
+    return matches
+
+
+def _input_text_selector(value: Any) -> str | None:
+    """Return the primary user input selector."""
+    messages = _message_matches(value, "user")
+    if messages:
+        return messages[-1].selector
+    if isinstance(value, str):
+        return "$" if value.strip() else None
+    if isinstance(value, dict):
+        for key in ("prompt", "query", "question", "user_input", "message"):
+            if key in value and (
+                match := _content_match(value[key], _child_selector("$", key))
+            ):
+                return match.selector
+    return None
+
+
+def _output_text_selector(value: Any) -> str | None:
+    """Return the primary assistant output selector."""
+    messages = _message_matches(value, "assistant")
+    if messages:
+        return messages[-1].selector
+    if isinstance(value, str):
+        return "$" if value.strip() else None
+    if isinstance(value, dict):
+        for key in ("answer", "result", "response", "output", "text", "content"):
+            if key in value and (
+                match := _content_match(value[key], _child_selector("$", key))
+            ):
+                return match.selector
+    return None
+
+
+def _system_prompt_match(value: Any) -> _TextMatch | None:
+    """Return the latest system prompt and its selector."""
+    messages = _message_matches(value, "system")
+    if messages:
+        return messages[-1]
+    found: list[_TextMatch] = []
+
+    def _collect(item: Any, selector: str = "$", depth: int = 0) -> None:
+        if depth > 12:
+            return
+        if isinstance(item, list):
+            for index, child in enumerate(item):
+                _collect(child, _child_selector(selector, index), depth + 1)
+            return
+        if not isinstance(item, dict):
+            return
+        for key in ("system_prompt", "system_instruction", "instructions"):
+            if key in item and (
+                match := _content_match(
+                    item[key], _child_selector(selector, key), depth + 1
+                )
+            ):
+                found.append(match)
+        for key, child in item.items():
+            _collect(child, _child_selector(selector, key), depth + 1)
+
+    _collect(value)
+    return found[-1] if found else None
+
+
+def _reasoning(value: Any) -> str | None:
+    """Return visible reasoning from a provider payload."""
+    found: list[str] = []
+
+    def _collect(item: Any, depth: int = 0) -> None:
+        if depth > 12:
+            return
+        if isinstance(item, list):
+            for child in item:
+                _collect(child, depth + 1)
+            return
+        if not isinstance(item, dict):
+            return
+        kind_value = item.get("type") or item.get("part_kind")
+        kind = str(kind_value).lower().replace("_", "-") if kind_value else ""
+        if kind in {"reasoning", "reasoning-content", "thinking", "thought"}:
+            for key in ("text", "content", "summary"):
+                if key in item and (
+                    match := _content_match(item[key], depth=depth + 1)
+                ):
+                    found.append(match.text)
+        for key in ("reasoning", "reasoning_content", "thinking", "thought"):
+            if key in item and (match := _content_match(item[key], depth=depth + 1)):
+                found.append(match.text)
+        for child in item.values():
+            _collect(child, depth + 1)
+
+    _collect(value)
+    return found[-1] if found else None
+
+
+def _detect_framework(value: Any) -> str | None:
+    """Detect one supported framework from provider metadata."""
+    evidence: list[str] = []
+
+    def _collect(item: Any, depth: int = 0) -> None:
+        if depth > 8 or len(evidence) >= 500:
+            return
+        if isinstance(item, dict):
+            for key, child in item.items():
+                evidence.append(str(key))
+                _collect(child, depth + 1)
+        elif isinstance(item, list):
+            for child in item[:100]:
+                _collect(child, depth + 1)
+        elif isinstance(item, str):
+            evidence.append(item)
+
+    _collect(value)
+    joined = "\n".join(evidence)
+    matches = {
+        framework
+        for pattern, framework in _FRAMEWORK_PATTERNS
+        if pattern.search(joined)
+    }
+    return next(iter(matches)) if len(matches) == 1 else None
+
+
+def _populate_node_fields(nodes: list[ImportedNode]) -> str | None:
+    """Populate normalized node fields and return the latest system prompt."""
+    session_system_prompt = None
+    for node in nodes:
+        node.input_text_selector = _input_text_selector(node.inputs)
+        node.output_text_selector = _output_text_selector(node.outputs)
+        if node.node_type is NodeType.LLM_CALL:
+            system_prompt = _system_prompt_match(node.inputs)
+            node.system_prompt_selector = (
+                system_prompt.selector if system_prompt is not None else None
+            )
+            node.reasoning = _reasoning(node.outputs) or _reasoning(node.inputs)
+            if system_prompt is not None:
+                session_system_prompt = system_prompt.text
+    return session_system_prompt
 
 
 class InvalidImport(ValueError):
@@ -812,8 +1075,8 @@ def _find_cycle(records: list[_SpanRecord]) -> bool:
 
 
 def _build_node_tree(
-    nodes_with_parents: list[tuple[ParsedNode, str | None]],
-) -> list[ParsedNode]:
+    nodes_with_parents: list[tuple[ImportedNode, str | None]],
+) -> list[ImportedNode]:
     """Build the parsed-node tree."""
     converted = {
         node.external_id: node
@@ -821,8 +1084,8 @@ def _build_node_tree(
         if node.external_id is not None
     }
     if len(converted) != len(nodes_with_parents):
-        raise InvalidImport("The parsed node graph contains duplicate external ids")
-    roots: list[ParsedNode] = []
+        raise InvalidImport("The imported node graph contains duplicate external ids")
+    roots: list[ImportedNode] = []
     for node, parent_external_id in nodes_with_parents:
         if parent_external_id in converted:
             converted[parent_external_id].children.append(node)
@@ -837,13 +1100,13 @@ def _parse_session(
     source_instance: str,
     fallback_source: bool,
     file_framework: str | None,
-) -> ParsedSession:
+) -> ImportedSession:
     """Parse one conversation or trace-derived session."""
     warnings: list[str] = []
     if fallback_source:
         warnings.append("Source instance was derived from the filename or OTLP")
     turns: list[_Turn] = []
-    nodes_with_parents: list[tuple[ParsedNode, str | None]] = []
+    nodes_with_parents: list[tuple[ImportedNode, str | None]] = []
     roots_by_trace: dict[str, _SpanRecord] = {}
     for trace_id, records in traces:
         ids = {record.span_id for record in records}
@@ -897,7 +1160,7 @@ def _parse_session(
             )
             nodes_with_parents.append(
                 (
-                    ParsedNode(
+                    ImportedNode(
                         external_id=f"{trace_id}:{record.span_id}",
                         trace_id=trace_id,
                         node_type=node_type,
@@ -957,7 +1220,7 @@ def _parse_session(
         )
     )
     nodes = [node for node, _ in nodes_with_parents]
-    system_prompt = populate_node_display_fields(nodes)
+    system_prompt = _populate_node_fields(nodes)
     latest_turn = turns[-1]
     latest_root = roots_by_trace[latest_turn.trace_id]
     session_status = (
@@ -1005,7 +1268,7 @@ def _parse_session(
         "normalization_warnings": warnings,
     }
     framework = (
-        detect_framework(
+        _detect_framework(
             [
                 {
                     "attributes": record.attributes,
@@ -1017,7 +1280,7 @@ def _parse_session(
         )
         or file_framework
     )
-    return ParsedSession(
+    return ImportedSession(
         external_id=f"{source_instance}:{source_id}",
         name=latest_root.name,
         status=session_status,
@@ -1047,7 +1310,7 @@ class OTLPJSONImporter:
 
     def parse(
         self, content: bytes, params: dict[str, Any]
-    ) -> list[ParsedSession | ImportFailure]:
+    ) -> list[ImportedSession | ImportFailure]:
         """Parse OTLP JSON or JSONL into Kitaru sessions."""
         spans, errors = _decode_spans(_parse_requests(content))
         if not spans:
@@ -1076,7 +1339,7 @@ class OTLPJSONImporter:
                 )
             )
 
-        file_framework = detect_framework(
+        file_framework = _detect_framework(
             [
                 {
                     "attributes": record.attributes,
@@ -1126,7 +1389,7 @@ class OTLPJSONImporter:
             grouped[key].append((trace_id, records))
             fallback_sources[key] = fallback_sources.get(key, False) or fallback
 
-        sessions: list[ParsedSession] = []
+        sessions: list[ImportedSession] = []
         for (source_instance, source_id), grouped_traces in sorted(grouped.items()):
             try:
                 sessions.append(
@@ -1152,6 +1415,6 @@ class OTLPJSONImporter:
 def parse(
     content: bytes,
     params: dict[str, Any],
-) -> Iterator[ParsedSession | ImportFailure]:
+) -> Iterator[ImportedSession | ImportFailure]:
     """Parse OTLP JSON or JSONL through the unified importer contract."""
     yield from OTLPJSONImporter().parse(content, params)

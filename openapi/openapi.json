@@ -5933,7 +5933,7 @@
             "title": "Index",
             "type": "integer"
           },
-          "input_text": {
+          "input_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -5942,8 +5942,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable input to the node.",
-            "title": "Input Text"
+            "description": "RFC 9535 JSONPath selecting display text from node inputs.",
+            "title": "Input Text Selector"
           },
           "inputs": {
             "description": "Node inputs.",
@@ -5989,7 +5989,7 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
-          "output_text": {
+          "output_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -5998,8 +5998,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable output from the node.",
-            "title": "Output Text"
+            "description": "RFC 9535 JSONPath selecting display text from node outputs.",
+            "title": "Output Text Selector"
           },
           "outputs": {
             "description": "Node outputs.",
@@ -6090,7 +6090,7 @@
             "description": "Subagent invoked.",
             "title": "Subagent Id"
           },
-          "system_prompt": {
+          "system_prompt_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6099,8 +6099,8 @@
                 "type": "null"
               }
             ],
-            "description": "System prompt used by the model call.",
-            "title": "System Prompt"
+            "description": "RFC 9535 JSONPath selecting the system prompt from node inputs.",
+            "title": "System Prompt Selector"
           },
           "tokens": {
             "anyOf": [
@@ -6230,7 +6230,7 @@
             "title": "Index",
             "type": "integer"
           },
-          "input_text": {
+          "input_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6239,8 +6239,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable input to the node.",
-            "title": "Input Text"
+            "description": "RFC 9535 JSONPath selecting display text from node inputs.",
+            "title": "Input Text Selector"
           },
           "inputs": {
             "description": "Node inputs, null unless include_payloads.",
@@ -6286,7 +6286,7 @@
             "$ref": "#/components/schemas/NodeType",
             "description": "Kind of work the node records."
           },
-          "output_text": {
+          "output_text_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6295,8 +6295,8 @@
                 "type": "null"
               }
             ],
-            "description": "Primary human-readable output from the node.",
-            "title": "Output Text"
+            "description": "RFC 9535 JSONPath selecting display text from node outputs.",
+            "title": "Output Text Selector"
           },
           "outputs": {
             "description": "Node outputs, null unless include_payloads.",
@@ -6348,7 +6348,7 @@
                 "type": "null"
               }
             ],
-            "description": "Visible reasoning produced by the model call.",
+            "description": "Visible reasoning, null unless payloads are included.",
             "title": "Reasoning"
           },
           "requested_model": {
@@ -6415,7 +6415,7 @@
             "description": "Subagent invoked.",
             "title": "Subagent Id"
           },
-          "system_prompt": {
+          "system_prompt_selector": {
             "anyOf": [
               {
                 "type": "string"
@@ -6424,8 +6424,8 @@
                 "type": "null"
               }
             ],
-            "description": "System prompt used by the model call.",
-            "title": "System Prompt"
+            "description": "RFC 9535 JSONPath selecting the system prompt from node inputs.",
+            "title": "System Prompt Selector"
           },
           "tokens": {
             "anyOf": [
@@ -14730,13 +14730,13 @@
             }
           },
           {
-            "description": "Include inputs, outputs, and attributes.",
+            "description": "Include reasoning, inputs, outputs, and attributes.",
             "in": "query",
             "name": "include_payloads",
             "required": false,
             "schema": {
               "default": false,
-              "description": "Include inputs, outputs, and attributes.",
+              "description": "Include reasoning, inputs, outputs, and attributes.",
               "title": "Include Payloads",
               "type": "boolean"
             }

@@ -23,7 +23,7 @@ import importers.langfuse as langfuse_module
 from importers.langfuse import InvalidImport, LangfuseJSONLImporter, parse
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
 
 
 def jsonl(*records: dict[str, Any]) -> bytes:
@@ -38,12 +38,12 @@ def params(source_instance: str | None = None) -> dict[str, Any]:
 
 def sessions(
     content: bytes, importer_params: dict[str, Any] | None = None
-) -> list[ParsedSession]:
-    """Return successfully parsed sessions."""
+) -> list[ImportedSession]:
+    """Return successfully imported sessions."""
     return [
         item
         for item in LangfuseJSONLImporter().parse(content, importer_params or {})
-        if isinstance(item, ParsedSession)
+        if isinstance(item, ImportedSession)
     ]
 
 
@@ -58,8 +58,8 @@ def failures(
     ]
 
 
-def flatten(nodes: list[ParsedNode]) -> list[ParsedNode]:
-    """Flatten parsed nodes depth-first for assertions."""
+def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten imported nodes depth-first for assertions."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
@@ -81,7 +81,7 @@ def test_unified_parse_returns_prefixed_external_id() -> None:
     )
 
     assert len(parsed) == 1
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].external_id == "project-1:conversation-1"
 
 
@@ -128,7 +128,7 @@ def test_unified_parse_preserves_node_trace_id() -> None:
         )
     )
 
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].nodes[0].trace_id == "trace-1"
 
 
@@ -205,7 +205,7 @@ def test_imports_multiturn_observations() -> None:
 
     assert len(parsed) == 1
     session = parsed[0]
-    assert isinstance(session, ParsedSession)
+    assert isinstance(session, ImportedSession)
     assert session.external_id == "project-1:conversation-1"
     assert session.status is SessionStatus.COMPLETED
     assert session.inputs == {
@@ -268,7 +268,7 @@ def test_joins_traces_by_metadata_key_and_json_pointer() -> None:
 
     assert len(parsed) == 1
     session = parsed[0]
-    assert isinstance(session, ParsedSession)
+    assert isinstance(session, ImportedSession)
     assert session.external_id == "project-1:case-42"
     assert session.metadata["source_trace_count"] == 2
     assert session.metadata["langfuse.join_paths"] == ["/metadata/customer/case_id"]
@@ -294,7 +294,7 @@ def test_isolates_trace_missing_selected_join_value() -> None:
     )
 
     assert len(parsed) == 2
-    assert isinstance(parsed[0], ParsedSession)
+    assert isinstance(parsed[0], ImportedSession)
     assert isinstance(parsed[1], ImportFailure)
     assert parsed[1].external_id == "trace-2"
     assert "join selector" in parsed[1].error
@@ -471,8 +471,8 @@ def test_node_order_is_stable_across_upload_order() -> None:
     forward = importer.parse(jsonl(first, child), {})[0]
     reversed_ = importer.parse(jsonl(child, first), {})[0]
 
-    assert isinstance(forward, ParsedSession)
-    assert isinstance(reversed_, ParsedSession)
+    assert isinstance(forward, ImportedSession)
+    assert isinstance(reversed_, ImportedSession)
     assert [node.external_id for node in forward.nodes] == [
         node.external_id for node in reversed_.nodes
     ]

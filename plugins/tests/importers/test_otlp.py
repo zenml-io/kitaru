@@ -22,7 +22,7 @@ import pytest
 from importers import otlp as importer_module
 from importers.otlp import InvalidImport, OTLPJSONImporter, parse
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
 from kitaru.worker.process import parse_inline_dependencies
 
 TRACE_1 = "0af7651916cd43dd8448eb211c80319c"
@@ -129,12 +129,12 @@ def params(source_instance: str | None = None) -> dict[str, Any]:
 
 def sessions(
     content: bytes, importer_params: dict[str, Any] | None = None
-) -> list[ParsedSession]:
-    """Return successfully parsed sessions."""
+) -> list[ImportedSession]:
+    """Return successfully imported sessions."""
     return [
         item
         for item in OTLPJSONImporter().parse(content, importer_params or params())
-        if isinstance(item, ParsedSession)
+        if isinstance(item, ImportedSession)
     ]
 
 
@@ -149,8 +149,8 @@ def failures(
     ]
 
 
-def flatten(nodes: list[ParsedNode]) -> list[ParsedNode]:
-    """Flatten parsed nodes depth-first for assertions."""
+def flatten(nodes: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten imported nodes depth-first for assertions."""
     return [node for root in nodes for node in (root, *flatten(root.children))]
 
 
@@ -192,7 +192,7 @@ def test_imports_span_graph_and_genai_fields() -> None:
 
     assert len(parsed) == 1
     session = parsed[0]
-    assert isinstance(session, ParsedSession)
+    assert isinstance(session, ImportedSession)
     assert session.external_id == "acme/document-agent:document-run-1"
     assert session.inputs["turns"][0]["inputs"] == {"document": "invoice.pdf"}
     assert session.outputs == {"category": "invoice"}
@@ -203,8 +203,8 @@ def test_imports_span_graph_and_genai_fields() -> None:
     assert child.requested_model == "gpt-5-mini"
     assert child.model == "gpt-5-mini-2026-06-01"
     assert child.provider == "openai"
-    assert child.input_text == "Classify"
-    assert child.output_text == "invoice"
+    assert child.input_text_selector == '$[0]["content"]'
+    assert child.output_text_selector == '$[0]["content"]'
     assert child.tokens and child.tokens.input_tokens == 120
     assert child.model_params == {"temperature": 0.2}
 
@@ -242,9 +242,9 @@ def test_imports_flattened_otlp_jsonl_and_surfaces_prompts() -> None:
 
     assert session.framework == "pydantic-ai"
     assert session.system_prompt == "Be brief."
-    assert node.input_text == "Classify it."
-    assert node.output_text == "invoice"
-    assert node.system_prompt == "Be brief."
+    assert node.input_text_selector == '$[1]["parts"][0]["content"]'
+    assert node.output_text_selector == '$["answer"]'
+    assert node.system_prompt_selector == '$[0]["parts"][0]["content"]'
     assert node.reasoning == "The document contains an invoice number."
     assert node.inputs == messages
     assert node.outputs == {
@@ -378,8 +378,8 @@ def test_imports_arize_flat_span_jsonl() -> None:
     node = session.nodes[0]
 
     assert node.trace_id == TRACE_1
-    assert node.input_text == "Classify it."
-    assert node.output_text == "invoice"
+    assert node.input_text_selector == "$"
+    assert node.output_text_selector == "$"
 
 
 def test_imports_tool_call_content() -> None:
@@ -531,7 +531,7 @@ def test_unified_entrypoint_and_pep723_metadata() -> None:
     )
 
     assert len(items) == 1
-    assert isinstance(items[0], ParsedSession)
+    assert isinstance(items[0], ImportedSession)
     assert items[0].external_id == f"collector:{TRACE_1}"
     assert parse_inline_dependencies(Path(importer_module.__file__)) == []
 

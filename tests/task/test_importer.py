@@ -50,13 +50,11 @@ from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
     MAX_IMPORT_FAILURES,
     NODE_BATCH_SIZE,
-    ParsedNode,
-    ParsedSession,
+    ImportedNode,
+    ImportedSession,
     SessionImportError,
     call_parser,
-    detect_framework,
     flatten_nodes,
-    populate_node_display_fields,
     run,
     session_request,
 )
@@ -69,8 +67,8 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
         yield value
 
 
-def _node(name: str, children: list[ParsedNode] | None = None) -> ParsedNode:
-    return ParsedNode(
+def _node(name: str, children: list[ImportedNode] | None = None) -> ImportedNode:
+    return ImportedNode(
         node_type=NodeType.LLM_CALL,
         name=name,
         status=NodeStatus.COMPLETED,
@@ -82,9 +80,9 @@ def _node(name: str, children: list[ParsedNode] | None = None) -> ParsedNode:
 
 
 def _parsed_session(
-    external_id: str, nodes: list[ParsedNode] | None = None
-) -> ParsedSession:
-    return ParsedSession(
+    external_id: str, nodes: list[ImportedNode] | None = None
+) -> ImportedSession:
+    return ImportedSession(
         status=SessionStatus.COMPLETED,
         name=external_id,
         inputs=None,
@@ -133,7 +131,7 @@ def test_call_parser_wraps_mid_stream_crash() -> None:
 
     iterator = call_parser(parser, b"", {})
     first = next(iterator)
-    assert isinstance(first, ParsedSession)
+    assert isinstance(first, ImportedSession)
     with pytest.raises(SessionImportError, match="boom"):
         next(iterator)
 
@@ -142,9 +140,9 @@ def test_call_parser_rejects_unknown_item() -> None:
     """Raise SessionImportError when the parser yields an unsupported item type."""
 
     def parser(payload: bytes, params: dict) -> Any:
-        yield {"not": "a parsed item"}
+        yield {"not": "a imported item"}
 
-    with pytest.raises(SessionImportError, match="ParsedSession"):
+    with pytest.raises(SessionImportError, match="ImportedSession"):
         next(call_parser(parser, b"", {}))
 
 
@@ -184,100 +182,8 @@ def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
     assert flattened[1].parent_index == 4
 
 
-def test_extracts_prompt_fields_from_provider_message_shapes() -> None:
-    """Surface role-tagged prompts while retaining nested provider payloads."""
-    value = {
-        "messages": [
-            {
-                "id": ["langchain", "schema", "messages", "SystemMessage"],
-                "kwargs": {"content": "Follow policy."},
-            },
-            {
-                "data": {"type": "human", "content": "Where is my order?"},
-                "type": "human",
-            },
-        ]
-    }
-
-    node = _node("model request").model_copy(update={"inputs": value})
-
-    system_prompt = populate_node_display_fields([node])
-
-    assert system_prompt == "Follow policy."
-    assert node.system_prompt == "Follow policy."
-    assert node.input_text == "Where is my order?"
-
-
-def test_extracts_nested_system_instruction() -> None:
-    """Surface provider instructions nested inside request configuration."""
-    node = _node("model request").model_copy(
-        update={
-            "inputs": {
-                "config": {"system_instruction": "Answer from the handbook."},
-                "contents": [{"role": "user", "parts": [{"text": "Refunds?"}]}],
-            }
-        }
-    )
-
-    system_prompt = populate_node_display_fields([node])
-
-    assert system_prompt == "Answer from the handbook."
-    assert node.system_prompt == "Answer from the handbook."
-    assert node.input_text == "Refunds?"
-
-
-def test_extracts_output_and_visible_reasoning() -> None:
-    """Surface assistant output and visible reasoning while ignoring ciphertext."""
-    value = {
-        "messages": [{"role": "assistant", "content": "Order 42 shipped."}],
-        "reasoning": "The tracking event says shipped.",
-        "encrypted_content": "ciphertext",
-    }
-
-    node = _node("model request").model_copy(update={"outputs": value})
-    encrypted = _node("encrypted").model_copy(
-        update={
-            "outputs": {
-                "type": "reasoning",
-                "content": [],
-                "encrypted_content": "ciphertext",
-            }
-        }
-    )
-
-    populate_node_display_fields([node, encrypted])
-
-    assert node.output_text == "Order 42 shipped."
-    assert node.reasoning == "The tracking event says shipped."
-    assert encrypted.reasoning is None
-
-
-def test_populates_tool_input_and_output_text() -> None:
-    """Serialize structured tool arguments and results for display."""
-    node = ParsedNode(
-        node_type=NodeType.TOOL_CALL,
-        name="weather",
-        status=NodeStatus.COMPLETED,
-        inputs={"city": "Delft"},
-        outputs={"rain": True, "temperature": 18},
-        attributes={},
-    )
-
-    populate_node_display_fields([node])
-
-    assert node.input_text == '{"city":"Delft"}'
-    assert node.output_text == '{"rain":true,"temperature":18}'
-
-
-def test_detects_one_framework_from_metadata() -> None:
-    """Map instrumentation markers to a canonical framework name."""
-    assert detect_framework({"otel.scope.name": "pydantic_ai"}) == "pydantic-ai"
-    assert detect_framework({"framework": "langgraph"}) == "langgraph"
-    assert detect_framework(["langgraph", "pydantic-ai"]) is None
-
-
 def test_session_request_maps_fields() -> None:
-    """Build a session create request from importer details and a parsed item."""
+    """Build a session create request from importer details and a imported item."""
     agent_id = uuid.uuid4()
     importer = ImportTaskDetails(
         plugin={
@@ -290,7 +196,7 @@ def test_session_request_maps_fields() -> None:
         agent_id=agent_id,
         params={},
     )
-    parsed = ParsedSession(
+    parsed = ImportedSession(
         status=SessionStatus.FAILED,
         name="imported-1",
         system_prompt="Follow policy.",
@@ -327,7 +233,7 @@ import json
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession
 
 
 def parse(payload: bytes, params: dict):
@@ -335,7 +241,7 @@ def parse(payload: bytes, params: dict):
     yield ImportFailure(line=1, external_id="bad-1", error="unparsable item")
 
     nodes = [
-        ParsedNode(
+        ImportedNode(
             external_id=f"node-{i}",
             node_type=NodeType.LLM_CALL,
             name=f"call-{i}",
@@ -346,7 +252,7 @@ def parse(payload: bytes, params: dict):
         )
         for i in range(config["node_count"])
     ]
-    yield ParsedSession(
+    yield ImportedSession(
         status=SessionStatus.COMPLETED,
         name="session-1",
         inputs=None,
@@ -358,7 +264,7 @@ def parse(payload: bytes, params: dict):
         metadata={},
         nodes=nodes,
     )
-    yield ParsedSession(
+    yield ImportedSession(
         status=SessionStatus.COMPLETED,
         name="session-1-dup",
         inputs=None,
@@ -374,11 +280,11 @@ def parse(payload: bytes, params: dict):
 
 _CRASHING_PARSER_SCRIPT = """
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.task.importer import ParsedSession
+from kitaru.task.importer import ImportedSession
 
 
 def parse(payload: bytes, params: dict):
-    yield ParsedSession(
+    yield ImportedSession(
         status=SessionStatus.COMPLETED,
         name="session-1",
         inputs=None,
@@ -395,11 +301,11 @@ def parse(payload: bytes, params: dict):
 
 _SINGLE_SESSION_PARSER_SCRIPT = """
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.task.importer import ParsedSession
+from kitaru.task.importer import ImportedSession
 
 
 def parse(payload: bytes, params: dict):
-    yield ParsedSession(
+    yield ImportedSession(
         status=SessionStatus.COMPLETED,
         name="session-1",
         inputs=None,
@@ -416,11 +322,11 @@ def parse(payload: bytes, params: dict):
 _SINGLE_SESSION_WITH_NODE_PARSER_SCRIPT = """
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ParsedNode, ParsedSession
+from kitaru.task.importer import ImportedNode, ImportedSession
 
 
 def parse(payload: bytes, params: dict):
-    yield ParsedSession(
+    yield ImportedSession(
         status=SessionStatus.COMPLETED,
         name="session-1",
         inputs=None,
@@ -431,7 +337,7 @@ def parse(payload: bytes, params: dict):
         external_id="session-1",
         metadata={},
         nodes=[
-            ParsedNode(
+            ImportedNode(
                 node_type=NodeType.LLM_CALL,
                 name="call-1",
                 status=NodeStatus.COMPLETED,
