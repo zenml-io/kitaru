@@ -289,7 +289,7 @@ class SessionService:
             Stored session.
         """
         session = await self._repository.get(session_id)
-        check_task_session_read(session_id, session.task_id, actor)
+        await check_task_session_read(session, actor, self._tasks)
         return session
 
     async def get_baseline_session(
@@ -316,7 +316,7 @@ class SessionService:
             Baseline session the replay ran against.
         """
         session = await self._repository.get(session_id)
-        check_task_session_read(session_id, session.task_id, actor)
+        await check_task_session_read(session, actor, self._tasks)
         if session.task_id is None:
             raise SessionBaselineNotFound(session_id)
         task = await self._tasks.get(session.task_id)

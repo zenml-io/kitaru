@@ -85,17 +85,20 @@ def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
     return grants
 
 
-def check_task_session_read(
-    session_id: uuid.UUID, session_task_id: uuid.UUID | None, actor: AuthContext
+async def check_task_session_read(
+    session: Session, actor: AuthContext, tasks: TaskRepository
 ) -> None:
     """Require a task principal to own the session or hold a grant for it.
+
+    An import task principal additionally reads any pending-import session
+    of the account, the adopted placeholder it fills.
 
     An account principal always passes.
 
     Args:
-        session_id: Id of the session being read.
-        session_task_id: Id of the task the session is linked to, if any.
+        session: Session being read.
         actor: Caller context.
+        tasks: Task repository.
 
     Raises:
         SessionAccessDenied: A task principal neither owns the session nor
@@ -104,11 +107,15 @@ def check_task_session_read(
     if not isinstance(actor.principal, TaskPrincipal):
         return
     principal = actor.principal
-    if session_task_id == principal.task_id or principal.has_grant(
-        GrantKind.SESSION, session_id
+    if session.task_id == principal.task_id or principal.has_grant(
+        GrantKind.SESSION, session.id
     ):
         return
-    raise SessionAccessDenied(session_id)
+    if session.status is SessionStatus.PENDING_IMPORT:
+        task = await tasks.get(principal.task_id)
+        if isinstance(task, ImportTask):
+            return
+    raise SessionAccessDenied(session.id)
 
 
 async def check_task_session_write(

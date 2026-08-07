@@ -210,7 +210,7 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_node_filter.session_id)
-            check_task_session_read(session.id, session.task_id, actor)
+            await check_task_session_read(session, actor, self._tasks)
         return await self._repository.query(session_node_filter)
 
     async def list_all_nodes(
@@ -238,7 +238,7 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
-            check_task_session_read(session_id, session.task_id, actor)
+            await check_task_session_read(session, actor, self._tasks)
         return await self._repository.list_all(session_id, include_payloads)
 
     async def get_indexes_by_ids(
@@ -268,5 +268,5 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
-            check_task_session_read(session_id, session.task_id, actor)
+            await check_task_session_read(session, actor, self._tasks)
         return await self._repository.get_indexes_by_ids(session_id, node_ids)

@@ -22,6 +22,7 @@ from kitaru.server.application.interfaces.evaluation_repository import (
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import (
     EvaluationFilter,
@@ -38,6 +39,7 @@ class EvaluationService:
         self,
         repository: EvaluationRepository,
         session_repository: SessionRepository,
+        task_repository: TaskRepository,
     ) -> None:
         """Initialize the service.
 
@@ -45,9 +47,11 @@ class EvaluationService:
             repository: Evaluation repository.
             session_repository: Session repository, for the merge existence
                 check.
+            task_repository: Task repository, for the session access check.
         """
         self._repository = repository
         self._sessions = session_repository
+        self._tasks = task_repository
 
     async def get_evaluation(
         self, evaluation_id: uuid.UUID, actor: AuthContext
@@ -111,7 +115,7 @@ class EvaluationService:
             Stored evaluations in request order.
         """
         session = await self._sessions.get(session_id)
-        check_task_session_read(session_id, session.task_id, actor)
+        await check_task_session_read(session, actor, self._tasks)
         seen: set[str] = set()
         for command in commands:
             if command.name in seen:

@@ -723,6 +723,7 @@ def get_evaluation_service(
     return EvaluationService(
         repository=SQLEvaluationRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+        task_repository=SQLTaskRepository(session),
     )
 
 

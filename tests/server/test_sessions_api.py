@@ -162,7 +162,9 @@ async def client(
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
-        repository=evaluation_repository, session_repository=session_repository
+        repository=evaluation_repository,
+        session_repository=session_repository,
+        task_repository=FakeTaskRepository(sessions=session_repository),
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
@@ -922,7 +924,9 @@ def _build_task_scoped_app(
         task_repository=task_repository,
     )
     app.dependency_overrides[get_evaluation_service] = lambda: EvaluationService(
-        repository=evaluation_repository, session_repository=session_repository
+        repository=evaluation_repository,
+        session_repository=session_repository,
+        task_repository=FakeTaskRepository(sessions=session_repository),
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     transport = httpx.ASGITransport(app=app)
