@@ -551,11 +551,18 @@ jobs:
             --build-arg KITARU_VERSION="$VERSION" \
             --build-arg PACKAGE_SOURCE=candidates \
             -t kitaru-server-release-dry-run .
+          docker build \
+            -f docker/release-worker.Dockerfile \
+            --target worker \
+            --build-arg KITARU_VERSION="$VERSION" \
+            --build-arg PACKAGE_SOURCE=candidates \
+            -t kitaru-worker-release-dry-run .
           docker run --rm kitaru-release-dry-run \
             python -c "import kitaru"
           docker run --rm kitaru-server-release-dry-run \
             python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
-          docker build --check -f docker/release-worker.Dockerfile .
+          docker run --rm kitaru-worker-release-dry-run \
+            python -c "import kitaru"
       - name: Build and publish public client Docker image
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
@@ -670,8 +677,7 @@ jobs:
             echo "### Docker image"
             echo "Built from candidate wheels: kitaru-release-dry-run"
             echo "Built from candidate wheels: kitaru-server-release-dry-run"
-            echo "Statically validated: docker/release-worker.Dockerfile"
-            echo "The worker image requires the published kitaru==$VERSION package and was not built."
+            echo "Built from candidate wheels: kitaru-worker-release-dry-run"
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""

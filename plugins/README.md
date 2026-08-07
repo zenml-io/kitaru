@@ -4,28 +4,27 @@ Each importer under `packages/` is an independently versioned Python distributio
 
 Every distribution exposes one catalog through the `kitaru.default_plugins` entry-point group. At startup, Kitaru records the owning distribution and exact version as the package requirement for that plugin.
 
-## Local development
+## Packages
 
-Install Kitaru and all plugin workspace members from the repository root:
+| Directory | Distribution | Contents |
+|---|---|---|
+| `braintrust-importer` | `kitaru-braintrust-importer` | Braintrust importer |
+| `evaluator` | `kitaru-evaluator` | All built-in evaluators |
+| `jsonl-importer` | `kitaru-jsonl-importer` | Kitaru JSONL importer |
+| `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer |
+| `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer |
+| `opentelemetry-importer` | `kitaru-opentelemetry-importer` | OpenTelemetry importer |
 
-```bash
-uv sync --all-packages --extra server --extra otel
-```
+## Development and releases
 
-This exposes the same catalogs used by published wheels without requiring a PyPI release. Build one distribution by passing its project directory:
+Read [DEVELOPMENT.md](DEVELOPMENT.md) before you change, test, or publish a plugin package. It contains the local artifact test, release-image Compose rehearsal, manual registration example, clean worker setup, version bump procedure, dry-run workflow, and PyPI publishing procedure.
 
-```bash
-uv build --project plugins/packages/langfuse-importer --out-dir plugins/dist
-```
+Manual workflow dispatches build and test without publishing. A package tag publishes only when the tagged commit is contained in `main`.
 
-Test every distribution through a clean wheel installation:
+Run the main package gate from the repository root:
 
 ```bash
 just plugin-artifact-smoke
 ```
 
-## Releases
-
-The `Release plugin` workflow accepts a package directory name and its committed version. It tests and publishes only that distribution, then creates a package-specific tag such as `langfuse-importer-v0.2.0`.
-
-`default-requirements.txt` pins the plugin package versions bundled into Kitaru server images. Update the importer line for a provider-specific release, or the `kitaru-evaluator` line when releasing any built-in evaluator change.
+`default-requirements.txt` pins the plugin versions installed in Kitaru server images. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
