@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Build the server release image from PyPI or candidate wheels and the
+# Build the server release image from the published PyPI package and the
 # dependency versions locked by the matching repository release.
 
 ARG PYTHON_VERSION=3.13
@@ -9,7 +9,6 @@ ARG USERNAME=kitaru
 ARG USER_UID=1000
 ARG USER_GID=1000
 ARG KITARU_VERSION=""
-ARG PACKAGE_SOURCE=pypi
 
 FROM docker.io/astral/uv:${UV_VERSION} AS uv
 
@@ -20,7 +19,6 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
-ARG PACKAGE_SOURCE
 
 FROM python:${PYTHON_VERSION}-slim-bookworm AS base
 
@@ -31,7 +29,6 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
-ARG PACKAGE_SOURCE
 
 RUN groupadd --gid $USER_GID $USERNAME && \
   useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
@@ -49,11 +46,9 @@ ARG USERNAME
 ARG USER_UID
 ARG USER_GID
 ARG KITARU_VERSION
-ARG PACKAGE_SOURCE
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
-COPY --chown=$USERNAME:$USER_GID docker/candidate-wheels ./candidate-wheels
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -65,8 +60,8 @@ ENV UV_COMPILE_BYTECODE=1 \
 USER $USERNAME
 
 # Install the locked server and OpenTelemetry dependencies, then install the
-# matching Kitaru wheel without resolving its dependencies. Keep a snapshot
-# of the resulting environment for external inspection.
+# matching published Kitaru wheel without resolving its dependencies again.
+# Keep a snapshot of the resulting environment for external inspection.
 RUN test -n "$KITARU_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
   uv sync \
@@ -75,20 +70,10 @@ RUN test -n "$KITARU_VERSION" && \
     --no-install-project \
     --extra server \
     --extra otel && \
-  if [ "$PACKAGE_SOURCE" = candidates ]; then \
-    uv pip install \
-      --no-deps \
-      --no-index \
-      --find-links candidate-wheels \
-      --only-binary=:all: \
-      "kitaru==$KITARU_VERSION"; \
-  else \
-    test "$PACKAGE_SOURCE" = pypi && \
-    uv pip install \
-      --no-deps \
-      --only-binary=:all: \
-      "kitaru==$KITARU_VERSION"; \
-  fi && \
+  uv pip install \
+    --no-deps \
+    --only-binary=:all: \
+    "kitaru==$KITARU_VERSION" && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \

@@ -26,7 +26,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - Run `uv run --project plugins ty check --project plugins`.
 - Run `uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py`.
 - Run `just plugin-artifact-smoke` for default definitions, package metadata, pins, or release-path changes.
-- Use `plugins/docker-compose.candidate.yml` when a change needs a release-image rehearsal.
+- Use `plugins/docker-compose.candidate.yml` when a change needs a candidate-image rehearsal.
 
 ## Release safety
 

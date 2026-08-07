@@ -277,7 +277,7 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --kitaru-wheel dist
-          --candidate-dir docker/candidate-wheels
+          --candidate-dir plugins/candidate-wheels
       - name: Test clean base and MCP wheel installations
         run: KITARU_TEST_WHEEL=dist uv run pytest tests/mcp/test_installed_contract.py
       - name: List build artifacts
@@ -536,32 +536,31 @@ jobs:
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build release Docker images from candidate wheels (dry run)
+      - name: Build candidate Docker images from local wheels (dry run)
         if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
         run: |
           docker build \
-            -f docker/release-client.Dockerfile \
+            -f plugins/candidate.Dockerfile \
             --target client \
             --build-arg KITARU_VERSION="$VERSION" \
-            --build-arg PACKAGE_SOURCE=candidates \
-            -t kitaru-release-dry-run .
+            -t kitaru-candidate-client .
           docker build \
-            -f docker/release-server.Dockerfile \
+            -f plugins/candidate.Dockerfile \
             --target server \
             --build-arg KITARU_VERSION="$VERSION" \
-            --build-arg PACKAGE_SOURCE=candidates \
-            -t kitaru-server-release-dry-run .
+            --build-arg "KITARU_EXTRAS=--extra server --extra otel" \
+            -t kitaru-candidate-server .
           docker build \
-            -f docker/release-worker.Dockerfile \
+            -f plugins/candidate.Dockerfile \
             --target worker \
             --build-arg KITARU_VERSION="$VERSION" \
-            --build-arg PACKAGE_SOURCE=candidates \
-            -t kitaru-worker-release-dry-run .
-          docker run --rm kitaru-release-dry-run \
+            --build-arg "KITARU_EXTRAS=--extra worker" \
+            -t kitaru-candidate-worker .
+          docker run --rm kitaru-candidate-client \
             python -c "import kitaru"
-          docker run --rm kitaru-server-release-dry-run \
+          docker run --rm kitaru-candidate-server \
             python -c "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; assert DEFAULT_PLUGIN_DEFINITIONS"
-          docker run --rm kitaru-worker-release-dry-run \
+          docker run --rm kitaru-candidate-worker \
             python -c "import kitaru"
       - name: Build and publish public client Docker image
         if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
@@ -675,9 +674,9 @@ jobs:
             ls dist/
             echo ""
             echo "### Docker image"
-            echo "Built from candidate wheels: kitaru-release-dry-run"
-            echo "Built from candidate wheels: kitaru-server-release-dry-run"
-            echo "Built from candidate wheels: kitaru-worker-release-dry-run"
+            echo "Built from local wheels: kitaru-candidate-client"
+            echo "Built from local wheels: kitaru-candidate-server"
+            echo "Built from local wheels: kitaru-candidate-worker"
             echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""

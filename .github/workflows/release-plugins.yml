@@ -141,7 +141,7 @@ jobs:
       - name: Test package and catalog integration
         run: |
           uv sync --project plugins --frozen --all-packages
-          uv run --project plugins pytest -q plugins/tests tests/server/test_default_plugins.py
+          uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py
           uv run --project plugins python -c "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; assert DEFAULT_PLUGIN_DEFINITIONS"
       - name: Test installed package artifact
         run: >-

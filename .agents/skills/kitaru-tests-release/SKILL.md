@@ -44,12 +44,12 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 
 ## Default Plugin Packages
 
-- Read `plugins/DEVELOPMENT.md` for the package map, local release-image rehearsal, version preparation, dry-run dispatch, PyPI Trusted Publisher setup, publish workflow, and verification commands.
+- Read `plugins/DEVELOPMENT.md` for the package map, local candidate-image rehearsal, version preparation, dry-run dispatch, PyPI Trusted Publisher setup, publish workflow, and verification commands.
 - Run `just plugin-artifact-smoke` after changing plugin package metadata, default definitions, requirement pins, or release installation paths.
 - The smoke builds Kitaru and every selected plugin as wheels, installs them into a clean environment, loads each configured package entrypoint, and verifies idempotent default registration.
 - CI runs plugin distributions as a package matrix. Keep the matrix aligned with `plugins/packages/` and the choices in `.github/workflows/release-plugins.yml`.
 - Plugin workflow dispatches are dry-runs. A package tag triggers publishing only when its commit is contained in `main`.
-- Kitaru release dry-runs build client and server images from `docker/candidate-wheels`; publishing builds continue to install exact versions from PyPI.
+- Kitaru release dry-runs build plugin-owned candidate images from `plugins/candidate-wheels`; production release Dockerfiles continue to install exact versions from PyPI.
 
 ## MCP Tests
 

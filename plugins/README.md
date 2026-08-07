@@ -17,7 +17,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 
 ## Development and releases
 
-Read [DEVELOPMENT.md](DEVELOPMENT.md) before you change, test, or publish a plugin package. It contains the local artifact test, release-image Compose rehearsal, manual registration example, clean worker setup, version bump procedure, dry-run workflow, and PyPI publishing procedure.
+Read [DEVELOPMENT.md](DEVELOPMENT.md) before you change, test, or publish a plugin package. It contains the local artifact test, candidate-image Compose rehearsal, manual registration example, clean worker setup, version bump procedure, dry-run workflow, and PyPI publishing procedure.
 
 Manual workflow dispatches build and test without publishing. A package tag publishes only when the tagged commit is contained in `main`.
 

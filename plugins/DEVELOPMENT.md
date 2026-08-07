@@ -55,31 +55,33 @@ The smoke test performs these actions:
 Create a clean candidate directory and retain the artifacts:
 
 ```bash
-find docker/candidate-wheels -maxdepth 1 -type f -name '*.whl' -delete
+find plugins/candidate-wheels -maxdepth 1 -type f -name '*.whl' -delete
 uv run --no-sync python scripts/smoke_plugin_artifacts.py \
-  --candidate-dir docker/candidate-wheels
-ls -lh docker/candidate-wheels/*.whl
+  --candidate-dir plugins/candidate-wheels
+ls -lh plugins/candidate-wheels/*.whl
 ```
 
 The directory must contain the Kitaru wheel and all six plugin wheels.
 
 ## Build the candidate server image
 
-Build the same server path used by a Kitaru release dry-run:
+Build the plugin-owned candidate server image. Production release Dockerfiles remain PyPI-only:
 
 ```bash
-KITARU_VERSION="$(uv version --short)"
+export KITARU_VERSION="$(uv version --short)"
 
 docker build \
-  -f docker/release-server.Dockerfile \
+  -f plugins/candidate.Dockerfile \
   --target server \
   --build-arg KITARU_VERSION="$KITARU_VERSION" \
-  --build-arg PACKAGE_SOURCE=candidates \
+  --build-arg "KITARU_EXTRAS=--extra server --extra otel" \
   -t kitaru-plugin-e2e:local \
   .
 ```
 
-The Dockerfile installs Kitaru from `docker/candidate-wheels`. Plugin wheels remain separate and are resolved by workers when tasks execute.
+The candidate Dockerfile installs Kitaru from `plugins/candidate-wheels`. Plugin wheels remain separate and are resolved by workers when tasks execute.
+
+The same Dockerfile provides `client` and `worker` targets for CI. Build the worker with `--build-arg "KITARU_EXTRAS=--extra worker"`; its `UV_FIND_LINKS` points to the candidate wheel directory copied into the development image.
 
 Confirm the default catalog inside the image:
 
@@ -175,7 +177,7 @@ Use a separate environment so the worker does not inherit editable workspace pac
 
 ```bash
 export KITARU_REPO="$PWD"
-export KITARU_CANDIDATES="$KITARU_REPO/docker/candidate-wheels"
+export KITARU_CANDIDATES="$KITARU_REPO/plugins/candidate-wheels"
 KITARU_WHEEL="$(find "$KITARU_CANDIDATES" -maxdepth 1 -type f -name 'kitaru-[0-9]*.whl' -print -quit)"
 test -n "$KITARU_WHEEL"
 

@@ -3,6 +3,13 @@ name: kitaru-plugin-e2e
 services:
   server:
     image: ${KITARU_PLUGIN_IMAGE:-kitaru-plugin-e2e:local}
+    build:
+      context: ..
+      dockerfile: plugins/candidate.Dockerfile
+      target: server
+      args:
+        KITARU_VERSION: ${KITARU_VERSION:?Set KITARU_VERSION}
+        KITARU_EXTRAS: --extra server --extra otel
     ports: ['${KITARU_PORT:-8000}:8000']
     depends_on:
       db:
