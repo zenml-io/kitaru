@@ -230,7 +230,7 @@ class Worker:
         if self._config.timeout is not None:
             deadline = asyncio.get_running_loop().time() + self._config.timeout
 
-        runner = TaskRunner(ctx)
+        runner = TaskRunner(ctx, self._inflight)
         running: set[asyncio.Task[None]] = set()
         backoff = self._config.poll_interval
 
@@ -291,7 +291,7 @@ class Worker:
                 await asyncio.gather(*pending, return_exceptions=True)
 
     async def _drain(self, running: set[asyncio.Task[None]]) -> None:
-        """Wait for the running tasks, canceling them past the drain timeout.
+        """Wait for the running tasks, releasing them past the drain timeout.
 
         Args:
             running: Running task set.
@@ -303,9 +303,9 @@ class Worker:
         _, pending = await asyncio.wait(running, timeout=self._config.drain_timeout)
         if pending:
             logger.info(
-                "Drain timeout reached, canceling %d remaining task(s).", len(pending)
+                "Drain timeout reached, releasing %d remaining task(s).", len(pending)
             )
-            self._inflight.cancel_all()
+            self._inflight.release_all()
             await asyncio.wait(pending)
 
     async def _should_stop(

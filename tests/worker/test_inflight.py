@@ -54,3 +54,39 @@ def test_cancel_all_sets_every_event() -> None:
     inflight.cancel_all()
 
     assert all(event.is_set() for event in events)
+
+
+def test_cancel_all_does_not_mark_any_task_released() -> None:
+    """cancel_all() sets events without marking any task released."""
+    inflight = InflightTasks()
+    task_id = uuid.uuid4()
+    event = inflight.register(task_id)
+
+    inflight.cancel_all()
+
+    assert event.is_set()
+    assert inflight.was_released(task_id) is False
+
+
+def test_release_all_sets_every_event_and_marks_it_released() -> None:
+    """release_all() sets the event of every registered task and marks it released."""
+    inflight = InflightTasks()
+    task_ids = [uuid.uuid4() for _ in range(3)]
+    events = [inflight.register(task_id) for task_id in task_ids]
+
+    inflight.release_all()
+
+    assert all(event.is_set() for event in events)
+    assert all(inflight.was_released(task_id) for task_id in task_ids)
+
+
+def test_unregister_clears_the_released_mark() -> None:
+    """unregister() drops a task's released mark along with its entry."""
+    inflight = InflightTasks()
+    task_id = uuid.uuid4()
+    inflight.register(task_id)
+    inflight.release_all()
+
+    inflight.unregister(task_id)
+
+    assert inflight.was_released(task_id) is False

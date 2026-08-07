@@ -510,6 +510,80 @@ async def test_claim_loop_drain_timeout_cancels_lingering_tasks(
     assert worker._inflight.get_ids() == []
 
 
+async def test_claim_loop_drain_timeout_releases_the_running_task(
+    tmp_path: Path,
+) -> None:
+    """A task still running past drain_timeout is released back to pending."""
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(concurrency=1, drain_timeout=0.1)
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+    stop = asyncio.Event()
+
+    task = make_task(kind=TaskKind.AGENT)
+    spec = make_agent_spec(task.id, command="sleep 30")
+    client.tasks.claim_responses.append(
+        TaskClaimResponse(tasks=[make_claimed(task, spec)])
+    )
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    released_task = running_task.model_copy(update={"status": TaskStatus.PENDING})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(released_task)
+
+    async def stop_soon() -> None:
+        await asyncio.sleep(0.1)
+        stop.set()
+
+    # The gather only finishes if the drain timeout releases the running task.
+    await asyncio.wait_for(
+        asyncio.gather(worker._claim_loop(ctx, stop), stop_soon()), timeout=5.0
+    )
+
+    assert [call.status for _, call in client.tasks.update_calls] == [
+        TaskStatus.RUNNING,
+        TaskStatus.PENDING,
+    ]
+    assert worker._inflight.get_ids() == []
+
+
+async def test_claim_loop_server_requested_cancel_still_cancels_the_task(
+    tmp_path: Path,
+) -> None:
+    """A heartbeat-delivered server cancel still ends the task canceled."""
+    client = FakeKitaruAPIClient()
+    config = WorkerConfig(concurrency=1)
+    worker = Worker(config)
+    ctx = _ctx(tmp_path, client)
+    stop = asyncio.Event()
+
+    task = make_task(kind=TaskKind.AGENT)
+    spec = make_agent_spec(task.id, command="sleep 30")
+    client.tasks.claim_responses.append(
+        TaskClaimResponse(tasks=[make_claimed(task, spec)])
+    )
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    canceled_task = running_task.model_copy(update={"status": TaskStatus.CANCELED})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(canceled_task)
+
+    async def cancel_soon() -> None:
+        # A heartbeat-delivered server cancel calls inflight.cancel(), never
+        # release_all(), so the task must still end up canceled.
+        await asyncio.sleep(0.1)
+        worker._inflight.cancel(task.id)
+        stop.set()
+
+    await asyncio.wait_for(
+        asyncio.gather(worker._claim_loop(ctx, stop), cancel_soon()), timeout=5.0
+    )
+
+    assert [call.status for _, call in client.tasks.update_calls] == [
+        TaskStatus.RUNNING,
+        TaskStatus.CANCELED,
+    ]
+    assert worker._inflight.get_ids() == []
+
+
 def test_cancel_inflight_sets_registered_cancel_events() -> None:
     """cancel_inflight() sets the cancel event of every held task."""
     worker = Worker(WorkerConfig())
@@ -538,7 +612,7 @@ async def test_run_task_reports_a_runner_crash_as_failed(
 
     monkeypatch.setattr(TaskRunner, "execute", crash)
 
-    await worker._run_task(ctx, TaskRunner(ctx), claimed)
+    await worker._run_task(ctx, TaskRunner(ctx, worker._inflight), claimed)
 
     assert len(client.tasks.update_calls) == 1
     _, request = client.tasks.update_calls[0]

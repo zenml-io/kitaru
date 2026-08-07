@@ -63,6 +63,7 @@ from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
+    IllegalTaskStatusTransition,
     ImportTask,
     ImportTaskDetails,
     Task,
@@ -674,6 +675,127 @@ async def test_update_task_attempt_fencing(services: JobAndTaskServices) -> None
             task_id,
             TaskUpdate(status=TaskStatus.RUNNING),
             actor=build_task_actor(ACTOR.account, task_id, 0, worker.id),
+        )
+
+
+async def test_update_task_release_requeues_a_claimed_task_for_a_later_claim(
+    services: JobAndTaskServices,
+) -> None:
+    """A released claimed task requeues and the next claim picks it up."""
+    job_id = await _pending_job(services)
+    released = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id, name="releasing")
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    assert len(claimed) == 1
+
+    updated = await services.task_service.update_task(
+        released.id,
+        TaskUpdate(status=TaskStatus.PENDING),
+        actor=build_task_actor(ACTOR.account, released.id, 1, worker.id),
+    )
+    assert updated.status is TaskStatus.PENDING
+    assert updated.worker_id is None
+    assert updated.attempt == 1
+
+    other_worker = await create_worker(services.workers, ACTOR.account.id, name="other")
+    reclaimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, other_worker.id)
+    )
+    assert len(reclaimed) == 1
+    assert reclaimed[0].task.id == released.id
+    assert reclaimed[0].task.attempt == 2
+    assert reclaimed[0].task.worker_id == other_worker.id
+
+
+async def test_update_task_release_unlinks_the_result_session(
+    services: JobAndTaskServices,
+) -> None:
+    """Releasing a claimed agent task frees its result session slot."""
+    job_id = await _pending_job(services)
+    task = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    session = await create_session(
+        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
+    )
+    stored = await services.tasks.get(task.id)
+    assert isinstance(stored, AgentTask)
+    stored.result_session_id = session.id
+    await services.tasks.update(stored)
+
+    await services.task_service.update_task(
+        task.id,
+        TaskUpdate(status=TaskStatus.PENDING),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
+    )
+
+    reloaded_task = await services.tasks.get(task.id)
+    assert isinstance(reloaded_task, AgentTask)
+    assert reloaded_task.result_session_id is None
+    reloaded_session = await services.sessions.get(session.id)
+    assert reloaded_session.task_id is None
+
+
+async def test_update_task_release_with_cancel_requested_settles_canceled(
+    services: JobAndTaskServices,
+) -> None:
+    """Releasing a task with a pending cancel request settles canceled, not requeued."""
+    job_id = await _pending_job(services)
+    task = await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    stored = await services.tasks.get(task.id)
+    stored.cancel_requested_at = datetime.now(UTC)
+    await services.tasks.update(stored)
+
+    updated = await services.task_service.update_task(
+        task.id,
+        TaskUpdate(status=TaskStatus.PENDING),
+        actor=build_task_actor(ACTOR.account, task.id, 1, worker.id),
+    )
+    assert updated.status is TaskStatus.CANCELED
+
+
+async def test_update_task_release_attempt_fencing(
+    services: JobAndTaskServices,
+) -> None:
+    """A release fenced by a stale attempt conflicts."""
+    job_id = await _pending_job(services)
+    await _claimable_agent_task(services, job_id)
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    claimed = await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    task_id = claimed[0].task.id
+
+    with pytest.raises(TaskAttemptMismatch):
+        await services.task_service.update_task(
+            task_id,
+            TaskUpdate(status=TaskStatus.PENDING),
+            actor=build_task_actor(ACTOR.account, task_id, 0, worker.id),
+        )
+
+
+async def test_update_task_release_on_a_pending_task_is_illegal(
+    services: JobAndTaskServices,
+) -> None:
+    """Releasing a task that was never claimed is an illegal transition."""
+    job_id = await _pending_job(services)
+    task = await create_agent_task(services.tasks, job_id)
+
+    with pytest.raises(IllegalTaskStatusTransition):
+        await services.task_service.update_task(
+            task.id,
+            TaskUpdate(status=TaskStatus.PENDING),
+            actor=build_task_actor(ACTOR.account, task.id, 0, uuid.uuid4()),
         )
 
 

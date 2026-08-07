@@ -284,7 +284,13 @@ class TaskService:
         task.check_attempt(actor.principal.attempt)
         now = datetime.now(UTC)
         transition: Callable[[Task], None]
-        if command.status is TaskStatus.RUNNING:
+        if command.status is TaskStatus.PENDING:
+            if task.cancel_requested_at is not None:
+                transition = partial(Task.cancel, now=now)
+            else:
+                await self._unlink_result_session(task)
+                transition = Task.requeue
+        elif command.status is TaskStatus.RUNNING:
             transition = partial(Task.start, now=now)
         elif command.status is TaskStatus.COMPLETED:
             self._check_result_size(command.result)
