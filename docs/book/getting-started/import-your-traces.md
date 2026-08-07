@@ -9,7 +9,7 @@ You don't have to run a single request through Kitaru to start. If your
 agent already logs to Langfuse (or any tracing system you can export
 from), your history is the raw material: import it, and every trace lands
 as a [session](../concepts/agents-and-sessions.md) — the same object a
-live-recorded run produces, replayable and scorable like any other.
+live-recorded run produces, ready to replay and evaluate like any other.
 
 This is the honest division of labor: **your observability stack stays
 your system of record**. Kitaru takes a copy of the runs you care about
@@ -97,7 +97,7 @@ customer data.
 Everything recorded sessions can:
 
 * **Inspect** them — nodes, cost, and token rollups all populate.
-* **Score** them with [evaluators](../concepts/evaluators.md), including
+* **Evaluate** them with [evaluators](../concepts/evaluators.md), including
   backfilling evaluations over your whole history.
 * **Group** them into [cohorts](../concepts/cohorts.md) and run
   [experiments](../concepts/experiments.md) against them.
@@ -115,7 +115,7 @@ gives you the skeleton; the contract is in
 
 ## Next
 
-Score your imported history with your first evaluator —
+Evaluate your imported history with your first evaluator —
 [Write an evaluator](../guides/write-an-evaluator.md) — then pick the
 sessions that matter into a cohort and put a change to the test with
 [Build a regression suite from production](../guides/regression-suite.md).

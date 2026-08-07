@@ -1,5 +1,5 @@
 ---
-description: Evaluators score sessions; evaluations are the rows they write. Numbers average, words count, free text gets read.
+description: Evaluators turn sessions into evaluations — the rows they write. Numbers average, words count, free text gets read.
 icon: chart-line
 ---
 
@@ -11,9 +11,10 @@ Replay tells you what a change *did*; evaluators tell you whether it
 writes one or more **evaluations**: named, typed verdicts that Kitaru
 stores against the session.
 
-Because evaluators run against recorded sessions, they score baselines,
-replays, and imported traces identically. The same evaluator that grades
-today's production traffic grades the fork you're thinking about shipping.
+Because evaluators run against recorded sessions, they evaluate baselines,
+replays, and imported traces identically. The same evaluator you run over
+today's production traffic runs over the fork you're thinking about
+shipping.
 
 ## The evaluator contract
 
@@ -81,7 +82,7 @@ derived from what you set, never declared:
 | `score=0.9, value="polite"` | `categorical` | labels count, transitions diff |
 
 `passed` is an independent optional verdict — a threshold you decided in
-the evaluator, not something derived from the score — and `explanation`
+the evaluator, not something derived from `score` — and `explanation`
 says why, which is what you'll actually read when a regression gate goes
 red.
 
@@ -148,5 +149,5 @@ one failed pair never cancels the rest. Read results back with
 
 Evaluators are also how [replays](replay.md) and
 [experiments](experiments.md) get their numbers: both require at least one
-evaluator, so a re-run is never just "it finished" — it's scored the moment
+evaluator, so a re-run is never just "it finished" — it's evaluated the moment
 it lands.

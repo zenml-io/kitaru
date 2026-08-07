@@ -54,7 +54,7 @@ support.run_sync("Refund order #4821 — the card reader was double-charged.")
 
 Every run is now a session you can replay — the
 [Quickstart](getting-started/quickstart.md) takes you from this wrapper to
-a scored model-swap experiment in one sitting.
+a measured model-swap experiment in one sitting.
 
 ## Built to sit in your stack
 

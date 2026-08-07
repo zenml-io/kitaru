@@ -123,5 +123,5 @@ cohort — apply one to a whole import with
   system of record; Kitaru gets a runnable copy. See
   [Import your traces](../getting-started/import-your-traces.md).
 * **Replay** — every replay produces a new session with `origin: replay`,
-  scored by the same evaluators as any other session. See
+  evaluated by the same evaluators as any other session. See
   [Replay](replay.md).

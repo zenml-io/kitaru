@@ -1,5 +1,5 @@
 ---
-description: A named change, replayed across a cohort and scored — what improved, what regressed, before you ship.
+description: A named change, replayed across a cohort and evaluated — what improved, what regressed, before you ship.
 icon: vials
 ---
 

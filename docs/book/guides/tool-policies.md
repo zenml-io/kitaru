@@ -72,7 +72,7 @@ safety posture lives:
 A fork that changes the model or prompt *will* sometimes take new paths
 and call tools the baseline never called. A miss isn't noise — it's the
 fork diverging. `fail` tells you loudly; `error_result` lets the run
-finish so the evaluator can judge the recovery.
+finish so the evaluator can assess the recovery.
 
 ### `static` — a canned answer
 

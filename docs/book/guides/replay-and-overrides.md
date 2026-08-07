@@ -76,7 +76,7 @@ Field by field:
   live tools.** For a replay that touches nothing real, set a `history`
   policy as above. Details in [Tool policies](tool-policies.md).
 * `evaluators` — at least one, always. A replay is never just "it ran";
-  it's scored on arrival.
+  it's evaluated on arrival.
 * `evaluate_baselines` — score the original session with the same
   evaluators, so the comparison exists as soon as the replay settles.
 
@@ -158,5 +158,5 @@ error and a log tail — `kitaru job get <job-id>` and
 The same request against many sessions is a
 [cohort](../concepts/cohorts.md) plus an
 [experiment](../concepts/experiments.md) — one replay per session, fanned
-out and scored identically. That's the subject of
+out and evaluated identically. That's the subject of
 [Build a regression suite from production](regression-suite.md).

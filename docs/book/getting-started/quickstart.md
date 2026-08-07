@@ -116,7 +116,7 @@ what the model saw, what the tool returned, what it cost.
 
 ## 4. Write the evaluator
 
-A replay is always scored, so define what "good" means before replaying.
+A replay is always evaluated, so define what "good" means before replaying.
 Scaffold an [evaluator](../concepts/evaluators.md) — plain Python reading
 the session:
 
@@ -231,7 +231,7 @@ recorded world. One run, one thing changed.
 
 ## 8. Read the diff
 
-Each replay produced a new session (`origin: replay`), already scored.
+Each replay produced a new session (`origin: replay`), already evaluated.
 Compare the fork against the baseline:
 
 ```python
