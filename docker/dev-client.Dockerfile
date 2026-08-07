@@ -53,8 +53,7 @@ ARG USER_GID
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock README.md ./
-COPY --chown=$USERNAME:$USER_GID \
-  plugins/pyproject.toml plugins/README.md ./plugins/
+COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
 COPY --chown=$USERNAME:$USER_GID src ./src
 
 ENV UV_COMPILE_BYTECODE=1 \

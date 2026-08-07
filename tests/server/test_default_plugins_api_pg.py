@@ -32,7 +32,7 @@ async def test_default_plugins_are_registered_at_startup(
         description="Test evaluator.",
         provider=None,
         entrypoint="package.evaluator:evaluate",
-        requirement="kitaru-plugins==1.0.0",
+        requirement="kitaru-importer-langfuse==1.0.0",
         display_version="1.0.0",
     )
     monkeypatch.setattr(

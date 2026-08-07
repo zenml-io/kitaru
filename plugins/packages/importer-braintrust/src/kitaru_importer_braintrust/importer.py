@@ -31,7 +31,7 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ParsedNode, ParsedSession
-from kitaru_plugins.importers.normalization import (
+from kitaru_importer_braintrust.normalization import (
     detect_framework,
     get_input_text,
     get_output_text,
@@ -591,7 +591,9 @@ class BraintrustProjectLogImporter:
             )
             if node.node_type is NodeType.LLM_CALL:
                 node.system_prompt = get_system_prompt(node.inputs)
-                node.reasoning = get_reasoning(node.outputs) or get_reasoning(node.inputs)
+                node.reasoning = get_reasoning(node.outputs) or get_reasoning(
+                    node.inputs
+                )
                 system_prompt = node.system_prompt or system_prompt
         if missing_parent:
             warnings.append("One or more spans reference a missing parent")

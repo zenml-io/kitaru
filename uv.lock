@@ -7,13 +7,20 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-04T08:49:21.946128Z"
 exclude-newer-span = "P3D"
 
 [manifest]
 members = [
     "kitaru",
-    "kitaru-plugins",
+    "kitaru-evaluator-cost",
+    "kitaru-evaluator-latency",
+    "kitaru-evaluator-tool-call-patterns",
+    "kitaru-importer-braintrust",
+    "kitaru-importer-kitaru-jsonl",
+    "kitaru-importer-langfuse",
+    "kitaru-importer-langsmith",
+    "kitaru-importer-opentelemetry",
 ]
 
 [[package]]
@@ -1014,9 +1021,86 @@ dev = [
 ]
 
 [[package]]
-name = "kitaru-plugins"
+name = "kitaru-evaluator-cost"
 version = "0.1.0"
-source = { editable = "plugins" }
+source = { editable = "plugins/packages/evaluator-cost" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-evaluator-latency"
+version = "0.1.0"
+source = { editable = "plugins/packages/evaluator-latency" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-evaluator-tool-call-patterns"
+version = "0.1.0"
+source = { editable = "plugins/packages/evaluator-tool-call-patterns" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-importer-braintrust"
+version = "0.1.0"
+source = { editable = "plugins/packages/importer-braintrust" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-importer-kitaru-jsonl"
+version = "0.1.0"
+source = { editable = "plugins/packages/importer-kitaru-jsonl" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-importer-langfuse"
+version = "0.1.0"
+source = { editable = "plugins/packages/importer-langfuse" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-importer-langsmith"
+version = "0.1.0"
+source = { editable = "plugins/packages/importer-langsmith" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-importer-opentelemetry"
+version = "0.1.0"
+source = { editable = "plugins/packages/importer-opentelemetry" }
 dependencies = [
     { name = "kitaru" },
 ]

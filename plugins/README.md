@@ -1,32 +1,25 @@
-# Kitaru Plugins
+# Kitaru plugins
 
-This directory is the source of the independently versioned `kitaru-plugins` distribution. Its wheel contains the official importers and evaluators. These files are not included in the `kitaru` wheel.
+Each directory under `packages/` is an independently versioned Python distribution for one built-in Kitaru importer or evaluator. A release of one package cannot create new versions for the other default plugins.
 
-The distribution exposes its catalog through the `kitaru.default_plugins` Python entry-point group. A Kitaru server discovers installed catalogs at startup and stores each definition as an exact package source such as `kitaru-plugins==0.1.0`. Workers install that requirement when they execute the importer or evaluator.
+Every distribution exposes one catalog through the `kitaru.default_plugins` entry-point group. At startup, Kitaru records the owning distribution and exact version as the package requirement for that plugin.
 
 ## Local development
 
-Install all workspace packages from the repository root:
+Install Kitaru and all plugin workspace members from the repository root:
 
 ```bash
 uv sync --all-packages --extra server --extra otel
 ```
 
-The editable `kitaru-plugins` package then exposes the same catalog used by a published wheel. Starting the server through the root environment registers the local package version without a PyPI release.
-
-Build and inspect the standalone artifacts with:
+This exposes the same catalogs used by published wheels without requiring a PyPI release. Build one distribution by passing its project directory:
 
 ```bash
-uv build --project plugins --out-dir plugins/dist
-uv run --project plugins python -c "from kitaru_plugins.catalog import get_definitions; print(get_definitions())"
+uv build --project plugins/packages/importer-langfuse --out-dir plugins/dist
 ```
 
-## Release order
+## Releases
 
-1. Update the version and raise the minimum Kitaru version when the plugin contract requires it.
-2. Add the release notes to `plugins/CHANGELOG.md`.
-3. Run the `Release plugins` workflow in dry-run mode.
-4. Publish the plugin release.
-5. Use that published version when building Kitaru server images.
+The `Release plugin` workflow accepts a package directory name and its committed version. It tests and publishes only that distribution, then creates a package-specific tag such as `importer-langfuse-v0.2.0`.
 
-Plugin releases use `plugins-v<version>` tags. Kitaru releases continue to use `v<version>` tags.
+`default-requirements.txt` pins the plugin versions bundled into Kitaru server images. Update only the line for the plugin whose published version should become the server default.

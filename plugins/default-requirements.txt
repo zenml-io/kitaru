@@ -1,0 +1,8 @@
+kitaru-evaluator-cost==0.1.0
+kitaru-evaluator-latency==0.1.0
+kitaru-evaluator-tool-call-patterns==0.1.0
+kitaru-importer-braintrust==0.1.0
+kitaru-importer-kitaru-jsonl==0.1.0
+kitaru-importer-langfuse==0.1.0
+kitaru-importer-langsmith==0.1.0
+kitaru-importer-opentelemetry==0.1.0

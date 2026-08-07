@@ -13,21 +13,30 @@
 #  permissions and limitations under the License.
 """Tests for the published default plugin catalog."""
 
+from pathlib import Path
+
+from kitaru.server.api.bootstrap import _load_default_plugin_definitions
 from kitaru.source_refs import parse_source_ref
 from kitaru.task.plugins import load_source_ref
-from kitaru_plugins.catalog import get_definitions
 
 
 def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     """Expose one callable package entrypoint for each reserved plugin name."""
-    definitions = get_definitions()
-    names = [definition["name"] for definition in definitions]
-    entrypoints = [definition["entrypoint"] for definition in definitions]
+    definitions = _load_default_plugin_definitions()
+    names = [definition.name for definition in definitions]
+    entrypoints = [definition.entrypoint for definition in definitions]
+    requirements = [definition.requirement for definition in definitions]
 
     assert all(name.startswith("kitaru/") for name in names)
     assert len(names) == len(set(names))
     assert len(entrypoints) == len(set(entrypoints))
     for entrypoint in entrypoints:
         module, attribute = parse_source_ref(entrypoint)
-        assert module.startswith("kitaru_plugins.")
         assert callable(load_source_ref(f"{module}:{attribute}", "Plugin"))
+    assert len(requirements) == len(set(requirements))
+
+    requirements_file = Path(__file__).parents[1] / "default-requirements.txt"
+    bundled_requirements = {
+        line for line in requirements_file.read_text().splitlines() if line
+    }
+    assert set(requirements) == bundled_requirements

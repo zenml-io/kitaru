@@ -19,11 +19,11 @@ from typing import Any
 
 import pytest
 
-import kitaru_plugins.importers.braintrust as braintrust_module
+import kitaru_importer_braintrust.importer as braintrust_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
-from kitaru_plugins.importers.braintrust import (
+from kitaru_importer_braintrust.importer import (
     BraintrustProjectLogImporter,
     InvalidImport,
     parse,

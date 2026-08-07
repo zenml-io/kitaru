@@ -19,12 +19,12 @@ from typing import Any
 
 import pytest
 
-import kitaru_plugins.importers.langsmith as langsmith_module
+import kitaru_importer_langsmith.importer as langsmith_module
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ParsedNode, ParsedSession
-from kitaru_plugins.importers.langsmith import (
+from kitaru_importer_langsmith.importer import (
     InvalidImport,
     LangSmithRunImporter,
     parse,

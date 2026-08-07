@@ -20,7 +20,7 @@ import pytest
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.task.importer import ParsedSession
-from kitaru_plugins.importers.kitaru import InvalidImport, parse
+from kitaru_importer_kitaru_jsonl.importer import InvalidImport, parse
 
 
 def _session() -> dict[str, object]:

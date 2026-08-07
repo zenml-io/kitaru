@@ -68,8 +68,7 @@ ARG INSTALL_DEBUG_TOOLS
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
-COPY --chown=$USERNAME:$USER_GID \
-  plugins/pyproject.toml plugins/README.md ./plugins/
+COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -101,7 +100,6 @@ ARG INSTALL_DEBUG_TOOLS
 
 COPY --chown=$USERNAME:$USER_GID README.md ./
 COPY --chown=$USERNAME:$USER_GID src ./src
-COPY --chown=$USERNAME:$USER_GID plugins/kitaru_plugins ./plugins/kitaru_plugins
 
 ENV PYTHONUNBUFFERED=1 \
   PYTHONFAULTHANDLER=1 \
@@ -143,7 +141,6 @@ ARG INSTALL_DEBUG_TOOLS
 
 COPY --chown=$USERNAME:$USER_GID README.md ./
 COPY --chown=$USERNAME:$USER_GID src ./src
-COPY --chown=$USERNAME:$USER_GID plugins/kitaru_plugins ./plugins/kitaru_plugins
 
 # Install the repository project non-editably for the production-style image.
 RUN uv sync \

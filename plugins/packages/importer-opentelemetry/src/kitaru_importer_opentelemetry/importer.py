@@ -34,7 +34,7 @@ from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.task.importer import ParsedNode, ParsedSession
-from kitaru_plugins.importers.normalization import (
+from kitaru_importer_opentelemetry.normalization import (
     detect_framework,
     get_input_text,
     get_output_text,

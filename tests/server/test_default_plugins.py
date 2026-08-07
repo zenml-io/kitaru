@@ -34,7 +34,7 @@ DEFINITIONS = (
         description="Test importer.",
         provider="langfuse",
         entrypoint="package.importer:parse",
-        requirement="kitaru-plugins==1.0.0",
+        requirement="kitaru-importer-langfuse==1.0.0",
         display_version="1.0.0",
     ),
     DefaultPluginDefinition(
@@ -43,7 +43,7 @@ DEFINITIONS = (
         description="Test evaluator.",
         provider=None,
         entrypoint="package.evaluator:evaluate",
-        requirement="kitaru-plugins==1.0.0",
+        requirement="kitaru-evaluator-cost==1.0.0",
         display_version="1.0.0",
     ),
 )
@@ -81,7 +81,7 @@ async def test_register_creates_default_plugins(
         version = await repository.get_version(plugin.id, 1)
         assert isinstance(version.source, PackagePluginSource)
         assert version.source.entrypoint == definition.entrypoint
-        assert version.source.requirement == "kitaru-plugins==1.0.0"
+        assert version.source.requirement == definition.requirement
         assert version.display_version == "1.0.0"
 
 
@@ -116,7 +116,7 @@ async def test_register_creates_new_version_on_version_bump(
     bumped = tuple(
         definition.model_copy(
             update={
-                "requirement": "kitaru-plugins==1.1.0",
+                "requirement": "kitaru-importer-langfuse==1.1.0",
                 "display_version": "1.1.0",
             }
         )
@@ -142,12 +142,12 @@ def test_loads_definitions_from_distribution_entrypoint(
         "name": f"{RESERVED_PLUGIN_NAME_PREFIX}provider",
         "description": "Import provider traces.",
         "provider": "provider",
-        "entrypoint": "kitaru_plugins.importers.provider:parse",
+        "entrypoint": "kitaru_importer_provider.importer:parse",
     }
     catalog = SimpleNamespace(
         name="official",
         dist=SimpleNamespace(
-            metadata={"Name": "kitaru-plugins"},
+            metadata={"Name": "kitaru-importer-provider"},
             version="2.3.0",
         ),
         load=lambda: lambda: [value],
@@ -156,5 +156,5 @@ def test_loads_definitions_from_distribution_entrypoint(
 
     [definition] = _load_default_plugin_definitions()
 
-    assert definition.requirement == "kitaru-plugins==2.3.0"
+    assert definition.requirement == "kitaru-importer-provider==2.3.0"
     assert definition.display_version == "2.3.0"

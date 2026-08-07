@@ -100,7 +100,7 @@ packages = ["src/kitaru"]
 exclude-newer = "3 days"
 
 [tool.uv.workspace]
-members = ["plugins"]
+members = ["plugins/packages/*"]
 
 [dependency-groups]
 dev = [
@@ -142,7 +142,19 @@ extend-immutable-calls = ["fastapi.Depends"]
 convention = "google"
 
 [tool.ruff.lint.isort]
-known-first-party = ["adapters", "kitaru", "kitaru_plugins", "plugins"]
+known-first-party = [
+    "adapters",
+    "kitaru",
+    "kitaru_evaluator_cost",
+    "kitaru_evaluator_latency",
+    "kitaru_evaluator_tool_call_patterns",
+    "kitaru_importer_braintrust",
+    "kitaru_importer_kitaru_jsonl",
+    "kitaru_importer_langfuse",
+    "kitaru_importer_langsmith",
+    "kitaru_importer_opentelemetry",
+    "plugins",
+]
 
 [tool.ty.src]
 # TODO: Re-enable once the examples are migrated to the v2 SDK.

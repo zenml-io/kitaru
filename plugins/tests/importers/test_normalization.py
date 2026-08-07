@@ -13,14 +13,16 @@
 #  limitations under the License.
 """Tests for normalization shared by the official importers."""
 
-from kitaru_plugins.importers.normalization import (
+from kitaru_importer_langfuse.normalization import (
     detect_framework,
     get_input_text,
     get_output_text,
+    get_reasoning,
     get_system_prompt,
     get_tool_payload_text,
-    get_reasoning,
 )
+
+
 def test_populates_prompt_fields_from_provider_message_shapes() -> None:
     """Surface role-tagged text while retaining nested provider payloads."""
     value = {
