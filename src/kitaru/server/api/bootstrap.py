@@ -65,6 +65,7 @@ class DefaultPluginDefinition(FrozenModel):
     name: str
     description: str
     provider: str | None
+    logo_url: str | None = None
     entrypoint: str
     content: bytes
     version: int
@@ -97,6 +98,7 @@ async def _get_or_create_plugin(
                 name=definition.name,
                 description=definition.description,
                 provider=definition.provider,
+                logo_url=definition.logo_url,
                 metadata={},
             )
         )

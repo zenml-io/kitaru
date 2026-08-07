@@ -2200,6 +2200,18 @@
             "description": "Evaluator description.",
             "title": "Description"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluator logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -2250,6 +2262,18 @@
             "title": "Latest Version",
             "type": "integer"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluator logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -2288,6 +2312,7 @@
           "id",
           "name",
           "description",
+          "logo_url",
           "metadata",
           "latest_version"
         ],
@@ -2309,6 +2334,18 @@
             ],
             "description": "New evaluator description.",
             "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New logo URL.",
+            "title": "Logo Url"
           },
           "metadata": {
             "anyOf": [
@@ -3131,6 +3168,18 @@
             "description": "Importer description.",
             "title": "Description"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Importer logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -3193,6 +3242,18 @@
             "title": "Latest Version",
             "type": "integer"
           },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Importer logo URL.",
+            "title": "Logo Url"
+          },
           "metadata": {
             "additionalProperties": true,
             "description": "Arbitrary metadata.",
@@ -3244,6 +3305,7 @@
           "name",
           "description",
           "provider",
+          "logo_url",
           "metadata",
           "latest_version"
         ],
@@ -3265,6 +3327,18 @@
             ],
             "description": "New importer description.",
             "title": "Description"
+          },
+          "logo_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New logo URL.",
+            "title": "Logo Url"
           },
           "metadata": {
             "anyOf": [

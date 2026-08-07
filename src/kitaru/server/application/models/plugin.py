@@ -11,11 +11,13 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Plugin filter and update command models."""
+"""Plugin filter and command models."""
 
 import uuid
 from collections.abc import Mapping
 from typing import Any, ClassVar
+
+from pydantic import Field
 
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
@@ -52,8 +54,19 @@ class PluginVersionFilter(ListFilter):
     plugin_id: uuid.UUID
 
 
+class PluginCreate(FrozenModel):
+    """Plugin create command."""
+
+    name: str
+    description: str | None = None
+    provider: str | None = None
+    logo_url: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
 class PluginUpdate(FrozenModel):
     """Plugin update command."""
 
     description: str | None = None
+    logo_url: str | None = None
     metadata: dict[str, Any] | None = None

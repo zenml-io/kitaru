@@ -277,6 +277,7 @@ class Plugin(DomainModel):
     name: PluginName
     description: str | None = None
     provider: str | None = None
+    logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     latest_version: int = 0
     created: datetime | None = None
@@ -303,6 +304,14 @@ class Plugin(DomainModel):
             description: New description.
         """
         self.description = description
+
+    def update_logo_url(self, logo_url: str | None) -> None:
+        """Set a new plugin logo URL.
+
+        Args:
+            logo_url: New logo URL.
+        """
+        self.logo_url = logo_url
 
     def update_metadata(self, metadata: dict[str, Any]) -> None:
         """Set new plugin metadata.

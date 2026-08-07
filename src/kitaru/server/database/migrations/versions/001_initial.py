@@ -193,6 +193,7 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("provider", sa.String(length=255), nullable=True),
+        sa.Column("logo_url", sa.Text(), nullable=True),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("latest_version", sa.Integer(), nullable=False),
         sa.ForeignKeyConstraint(
