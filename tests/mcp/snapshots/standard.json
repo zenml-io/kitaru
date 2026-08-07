@@ -935,6 +935,12 @@
         "ExperimentResponse": {
           "description": "Experiment response.",
           "properties": {
+            "agent_id": {
+              "description": "Agent the experiment's runs belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -1007,6 +1013,7 @@
             "id",
             "name",
             "description",
+            "agent_id",
             "override",
             "tool_policy",
             "evaluators"
@@ -5814,6 +5821,11 @@
           "additionalProperties": false,
           "description": "Create an experiment with exact evaluator selections.",
           "properties": {
+            "agent_id": {
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "description": {
               "anyOf": [
                 {
@@ -5870,6 +5882,7 @@
           },
           "required": [
             "operation",
+            "agent_id",
             "name",
             "evaluators"
           ],
@@ -6344,6 +6357,12 @@
         "ExperimentResponse": {
           "description": "Experiment response.",
           "properties": {
+            "agent_id": {
+              "description": "Agent the experiment's runs belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -6416,6 +6435,7 @@
             "id",
             "name",
             "description",
+            "agent_id",
             "override",
             "tool_policy",
             "evaluators"

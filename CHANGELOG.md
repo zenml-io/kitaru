@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - OpenTelemetry instrumentation for the API server, enabled by setting `KITARU_SERVER_OTEL_EXPORTER_OTLP_ENDPOINT` (or the standard `OTEL_*` environment variables) with the `otel` extra installed.
 
 ### Changed
+- Experiments are now scoped to an agent. Creating an experiment requires an `agent_id`, experiments filter on `agent_id`, and starting a run rejects a cohort version or agent version that belongs to a different agent.
 - The worker now stops promptly when asked. A stop request or the configured lifetime ends every wait in the claim loop, including error backoff and the wait for a free slot, and a stopping worker never claims again. A second SIGINT or SIGTERM during a drain cancels the held tasks instead of being ignored, and the new `--drain-timeout` option bounds the drain before canceling. The worker also survives transient network failures during claiming and job polling instead of exiting, and its heartbeat loop restarts after an unexpected error.
 - A task process is now killed together with every descendant on all outcomes, including success, so a background process spawned by a task can no longer outlive it or hang the worker by holding the task's output pipes open. Worker-built task commands run without a shell, and process spawning and killing are platform-specific, preparing task execution on Windows.
 - Starting an experiment run now writes its replays, jobs, and tasks in three batched inserts instead of row by row, so run creation stays fast for large cohorts.

@@ -121,7 +121,12 @@ async def test_finalize_runs_if_drained_serializes_concurrent_settlements() -> N
             )
         )
         experiment = await SQLExperimentRepository(seed_session).create(
-            Experiment(owner_id=owner.id, name="exp", replay_config_id=config.id)
+            Experiment(
+                owner_id=owner.id,
+                name="exp",
+                agent_id=agent.id,
+                replay_config_id=config.id,
+            )
         )
         run = await SQLExperimentRunRepository(seed_session).create(
             ExperimentRun(

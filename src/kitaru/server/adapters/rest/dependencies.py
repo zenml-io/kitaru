@@ -575,6 +575,7 @@ def get_experiment_service(
         repository=SQLExperimentRepository(session),
         plugin_repository=SQLPluginRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
+        agent_repository=SQLAgentRepository(session),
         cohort_version_repository=SQLCohortVersionRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         agent_version_repository=SQLAgentVersionRepository(session),

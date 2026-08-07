@@ -2841,6 +2841,24 @@ class FakeCohortVersionRepository:
             raise CohortVersionIdNotFound(cohort_version_id)
         return version.model_copy()
 
+    async def get_agent_id(self, cohort_version_id: uuid.UUID) -> uuid.UUID:
+        """Load the id of the agent a version's cohort belongs to.
+
+        Args:
+            cohort_version_id: Id of the cohort version.
+
+        Raises:
+            CohortVersionIdNotFound: No cohort version has this id.
+
+        Returns:
+            Id of the owning agent.
+        """
+        version = self._versions.get(cohort_version_id)
+        if version is None:
+            raise CohortVersionIdNotFound(cohort_version_id)
+        cohort = await self._cohorts.get(version.cohort_id)
+        return cohort.agent_id
+
     async def get_by_number(self, cohort_id: uuid.UUID, version: int) -> CohortVersion:
         """Load a cohort version by cohort id and version number.
 
@@ -3827,6 +3845,7 @@ class FakeExperimentRepository:
 async def create_experiment(
     repository: FakeExperimentRepository,
     owner_id: uuid.UUID,
+    agent_id: uuid.UUID,
     replay_config_id: uuid.UUID,
     name: str = "smoke-test",
     description: str | None = None,
@@ -3836,6 +3855,7 @@ async def create_experiment(
     Args:
         repository: Fake experiment repository.
         owner_id: Id of the owning account.
+        agent_id: Id of the agent the experiment belongs to.
         replay_config_id: Id of the experiment's replay config.
         name: Experiment name.
         description: Experiment description.
@@ -3848,6 +3868,7 @@ async def create_experiment(
             owner_id=owner_id,
             name=name,
             description=description,
+            agent_id=agent_id,
             replay_config_id=replay_config_id,
         )
     )
@@ -5585,6 +5606,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         repository=experiments,
         plugin_repository=plugins,
         experiment_run_repository=experiment_runs,
+        agent_repository=agents,
         cohort_version_repository=cohort_versions,
         session_repository=sessions,
         agent_version_repository=agent_versions,

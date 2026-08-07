@@ -342,7 +342,11 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("agent_id", sa.Uuid(), nullable=False),
         sa.Column("replay_config_id", sa.Uuid(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["agent_id"], ["agent.id"], name="fk_experiment_agent_id"
+        ),
         sa.ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name="fk_experiment_owner_id"
         ),
@@ -354,6 +358,8 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_experiment_name"),
     )
+    with op.batch_alter_table("experiment", schema=None) as batch_op:
+        batch_op.create_index("ix_experiment_agent_id", ["agent_id"], unique=False)
     op.create_table(
         "plugin_version",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
@@ -1053,6 +1059,9 @@ def downgrade() -> None:
 
     op.drop_table("tag_link")
     op.drop_table("plugin_version")
+    with op.batch_alter_table("experiment", schema=None) as batch_op:
+        batch_op.drop_index("ix_experiment_agent_id")
+
     op.drop_table("experiment")
     op.drop_table("cohort_version")
     op.drop_table("cohort")
