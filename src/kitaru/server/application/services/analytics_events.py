@@ -11,12 +11,16 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Analytics event property builders."""
+"""Analytics event property and user trait builders."""
 
 from datetime import datetime
 from typing import Any
 
+from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.annotation import Annotation
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PluginKind, PluginSource
 from kitaru.server.domain.replay_config import ReplayOverride
@@ -39,6 +43,22 @@ def _duration_properties(
     if started_at is None or ended_at is None:
         return {}
     return {"duration_seconds": (ended_at - started_at).total_seconds()}
+
+
+def build_account_traits(account: Account) -> dict[str, Any]:
+    """Build the traits of an account, excluding its name and email.
+
+    Args:
+        account: Account the traits describe.
+
+    Returns:
+        User traits.
+    """
+    return {
+        "is_admin": account.is_admin,
+        "is_service_account": account.is_service_account,
+        "active": account.active,
+    }
 
 
 def build_session_completed_properties(session: Session) -> dict[str, Any]:
@@ -188,6 +208,56 @@ def build_cohort_version_created_properties(session_count: int) -> dict[str, Any
         Event properties.
     """
     return {"session_count": session_count}
+
+
+def build_agent_version_created_properties(version: AgentVersion) -> dict[str, Any]:
+    """Build the properties of an agent version creation.
+
+    Args:
+        version: Created agent version.
+
+    Returns:
+        Event properties.
+    """
+    return {
+        "version": version.version,
+        "runnable": version.run_spec is not None,
+        "tool_count": len(version.capabilities.tools),
+        "mcp_server_count": len(version.capabilities.mcp_servers),
+        "skill_count": len(version.capabilities.skills),
+    }
+
+
+def build_investigation_created_properties(
+    investigation: Investigation,
+) -> dict[str, Any]:
+    """Build the properties of an investigation creation.
+
+    Args:
+        investigation: Created investigation.
+
+    Returns:
+        Event properties.
+    """
+    return {
+        "question_count": len(investigation.questions),
+        "session_count": investigation.total_sessions,
+    }
+
+
+def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any]:
+    """Build the properties of an annotation creation.
+
+    Args:
+        annotation: Stored annotation.
+
+    Returns:
+        Event properties.
+    """
+    return {
+        "investigation_answer": annotation.investigation_session_id is not None,
+        "has_selector": annotation.selector is not None,
+    }
 
 
 def build_plugin_registered_properties(

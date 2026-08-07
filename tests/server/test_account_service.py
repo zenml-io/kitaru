@@ -14,6 +14,7 @@
 """Tests for account use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -24,6 +25,7 @@ from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import (
     Account,
     AccountNotFound,
@@ -37,6 +39,25 @@ ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True
 NON_ADMIN_ACTOR = AuthContext(
     account=Account(id=uuid.uuid4(), name="alice", is_admin=False)
 )
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording identify calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
+
+    def identify(
+        self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
+    ) -> None:
+        """Record an identify call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            traits: User traits.
+        """
+        self.identified.append((user_id, traits or {}))
 
 
 @pytest.fixture
@@ -458,3 +479,65 @@ async def test_ensure_account_promotes_existing_non_admin(
     await repository.create(Account(name="admin", is_admin=False))
     account = await service.ensure_account("admin", "secret")
     assert account.is_admin is True
+
+
+async def test_create_account_identifies_the_account() -> None:
+    """Identify a created account with its traits, excluding name and email."""
+    analytics = _RecordingAnalytics()
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+
+    account, _ = await service.create_account(
+        name="alice",
+        email="alice@example.com",
+        password="secret",
+        is_admin=False,
+        actor=ACTOR,
+    )
+
+    assert len(analytics.identified) == 1
+    user_id, traits = analytics.identified[0]
+    assert user_id == account.id
+    assert traits == {
+        "is_admin": False,
+        "is_service_account": False,
+        "active": True,
+    }
+
+
+async def test_create_pending_account_identifies_the_account() -> None:
+    """Identify a password-less account as inactive."""
+    analytics = _RecordingAnalytics()
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+
+    account, _ = await service.create_account(
+        name="alice", email=None, password=None, is_admin=True, actor=ACTOR
+    )
+
+    assert len(analytics.identified) == 1
+    user_id, traits = analytics.identified[0]
+    assert user_id == account.id
+    assert traits == {
+        "is_admin": True,
+        "is_service_account": False,
+        "active": False,
+    }
+
+
+async def test_create_account_without_analytics_tracker(
+    service: AccountService,
+) -> None:
+    """Create an account normally when no analytics tracker is configured."""
+    account, _ = await service.create_account(
+        name="alice", email=None, password="secret", is_admin=False, actor=ACTOR
+    )
+    assert account.name == "alice"

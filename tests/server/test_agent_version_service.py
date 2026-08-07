@@ -14,6 +14,7 @@
 """Tests for agent version use cases."""
 
 import uuid
+from typing import Any
 
 import pytest
 
@@ -24,6 +25,7 @@ from conftest import (
     create_agent,
     create_agent_task,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
     AgentVersionUpdate,
@@ -32,6 +34,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import (
@@ -41,6 +44,29 @@ from kitaru.server.domain.agent_version import (
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, AnalyticsEvent | str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -450,3 +476,68 @@ async def test_delete_version_not_found(service: AgentVersionService) -> None:
     """Raise for an unknown agent version id."""
     with pytest.raises(AgentVersionNotFound):
         await service.delete_version(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_create_version_tracks_agent_version_created(
+    repository: FakeAgentVersionRepository, agent_id: uuid.UUID
+) -> None:
+    """Fire AGENT_VERSION_CREATED with the version number and capability counts."""
+    analytics = _RecordingAnalytics()
+    service = AgentVersionService(repository=repository, analytics=analytics)
+
+    await service.create_version(
+        agent_id=agent_id,
+        display_version=None,
+        description=None,
+        run_spec=RunSpec(command="run.sh"),
+        capabilities=AgentCapabilities(tools=["search", "browse"], skills=["triage"]),
+        actor=ACTOR,
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == ACTOR.account.id
+    assert event == AnalyticsEvent.AGENT_VERSION_CREATED
+    assert properties == {
+        "version": 1,
+        "runnable": True,
+        "tool_count": 2,
+        "mcp_server_count": 0,
+        "skill_count": 1,
+    }
+
+
+async def test_create_version_without_run_spec_tracks_the_flag(
+    repository: FakeAgentVersionRepository, agent_id: uuid.UUID
+) -> None:
+    """Flag a version created without a run spec as not runnable."""
+    analytics = _RecordingAnalytics()
+    service = AgentVersionService(repository=repository, analytics=analytics)
+
+    await service.create_version(
+        agent_id=agent_id,
+        display_version=None,
+        description=None,
+        run_spec=None,
+        capabilities=None,
+        actor=ACTOR,
+    )
+
+    _, _, properties = analytics.tracked[0]
+    assert properties["runnable"] is False
+    assert properties["tool_count"] == 0
+
+
+async def test_create_version_without_analytics_tracker(
+    service: AgentVersionService, agent_id: uuid.UUID
+) -> None:
+    """Create a version normally when no analytics tracker is configured."""
+    version = await service.create_version(
+        agent_id=agent_id,
+        display_version=None,
+        description=None,
+        run_spec=None,
+        capabilities=None,
+        actor=ACTOR,
+    )
+    assert version.owner_id == ACTOR.account.id

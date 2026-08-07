@@ -27,15 +27,35 @@ _BUFFER_KEY = "kitaru_analytics_buffer"
 
 
 @dataclass
+class _BufferedTrack:
+    """Buffered track message."""
+
+    user_id: uuid.UUID
+    event: str
+    properties: dict[str, Any]
+
+
+@dataclass
+class _BufferedIdentify:
+    """Buffered identify message."""
+
+    user_id: uuid.UUID
+    traits: dict[str, Any]
+
+
+_BufferedMessage = _BufferedTrack | _BufferedIdentify
+
+
+@dataclass
 class _AnalyticsBuffer:
-    """Track messages queued on a session until it commits."""
+    """Messages queued on a session until it commits."""
 
     client: AnalyticsClient
-    messages: list[tuple[uuid.UUID, str, dict[str, Any]]] = field(default_factory=list)
+    messages: list[_BufferedMessage] = field(default_factory=list)
 
 
 class ServerAnalytics:
-    """Analytics tracker that buffers track calls until the session commits."""
+    """Analytics tracker that buffers calls until the session commits."""
 
     def __init__(
         self,
@@ -75,20 +95,57 @@ class ServerAnalytics:
         """
         if not self._client.enabled:
             return
-        merged = {
-            **(properties or {}),
+        self._get_buffer().messages.append(
+            _BufferedTrack(
+                user_id=user_id, event=event, properties=self._merge(properties)
+            )
+        )
+
+    def identify(
+        self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
+    ) -> None:
+        """Buffer an identify message for delivery once the session commits.
+
+        Args:
+            user_id: User id.
+            traits: User traits, merged with the server id and version.
+        """
+        if not self._client.enabled:
+            return
+        self._get_buffer().messages.append(
+            _BufferedIdentify(user_id=user_id, traits=self._merge(traits))
+        )
+
+    def _merge(self, values: dict[str, Any] | None) -> dict[str, Any]:
+        """Merge the server id and version into a message's values.
+
+        Args:
+            values: Event properties or user traits.
+
+        Returns:
+            Merged values.
+        """
+        return {
+            **(values or {}),
             "server_id": self._server_id,
             "version": self._version,
         }
+
+    def _get_buffer(self) -> _AnalyticsBuffer:
+        """Get the session's buffer, creating it on first use.
+
+        Returns:
+            Buffer stored on the request session.
+        """
         buffer = self._session.info.get(_BUFFER_KEY)
         if buffer is None:
             buffer = _AnalyticsBuffer(client=self._client)
             self._session.info[_BUFFER_KEY] = buffer
-        buffer.messages.append((user_id, event, merged))
+        return buffer
 
 
 def flush_analytics_buffer(session: Session) -> None:
-    """Deliver every track message buffered on a committed session.
+    """Deliver every message buffered on a committed session.
 
     Args:
         session: Sync session underlying a committed AsyncSession.
@@ -96,12 +153,15 @@ def flush_analytics_buffer(session: Session) -> None:
     buffer: _AnalyticsBuffer | None = session.info.pop(_BUFFER_KEY, None)
     if buffer is None:
         return
-    for user_id, event, properties in buffer.messages:
-        buffer.client.track(user_id, event, properties)
+    for message in buffer.messages:
+        if isinstance(message, _BufferedTrack):
+            buffer.client.track(message.user_id, message.event, message.properties)
+        else:
+            buffer.client.identify(message.user_id, message.traits)
 
 
 def discard_analytics_buffer(session: Session) -> None:
-    """Discard every track message buffered on a rolled back session.
+    """Discard every message buffered on a rolled back session.
 
     Args:
         session: Sync session underlying a rolled back AsyncSession.

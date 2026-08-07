@@ -32,7 +32,7 @@ def analytics_listeners() -> None:
 
 
 class _RecordingAnalyticsClient(AnalyticsClient):
-    """Analytics client recording track calls instead of sending them."""
+    """Analytics client recording calls instead of sending them."""
 
     def __init__(self, enabled: bool = True) -> None:
         """Initialize the client.
@@ -42,6 +42,7 @@ class _RecordingAnalyticsClient(AnalyticsClient):
         """
         super().__init__(enabled=enabled)
         self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
+        self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
 
     def track(
         self,
@@ -57,6 +58,17 @@ class _RecordingAnalyticsClient(AnalyticsClient):
             properties: Event properties.
         """
         self.tracked.append((user_id, event, properties or {}))
+
+    def identify(
+        self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
+    ) -> None:
+        """Record an identify call instead of queuing it for delivery.
+
+        Args:
+            user_id: User id.
+            traits: User traits.
+        """
+        self.identified.append((user_id, traits or {}))
 
 
 async def test_track_then_commit_delivers_to_client() -> None:
@@ -129,3 +141,59 @@ async def test_disabled_client_buffers_nothing() -> None:
         await session.commit()
 
     assert client.tracked == []
+
+
+async def test_identify_then_commit_delivers_to_client() -> None:
+    """A buffered identify message reaches the client once the session commits."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    user_id = uuid.uuid4()
+    async with pg_session() as session:
+        analytics = ServerAnalytics(
+            client=client, session=session, server_id=None, version="0.0.0"
+        )
+        analytics.identify(user_id, {"is_admin": True})
+        await session.commit()
+
+    assert len(client.identified) == 1
+    identified_user_id, traits = client.identified[0]
+    assert identified_user_id == user_id
+    assert traits["is_admin"] is True
+    assert traits["server_id"] is None
+    assert traits["version"] == "0.0.0"
+
+
+async def test_identify_then_rollback_delivers_nothing() -> None:
+    """A buffered identify message is discarded when the session rolls back."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    async with pg_session() as session:
+        analytics = ServerAnalytics(
+            client=client, session=session, server_id=None, version="0.0.0"
+        )
+        analytics.identify(uuid.uuid4())
+        await session.rollback()
+
+    assert client.identified == []
+
+
+async def test_identify_and_track_deliver_in_order() -> None:
+    """Both message kinds buffered on one session reach the client on commit."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    async with pg_session() as session:
+        analytics = ServerAnalytics(
+            client=client, session=session, server_id=None, version="0.0.0"
+        )
+        analytics.identify(uuid.uuid4())
+        analytics.track(uuid.uuid4(), AnalyticsEvent.SESSION_COMPLETED)
+        await session.commit()
+
+    assert len(client.identified) == 1
+    assert len(client.tracked) == 1

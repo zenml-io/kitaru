@@ -254,12 +254,14 @@ def get_permission_service(
 def get_account_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     permission_service: Annotated[PermissionService, Depends(get_permission_service)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AccountService:
     """Return an account service for the current request.
 
     Args:
         session: Request-scoped database session.
         permission_service: Permission service for the current request.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Account service bound to the SQL repository.
@@ -268,35 +270,42 @@ def get_account_service(
         repository=SQLAccountRepository(session),
         password_hasher=BcryptPasswordHasher(),
         permission_service=permission_service,
+        analytics=analytics,
     )
 
 
 def get_agent_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AgentService:
     """Return an agent service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Agent service bound to the SQL repository.
     """
-    return AgentService(repository=SQLAgentRepository(session))
+    return AgentService(repository=SQLAgentRepository(session), analytics=analytics)
 
 
 def get_agent_version_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AgentVersionService:
     """Return an agent version service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Agent version service bound to the SQL repositories.
     """
-    return AgentVersionService(repository=SQLAgentVersionRepository(session))
+    return AgentVersionService(
+        repository=SQLAgentVersionRepository(session), analytics=analytics
+    )
 
 
 def get_api_key_service(
@@ -692,12 +701,14 @@ def get_evaluation_service(
 def get_investigation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> InvestigationService:
     """Return an investigation service for the current request.
 
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Investigation service bound to the SQL repositories.
@@ -706,18 +717,21 @@ def get_investigation_service(
         repository=SQLInvestigationRepository(session),
         agent_repository=SQLAgentRepository(session),
         session_repository=SQLSessionRepository(session, engine),
+        analytics=analytics,
     )
 
 
 def get_annotation_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AnnotationService:
     """Return an annotation service for the current request.
 
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Annotation service bound to the SQL repositories.
@@ -727,6 +741,7 @@ def get_annotation_service(
         investigation_repository=SQLInvestigationRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         session_node_repository=SQLSessionNodeRepository(session),
+        analytics=analytics,
     )
 
 

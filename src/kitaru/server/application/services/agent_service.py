@@ -15,22 +15,28 @@
 
 import uuid
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.agent import Agent
 
 
 class AgentService:
     """Agent use cases."""
 
-    def __init__(self, repository: AgentRepository) -> None:
+    def __init__(
+        self, repository: AgentRepository, analytics: ServerAnalytics | None = None
+    ) -> None:
         """Initialize the service.
 
         Args:
             repository: Agent repository.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
+        self._analytics = analytics
 
     async def create_agent(
         self, name: str, description: str | None, actor: AuthContext
@@ -49,7 +55,10 @@ class AgentService:
             Created agent.
         """
         agent = Agent(owner_id=actor.account.id, name=name, description=description)
-        return await self._repository.create(agent)
+        agent = await self._repository.create(agent)
+        if self._analytics is not None:
+            self._analytics.track(actor.account.id, AnalyticsEvent.AGENT_CREATED)
+        return agent
 
     async def get_agent(self, agent_id: uuid.UUID, actor: AuthContext) -> Agent:
         """Get an agent by id.
