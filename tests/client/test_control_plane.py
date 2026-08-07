@@ -269,3 +269,27 @@ async def test_relative_verification_uri_is_opened_against_the_control_plane(
     await session.close()
 
     assert opened == [f"{CONTROL_PLANE_URL}/devices/verify"]
+
+
+async def test_device_login_adds_the_workspace_to_the_verification_uri(
+    credential_store: CredentialStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open and prompt the verification page with the workspace query parameter."""
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "kitaru.client.control_plane.webbrowser.open", lambda uri: opened.append(uri)
+    )
+    prompted: list[str | None] = []
+    session = _session(credential_store, FakeControlPlane())
+
+    await session.device_login(
+        prompt=lambda authorization: prompted.append(
+            authorization.verification_uri_complete
+        ),
+        workspace_id="workspace-id",
+    )
+    await session.close()
+
+    expected = f"{CONTROL_PLANE_URL}/devices/verify?workspace=workspace-id"
+    assert opened == [expected]
+    assert prompted == [expected]
