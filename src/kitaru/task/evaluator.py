@@ -13,7 +13,6 @@
 #  permissions and limitations under the License.
 """Evaluator plugin contract and the evaluation flow."""
 
-import asyncio
 import uuid
 from collections.abc import Callable
 from pathlib import Path
@@ -23,7 +22,7 @@ from pydantic import BaseModel
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionResponse
-from kitaru.api_models.v1.session_node import SessionNodeListParams, SessionNodeResponse
+from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.api_models.v1.task import EvaluationTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task.plugins import PluginLoadError, load_plugin_entrypoint, load_source_ref
@@ -134,18 +133,7 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
         raise EvaluationError(f"Task {task_id} is not an evaluator task")
     evaluator = _resolve_evaluator(details)
 
-    async def _fetch_nodes() -> list[SessionNodeResponse]:
-        return [
-            node
-            async for node in client.sessions.iter_nodes(
-                details.input_session_id,
-                SessionNodeListParams(include_payloads=True),
-            )
-        ]
-
-    session, nodes = await asyncio.gather(
-        client.sessions.get(details.input_session_id), _fetch_nodes()
-    )
-    view = SessionView(session=session, nodes=nodes)
+    full = await client.sessions.get_with_nodes(details.input_session_id)
+    view = SessionView(session=full.session, nodes=full.nodes)
     results = call_evaluator(details.evaluator_name, evaluator, view, details.params)
     write_task_result(results)

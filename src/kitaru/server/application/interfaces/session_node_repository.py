@@ -14,7 +14,7 @@
 """Session node repository interface."""
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
 from kitaru.server.application.models.session_node import SessionNodeFilter
@@ -25,13 +25,15 @@ class SessionNodeRepository(Protocol):
     """Session node persistence operations."""
 
     async def get_by_indexes(
-        self, session_id: uuid.UUID, indexes: Sequence[int]
+        self, session_id: uuid.UUID, indexes: Sequence[int], include_payloads: bool
     ) -> dict[int, SessionNode]:
         """Bulk-load the stored nodes of a session at the given indexes.
 
         Args:
             session_id: Id of the owning session.
             indexes: Indexes to load.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
             Stored nodes keyed by index, missing indexes omitted.
@@ -68,14 +70,32 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
-    async def get_index_by_id(self, session_id: uuid.UUID) -> dict[uuid.UUID, int]:
-        """Bulk-load the index of every node in a session, keyed by node id.
+    async def list_all(
+        self, session_id: uuid.UUID, include_payloads: bool
+    ) -> list[SessionNode]:
+        """Read every node of a session, ordered by index ascending.
 
         Args:
             session_id: Id of the owning session.
+            include_payloads: Whether to read the inputs, outputs, and
+                attributes.
 
         Returns:
-            Every node id in the session mapped to its index.
+            Every node of the session.
+        """
+        ...
+
+    async def get_indexes_by_ids(
+        self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, int]:
+        """Bulk-load the index of the named nodes of a session, keyed by node id.
+
+        Args:
+            session_id: Id of the owning session.
+            node_ids: Ids to look up.
+
+        Returns:
+            Each requested node id mapped to its index, missing ids omitted.
         """
         ...
 

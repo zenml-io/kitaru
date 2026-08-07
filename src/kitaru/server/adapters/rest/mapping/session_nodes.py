@@ -14,6 +14,7 @@
 """Session node DTO conversions."""
 
 import uuid
+from collections.abc import Sequence
 
 from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
@@ -76,6 +77,23 @@ def session_node_batch_to_upserts(
         Upsert commands, parent before child.
     """
     return [session_node_create_to_upsert(node) for node in batch.nodes]
+
+
+def referenced_parent_ids(nodes: Sequence[SessionNode]) -> set[uuid.UUID]:
+    """Collect the parent ids the given nodes point at.
+
+    Args:
+        nodes: Nodes about to be converted to responses.
+
+    Returns:
+        Ids of every primary and secondary parent the nodes name.
+    """
+    parent_ids: set[uuid.UUID] = set()
+    for node in nodes:
+        if node.parent_id is not None:
+            parent_ids.add(node.parent_id)
+        parent_ids.update(node.secondary_parent_ids)
+    return parent_ids
 
 
 def session_node_to_response(
