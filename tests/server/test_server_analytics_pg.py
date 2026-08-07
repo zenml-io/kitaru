@@ -22,7 +22,11 @@ from conftest import pg_session, postgres_available
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.adapters.db.analytics import register_analytics_listeners
-from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.server_analytics import (
+    ServerAnalytics,
+    current_actor,
+)
+from kitaru.server.domain.account import Account
 
 
 @pytest.fixture(autouse=True)
@@ -89,9 +93,7 @@ async def test_track_then_commit_delivers_to_client() -> None:
     client = _RecordingAnalyticsClient()
     user_id = uuid.uuid4()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.track(user_id, AnalyticsEvent.SESSION_COMPLETED, {"foo": "bar"})
         await session.commit()
 
@@ -100,8 +102,8 @@ async def test_track_then_commit_delivers_to_client() -> None:
     assert tracked_user_id == user_id
     assert tracked_event == AnalyticsEvent.SESSION_COMPLETED
     assert tracked_properties["foo"] == "bar"
-    assert tracked_properties["server_id"] is None
-    assert tracked_properties["version"] == "0.0.0"
+    assert "service_account" not in tracked_properties
+    assert "control_plane_user_id" not in tracked_properties
 
 
 async def test_track_then_rollback_delivers_nothing() -> None:
@@ -111,9 +113,7 @@ async def test_track_then_rollback_delivers_nothing() -> None:
 
     client = _RecordingAnalyticsClient()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.track(uuid.uuid4(), AnalyticsEvent.SESSION_COMPLETED)
         await session.rollback()
 
@@ -127,9 +127,7 @@ async def test_second_commit_does_not_resend() -> None:
 
     client = _RecordingAnalyticsClient()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.track(uuid.uuid4(), AnalyticsEvent.SESSION_COMPLETED)
         await session.commit()
         await session.commit()
@@ -144,9 +142,7 @@ async def test_disabled_client_buffers_nothing() -> None:
 
     client = _RecordingAnalyticsClient(enabled=False)
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.track(uuid.uuid4(), AnalyticsEvent.SESSION_COMPLETED)
         await session.commit()
 
@@ -161,9 +157,7 @@ async def test_identify_then_commit_delivers_to_client() -> None:
     client = _RecordingAnalyticsClient()
     user_id = uuid.uuid4()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.identify(user_id, {"is_admin": True})
         await session.commit()
 
@@ -171,8 +165,6 @@ async def test_identify_then_commit_delivers_to_client() -> None:
     identified_user_id, traits = client.identified[0]
     assert identified_user_id == user_id
     assert traits["is_admin"] is True
-    assert traits["server_id"] is None
-    assert traits["version"] == "0.0.0"
 
 
 async def test_identify_then_rollback_delivers_nothing() -> None:
@@ -182,9 +174,7 @@ async def test_identify_then_rollback_delivers_nothing() -> None:
 
     client = _RecordingAnalyticsClient()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.identify(uuid.uuid4())
         await session.rollback()
 
@@ -198,9 +188,7 @@ async def test_identify_and_track_deliver_in_order() -> None:
 
     client = _RecordingAnalyticsClient()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.identify(uuid.uuid4())
         analytics.track(uuid.uuid4(), AnalyticsEvent.SESSION_COMPLETED)
         await session.commit()
@@ -218,9 +206,7 @@ async def test_alias_then_commit_delivers_to_client() -> None:
     user_id = uuid.uuid4()
     previous_id = uuid.uuid4()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.alias(user_id, previous_id)
         await session.commit()
 
@@ -234,10 +220,54 @@ async def test_alias_then_rollback_delivers_nothing() -> None:
 
     client = _RecordingAnalyticsClient()
     async with pg_session() as session:
-        analytics = ServerAnalytics(
-            client=client, session=session, server_id=None, version="0.0.0"
-        )
+        analytics = ServerAnalytics(client=client, session=session)
         analytics.alias(uuid.uuid4(), uuid.uuid4())
         await session.rollback()
 
     assert client.aliased == []
+
+
+async def test_track_merges_the_current_actor() -> None:
+    """The acting account lands in tracked properties but not identify traits."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    account = Account(name="runner", is_service_account=True, external_id=uuid.uuid4())
+    token = current_actor.set(account)
+    try:
+        async with pg_session() as session:
+            analytics = ServerAnalytics(client=client, session=session)
+            analytics.track(account.id, AnalyticsEvent.SESSION_COMPLETED)
+            analytics.identify(account.id)
+            await session.commit()
+    finally:
+        current_actor.reset(token)
+
+    _, _, properties = client.tracked[0]
+    assert properties["service_account"] is True
+    assert properties["control_plane_user_id"] == account.external_id
+    _, traits = client.identified[0]
+    assert "service_account" not in traits
+    assert "control_plane_user_id" not in traits
+
+
+async def test_track_omits_control_plane_user_id_without_external_id() -> None:
+    """An actor without an external id contributes only the service flag."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    account = Account(name="ann")
+    token = current_actor.set(account)
+    try:
+        async with pg_session() as session:
+            analytics = ServerAnalytics(client=client, session=session)
+            analytics.track(account.id, AnalyticsEvent.SESSION_COMPLETED)
+            await session.commit()
+    finally:
+        current_actor.reset(token)
+
+    _, _, properties = client.tracked[0]
+    assert properties["service_account"] is False
+    assert "control_plane_user_id" not in properties

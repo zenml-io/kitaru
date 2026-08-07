@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- The server persists a generated server id on first startup, seeded from `KITARU_SERVER_SERVER_ID` when set. Analytics events carry that id together with the auth scheme, runtime environment, operating system, Python version, and, when available, the enrolled workspace id, the acting account's service account flag, and its control plane user id. The default account is identified at startup, and identify traits carry an `account_origin` (`bootstrap`, `api`, or `control_plane`).
 - Evaluators and importers carry an optional `logo_url`, set at creation, changed through the update endpoints, and returned in responses. Default plugin definitions can supply one.
 - Server-side analytics now cover agent, agent version, investigation, and annotation creation. A created account is identified with its email, service account flag, and source, and an account mirrored from a control plane user is aliased to that user.
 - The `kitaru/` plugin name prefix is reserved for built-in default plugins, which are registered at server startup without an owner. Creating a plugin whose name starts with `kitaru/` via the API is rejected.

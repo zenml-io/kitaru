@@ -35,8 +35,9 @@ class AnalyticsEvent(StrEnum):
     PLUGIN_REGISTERED = "plugin_registered"
 
 
-class AccountSource(StrEnum):
-    """Account source."""
+class AccountOrigin(StrEnum):
+    """Account origin."""
 
+    BOOTSTRAP = "bootstrap"
     API = "api"
     CONTROL_PLANE = "control_plane"

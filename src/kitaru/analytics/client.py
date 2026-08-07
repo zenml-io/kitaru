@@ -85,6 +85,7 @@ class AnalyticsClient:
         """
         self._enabled = enabled
         self._debug = debug
+        self._context: dict[str, Any] = {}
         self._max_batch_size = max_batch_size
         self._queue: asyncio.Queue[tuple[AnalyticsSource, AnalyticsMessage] | None] = (
             asyncio.Queue(maxsize=max_queue_size)
@@ -96,6 +97,14 @@ class AnalyticsClient:
         )
         self._worker: asyncio.Task[None] | None = None
         self._closed = False
+
+    def set_context(self, context: dict[str, Any]) -> None:
+        """Set the context merged into every track message.
+
+        Args:
+            context: Values merged into event properties.
+        """
+        self._context = context
 
     @property
     def enabled(self) -> bool:
@@ -123,7 +132,7 @@ class AnalyticsClient:
             TrackMessage(
                 user_id=user_id,
                 event=event,
-                properties=properties or {},
+                properties={**(properties or {}), **self._context},
                 debug=self._debug,
             )
         )

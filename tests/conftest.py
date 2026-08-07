@@ -238,6 +238,10 @@ from kitaru.transport import RetryTransport
 # only conftest in the tree.
 sys.modules.setdefault("conftest", sys.modules[__name__])
 
+# Settings built without an explicit ANALYTICS_OPT_IN read this environment
+# variable, so no test server posts analytics to the real endpoint.
+os.environ["KITARU_SERVER_ANALYTICS_OPT_IN"] = "false"
+
 TEST_DB_PREFIX = "kitaru_test"
 
 

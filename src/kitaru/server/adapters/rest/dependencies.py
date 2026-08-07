@@ -14,7 +14,6 @@
 """FastAPI dependency providers."""
 
 from collections.abc import AsyncGenerator
-from importlib.metadata import version
 from typing import Annotated, NamedTuple
 
 from fastapi import Depends, HTTPException, Request, status
@@ -94,7 +93,7 @@ from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionPro
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
-from kitaru.server.api.config import UNSET_SERVER_ID, APISettings
+from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -130,7 +129,10 @@ from kitaru.server.application.services.permission_service import PermissionServ
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.secret_service import SecretService
-from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.server_analytics import (
+    ServerAnalytics,
+    current_actor,
+)
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -145,7 +147,6 @@ from kitaru.server.domain.account import AccountNotFound
 from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
-KITARU_VERSION = version("kitaru")
 
 
 class RequestCredential(NamedTuple):
@@ -216,23 +217,18 @@ def get_analytics_client(request: Request) -> AnalyticsClient:
 
 def get_server_analytics(
     session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
     client: Annotated[AnalyticsClient, Depends(get_analytics_client)],
 ) -> ServerAnalytics:
     """Return a server analytics tracker for the current request.
 
     Args:
         session: Request-scoped database session.
-        settings: API settings for this process.
         client: Analytics client for this process.
 
     Returns:
         Tracker buffering track calls until the request session commits.
     """
-    server_id = None if settings.SERVER_ID == UNSET_SERVER_ID else settings.SERVER_ID
-    return ServerAnalytics(
-        client=client, session=session, server_id=server_id, version=KITARU_VERSION
-    )
+    return ServerAnalytics(client=client, session=session)
 
 
 def get_permission_service(
@@ -824,6 +820,9 @@ def get_auth_service(
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
     if client is not None:
+        # Settings validation requires SERVER_ID under the control plane
+        # scheme, the only scheme that constructs the client.
+        assert settings.SERVER_ID is not None
         control_plane = ControlPlaneAuthenticator(
             client=client,
             account_repository=account_repository,
@@ -907,8 +906,38 @@ async def _resolve_auth_context(
         RequestCredential | None, Depends(get_optional_bearer_credential)
     ],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
-) -> AuthContext:
+) -> AsyncGenerator[AuthContext, None]:
     """Resolve a request into its auth context, gating on nothing but validity.
+
+    The resolved account is published as the analytics actor for the rest of
+    the request.
+
+    Args:
+        settings: Service settings governing auth behavior.
+        credential: Bearer token plus optional CSRF token.
+        auth_service: Authentication service for the current request.
+
+    Raises:
+        HTTPException: The credential is missing or invalid.
+        RuntimeError: The default account was not initialized at startup.
+
+    Yields:
+        Resolved account and principal for use-case calls.
+    """
+    context = await _authenticate(settings, credential, auth_service)
+    token = current_actor.set(context.account)
+    try:
+        yield context
+    finally:
+        current_actor.reset(token)
+
+
+async def _authenticate(
+    settings: APISettings,
+    credential: RequestCredential | None,
+    auth_service: AuthService,
+) -> AuthContext:
+    """Authenticate a request credential into its auth context.
 
     With the ``none`` auth scheme a request without a worker or task
     credential runs as the default account. Other schemes require a bearer

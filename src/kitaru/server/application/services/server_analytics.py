@@ -13,17 +13,54 @@
 #  permissions and limitations under the License.
 """Analytics tracking deferred until the request session commits."""
 
+import platform
 import uuid
+from contextvars import ContextVar
 from dataclasses import dataclass, field
+from importlib.metadata import version
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from kitaru.analytics.client import AnalyticsClient
+from kitaru.analytics.environment import get_environment
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.info import AuthScheme
+from kitaru.server.domain.account import Account
 
 _BUFFER_KEY = "kitaru_analytics_buffer"
+
+current_actor: ContextVar[Account | None] = ContextVar(
+    "kitaru_analytics_actor", default=None
+)
+
+
+def build_analytics_context(
+    server_id: uuid.UUID, auth_scheme: AuthScheme
+) -> dict[str, Any]:
+    """Build the analytics context for this process.
+
+    Args:
+        server_id: Persisted server id.
+        auth_scheme: Active authentication scheme.
+
+    Returns:
+        Context values merged into every message.
+    """
+    context: dict[str, Any] = {
+        "server_id": server_id,
+        "server_version": version("kitaru"),
+        "auth_scheme": auth_scheme.value,
+        "environment": get_environment(),
+        "os": platform.system().lower(),
+        "python_version": platform.python_version(),
+    }
+    # Under the control plane scheme the enrolled server id is the workspace
+    # id assigned by the control plane.
+    if auth_scheme is AuthScheme.CONTROL_PLANE:
+        context["workspace_id"] = server_id
+    return context
 
 
 @dataclass
@@ -65,13 +102,7 @@ class _AnalyticsBuffer:
 class ServerAnalytics:
     """Analytics tracker that buffers calls until the session commits."""
 
-    def __init__(
-        self,
-        client: AnalyticsClient,
-        session: AsyncSession,
-        server_id: uuid.UUID | None,
-        version: str,
-    ) -> None:
+    def __init__(self, client: AnalyticsClient, session: AsyncSession) -> None:
         """Initialize the tracker.
 
         Args:
@@ -79,13 +110,9 @@ class ServerAnalytics:
                 through.
             session: Request-scoped database session the messages are
                 buffered on.
-            server_id: Enrolled server id, None when unset.
-            version: Kitaru version, merged into every event's properties.
         """
         self._client = client
         self._session = session
-        self._server_id = server_id
-        self._version = version
 
     def track(
         self,
@@ -98,15 +125,18 @@ class ServerAnalytics:
         Args:
             user_id: User id.
             event: Event name.
-            properties: Event properties, merged with the server id and
-                version.
+            properties: Event properties, merged with the acting account.
         """
         if not self._client.enabled:
             return
+        properties = dict(properties or {})
+        actor = current_actor.get()
+        if actor is not None:
+            properties["service_account"] = actor.is_service_account
+            if actor.external_id is not None:
+                properties["control_plane_user_id"] = actor.external_id
         self._get_buffer().messages.append(
-            _BufferedTrack(
-                user_id=user_id, event=event, properties=self._merge(properties)
-            )
+            _BufferedTrack(user_id=user_id, event=event, properties=properties)
         )
 
     def identify(
@@ -116,12 +146,12 @@ class ServerAnalytics:
 
         Args:
             user_id: User id.
-            traits: User traits, merged with the server id and version.
+            traits: User traits.
         """
         if not self._client.enabled:
             return
         self._get_buffer().messages.append(
-            _BufferedIdentify(user_id=user_id, traits=self._merge(traits))
+            _BufferedIdentify(user_id=user_id, traits=traits or {})
         )
 
     def alias(self, user_id: uuid.UUID, previous_id: uuid.UUID) -> None:
@@ -136,21 +166,6 @@ class ServerAnalytics:
         self._get_buffer().messages.append(
             _BufferedAlias(user_id=user_id, previous_id=previous_id)
         )
-
-    def _merge(self, values: dict[str, Any] | None) -> dict[str, Any]:
-        """Merge the server id and version into a message's values.
-
-        Args:
-            values: Event properties or user traits.
-
-        Returns:
-            Merged values.
-        """
-        return {
-            **(values or {}),
-            "server_id": self._server_id,
-            "version": self._version,
-        }
 
     def _get_buffer(self) -> _AnalyticsBuffer:
         """Get the session's buffer, creating it on first use.

@@ -434,7 +434,7 @@ async def test_authenticate_new_account_identifies_and_aliases(
     assert user_id == context.account.id
     assert traits == {
         "is_service_account": False,
-        "source": "control_plane",
+        "account_origin": "control_plane",
         "email": user.email,
     }
     assert analytics.aliased == [(user.id, context.account.id)]

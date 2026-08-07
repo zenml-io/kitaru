@@ -22,7 +22,7 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from kitaru.analytics.events import AccountSource
+from kitaru.analytics.events import AccountOrigin
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
@@ -303,7 +303,7 @@ class ControlPlaneAuthenticator:
         if self._analytics is not None:
             self._analytics.identify(
                 account.id,
-                build_account_traits(account, AccountSource.CONTROL_PLANE),
+                build_account_traits(account, AccountOrigin.CONTROL_PLANE),
             )
             self._analytics.alias(user_id=user.id, previous_id=account.id)
         return account

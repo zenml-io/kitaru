@@ -481,8 +481,46 @@ async def test_ensure_account_promotes_existing_non_admin(
     assert account.is_admin is True
 
 
+async def test_ensure_account_identifies_the_account() -> None:
+    """Identify the ensured account with the bootstrap origin."""
+    analytics = _RecordingAnalytics()
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+
+    account = await service.ensure_account("admin", "secret")
+
+    assert len(analytics.identified) == 1
+    user_id, traits = analytics.identified[0]
+    assert user_id == account.id
+    assert traits == {"is_service_account": False, "account_origin": "bootstrap"}
+
+
+async def test_ensure_account_identifies_an_existing_account() -> None:
+    """Identify the default account again when it already exists."""
+    analytics = _RecordingAnalytics()
+    repository = FakeAccountRepository()
+    await repository.create(Account(name="admin", is_admin=True))
+    service = AccountService(
+        repository=repository,
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+
+    account = await service.ensure_account("admin", "secret")
+
+    assert len(analytics.identified) == 1
+    user_id, traits = analytics.identified[0]
+    assert user_id == account.id
+    assert traits["account_origin"] == "bootstrap"
+
+
 async def test_create_account_identifies_the_account() -> None:
-    """Identify a created account with its email and source."""
+    """Identify a created account with its email and origin."""
     analytics = _RecordingAnalytics()
     service = AccountService(
         repository=FakeAccountRepository(),
@@ -504,7 +542,7 @@ async def test_create_account_identifies_the_account() -> None:
     assert user_id == account.id
     assert traits == {
         "is_service_account": False,
-        "source": "api",
+        "account_origin": "api",
         "email": "alice@example.com",
     }
 
@@ -526,7 +564,7 @@ async def test_create_account_without_email_omits_the_trait() -> None:
     assert len(analytics.identified) == 1
     user_id, traits = analytics.identified[0]
     assert user_id == account.id
-    assert traits == {"is_service_account": False, "source": "api"}
+    assert traits == {"is_service_account": False, "account_origin": "api"}
 
 
 async def test_create_account_without_analytics_tracker(

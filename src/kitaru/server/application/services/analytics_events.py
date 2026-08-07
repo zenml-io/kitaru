@@ -16,7 +16,7 @@
 from datetime import datetime
 from typing import Any
 
-from kitaru.analytics.events import AccountSource
+from kitaru.analytics.events import AccountOrigin
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.annotation import Annotation
@@ -46,19 +46,19 @@ def _duration_properties(
     return {"duration_seconds": (ended_at - started_at).total_seconds()}
 
 
-def build_account_traits(account: Account, source: AccountSource) -> dict[str, Any]:
+def build_account_traits(account: Account, origin: AccountOrigin) -> dict[str, Any]:
     """Build the traits of an account.
 
     Args:
         account: Account the traits describe.
-        source: Where the account was created.
+        origin: Where the account was created.
 
     Returns:
         User traits.
     """
     traits: dict[str, Any] = {
         "is_service_account": account.is_service_account,
-        "source": source.value,
+        "account_origin": origin.value,
     }
     if account.email is not None:
         traits["email"] = account.email
@@ -102,7 +102,6 @@ def build_import_completed_properties(task: ImportTask) -> dict[str, Any]:
     """
     properties: dict[str, Any] = {
         "status": task.status.value,
-        "plugin_version_id": task.plugin_version_id,
         **_duration_properties(task.started_at, task.ended_at),
     }
     if isinstance(task.result, dict) and isinstance(task.result.get("created"), int):
@@ -121,7 +120,6 @@ def build_evaluation_completed_properties(task: EvaluationTask) -> dict[str, Any
     """
     return {
         "status": task.status.value,
-        "plugin_version_id": task.plugin_version_id,
         **_duration_properties(task.started_at, task.ended_at),
     }
 
@@ -137,6 +135,7 @@ def build_job_completed_properties(job: Job, tasks: list[Task]) -> dict[str, Any
         Event properties.
     """
     return {
+        "kind": job.kind.value,
         "status": job.status.value,
         "task_count": len(tasks),
         "task_kinds": sorted({task.kind.value for task in tasks}),

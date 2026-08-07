@@ -96,6 +96,15 @@ def upgrade() -> None:
         batch_op.create_index("ix_secret_owner_id", ["owner_id"], unique=False)
 
     op.create_table(
+        "server_settings",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("singleton", sa.Boolean(), nullable=False),
+        sa.Column("server_id", sa.Uuid(), nullable=False),
+        sa.PrimaryKeyConstraint("singleton"),
+    )
+
+    op.create_table(
         "device",
         sa.Column("created", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
@@ -1106,6 +1115,7 @@ def downgrade() -> None:
     with op.batch_alter_table("secret", schema=None) as batch_op:
         batch_op.drop_index("ix_secret_owner_id")
 
+    op.drop_table("server_settings")
     op.drop_table("secret")
     with op.batch_alter_table("api_key", schema=None) as batch_op:
         batch_op.drop_index("ix_api_key_owner_id")
