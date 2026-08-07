@@ -24,7 +24,13 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionResponse,
     AgentVersionUpdateRequest,
 )
+from kitaru.api_models.v1.agent_version import (
+    CommandRunSpec as WireCommandRunSpec,
+)
 from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
+from kitaru.api_models.v1.agent_version import (
+    TriggerRunSpec as WireTriggerRunSpec,
+)
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
@@ -33,7 +39,9 @@ from kitaru.server.application.models.agent_version import (
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
+    CommandRunSpec,
     RunSpec,
+    TriggerRunSpec,
 )
 
 
@@ -46,12 +54,20 @@ def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
     Returns:
         Domain run spec.
     """
-    return RunSpec(
-        command=run_spec.command,
-        working_dir=run_spec.working_dir,
+    if isinstance(run_spec, WireCommandRunSpec):
+        return CommandRunSpec(
+            command=run_spec.command,
+            working_dir=run_spec.working_dir,
+            env=run_spec.env,
+            secret_ids=run_spec.secret_ids,
+            timeout_seconds=run_spec.timeout_seconds,
+        )
+    return TriggerRunSpec(
+        entrypoint=run_spec.entrypoint,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         timeout_seconds=run_spec.timeout_seconds,
+        import_deadline_seconds=run_spec.import_deadline_seconds,
     )
 
 
@@ -64,12 +80,20 @@ def _run_spec_to_response(run_spec: RunSpec) -> WireRunSpec:
     Returns:
         Wire run spec.
     """
-    return WireRunSpec(
-        command=run_spec.command,
-        working_dir=run_spec.working_dir,
+    if isinstance(run_spec, CommandRunSpec):
+        return WireCommandRunSpec(
+            command=run_spec.command,
+            working_dir=run_spec.working_dir,
+            env=run_spec.env,
+            secret_ids=run_spec.secret_ids,
+            timeout_seconds=run_spec.timeout_seconds,
+        )
+    return WireTriggerRunSpec(
+        entrypoint=run_spec.entrypoint,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         timeout_seconds=run_spec.timeout_seconds,
+        import_deadline_seconds=run_spec.import_deadline_seconds,
     )
 
 

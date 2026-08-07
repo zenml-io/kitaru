@@ -32,6 +32,8 @@ from kitaru.server.domain.base import (
 )
 from kitaru.server.domain.ids import uuid7
 
+TERMINAL_SESSION_STATUSES = frozenset({SessionStatus.COMPLETED, SessionStatus.FAILED})
+
 
 class SessionNotFound(NotFoundError):
     """Raised when a session lookup does not resolve."""
@@ -82,6 +84,20 @@ class DuplicateSessionExternalId(ConflictError):
         super().__init__(
             f"Session with imported_from '{imported_from}' and external_id "
             f"'{external_id}' is already registered"
+        )
+
+
+class DuplicatePendingImportSession(ConflictError):
+    """Raised when a pending-import session with this external id already exists."""
+
+    def __init__(self, external_id: str | None) -> None:
+        """Initialize the error.
+
+        Args:
+            external_id: Id from the source system.
+        """
+        super().__init__(
+            f"A pending-import session with external_id '{external_id}' already exists"
         )
 
 
@@ -323,14 +339,52 @@ class Session(DomainModel):
         """Clear the task this session was produced by."""
         self.task_id = None
 
+    def adopt_import(
+        self,
+        name: str | None,
+        inputs: Any,
+        outputs: Any,
+        error: str | None,
+        started_at: datetime | None,
+        ended_at: datetime | None,
+        metadata: dict[str, Any],
+        imported_from: str | None,
+        framework: str | None,
+        adapter_version: str | None,
+    ) -> None:
+        """Fill the placeholder from an imported trace, keeping identity and status.
+
+        Args:
+            name: Session name.
+            inputs: Session inputs.
+            outputs: Session outputs.
+            error: Error from a failed session.
+            started_at: Time the session started.
+            ended_at: Time the session ended.
+            metadata: Arbitrary metadata.
+            imported_from: Source system the session was imported from.
+            framework: Agent framework used.
+            adapter_version: Recording adapter version.
+        """
+        self.name = name
+        self.inputs = inputs
+        self.outputs = outputs
+        self.error = error
+        self.started_at = started_at
+        self.ended_at = ended_at
+        self.metadata = metadata
+        self.imported_from = imported_from
+        self.framework = framework
+        self.adapter_version = adapter_version
+
     def check_node_ingest(self) -> None:
         """Require the session to currently accept node ingestion.
 
         Raises:
-            SessionNotIngestable: The session is not in progress and its
-                origin is not imported.
+            SessionNotIngestable: The session is terminal and its origin is
+                not imported.
         """
-        if self.status == SessionStatus.IN_PROGRESS:
+        if self.status in (SessionStatus.IN_PROGRESS, SessionStatus.PENDING_IMPORT):
             return
         if self.origin == SessionOrigin.IMPORTED:
             return
@@ -345,12 +399,21 @@ class Session(DomainModel):
     ) -> None:
         """Apply a status transition together with its outputs, error, and end time.
 
+        A pending-import session only ever moves to a terminal status, the
+        finalizing step of an adopted import.
+
         Raises:
             IllegalSessionStatusTransition: The session is terminal and
-                ``status`` changes it.
+                ``status`` changes it, or a pending-import session moves to
+                a non-terminal status.
         """
-        if status != self.status and self.status != SessionStatus.IN_PROGRESS:
-            raise IllegalSessionStatusTransition(self.id, self.status, status)
+        if status != self.status:
+            allowed = self.status is SessionStatus.IN_PROGRESS or (
+                self.status is SessionStatus.PENDING_IMPORT
+                and status in TERMINAL_SESSION_STATUSES
+            )
+            if not allowed:
+                raise IllegalSessionStatusTransition(self.id, self.status, status)
         self.status = status
         self.outputs = outputs
         self.error = error

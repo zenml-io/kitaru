@@ -14,16 +14,22 @@
 """Agent version API models."""
 
 import uuid
+from typing import Annotated, Literal
 
 from pydantic import Field, PositiveInt
 
-from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
+from kitaru.api_models.v1.base import (
+    DiscriminatedRequestModel,
+    OwnedResponseModel,
+    RequestModel,
+)
 from kitaru.api_models.v1.filter import FilterableListParams
 
 
-class RunSpec(RequestModel):
-    """Run spec."""
+class CommandRunSpec(DiscriminatedRequestModel):
+    """Command run spec."""
 
+    type: Literal["command"] = Field(default="command")
     command: str = Field(description="Shell command to run.")
     working_dir: str | None = Field(default=None, description="Working directory.")
     env: dict[str, str] = Field(
@@ -33,6 +39,29 @@ class RunSpec(RequestModel):
         default_factory=list, description="Secrets merged into the process environment."
     )
     timeout_seconds: PositiveInt = Field(default=3600, description="Process timeout.")
+
+
+class TriggerRunSpec(DiscriminatedRequestModel):
+    """Trigger run spec."""
+
+    type: Literal["trigger"] = Field(default="trigger")
+    entrypoint: str = Field(
+        description="Trigger function to load, as module:attribute."
+    )
+    env: dict[str, str] = Field(
+        default_factory=dict, description="Process environment."
+    )
+    secret_ids: list[uuid.UUID] = Field(
+        default_factory=list, description="Secrets merged into the process environment."
+    )
+    timeout_seconds: PositiveInt = Field(default=3600, description="Process timeout.")
+    import_deadline_seconds: PositiveInt = Field(
+        default=86400,
+        description="Seconds the resulting session may stay pending import.",
+    )
+
+
+RunSpec = Annotated[CommandRunSpec | TriggerRunSpec, Field(discriminator="type")]
 
 
 class AgentCapabilities(RequestModel):

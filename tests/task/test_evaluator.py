@@ -51,7 +51,7 @@ from kitaru.api_models.v1.session_node import (
     SessionWithNodesResponse,
 )
 from kitaru.api_models.v1.task import EvaluationTaskDetails, PackagePluginSpec
-from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task import evaluator as evaluator_module
 from kitaru.task.evaluator import EvaluationError, SessionView, call_evaluator, run
@@ -303,7 +303,7 @@ async def test_evaluator_flow_rejects_non_evaluator_task(
         task_app.services.agent_versions,
         agent_id=task_app.agent.id,
         owner_id=task_app.agent.owner_id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
     task = await create_agent_task(
         task_app.services.tasks, job.id, agent_version_id=version.id

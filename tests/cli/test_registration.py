@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 
 from kitaru.api_models.v1.agent import AgentCreateRequest
-from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest, RunSpec
+from kitaru.api_models.v1.agent_version import AgentVersionCreateRequest, CommandRunSpec
 from kitaru.api_models.v1.importer import ImporterCreateRequest
 from kitaru.cli import app as app_module
 from kitaru.cli.output import CLIError
@@ -230,7 +230,7 @@ async def test_agent_registration_reports_surviving_parent_on_version_failure() 
         await register_agent(
             client,
             AgentCreateRequest(name="agent"),
-            AgentVersionCreateRequest(run_spec=RunSpec(command="run")),
+            AgentVersionCreateRequest(run_spec=CommandRunSpec(command="run")),
         )
 
     assert error.value.kind == "partial_failure"

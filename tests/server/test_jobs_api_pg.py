@@ -21,7 +21,6 @@ import pytest
 from conftest import db_settings, lifespan_client
 
 RUNTIME = {"platform": "bare"}
-SCOPE = {"claims": [{"kind": "agent"}]}
 
 
 @pytest.fixture
@@ -41,7 +40,13 @@ async def _create_runnable_agent_version(client: httpx.AsyncClient) -> tuple[str
     version = (
         await client.post(
             f"/api/v1/agents/{agent['id']}/versions",
-            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+            json={
+                "run_spec": {
+                    "type": "command",
+                    "command": "run.sh",
+                    "timeout_seconds": 60,
+                }
+            },
         )
     ).json()
     return agent["id"], version["id"]
@@ -63,12 +68,7 @@ async def test_session_run_lifecycle_completes_the_job(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={
-                "name": "worker-1",
-                "scope": SCOPE,
-                "runtime": RUNTIME,
-                "metadata": {},
-            },
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
@@ -112,9 +112,7 @@ async def test_session_run_lifecycle_completes_the_job(
     assert response.status_code == 200
 
     response = await client.patch(
-        f"/api/v1/tasks/{task['id']}",
-        json={"status": "completed"},
-        headers=task_headers,
+        f"/api/v1/tasks/{task['id']}", json={"status": "completed"}, headers=task_headers
     )
     assert response.status_code == 200
 
@@ -195,12 +193,7 @@ async def test_heartbeat_reports_cancel_requested_tasks(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={
-                "name": "worker-1",
-                "scope": SCOPE,
-                "runtime": RUNTIME,
-                "metadata": {},
-            },
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker = registration["worker"]

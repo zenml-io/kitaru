@@ -27,6 +27,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -47,6 +48,13 @@ from kitaru.server.domain.session import Session
 SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["imported_from", "external_id"]
 )
+# A partial unique index, not a plain unique constraint, since Postgres only
+# supports a WHERE predicate on an index. It keeps a second trigger run from
+# reserving an external id an unadopted placeholder already holds.
+SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX = unique_constraint_name(
+    "session", ["owner_id", "external_id"]
+)
+PENDING_IMPORT_PREDICATE = "status = 'pending_import'"
 SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["agent_id", "number"]
 )
@@ -98,6 +106,13 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_TASK_ID_FOREIGN_KEY,
             ondelete="SET NULL",
             use_alter=True,
+        ),
+        Index(
+            SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX,
+            "owner_id",
+            "external_id",
+            unique=True,
+            postgresql_where=text(PENDING_IMPORT_PREDICATE),
         ),
         Index(SESSION_AGENT_ID_ID_INDEX, "agent_id", "id"),
         Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),

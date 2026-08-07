@@ -40,7 +40,7 @@ from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersionNotFound,
-    RunSpec,
+    CommandRunSpec,
 )
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -152,7 +152,9 @@ async def test_create_version_with_run_spec(
 ) -> None:
     """Store a run spec and explicit capabilities."""
     secret_id = uuid.uuid4()
-    run_spec = RunSpec(command="run.sh", secret_ids=[secret_id], timeout_seconds=120)
+    run_spec = CommandRunSpec(
+        command="run.sh", secret_ids=[secret_id], timeout_seconds=120
+    )
     capabilities = AgentCapabilities(tools=["search"])
     version = await service.create_version(
         agent_id=agent_id,
@@ -322,7 +324,7 @@ async def test_update_version_omitted_fields_unchanged(
     service: AgentVersionService, agent_id: uuid.UUID
 ) -> None:
     """Leave every field unchanged when the command sets none of it."""
-    run_spec = RunSpec(command="run.sh")
+    run_spec = CommandRunSpec(command="run.sh")
     created = await service.create_version(
         agent_id=agent_id,
         display_version="v1",
@@ -348,12 +350,12 @@ async def test_update_version_replaces_run_spec(
         agent_id=agent_id,
         display_version=None,
         description=None,
-        run_spec=RunSpec(command="old.sh", secret_ids=[uuid.uuid4()]),
+        run_spec=CommandRunSpec(command="old.sh", secret_ids=[uuid.uuid4()]),
         capabilities=None,
         actor=ACTOR,
     )
     new_secret_id = uuid.uuid4()
-    new_run_spec = RunSpec(command="new.sh", secret_ids=[new_secret_id])
+    new_run_spec = CommandRunSpec(command="new.sh", secret_ids=[new_secret_id])
     updated = await service.update_version(
         created.id, AgentVersionUpdate(run_spec=new_run_spec), actor=ACTOR
     )
@@ -370,7 +372,7 @@ async def test_update_version_clears_run_spec(
         agent_id=agent_id,
         display_version=None,
         description=None,
-        run_spec=RunSpec(command="run.sh"),
+        run_spec=CommandRunSpec(command="run.sh"),
         capabilities=None,
         actor=ACTOR,
     )
@@ -416,7 +418,7 @@ async def test_update_version_run_spec_editable_once_a_task_references_it(
         agent_id=agent_id,
         display_version=None,
         description=None,
-        run_spec=RunSpec(command="run.sh"),
+        run_spec=CommandRunSpec(command="run.sh"),
         capabilities=None,
         actor=ACTOR,
     )
@@ -424,12 +426,12 @@ async def test_update_version_run_spec_editable_once_a_task_references_it(
     updated = await service.update_version(
         created.id,
         AgentVersionUpdate(
-            run_spec=RunSpec(command="new.sh"),
+            run_spec=CommandRunSpec(command="new.sh"),
             capabilities=AgentCapabilities(tools=["search"]),
         ),
         actor=ACTOR,
     )
-    assert updated.run_spec is not None
+    assert isinstance(updated.run_spec, CommandRunSpec)
     assert updated.run_spec.command == "new.sh"
     assert updated.capabilities.tools == ["search"]
 
@@ -444,7 +446,7 @@ async def test_update_version_display_version_unaffected_by_tasks(
         agent_id=agent_id,
         display_version=None,
         description=None,
-        run_spec=RunSpec(command="run.sh"),
+        run_spec=CommandRunSpec(command="run.sh"),
         capabilities=None,
         actor=ACTOR,
     )
@@ -489,7 +491,7 @@ async def test_create_version_tracks_agent_version_created(
         agent_id=agent_id,
         display_version=None,
         description=None,
-        run_spec=RunSpec(command="run.sh"),
+        run_spec=CommandRunSpec(command="run.sh"),
         capabilities=AgentCapabilities(tools=["search", "browse"], skills=["triage"]),
         actor=ACTOR,
     )

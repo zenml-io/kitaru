@@ -36,7 +36,7 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionListParams,
     AgentVersionResponse,
     AgentVersionUpdateRequest,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.tag import (
@@ -192,7 +192,7 @@ async def test_create_version(api_client: KitaruAPIClient) -> None:
         AgentVersionCreateRequest(
             display_version="v1",
             description="First cut",
-            run_spec=RunSpec(command="run.sh", secret_ids=[secret_id]),
+            run_spec=CommandRunSpec(command="run.sh", secret_ids=[secret_id]),
             capabilities=AgentCapabilities(tools=["search"]),
         ),
     )

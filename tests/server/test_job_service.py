@@ -52,7 +52,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersionAgentMismatch,
     AgentVersionWithoutRunSpec,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.job import JobAlreadySettled, JobNotFound
@@ -80,7 +80,7 @@ async def _runnable_agent_version(services: JobAndTaskServices) -> uuid.UUID:
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
     return version.id
 

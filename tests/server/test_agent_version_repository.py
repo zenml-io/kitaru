@@ -51,7 +51,7 @@ from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
     AgentVersionNotFound,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.server.domain.secret import Secret
 from kitaru.server.domain.tag import Tag, TagLink
@@ -185,7 +185,7 @@ async def test_create_with_run_spec_and_secret_order(setup: Setup) -> None:
         await make_secret_id(),
         await make_secret_id(),
     ]
-    run_spec = RunSpec(
+    run_spec = CommandRunSpec(
         command="run.sh",
         working_dir="/app",
         env={"FOO": "bar"},
@@ -326,11 +326,11 @@ async def test_update_replaces_run_spec_and_secret_links(setup: Setup) -> None:
         AgentVersion(
             owner_id=owner_id,
             agent_id=agent_id,
-            run_spec=RunSpec(command="old.sh", secret_ids=old_secret_ids),
+            run_spec=CommandRunSpec(command="old.sh", secret_ids=old_secret_ids),
         )
     )
     new_secret_ids = [await make_secret_id()]
-    new_run_spec = RunSpec(command="new.sh", secret_ids=new_secret_ids)
+    new_run_spec = CommandRunSpec(command="new.sh", secret_ids=new_secret_ids)
     created.update_run_spec(new_run_spec)
     updated = await repository.update(created)
     assert updated.run_spec == new_run_spec
@@ -347,7 +347,9 @@ async def test_update_clears_run_spec_and_secret_links(setup: Setup) -> None:
         AgentVersion(
             owner_id=owner_id,
             agent_id=agent_id,
-            run_spec=RunSpec(command="run.sh", secret_ids=[await make_secret_id()]),
+            run_spec=CommandRunSpec(
+                command="run.sh", secret_ids=[await make_secret_id()]
+            ),
         )
     )
     created.update_run_spec(None)

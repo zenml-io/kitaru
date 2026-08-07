@@ -39,7 +39,13 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
     version = (
         await client.post(
             f"/api/v1/agents/{agent['id']}/versions",
-            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+            json={
+                "run_spec": {
+                    "type": "command",
+                    "command": "run.sh",
+                    "timeout_seconds": 60,
+                }
+            },
         )
     ).json()
     blob = (
@@ -49,9 +55,7 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
         )
     ).json()
     evaluator = (
-        await client.post(
-            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
-        )
+        await client.post("/api/v1/evaluators", json={"name": "accuracy", "metadata": {}})
     ).json()
     await client.post(
         f"/api/v1/evaluators/{evaluator['id']}/versions",
@@ -132,9 +136,7 @@ async def test_start_run_fans_out_one_replay_per_session(
     ).json()["items"]
     assert len(replays) == 2
 
-    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
-        "items"
-    ]
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
     assert len(jobs) == 2
     assert all(job["status"] == "pending" for job in jobs)
 
@@ -213,9 +215,7 @@ async def test_delete_run_cascades_its_jobs_and_replays(
             },
         )
     ).json()
-    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
-        "items"
-    ]
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
     replays = (
         await client.get(
             "/api/v1/replays",
@@ -270,7 +270,7 @@ async def test_agent_version_update_allowed_once_tasks_reference_it(
     )
     response = await client.patch(
         f"/api/v1/agent-versions/{setup['agent_version_id']}",
-        json={"run_spec": {"command": "new.sh"}},
+        json={"run_spec": {"type": "command", "command": "new.sh"}},
     )
     assert response.status_code == 200
     assert response.json()["run_spec"]["command"] == "new.sh"

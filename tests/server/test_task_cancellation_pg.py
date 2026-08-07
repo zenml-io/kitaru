@@ -67,7 +67,7 @@ from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.agent_version import AgentVersion, RunSpec
+from kitaru.server.domain.agent_version import AgentVersion, CommandRunSpec
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.task import AgentTask, Task
 from kitaru.server.domain.worker import Worker
@@ -288,7 +288,7 @@ async def test_job_cancel_survives_concurrent_task_claim(
             AgentVersion(
                 owner_id=owner.id,
                 agent_id=agent.id,
-                run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+                run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
             )
         )
         worker = await SQLWorkerRepository(seed_session).register(

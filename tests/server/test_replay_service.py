@@ -54,7 +54,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionWithoutRunSpec,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -112,7 +112,7 @@ async def _agent_version(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh") if with_run_spec else None,
+        run_spec=CommandRunSpec(command="run.sh") if with_run_spec else None,
     )
 
 

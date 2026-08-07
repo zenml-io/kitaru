@@ -34,8 +34,10 @@ class TaskKind(StrEnum):
     """Kind of work a task runs."""
 
     AGENT = "agent"
+    TRIGGER = "trigger"
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
+    IMPORT_WAIT = "import_wait"
 
 
 class TaskOnFailure(StrEnum):
@@ -180,6 +182,19 @@ class AgentTaskDetails(ResponseModel):
     )
 
 
+class TriggerTaskDetails(ResponseModel):
+    """Trigger task details."""
+
+    kind: Literal["trigger"] = Field(default="trigger")
+    entrypoint: str = Field(
+        description="Trigger function to load, as module:attribute."
+    )
+    inputs: JsonValue = Field(description="Inputs passed to the trigger function.")
+    replay_id: uuid.UUID | None = Field(
+        default=None, description="Replay the task runs for."
+    )
+
+
 class EvaluationTaskDetails(ResponseModel):
     """Evaluation task details."""
 
@@ -210,7 +225,7 @@ class ImportTaskDetails(ResponseModel):
 
 
 TaskDetails = Annotated[
-    AgentTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
+    AgentTaskDetails | TriggerTaskDetails | EvaluationTaskDetails | ImportTaskDetails,
     Field(discriminator="kind"),
 ]
 

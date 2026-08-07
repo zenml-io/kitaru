@@ -18,7 +18,7 @@ import uuid
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionUpdateRequest,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.server.adapters.rest.mapping.agent_versions import (
@@ -30,7 +30,7 @@ from kitaru.server.adapters.rest.mapping.plugins import plugin_source_to_domain
 from kitaru.server.domain.agent_version import (
     AgentCapabilities as DomainAgentCapabilities,
 )
-from kitaru.server.domain.agent_version import RunSpec as DomainRunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec as DomainCommandRunSpec
 from kitaru.server.domain.plugin import (
     PackagePluginSource as DomainPackagePluginSource,
 )
@@ -39,10 +39,10 @@ from kitaru.server.domain.plugin import ScriptPluginSource as DomainScriptPlugin
 
 def test_agent_version_create_converts_nested_wire_models() -> None:
     """Convert a create request's run spec and capabilities to domain value objects."""
-    run_spec = run_spec_to_domain(RunSpec(command="python agent.py"))
+    run_spec = run_spec_to_domain(CommandRunSpec(command="python agent.py"))
     capabilities = capabilities_to_domain(AgentCapabilities(tools=["search"]))
 
-    assert isinstance(run_spec, DomainRunSpec)
+    assert isinstance(run_spec, DomainCommandRunSpec)
     assert run_spec.command == "python agent.py"
     assert isinstance(capabilities, DomainAgentCapabilities)
     assert capabilities.tools == ["search"]

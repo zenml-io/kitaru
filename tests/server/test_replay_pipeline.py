@@ -54,7 +54,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionAgentMismatch,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
@@ -79,7 +79,7 @@ async def _agent_version_with_run_spec(services: ReplayServices) -> AgentVersion
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
 
 
@@ -749,7 +749,7 @@ async def test_start_run_rejects_an_agent_version_of_another_agent(
         services.agent_versions,
         agent_id=other_agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
     with pytest.raises(AgentVersionAgentMismatch):
         await services.experiment_service.start_run(

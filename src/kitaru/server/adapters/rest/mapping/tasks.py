@@ -31,6 +31,7 @@ from kitaru.api_models.v1.task import (
     TaskSpecResponse,
     TaskUpdateRequest,
     TaskWithSpec,
+    TriggerTaskDetails,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
@@ -61,6 +62,9 @@ from kitaru.server.domain.task import (
 )
 from kitaru.server.domain.task import (
     TaskRunSpec as DomainTaskRunSpec,
+)
+from kitaru.server.domain.task import (
+    TriggerTaskDetails as DomainTriggerTaskDetails,
 )
 
 
@@ -169,6 +173,12 @@ def _details_to_response(spec: TaskSpec) -> TaskDetails:
     details = spec.details
     if isinstance(details, DomainAgentTaskDetails):
         return AgentTaskDetails(inputs=details.inputs, replay_id=details.replay_id)
+    if isinstance(details, DomainTriggerTaskDetails):
+        return TriggerTaskDetails(
+            entrypoint=details.entrypoint,
+            inputs=details.inputs,
+            replay_id=details.replay_id,
+        )
     if isinstance(details, DomainEvaluationTaskDetails):
         return EvaluationTaskDetails(
             evaluator_name=details.evaluator_name,

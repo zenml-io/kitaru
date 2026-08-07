@@ -38,7 +38,7 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -77,7 +77,7 @@ async def test_create(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACCOUNT.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
     job = await api_client.session_runs.create(
         SessionRunCreateRequest(agent_version_id=version.id, inputs={"q": "hi"})

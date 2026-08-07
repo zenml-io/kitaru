@@ -37,7 +37,7 @@ from kitaru.server.adapters.rest.dependencies import get_auth_service, get_task_
 from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec
 
 
 @pytest.fixture
@@ -83,7 +83,7 @@ async def _claimable_agent_task(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=account.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
     return await create_agent_task(services.tasks, job_id, agent_version_id=version.id)
 

@@ -59,7 +59,7 @@ from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUp
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -108,7 +108,7 @@ async def _claimable_agent_task(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=CommandRunSpec(command="run.sh", timeout_seconds=60),
     )
     return await create_agent_task(
         services.tasks, job_id, agent_version_id=version.id, **overrides
@@ -756,7 +756,7 @@ async def test_agent_spec_merges_secrets_in_order_with_later_wins(
         name="second",
         values={"KEY": SecretStr("two")},
     )
-    version.run_spec = RunSpec(
+    version.run_spec = CommandRunSpec(
         command="run.sh",
         env={"STATIC": "x"},
         secret_ids=[first_secret.id, second_secret.id],

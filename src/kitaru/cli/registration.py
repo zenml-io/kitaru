@@ -24,7 +24,7 @@ from kitaru.api_models.v1.agent import AgentCreateRequest, AgentListParams
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionCreateRequest,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.api_models.v1.annotation import AnnotationListParams
 from kitaru.api_models.v1.base import ListParams, Page
@@ -263,7 +263,7 @@ def build_agent_requests(
         AgentVersionCreateRequest(
             display_version=display_version,
             description=version_description,
-            run_spec=RunSpec(**run_options),
+            run_spec=CommandRunSpec(**run_options),
             capabilities=capabilities,
         ),
     )
@@ -780,7 +780,10 @@ def _load_document(path: Path) -> dict[str, Any]:
 
 def _validate_agent_version(request: AgentVersionCreateRequest) -> None:
     """Require a nonblank run command for CLI-registered versions."""
-    if request.run_spec is None or not request.run_spec.command.strip():
+    if (
+        not isinstance(request.run_spec, CommandRunSpec)
+        or not request.run_spec.command.strip()
+    ):
         raise CLIError(
             "invalid_arguments",
             "Agent specs must include a nonblank version.run_spec.command.",

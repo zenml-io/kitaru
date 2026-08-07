@@ -68,7 +68,13 @@ async def test_update_replaces_run_spec_secrets_across_requests(
     created = (
         await client.post(
             f"/api/v1/agents/{agent_id}/versions",
-            json={"run_spec": {"command": "old.sh", "secret_ids": [old_secret["id"]]}},
+            json={
+                "run_spec": {
+                    "type": "command",
+                    "command": "old.sh",
+                    "secret_ids": [old_secret["id"]],
+                }
+            },
         )
     ).json()
 
@@ -79,7 +85,13 @@ async def test_update_replaces_run_spec_secrets_across_requests(
     ).json()
     response = await client.patch(
         f"/api/v1/agent-versions/{created['id']}",
-        json={"run_spec": {"command": "new.sh", "secret_ids": [new_secret["id"]]}},
+        json={
+            "run_spec": {
+                "type": "command",
+                "command": "new.sh",
+                "secret_ids": [new_secret["id"]],
+            }
+        },
     )
     assert response.status_code == 200
 

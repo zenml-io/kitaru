@@ -32,7 +32,9 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
+    CommandRunSpec,
     RunSpec,
+    TriggerRunSpec,
 )
 
 AGENT_VERSION_AGENT_ID_VERSION_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -66,10 +68,35 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     display_version: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
     run_command: Mapped[str | None] = mapped_column(Text)
+    run_entrypoint: Mapped[str | None] = mapped_column(Text)
     run_working_dir: Mapped[str | None] = mapped_column(Text)
     run_env: Mapped[dict[str, str] | None] = mapped_column(JSONB(none_as_null=True))
     run_timeout_seconds: Mapped[int | None]
+    run_import_deadline_seconds: Mapped[int | None]
     capabilities: Mapped[dict[str, list[str]]] = mapped_column(JSONB)
+
+    def apply_run_spec(self, run_spec: RunSpec | None) -> None:
+        """Flatten a run spec into the run_* columns, all null for ``None``.
+
+        Args:
+            run_spec: Run spec to store.
+        """
+        self.run_command = None
+        self.run_entrypoint = None
+        self.run_working_dir = None
+        self.run_env = None
+        self.run_timeout_seconds = None
+        self.run_import_deadline_seconds = None
+        if isinstance(run_spec, CommandRunSpec):
+            self.run_command = run_spec.command
+            self.run_working_dir = run_spec.working_dir
+            self.run_env = run_spec.env
+            self.run_timeout_seconds = run_spec.timeout_seconds
+        elif isinstance(run_spec, TriggerRunSpec):
+            self.run_entrypoint = run_spec.entrypoint
+            self.run_env = run_spec.env
+            self.run_timeout_seconds = run_spec.timeout_seconds
+            self.run_import_deadline_seconds = run_spec.import_deadline_seconds
 
     @classmethod
     def from_domain(cls, agent_version: AgentVersion) -> "AgentVersionORM":
@@ -85,22 +112,17 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Returns:
             Row without timestamps set.
         """
-        run_spec = agent_version.run_spec
-        return cls(
+        row = cls(
             id=agent_version.id,
             owner_id=agent_version.owner_id,
             agent_id=agent_version.agent_id,
             version=agent_version.version,
             display_version=agent_version.display_version,
             description=agent_version.description,
-            run_command=run_spec.command if run_spec is not None else None,
-            run_working_dir=run_spec.working_dir if run_spec is not None else None,
-            run_env=run_spec.env if run_spec is not None else None,
-            run_timeout_seconds=(
-                run_spec.timeout_seconds if run_spec is not None else None
-            ),
             capabilities=agent_version.capabilities.model_dump(mode="json"),
         )
+        row.apply_run_spec(agent_version.run_spec)
+        return row
 
     def to_domain(self, secret_ids: list[uuid.UUID]) -> AgentVersion:
         """Build a domain agent version from this row.
@@ -111,15 +133,25 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Returns:
             Agent version with timestamps set.
         """
-        run_spec = None
+        run_spec: RunSpec | None = None
         if self.run_command is not None:
             assert self.run_timeout_seconds is not None
-            run_spec = RunSpec(
+            run_spec = CommandRunSpec(
                 command=self.run_command,
                 working_dir=self.run_working_dir,
                 env=self.run_env if self.run_env is not None else {},
                 secret_ids=secret_ids,
                 timeout_seconds=self.run_timeout_seconds,
+            )
+        elif self.run_entrypoint is not None:
+            assert self.run_timeout_seconds is not None
+            assert self.run_import_deadline_seconds is not None
+            run_spec = TriggerRunSpec(
+                entrypoint=self.run_entrypoint,
+                env=self.run_env if self.run_env is not None else {},
+                secret_ids=secret_ids,
+                timeout_seconds=self.run_timeout_seconds,
+                import_deadline_seconds=self.run_import_deadline_seconds,
             )
         return AgentVersion(
             id=self.id,

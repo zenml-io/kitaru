@@ -138,6 +138,7 @@ async def test_create_version_with_secrets_round_trips(
         f"/api/v1/agents/{agent['id']}/versions",
         json={
             "run_spec": {
+                "type": "command",
                 "command": "run.sh",
                 "secret_ids": [secret_a["id"], secret_b["id"]],
             }

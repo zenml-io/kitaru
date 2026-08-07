@@ -283,12 +283,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         row.version = agent_version.version
         row.display_version = agent_version.display_version
         row.description = agent_version.description
-        row.run_command = run_spec.command if run_spec is not None else None
-        row.run_working_dir = run_spec.working_dir if run_spec is not None else None
-        row.run_env = run_spec.env if run_spec is not None else None
-        row.run_timeout_seconds = (
-            run_spec.timeout_seconds if run_spec is not None else None
-        )
+        row.apply_run_spec(run_spec)
         row.capabilities = agent_version.capabilities.model_dump(mode="json")
         await self._flush()
         await self._sync_secret_links(agent_version.id, run_spec)

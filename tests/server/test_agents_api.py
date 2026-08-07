@@ -243,6 +243,7 @@ async def test_create_agent_version_with_run_spec(client: httpx.AsyncClient) -> 
         f"/api/v1/agents/{agent['id']}/versions",
         json={
             "run_spec": {
+                "type": "command",
                 "command": "run.sh",
                 "working_dir": "/app",
                 "env": {"FOO": "bar"},

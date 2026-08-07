@@ -42,6 +42,7 @@ class SessionStatus(StrEnum):
     """Session status."""
 
     IN_PROGRESS = "in_progress"
+    PENDING_IMPORT = "pending_import"
     COMPLETED = "completed"
     FAILED = "failed"
 

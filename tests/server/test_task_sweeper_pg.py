@@ -22,7 +22,6 @@ import pytest
 from conftest import db_settings, lifespan_client
 
 RUNTIME = {"platform": "bare"}
-SCOPE = {"claims": [{"kind": "agent"}]}
 
 
 async def _wait_until(
@@ -75,7 +74,13 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     version = (
         await client.post(
             f"/api/v1/agents/{agent['id']}/versions",
-            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+            json={
+                "run_spec": {
+                    "type": "command",
+                    "command": "run.sh",
+                    "timeout_seconds": 60,
+                }
+            },
         )
     ).json()
     job = (
@@ -87,12 +92,7 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={
-                "name": "worker-1",
-                "scope": SCOPE,
-                "runtime": RUNTIME,
-                "metadata": {},
-            },
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
@@ -109,9 +109,7 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     )
     assert task_after["attempt"] == 1
 
-    job_after = await _wait_until(
-        client, f"/api/v1/jobs/{job['id']}", "status", "failed"
-    )
+    job_after = await _wait_until(client, f"/api/v1/jobs/{job['id']}", "status", "failed")
     assert job_after["error"] is not None
 
 
@@ -130,7 +128,13 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     version = (
         await client.post(
             f"/api/v1/agents/{agent['id']}/versions",
-            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+            json={
+                "run_spec": {
+                    "type": "command",
+                    "command": "run.sh",
+                    "timeout_seconds": 60,
+                }
+            },
         )
     ).json()
     baseline = (
@@ -152,9 +156,7 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
         )
     ).json()
     evaluator = (
-        await client.post(
-            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
-        )
+        await client.post("/api/v1/evaluators", json={"name": "accuracy", "metadata": {}})
     ).json()
     await client.post(
         f"/api/v1/evaluators/{evaluator['id']}/versions",
@@ -176,12 +178,7 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={
-                "name": "worker-1",
-                "scope": SCOPE,
-                "runtime": RUNTIME,
-                "metadata": {},
-            },
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}

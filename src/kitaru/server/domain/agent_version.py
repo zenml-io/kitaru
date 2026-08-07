@@ -15,7 +15,7 @@
 
 import uuid
 from datetime import datetime
-from typing import Annotated
+from typing import Annotated, Literal
 
 from pydantic import AfterValidator, Field
 
@@ -92,14 +92,29 @@ def validate_timeout_seconds(value: int) -> int:
 TimeoutSeconds = Annotated[int, AfterValidator(validate_timeout_seconds)]
 
 
-class RunSpec(FrozenModel):
-    """Run spec."""
+class CommandRunSpec(FrozenModel):
+    """Command run spec."""
 
+    type: Literal["command"] = "command"
     command: str
     working_dir: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: list[uuid.UUID] = Field(default_factory=list)
     timeout_seconds: TimeoutSeconds = 3600
+
+
+class TriggerRunSpec(FrozenModel):
+    """Trigger run spec."""
+
+    type: Literal["trigger"] = "trigger"
+    entrypoint: str
+    env: dict[str, str] = Field(default_factory=dict)
+    secret_ids: list[uuid.UUID] = Field(default_factory=list)
+    timeout_seconds: TimeoutSeconds = 3600
+    import_deadline_seconds: TimeoutSeconds = 86400
+
+
+RunSpec = Annotated[CommandRunSpec | TriggerRunSpec, Field(discriminator="type")]
 
 
 class AgentCapabilities(FrozenModel):

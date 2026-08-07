@@ -58,7 +58,7 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 
@@ -120,7 +120,7 @@ async def run_request(
         services.agent_versions,
         agent_id=agent_id,
         owner_id=ACCOUNT.id,
-        run_spec=RunSpec(command="run.sh"),
+        run_spec=CommandRunSpec(command="run.sh"),
     )
     session = await create_session(
         services.sessions,

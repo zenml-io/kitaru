@@ -177,13 +177,25 @@ async def test_update_agent_version_replaces_run_spec(
     created = (
         await client.post(
             f"/api/v1/agents/{agent_id}/versions",
-            json={"run_spec": {"command": "old.sh", "secret_ids": [old_secret_id]}},
+            json={
+                "run_spec": {
+                    "type": "command",
+                    "command": "old.sh",
+                    "secret_ids": [old_secret_id],
+                }
+            },
         )
     ).json()
     new_secret_id = str(uuid.uuid4())
     response = await client.patch(
         f"/api/v1/agent-versions/{created['id']}",
-        json={"run_spec": {"command": "new.sh", "secret_ids": [new_secret_id]}},
+        json={
+            "run_spec": {
+                "type": "command",
+                "command": "new.sh",
+                "secret_ids": [new_secret_id],
+            }
+        },
     )
     assert response.status_code == 200
     body = response.json()
@@ -198,7 +210,7 @@ async def test_update_agent_version_clears_run_spec(
     created = (
         await client.post(
             f"/api/v1/agents/{agent_id}/versions",
-            json={"run_spec": {"command": "run.sh"}},
+            json={"run_spec": {"type": "command", "command": "run.sh"}},
         )
     ).json()
     response = await client.patch(
