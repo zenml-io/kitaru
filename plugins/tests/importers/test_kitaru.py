@@ -17,10 +17,10 @@ import json
 
 import pytest
 
-from importers.kitaru import InvalidImport, parse
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.task.importer import ImportedSession
+from kitaru_jsonl_importer.importer import InvalidImport, parse
 
 
 def _session() -> dict[str, object]:

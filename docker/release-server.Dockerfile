@@ -49,6 +49,9 @@ ARG KITARU_VERSION
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
+COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
+COPY --chown=$USERNAME:$USER_GID \
+  plugins/default-requirements.txt ./plugins/default-requirements.txt
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -67,13 +70,17 @@ RUN test -n "$KITARU_VERSION" && \
   uv sync \
     --locked \
     --no-dev \
-    --no-install-project \
+    --no-install-workspace \
     --extra server \
     --extra otel && \
   uv pip install \
     --no-deps \
     --only-binary=:all: \
     "kitaru==$KITARU_VERSION" && \
+  uv pip install \
+    --no-deps \
+    --only-binary=:all: \
+    --requirements plugins/default-requirements.txt && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \

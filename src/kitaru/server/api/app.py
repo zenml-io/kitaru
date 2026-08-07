@@ -36,7 +36,6 @@ from kitaru.server.adapters.db.errors import is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
-from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
@@ -248,9 +247,7 @@ def create_app(settings: APISettings) -> FastAPI:
                 )
                 await session.commit()
         async for session in database.get_async_session():
-            await register_default_plugins(
-                SQLPluginRepository(session), SQLBlobRepository(session)
-            )
+            await register_default_plugins(SQLPluginRepository(session))
             await session.commit()
         sweep_task = start_task_sweeper(database, settings, analytics)
         try:

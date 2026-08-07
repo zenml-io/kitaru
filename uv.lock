@@ -7,8 +7,19 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-04T08:49:21.946128Z"
 exclude-newer-span = "P3D"
+
+[manifest]
+members = [
+    "kitaru",
+    "kitaru-braintrust-importer",
+    "kitaru-evaluator",
+    "kitaru-jsonl-importer",
+    "kitaru-langfuse-importer",
+    "kitaru-langsmith-importer",
+    "kitaru-opentelemetry-importer",
+]
 
 [[package]]
 name = "alembic"
@@ -1006,6 +1017,72 @@ dev = [
     { name = "ty", specifier = ">=0.0.1a7" },
     { name = "yamlfix" },
 ]
+
+[[package]]
+name = "kitaru-braintrust-importer"
+version = "0.1.0"
+source = { editable = "plugins/packages/braintrust-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-evaluator"
+version = "0.1.0"
+source = { editable = "plugins/packages/evaluator" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-jsonl-importer"
+version = "0.1.0"
+source = { editable = "plugins/packages/jsonl-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-langfuse-importer"
+version = "0.1.0"
+source = { editable = "plugins/packages/langfuse-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-langsmith-importer"
+version = "0.1.0"
+source = { editable = "plugins/packages/langsmith-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
+
+[[package]]
+name = "kitaru-opentelemetry-importer"
+version = "0.1.0"
+source = { editable = "plugins/packages/opentelemetry-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "." }]
 
 [[package]]
 name = "logfire-api"

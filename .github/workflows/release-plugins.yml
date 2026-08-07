@@ -1,0 +1,102 @@
+---
+name: Release plugin
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Plugin package directory under plugins/packages.
+        required: true
+        type: choice
+        options:
+          - braintrust-importer
+          - evaluator
+          - jsonl-importer
+          - langfuse-importer
+          - langsmith-importer
+          - opentelemetry-importer
+      version:
+        description: Package version already committed in its pyproject.toml.
+        required: true
+        type: string
+      dry-run:
+        description: Build and test without publishing or tagging.
+        required: false
+        type: boolean
+        default: false
+permissions: {}
+concurrency:
+  group: release-plugin-${{ inputs.package }}
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.dry-run && 'dry-run' || 'pypi' }}
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          ref: develop
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Resolve package metadata
+        env:
+          REQUESTED_PACKAGE: ${{ inputs.package }}
+          REQUESTED_VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          PROJECT_DIR="plugins/packages/$REQUESTED_PACKAGE"
+          PACKAGE_VERSION=$(uv version --project "$PROJECT_DIR" --short)
+          PACKAGE_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' "$PROJECT_DIR/pyproject.toml")
+          test -n "$PACKAGE_NAME"
+          test "$PACKAGE_VERSION" = "$REQUESTED_VERSION"
+          {
+            printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR"
+            printf 'PACKAGE_NAME=%s\n' "$PACKAGE_NAME"
+            printf 'PACKAGE_VERSION=%s\n' "$PACKAGE_VERSION"
+            printf 'PACKAGE_TAG=%s-v%s\n' "$REQUESTED_PACKAGE" "$PACKAGE_VERSION"
+          } >> "$GITHUB_ENV"
+      - name: Validate release is new
+        if: ${{ !inputs.dry-run }}
+        run: |
+          set -euo pipefail
+          if git rev-parse "refs/tags/$PACKAGE_TAG" >/dev/null 2>&1; then
+            echo "::error::Tag $PACKAGE_TAG already exists."
+            exit 1
+          fi
+          STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+            "https://pypi.org/pypi/$PACKAGE_NAME/$PACKAGE_VERSION/json")
+          if [ "$STATUS" = 200 ]; then
+            echo "::error::$PACKAGE_NAME $PACKAGE_VERSION is already published."
+            exit 1
+          fi
+          if [ "$STATUS" != 404 ]; then
+            echo "::error::PyPI returned HTTP $STATUS."
+            exit 1
+          fi
+      - name: Test package and catalog integration
+        run: |
+          uv sync --frozen --all-packages --extra server
+          uv run pytest -q plugins/tests tests/server/test_default_plugins.py
+          uv run python -c "from kitaru.server.api.bootstrap import _load_default_plugin_definitions; assert _load_default_plugin_definitions()"
+      - name: Build package
+        run: uv build --project "$PROJECT_DIR" --out-dir "plugins/dist/$PACKAGE_NAME"
+      - name: Publish package
+        if: ${{ !inputs.dry-run }}
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          packages-dir: plugins/dist/${{ env.PACKAGE_NAME }}
+      - name: Tag release
+        if: ${{ !inputs.dry-run }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          git tag "$PACKAGE_TAG"
+          git push origin "$PACKAGE_TAG"
+          gh release create "$PACKAGE_TAG" "plugins/dist/$PACKAGE_NAME"/* \
+            --title "$PACKAGE_NAME $PACKAGE_VERSION" \
+            --generate-notes

@@ -122,6 +122,14 @@ jobs:
         with:
           python-version: '3.12'
           enable-cache: false
+      - name: Validate default plugin packages are published
+        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+        run: |
+          while read -r requirement; do
+            package=${requirement%%==*}
+            version=${requirement#*==}
+            curl -fsS "https://pypi.org/pypi/$package/$version/json" >/dev/null
+          done < plugins/default-requirements.txt
 
       # --- Bump version (dispatch only, skip in recovery mode) ---
       # In recovery mode (tag already exists) we checked out the tag itself,
