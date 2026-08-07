@@ -25,16 +25,10 @@ single model or tool call instead of re-running the entire turn.
 | PydanticAI agent | `KitaruAgent` | **Per model/tool/MCP call** by default, or one turn checkpoint | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
 | OpenAI Agents SDK agent | `KitaruRunner` | **Per call**, or one runner-call checkpoint | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
 | Claude Agent SDK invocation | `KitaruClaudeRunner` | One completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
-| LangGraph graph | `KitaruGraphRunner` | One graph call, or middleware-wrapped model/tool calls | [LangGraph Adapter](../adapters/langgraph.md) |
+| LangGraph, LangChain, or Deep Agents graph | Repository-local `KitaruGraphRunner` | One invocation session; factory construction adds observable model/tool nodes and replay controls, not node-boundary replay | [LangGraph Adapter](../adapters/langgraph.md) |
 
 {% hint style="info" %}
-**Per-call checkpointing is fullest in the PydanticAI (`KitaruAgent`) and OpenAI
-Agents SDK (`KitaruRunner`) adapters.** Both can record every model and tool call
-as its own checkpoint, so replay can target an individual call. The Claude Agent
-SDK adapter currently checkpoints at the invocation boundary, and LangGraph's
-per-call granularity depends on middleware wrapping the model/tool calls. If
-call-level replay fidelity is your priority, prefer PydanticAI or OpenAI calls
-mode.
+**Per-call checkpointing is fullest in the PydanticAI (`KitaruAgent`) and OpenAI Agents SDK (`KitaruRunner`) adapters.** The LangGraph v2 adapter records each invocation as one session. Factory-built LangChain and Deep Agents expose model/tool nodes and can apply live request overrides or supported tool substitution, but native LangGraph checkpoint reconstruction and node-boundary replay are deferred.
 {% endhint %}
 
 ## Pick by goal
@@ -60,7 +54,7 @@ Start with:
 - [Wait, Input, and Resume](wait-and-resume.md)
 - [PydanticAI human-in-the-loop tools](../adapters/pydantic-ai.md#ask-the-human-from-a-tool-body)
 - [OpenAI approval interruptions](../adapters/openai-agents.md#approval-interruptions)
-- [LangGraph interrupt and resume](../adapters/langgraph.md#interrupt-and-resume)
+- [LangGraph interrupts and unsupported invocation modes](../adapters/langgraph.md#interrupts-and-unsupported-invocation-modes)
 
 ## Next
 

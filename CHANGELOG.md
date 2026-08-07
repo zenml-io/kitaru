@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- A repository-local Kitaru v2 LangGraph adapter for synchronous and asynchronous invocation recording across compiled LangGraph runnables, LangChain agents, and Deep Agents. Factory-built agents support live model-request overrides and capability-gated static or recorded-history tool-result substitution; streaming, batch invocation, native checkpoint reconstruction, and worker-managed interrupt resume remain unsupported.
 - Ten versioned offline deterministic evaluator plugins distributed with the existing basic evaluators in `kitaru-evaluator`, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs.
 - The server persists a generated server id on first startup, seeded from `KITARU_SERVER_SERVER_ID` when set. Analytics events carry that id together with the auth scheme, runtime environment, operating system, Python version, and, when available, the enrolled workspace id, the acting account's service account flag, and its control plane user id. The default account is identified at startup, and identify traits carry an `account_origin` (`bootstrap`, `api`, or `control_plane`).
 - Evaluators and importers carry an optional `logo_url`, set at creation, changed through the update endpoints, and returned in responses. Default plugin definitions can supply one.

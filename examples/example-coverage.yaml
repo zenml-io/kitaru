@@ -836,101 +836,27 @@ examples:
     release_policy:
       required_when_changed: true
       waiver_allowed: true
-  - id: langgraph-adapter
-    path: examples/integrations/langgraph_agent/langgraph_adapter.py
+  - id: langgraph-v2
+    path: examples/integrations/langgraph_v2/__main__.py
     public_docs:
+      - examples/integrations/langgraph_v2/README.md
       - examples/README.md
       - docs/book/getting-started/examples.md
       - docs/book/adapters/langgraph.md
-    owner_area: LangGraph local graph-call and OpenAI-backed calls strategy
+    owner_area: LangGraph v2 deterministic invocation recording
     coverage:
       deterministic_pytest:
         status: covered
-        test_file: tests/test_langgraph_calls_strategy.py
+        test_file: plugins/tests/adapters/langgraph/test_compatibility.py
+        notes: exercises the same provider-free StateGraph through the repository-local runner
       local_smoke:
         status: covered
-        command: uv run python examples/integrations/langgraph_agent/langgraph_adapter.py
-          --strategy graph_call
+        command: uv run python -m examples.integrations.langgraph_v2
         requires_server: true
         timeout_seconds: 60
       live_provider:
-        status: smoke_only
-        provider: openai
-        command: uv run python examples/integrations/langgraph_agent/langgraph_adapter.py
-          --strategy calls
-        weekly_workflow: false
-        local_release_smoke: true
-        manual_command_available: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 120
-        cost_class: low
-        manual_github_workflow:
-          workflow: .github/workflows/llm-integration.yml
-          suite: provider-extended
-          kitaru_ref: <RELEASE_REF_OR_SHA>
-          include_openai: true
-          include_anthropic: false
-          include_research_bot: false
-          include_google_adk: false
-          marker_expression: (live_openai) and provider_extended
-          scope: full provider-extended marker group
-          test_file: tests/live/test_openai_adapter_behavior.py
-          test_names:
-            - test_langgraph_live_calls_mode_records_model_and_tool_evidence
-        notes: Manual provider-extended GitHub evidence dispatches the full OpenAI
-          provider-extended marker group; the listed test is the relevant evidence
-          for this example. It is not part of the weekly provider-core workflow.
-    release_policy:
-      required_when_changed: true
-      waiver_allowed: true
-  - id: langgraph-sandbox-strategy
-    path: examples/integrations/langgraph_agent/langgraph_adapter.py
-    public_docs:
-      - examples/integrations/langgraph_agent/README.md
-      - docs/book/adapters/langgraph.md
-    owner_area: LangGraph OpenAI-backed active-stack sandbox command strategy
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/test_langgraph_sandbox_example.py
-        notes: tests example middleware; tests/test_langgraph_sandbox_tool.py covers
-          the tool factory, and tests/test_langgraph_calls_strategy.py covers the
-          true tool checkpoint path
-      local_smoke:
-        status: import_contract
-        command: uv run python -c 'from kitaru.adapters.langgraph import create_sandbox_command_tool;
-          assert create_sandbox_command_tool().name == "run_sandbox_command"'
-        requires_server: false
-        timeout_seconds: 30
-      live_provider:
-        status: smoke_only
-        provider: openai
-        command: uv run python examples/integrations/langgraph_agent/langgraph_adapter.py
-          --strategy sandbox
-        weekly_workflow: false
-        local_release_smoke: true
-        manual_command_available: true
-        required_env: [OPENAI_API_KEY]
-        timeout_seconds: 180
-        cost_class: low
-    release_policy:
-      required_when_changed: true
-      waiver_allowed: true
-  - id: langgraph-streaming
-    path: examples/integrations/langgraph_agent/langgraph_streaming.py
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
-    owner_area: LangGraph graph-call streaming events
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: tests/test_langgraph_streaming.py
-      local_smoke:
-        status: covered
-        command: uv run python examples/integrations/langgraph_agent/langgraph_streaming.py
-        requires_server: true
-        timeout_seconds: 120
-      live_provider:
         status: not_applicable
+        provider: none
         required: false
     release_policy:
       required_when_changed: true

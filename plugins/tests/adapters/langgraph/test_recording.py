@@ -1,0 +1,52 @@
+"""Callback recording and ancestry contracts."""
+
+import uuid
+from typing import Any
+
+from langchain_core.outputs import LLMResult
+
+from adapters.langgraph.callbacks import AsyncKitaruCallback
+from adapters.langgraph.capture import CapturePolicy
+from adapters.langgraph.recording import InvocationRecorder
+from kitaru.api_models.v1.session_node import NodeType
+
+
+async def test_nested_ancestor_is_persisted_before_child(fake_client: Any) -> None:
+    recorder = await InvocationRecorder.setup(
+        {"input": True},
+        None,
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        batch_size=1,
+        policy=CapturePolicy(),
+    )
+    callback = AsyncKitaruCallback(recorder)
+    root_id = uuid.uuid4()
+    nested_id = uuid.uuid4()
+    model_id = uuid.uuid4()
+
+    await callback.on_chain_start({}, {}, run_id=root_id)
+    await callback.on_chain_start(
+        {"name": "nested"}, {}, run_id=nested_id, parent_run_id=root_id
+    )
+    await callback.on_llm_start(
+        {"name": "model"}, ["prompt"], run_id=model_id, parent_run_id=nested_id
+    )
+    await callback.on_llm_end(
+        LLMResult(generations=[]),
+        run_id=model_id,
+        parent_run_id=nested_id,
+    )
+    await callback.on_chain_end({}, run_id=nested_id, parent_run_id=root_id)
+    await recorder.finalize(result={"done": True})
+
+    client = fake_client.instances[0]
+    nodes = [node for _, batch in client.sessions.node_batches for node in batch.nodes]
+    nested = next(node for node in nodes if node.name == "nested")
+    model = next(node for node in nodes if node.node_type is NodeType.LLM_CALL)
+    assert nested.index < model.index
+    assert model.parent_index == nested.index
+    assert all(
+        node.parent_index is None or node.parent_index < node.index for node in nodes
+    )

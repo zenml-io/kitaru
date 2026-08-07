@@ -5,13 +5,13 @@ icon: puzzle-piece
 
 # Adapters
 
-Adapters let Kitaru record and replay an agent you built with another framework, without rewriting it. Your framework still runs the agent — it decides how the agent thinks, calls tools, streams, pauses, and resumes — while the adapter wraps the durable seams so each model call, tool call, or graph invocation lands as a checkpoint you can replay later.
+Adapters let Kitaru record an agent you built with another framework without rewriting it. Your framework still runs the agent. Kitaru records the framework boundaries that each adapter can observe, and each adapter declares which replay operations it can apply safely.
 
-That boundary is deliberate. Kitaru records what passes through the seam the framework exposes safely; it does not claim to replay work it never saw. That honesty is what makes a replay faithful: a rerun with no change reproduces the original run, so when you replay again with one input changed, the diff is your change and not replay noise.
+The boundary differs by framework and construction path. Check the capability table on the adapter page before relying on input replacement, model overrides, tool substitution, nested coverage, streaming, or interrupts.
 
 ## Choose an adapter
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>PydanticAI</strong></td><td>Wrap a pydantic_ai.Agent and record model, tool, MCP, and wait boundaries.</td><td><a href="pydantic-ai.md">pydantic-ai.md</a></td></tr><tr><td><strong>OpenAI Agents</strong></td><td>Run OpenAI Agents SDK workflows with call-level or runner-call durability.</td><td><a href="openai-agents.md">openai-agents.md</a></td></tr><tr><td><strong>Claude Agent SDK</strong></td><td>Record one Claude Agent SDK invocation as one Kitaru checkpoint with usage and audit artifacts.</td><td><a href="claude-agent-sdk.md">claude-agent-sdk.md</a></td></tr><tr><td><strong>Gemini Interactions</strong></td><td>Record stable Gemini Interactions and Antigravity managed-agent responses as Kitaru checkpoints.</td><td><a href="gemini-interactions.md">gemini-interactions.md</a></td></tr><tr><td><strong>Google ADK</strong></td><td>Experimentally wrap Google ADK runner turns, or explicit ADK model/tool objects you control.</td><td><a href="google-adk.md">google-adk.md</a></td></tr><tr><td><strong>LangGraph</strong></td><td>Checkpoint LangGraph graph calls, interrupts, resumes, and LangChain model/tool calls.</td><td><a href="langgraph.md">langgraph.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>PydanticAI</strong></td><td>Wrap a pydantic_ai.Agent and record model, tool, MCP, and wait boundaries.</td><td><a href="pydantic-ai.md">pydantic-ai.md</a></td></tr><tr><td><strong>OpenAI Agents</strong></td><td>Run OpenAI Agents SDK workflows with call-level or runner-call durability.</td><td><a href="openai-agents.md">openai-agents.md</a></td></tr><tr><td><strong>Claude Agent SDK</strong></td><td>Record one Claude Agent SDK invocation as one Kitaru checkpoint with usage and audit artifacts.</td><td><a href="claude-agent-sdk.md">claude-agent-sdk.md</a></td></tr><tr><td><strong>Gemini Interactions</strong></td><td>Record stable Gemini Interactions and Antigravity managed-agent responses as Kitaru checkpoints.</td><td><a href="gemini-interactions.md">gemini-interactions.md</a></td></tr><tr><td><strong>Google ADK</strong></td><td>Experimentally wrap Google ADK runner turns, or explicit ADK model/tool objects you control.</td><td><a href="google-adk.md">google-adk.md</a></td></tr><tr><td><strong>LangGraph</strong></td><td>Record invoke and ainvoke sessions; factory-built agents can apply live request overrides and supported tool substitution.</td><td><a href="langgraph.md">langgraph.md</a></td></tr></tbody></table>
 
 ## How to pick the right page
 
@@ -22,7 +22,7 @@ Use the adapter that matches the framework object you already call:
 - **Claude Agent SDK** — your code invokes Claude through the Claude Agent SDK or Claude Code-style sessions and you want the full invocation saved as one durable step.
 - **Gemini Interactions** — your code calls Gemini Interactions, including Antigravity managed-agent calls, and you want the response captured as replayable output.
 - **Google ADK** — your code uses Google ADK, and you want experimental whole-runner checkpointing or explicit ADK model/tool checkpoints in an isolated no-dev ADK environment.
-- **LangGraph** — your agent runs as a LangGraph graph (or LangChain agents on top of it) and you want graph, model, and tool boundaries recorded.
+- **LangGraph** — your code calls a compiled LangGraph runnable, a LangChain agent, or a Deep Agent and you want explicit recording and replay capability boundaries.
 
 ## Migrating existing agent code
 
@@ -32,7 +32,6 @@ In Claude Code, invoke the skill that matches your current framework:
 
 - `/kitaru:kitaru-pydantic-ai-migration`
 - `/kitaru:kitaru-openai-agents-migration`
-- `/kitaru:kitaru-langgraph-migration`
 - `/kitaru:kitaru-claude-agent-sdk-migration`
 - `/kitaru:kitaru-gemini-interactions-migration`
 - Google ADK support is experimental; use the [Google ADK adapter page](google-adk.md) and runnable example first.
