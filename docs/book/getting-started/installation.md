@@ -84,16 +84,34 @@ kitaru --help
 
 ## Local UI
 
-If you installed the `local` extra, you can start a local server with a web
-UI for browsing executions:
+Install Docker with the Compose v2 plugin, then provision a local Kitaru server and PostgreSQL database:
 
 ```bash
-kitaru login
+kitaru login --local
 ```
 
-This launches the Kitaru server on your machine and opens the UI in your
-browser. You can inspect flows, checkpoints, logs, and artifacts from any
-execution you have run locally.
+The CLI runs the version-matched `zenmldocker/kitaru-server` image, waits for `http://localhost:8000` to become healthy, selects it, and opens the dashboard. On Apple Silicon, Docker runs the amd64 server image through emulation. If Docker is unavailable, install it from [Docker's installation guide](https://docs.docker.com/get-docker/) or sign up for [Kitaru Cloud](https://cloud.zenml.io/).
+
+The database persists when you stop the deployment:
+
+```bash
+kitaru local logs
+kitaru logout
+```
+
+Delete the local PostgreSQL data only when you want a clean reset:
+
+```bash
+kitaru logout --volumes
+```
+
+After installing a newer Kitaru CLI, upgrade the local server explicitly:
+
+```bash
+kitaru login --local --upgrade
+```
+
+Developers using an unpublished server image can set `KITARU_LOCAL_IMAGE` to the name of an image that already exists in the local Docker daemon.
 
 ## Next Steps
 

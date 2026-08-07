@@ -908,7 +908,7 @@ async def test_apply_status_importer_terminal_tracks_import_completed() -> None:
     assert tracked_user_id == ACTOR.account.id
     assert tracked_event == AnalyticsEvent.IMPORT_COMPLETED
     assert tracked_properties["status"] == "completed"
-    assert tracked_properties["plugin_version_id"] == task.plugin_version_id
+    assert "plugin_version_id" not in tracked_properties
     assert tracked_properties["session_count"] == 3
     assert tracked_properties["duration_seconds"] >= 0.0
 
@@ -930,7 +930,7 @@ async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> 
     assert tracked_user_id == ACTOR.account.id
     assert tracked_event == AnalyticsEvent.EVALUATION_COMPLETED
     assert tracked_properties["status"] == "completed"
-    assert tracked_properties["plugin_version_id"] == task.plugin_version_id
+    assert "plugin_version_id" not in tracked_properties
     assert "session_count" not in tracked_properties
 
 
@@ -975,6 +975,7 @@ async def test_advance_job_settlement_tracks_job_completed() -> None:
     assert len(job_events) == 1
     tracked_user_id, _, tracked_properties = job_events[0]
     assert tracked_user_id == ACTOR.account.id
+    assert tracked_properties["kind"] == job.kind.value
     assert tracked_properties["status"] == "completed"
     assert tracked_properties["task_count"] == 2
     assert tracked_properties["task_kinds"] == ["evaluator", "importer"]

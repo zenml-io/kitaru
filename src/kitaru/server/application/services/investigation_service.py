@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import UTC, datetime
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import InvestigationSessionStatus
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
@@ -31,6 +32,10 @@ from kitaru.server.application.models.investigation import (
     InvestigationSessionFilter,
     InvestigationUpdate,
 )
+from kitaru.server.application.services.analytics_events import (
+    build_investigation_created_properties,
+)
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.investigation import Investigation, InvestigationSession
 from kitaru.server.filtering import FilterCondition
@@ -44,6 +49,7 @@ class InvestigationService:
         repository: InvestigationRepository,
         agent_repository: AgentRepository,
         session_repository: SessionRepository,
+        analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
@@ -53,10 +59,12 @@ class InvestigationService:
                 agent exists.
             session_repository: Session repository, to validate linked
                 sessions exist and belong to the agent.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._agents = agent_repository
         self._sessions = session_repository
+        self._analytics = analytics
 
     async def _validate_sessions(
         self, session_ids: Sequence[uuid.UUID], agent_id: uuid.UUID
@@ -124,7 +132,14 @@ class InvestigationService:
             )
             for position, item in enumerate(command.sessions)
         ]
-        return await self._repository.create(investigation, sessions)
+        investigation = await self._repository.create(investigation, sessions)
+        if self._analytics is not None:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.INVESTIGATION_CREATED,
+                build_investigation_created_properties(investigation),
+            )
+        return investigation
 
     async def get_investigation(
         self, investigation_id: uuid.UUID, actor: AuthContext

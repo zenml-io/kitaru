@@ -1,0 +1,119 @@
+# syntax=docker/dockerfile:1
+# Build the worker release image from PyPI or candidate wheels and the
+# dependency versions locked by the matching repository release.
+
+ARG PYTHON_VERSION=3.13
+ARG UV_VERSION=0.12.1
+ARG VIRTUAL_ENV=/app/.venv
+ARG USERNAME=kitaru
+ARG USER_UID=1000
+ARG USER_GID=1000
+ARG KITARU_VERSION=""
+ARG PACKAGE_SOURCE=pypi
+
+FROM docker.io/astral/uv:${UV_VERSION} AS uv
+
+ARG PYTHON_VERSION
+ARG UV_VERSION
+ARG VIRTUAL_ENV
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
+ARG KITARU_VERSION
+ARG PACKAGE_SOURCE
+
+FROM python:${PYTHON_VERSION}-slim-bookworm AS base
+
+ARG PYTHON_VERSION
+ARG UV_VERSION
+ARG VIRTUAL_ENV
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
+ARG KITARU_VERSION
+ARG PACKAGE_SOURCE
+
+RUN groupadd --gid $USER_GID $USERNAME && \
+  useradd --uid $USER_UID --gid $USER_GID -m $USERNAME && \
+  mkdir -p /app $VIRTUAL_ENV && \
+  chown -R $USER_UID:$USER_GID /app
+
+WORKDIR /app
+
+FROM base AS builder
+
+ARG PYTHON_VERSION
+ARG UV_VERSION
+ARG VIRTUAL_ENV
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
+ARG KITARU_VERSION
+ARG PACKAGE_SOURCE
+
+COPY --from=uv /uv /uvx /bin/
+COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
+COPY --chown=$USERNAME:$USER_GID plugins/packages ./plugins/packages
+COPY --chown=$USERNAME:$USER_GID docker/candidate-wheels ./candidate-wheels
+
+ENV UV_COMPILE_BYTECODE=1 \
+  UV_LINK_MODE=copy \
+  UV_PYTHON_DOWNLOADS=never \
+  UV_PROJECT_ENVIRONMENT=$VIRTUAL_ENV \
+  VIRTUAL_ENV=$VIRTUAL_ENV \
+  PATH="$VIRTUAL_ENV/bin:$PATH"
+
+USER $USERNAME
+
+# Install the worker dependencies from the lockfile, then install the matching
+# Kitaru wheel without resolving its dependencies again. Keep a snapshot of
+# the resulting environment for inspection outside the container.
+RUN test -n "$KITARU_VERSION" && \
+  test "$(uv version --short)" = "$KITARU_VERSION" && \
+  uv sync --locked --no-dev --no-install-workspace --extra worker && \
+  if [ "$PACKAGE_SOURCE" = candidates ]; then \
+    uv pip install \
+      --no-deps \
+      --no-index \
+      --find-links candidate-wheels \
+      --only-binary=:all: \
+      "kitaru==$KITARU_VERSION"; \
+  else \
+    test "$PACKAGE_SOURCE" = pypi && \
+    uv pip install \
+      --no-deps \
+      --only-binary=:all: \
+      "kitaru==$KITARU_VERSION"; \
+  fi && \
+  uv pip check && \
+  python -c "import kitaru" && \
+  uv pip freeze > requirements.txt
+
+FROM base AS worker
+
+ARG PYTHON_VERSION
+ARG UV_VERSION
+ARG VIRTUAL_ENV
+ARG USERNAME
+ARG USER_UID
+ARG USER_GID
+ARG KITARU_VERSION
+
+COPY --from=uv /uv /bin/
+
+# The Python base image includes package-management tools that are unnecessary
+# at runtime.
+RUN uv pip uninstall --system pip setuptools wheel
+
+COPY --chown=$USERNAME:$USER_GID \
+  --from=builder $VIRTUAL_ENV $VIRTUAL_ENV
+COPY --chown=$USERNAME:$USER_GID \
+  --from=builder /app/requirements.txt /app/requirements.txt
+
+ENV VIRTUAL_ENV=$VIRTUAL_ENV \
+  PATH="$VIRTUAL_ENV/bin:/home/$USERNAME/.local/bin:$PATH" \
+  PYTHONUNBUFFERED=1 \
+  PYTHONFAULTHANDLER=1 \
+  PYTHONHASHSEED=random
+
+USER $USERNAME

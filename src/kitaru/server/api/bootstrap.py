@@ -11,9 +11,10 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Default account and default plugin bootstrap at server startup."""
+"""Default account, default plugin, and server id bootstrap at server startup."""
 
 import logging
+import uuid
 from importlib.metadata import entry_points
 
 from kitaru.base import FrozenModel
@@ -21,8 +22,12 @@ from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.application.interfaces.account_repository import AccountRepository
 from kitaru.server.application.interfaces.plugin_repository import PluginRepository
+from kitaru.server.application.interfaces.server_settings_repository import (
+    ServerSettingsRepository,
+)
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
@@ -37,8 +42,26 @@ _DEFAULT_PLUGIN_ENTRY_POINT_GROUP = "kitaru.default_plugins"
 logger = logging.getLogger(__name__)
 
 
+async def ensure_server_id(
+    repository: ServerSettingsRepository, configured_id: uuid.UUID | None
+) -> uuid.UUID:
+    """Persist the server id on first startup and load it after.
+
+    Args:
+        repository: Server settings repository.
+        configured_id: Configured server id, None generates one.
+
+    Returns:
+        Stored server id.
+    """
+    return await repository.ensure_server_id(configured_id or uuid.uuid4())
+
+
 async def ensure_default_account(
-    repository: AccountRepository, name: str, password: str | None
+    repository: AccountRepository,
+    name: str,
+    password: str | None,
+    analytics: ServerAnalytics | None = None,
 ) -> None:
     """Create the default account when it does not exist.
 
@@ -46,11 +69,13 @@ async def ensure_default_account(
         repository: Account repository.
         name: Account name.
         password: Login password, hashed before storage.
+        analytics: Analytics tracker, None skips tracking.
     """
     account_service = AccountService(
         repository=repository,
         password_hasher=BcryptPasswordHasher(),
         permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
     )
     await account_service.ensure_account(name, password)
 
@@ -62,6 +87,7 @@ class DefaultPluginDefinition(FrozenModel):
     name: str
     description: str
     provider: str | None
+    logo_url: str | None = None
     entrypoint: str
     requirement: str
     display_version: str
@@ -132,6 +158,7 @@ async def _get_or_create_plugin(
                 name=definition.name,
                 description=definition.description,
                 provider=definition.provider,
+                logo_url=definition.logo_url,
                 metadata={},
             )
         )

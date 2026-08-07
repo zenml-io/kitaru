@@ -49,7 +49,16 @@ class IdentifyMessage(BaseModel):
     debug: bool
 
 
-AnalyticsMessage = TrackMessage | IdentifyMessage
+class AliasMessage(BaseModel):
+    """Alias message."""
+
+    user_id: UUID
+    previous_id: UUID
+    type: Literal["alias"] = "alias"
+    debug: bool
+
+
+AnalyticsMessage = TrackMessage | IdentifyMessage | AliasMessage
 
 
 class AnalyticsClient:
@@ -76,6 +85,7 @@ class AnalyticsClient:
         """
         self._enabled = enabled
         self._debug = debug
+        self._context: dict[str, Any] = {}
         self._max_batch_size = max_batch_size
         self._queue: asyncio.Queue[tuple[AnalyticsSource, AnalyticsMessage] | None] = (
             asyncio.Queue(maxsize=max_queue_size)
@@ -87,6 +97,14 @@ class AnalyticsClient:
         )
         self._worker: asyncio.Task[None] | None = None
         self._closed = False
+
+    def set_context(self, context: dict[str, Any]) -> None:
+        """Set the context merged into every track message.
+
+        Args:
+            context: Values merged into event properties.
+        """
+        self._context = context
 
     @property
     def enabled(self) -> bool:
@@ -114,7 +132,7 @@ class AnalyticsClient:
             TrackMessage(
                 user_id=user_id,
                 event=event,
-                properties=properties or {},
+                properties={**(properties or {}), **self._context},
                 debug=self._debug,
             )
         )
@@ -128,6 +146,17 @@ class AnalyticsClient:
         """
         self._enqueue(
             IdentifyMessage(user_id=user_id, traits=traits or {}, debug=self._debug)
+        )
+
+    def alias(self, user_id: UUID, previous_id: UUID) -> None:
+        """Queue an alias message.
+
+        Args:
+            user_id: User id the alias points to.
+            previous_id: User id the events were recorded under.
+        """
+        self._enqueue(
+            AliasMessage(user_id=user_id, previous_id=previous_id, debug=self._debug)
         )
 
     async def aclose(self) -> None:

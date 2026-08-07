@@ -23,11 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.rest.dependencies import (
     get_analytics_client,
-    get_app_settings,
     get_experiment_run_service,
     get_server_analytics,
 )
-from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.replay import ReplayStatusCounts
 from kitaru.server.application.services.experiment_run_service import (
@@ -45,7 +43,6 @@ async def cancel_run(
     experiment_run_id: uuid.UUID,
     actor: AuthContext,
     database: DatabaseService,
-    settings: APISettings,
     analytics: AnalyticsClient,
 ) -> tuple[ExperimentRun, ReplayStatusCounts]:
     """Mark a run canceling, then cancel its jobs in a second transaction.
@@ -61,7 +58,6 @@ async def cancel_run(
         experiment_run_id: Id of the run.
         actor: Caller context.
         database: Database service the phases open sessions against.
-        settings: API settings for this process.
         analytics: Analytics client for this process.
 
     Raises:
@@ -73,7 +69,7 @@ async def cancel_run(
     """
     async for session in database.get_async_session():
         try:
-            service = _build_service(session, settings, analytics)
+            service = _build_service(session, analytics)
             await service.mark_run_canceling(experiment_run_id, actor=actor)
             await session.commit()
         except Exception:
@@ -82,7 +78,7 @@ async def cancel_run(
 
     async for session in database.get_async_session():
         try:
-            service = _build_service(session, settings, analytics)
+            service = _build_service(session, analytics)
             result = await service.cancel_run_jobs(experiment_run_id, actor=actor)
             await session.commit()
             return result
@@ -93,32 +89,29 @@ async def cancel_run(
 
 
 def _build_service(
-    session: AsyncSession, settings: APISettings, analytics: AnalyticsClient
+    session: AsyncSession, analytics: AnalyticsClient
 ) -> ExperimentRunService:
     """Build a run service the same way a request does.
 
     Args:
         session: Session the service binds its repositories to.
-        settings: API settings for this process.
         analytics: Analytics client for this process.
 
     Returns:
         Experiment run service.
     """
-    tracker = get_server_analytics(session, settings, analytics)
+    tracker = get_server_analytics(session, analytics)
     return get_experiment_run_service(session, tracker)
 
 
 def get_run_canceler(
     request: Request,
-    settings: Annotated[APISettings, Depends(get_app_settings)],
     analytics: Annotated[AnalyticsClient, Depends(get_analytics_client)],
 ) -> RunCanceler:
     """Return the run cancellation flow, bound to this process.
 
     Args:
         request: Incoming request.
-        settings: API settings for this process.
         analytics: Analytics client for this process.
 
     Returns:
@@ -129,6 +122,6 @@ def get_run_canceler(
     async def cancel(
         experiment_run_id: uuid.UUID, actor: AuthContext
     ) -> tuple[ExperimentRun, ReplayStatusCounts]:
-        return await cancel_run(experiment_run_id, actor, database, settings, analytics)
+        return await cancel_run(experiment_run_id, actor, database, analytics)
 
     return cancel

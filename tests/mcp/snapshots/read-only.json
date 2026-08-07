@@ -812,6 +812,18 @@
               "title": "Latest Version",
               "type": "integer"
             },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Evaluator logo URL.",
+              "title": "Logo Url"
+            },
             "metadata": {
               "additionalProperties": true,
               "description": "Arbitrary metadata.",
@@ -850,6 +862,7 @@
             "id",
             "name",
             "description",
+            "logo_url",
             "metadata",
             "latest_version"
           ],
@@ -935,6 +948,12 @@
         "ExperimentResponse": {
           "description": "Experiment response.",
           "properties": {
+            "agent_id": {
+              "description": "Agent the experiment's runs belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -1007,6 +1026,7 @@
             "id",
             "name",
             "description",
+            "agent_id",
             "override",
             "tool_policy",
             "evaluators"
@@ -1082,6 +1102,18 @@
               "title": "Latest Version",
               "type": "integer"
             },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Importer logo URL.",
+              "title": "Logo Url"
+            },
             "metadata": {
               "additionalProperties": true,
               "description": "Arbitrary metadata.",
@@ -1133,6 +1165,7 @@
             "name",
             "description",
             "provider",
+            "logo_url",
             "metadata",
             "latest_version"
           ],
@@ -4837,7 +4870,9 @@
             "input",
             "output",
             "error",
-            "metadata"
+            "metadata",
+            "attributes",
+            "model_params"
           ],
           "title": "AnnotationSelectorPart",
           "type": "string"

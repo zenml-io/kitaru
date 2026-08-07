@@ -43,6 +43,7 @@ from kitaru.cli import (
     experiments,
     investigations,
     jobs,
+    local_runtime,
     registration,
     scaffold,
     sessions,
@@ -63,7 +64,9 @@ from kitaru.cli.output import (
     OutputContext,
     OutputMode,
     emit_error,
+    emit_event,
     emit_result,
+    get_output_context,
     reset_output_context,
     resolve_output_mode,
     set_output_context,
@@ -188,6 +191,11 @@ job_app = App(
     help=GROUP_DESCRIPTIONS["job"],
     default_parameter=Parameter(negative=False),
 )
+local_app = App(
+    name="local",
+    help=GROUP_DESCRIPTIONS["local"],
+    default_parameter=Parameter(negative=False),
+)
 agent_app.command(agent_version_app, name="version")
 cohort_app.command(cohort_version_app, name="version")
 investigation_app.command(investigation_session_app, name="session")
@@ -206,6 +214,7 @@ app.command(session_app, name="session")
 app.command(evaluation_app, name="evaluation")
 app.command(worker_app, name="worker")
 app.command(job_app, name="job")
+app.command(local_app, name="local")
 
 
 @dataclass(slots=True)
@@ -536,7 +545,18 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
                 "Managed or self-hosted instance URL.",
             ),
             ParameterSpec(
-                "--local", "boolean", "option", False, "Use http://localhost:8000."
+                "--local",
+                "boolean",
+                "option",
+                False,
+                "Provision and use http://localhost:8000.",
+            ),
+            ParameterSpec(
+                "--upgrade",
+                "boolean",
+                "option",
+                False,
+                "Upgrade the CLI-owned local deployment.",
             ),
             ParameterSpec(
                 "--username", "string", "option", False, "Local account name."
@@ -557,11 +577,13 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
             ),
         ),
         read_only=False,
-        side_effects=("writes_local_config",),
-        idempotency="credential_replacement_after_validation",
-        interaction=(
-            "device flow or hidden password prompt unless explicit stdin input is used"
+        side_effects=(
+            "writes_local_config",
+            "writes_local_file",
+            "executes_local_code",
         ),
+        idempotency="local_reconciliation_or_credential_replacement",
+        interaction=("local dashboard launch, device flow, or hidden password prompt"),
         errors=(
             "invalid_arguments",
             "invalid_configuration",
@@ -577,6 +599,7 @@ async def login(
     /,
     *,
     local: bool = False,
+    upgrade: bool = False,
     username: str | None = None,
     password_stdin: bool = False,
     api_key_stdin: bool = False,
@@ -589,6 +612,7 @@ async def login(
     return await auth_commands.login(
         server=chosen_server,
         local=local,
+        upgrade=upgrade,
         username=username,
         password_stdin=password_stdin,
         api_key_stdin=api_key_stdin,
@@ -597,6 +621,7 @@ async def login(
         non_interactive=invocation.non_interactive,
         no_browser=invocation.no_browser,
         stdin=invocation.stdin,
+        package_version=diagnostics.package_version(),
     )
 
 
@@ -604,7 +629,7 @@ async def login(
     app,
     _spec(
         ("logout",),
-        "Remove locally stored credentials.",
+        "Disconnect from a server and stop an owned local deployment.",
         parameters=(
             ParameterSpec(
                 "SERVER", "URL", "argument", False, "Server to log out from."
@@ -612,14 +637,33 @@ async def login(
             ParameterSpec(
                 "--all", "boolean", "option", False, "Remove every stored credential."
             ),
+            ParameterSpec(
+                "--volumes/-v",
+                "boolean",
+                "option",
+                False,
+                "Delete data for the CLI-owned local deployment.",
+            ),
         ),
         read_only=False,
-        side_effects=("writes_local_config",),
+        side_effects=(
+            "writes_local_config",
+            "writes_local_file",
+            "executes_local_code",
+        ),
         idempotency="idempotent",
         errors=("invalid_arguments", "invalid_configuration", "internal_error"),
     ),
 )
-def logout(server: str | None = None, /, *, all: bool = False) -> CommandResult:
+async def logout(
+    server: str | None = None,
+    /,
+    *,
+    all: bool = False,
+    volumes: Annotated[
+        bool, Parameter(name=("--volumes", "-v"), negative=False)
+    ] = False,
+) -> CommandResult:
     """Remove one or all credentials from the local credential store."""
     invocation = _invocation()
     if all:
@@ -628,14 +672,73 @@ def logout(server: str | None = None, /, *, all: bool = False) -> CommandResult:
                 "invalid_arguments",
                 "SERVER or --server cannot be used with --all.",
             )
+        if volumes:
+            raise CLIError(
+                "invalid_arguments", "--all and --volumes cannot be combined."
+            )
         server_url = None
     else:
         server_url = invocation.resolve_target(server).server_url
-    return auth_commands.logout(
+    return await auth_commands.logout(
         server_url=server_url,
         all_servers=all,
+        delete_volumes=volumes,
         credential_store=invocation.credential_store,
     )
+
+
+@_register(
+    local_app,
+    _spec(
+        ("local", "logs"),
+        "Read logs from the CLI-owned local deployment.",
+        parameters=(
+            ParameterSpec(
+                "--service",
+                "server|db",
+                "option",
+                False,
+                "Limit output to one Compose service.",
+            ),
+            ParameterSpec(
+                "--tail", "integer", "option", False, "Number of recent lines."
+            ),
+            ParameterSpec(
+                "--follow", "boolean", "option", False, "Follow new log lines."
+            ),
+        ),
+        side_effects=("executes_local_code",),
+        errors=("invalid_configuration", "timeout", "internal_error"),
+        streams=True,
+    ),
+)
+async def local_logs(
+    *,
+    service: str | None = None,
+    tail: int = 100,
+    follow: bool = False,
+) -> CommandResult:
+    """Read or follow logs from the local Docker Compose deployment."""
+    if follow and get_output_context().mode == "json":
+        raise CLIError(
+            "invalid_arguments",
+            "--follow requires text or JSONL output.",
+            hint="Pass `--output jsonl` for structured streaming logs.",
+        )
+    result = await local_runtime.get_local_logs(
+        service=service,
+        tail=tail,
+        follow=follow,
+    )
+    if follow:
+        assert not isinstance(result, list)
+        count = 0
+        async for line in result:
+            emit_event("log", {"line": line})
+            count += 1
+        return CommandResult(item={"lines": count}, event="complete")
+    assert isinstance(result, list)
+    return CommandResult(items=[{"line": line} for line in result])
 
 
 @_register(
@@ -2049,6 +2152,13 @@ async def annotation_delete(
         parameters=(
             ParameterSpec("NAME", "string", "argument", True, "New experiment name."),
             ParameterSpec(
+                "--agent",
+                "reference",
+                "option",
+                True,
+                "Exact agent UUID or case-sensitive name.",
+            ),
+            ParameterSpec(
                 "--description", "string", "option", False, "Experiment description."
             ),
             ParameterSpec(
@@ -2090,6 +2200,7 @@ async def experiment_create(
     name: str,
     /,
     *,
+    agent: str,
     evaluator: list[str],
     description: str | None = None,
     override: str | None = None,
@@ -2101,6 +2212,7 @@ async def experiment_create(
         return await experiments.create_experiment(
             client,
             name,
+            agent=agent,
             description=description,
             override=override,
             tool_policy=tool_policy,

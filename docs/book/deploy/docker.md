@@ -11,6 +11,45 @@ dashboard your team and coding agents use to inspect and replay them. The
 container image is published as `zenmldocker/kitaru-server` and works with
 Docker, Docker Compose, or any container orchestration platform.
 
+## CLI-managed local deployment
+
+For one local Kitaru deployment per user, let the CLI manage the server and PostgreSQL lifecycle:
+
+```bash
+kitaru login --local
+```
+
+This requires Docker with the Compose v2 plugin. The CLI pins the server image to the installed Kitaru version, binds the dashboard to `http://localhost:8000`, keeps PostgreSQL private to the Compose network, stores generated runtime secrets in the Kitaru configuration directory, and opens the dashboard after the health check passes. Existing images are reused without an automatic pull.
+
+Use the local commands to inspect and stop the deployment:
+
+```bash
+kitaru local logs
+kitaru local logs --service server --follow
+kitaru logout
+```
+
+Plain logout stops the containers and keeps the PostgreSQL volume. Pass `--volumes` or `-v` to delete the database and generated runtime secrets:
+
+```bash
+kitaru logout --volumes
+```
+
+The CLI refuses to replace a server image during normal login. Upgrade it explicitly after updating the Kitaru package:
+
+```bash
+kitaru login --local --upgrade
+```
+
+Source builds and unpublished versions must name a compatible image that already exists locally:
+
+```bash
+export KITARU_LOCAL_IMAGE=kitaru-local:dev
+kitaru login --local
+```
+
+The remaining sections describe manually managed Docker deployments, which are separate from the CLI-owned deployment.
+
 ## Quick start
 
 Start a server with sensible defaults:
