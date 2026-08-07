@@ -18,56 +18,116 @@ on:
         description: Package version already committed in its pyproject.toml.
         required: true
         type: string
-      dry-run:
-        description: Build and test without publishing or tagging.
-        required: false
-        type: boolean
-        default: false
+  push:
+    tags:
+      - braintrust-importer-v*
+      - evaluator-v*
+      - jsonl-importer-v*
+      - langfuse-importer-v*
+      - langsmith-importer-v*
+      - opentelemetry-importer-v*
 permissions: {}
 concurrency:
-  group: release-plugin-${{ inputs.package }}
+  group: >-
+    release-plugin-${{
+      github.event_name == 'push' && github.ref_name || inputs.package
+    }}
   cancel-in-progress: false
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
-    environment: ${{ inputs.dry-run && 'dry-run' || 'pypi' }}
     permissions:
-      contents: write
-      id-token: write
+      contents: read
+    outputs:
+      package_name: ${{ steps.metadata.outputs.package_name }}
+      package_tag: ${{ steps.metadata.outputs.package_tag }}
+      package_version: ${{ steps.metadata.outputs.package_version }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
-          ref: ${{ inputs.dry-run && github.sha || 'develop' }}
           fetch-depth: 0
+          persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           python-version: '3.12'
           enable-cache: false
       - name: Resolve package metadata
+        id: metadata
         env:
-          REQUESTED_PACKAGE: ${{ inputs.package }}
-          REQUESTED_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_PACKAGE: ${{ inputs.package }}
+          INPUT_VERSION: ${{ inputs.version }}
+          TAG_NAME: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          if [ "$EVENT_NAME" = push ]; then
+            PACKAGE_TAG="$TAG_NAME"
+            case "$PACKAGE_TAG" in
+              braintrust-importer-v*)
+                REQUESTED_PACKAGE=braintrust-importer
+                REQUESTED_VERSION=${PACKAGE_TAG#braintrust-importer-v}
+                ;;
+              evaluator-v*)
+                REQUESTED_PACKAGE=evaluator
+                REQUESTED_VERSION=${PACKAGE_TAG#evaluator-v}
+                ;;
+              jsonl-importer-v*)
+                REQUESTED_PACKAGE=jsonl-importer
+                REQUESTED_VERSION=${PACKAGE_TAG#jsonl-importer-v}
+                ;;
+              langfuse-importer-v*)
+                REQUESTED_PACKAGE=langfuse-importer
+                REQUESTED_VERSION=${PACKAGE_TAG#langfuse-importer-v}
+                ;;
+              langsmith-importer-v*)
+                REQUESTED_PACKAGE=langsmith-importer
+                REQUESTED_VERSION=${PACKAGE_TAG#langsmith-importer-v}
+                ;;
+              opentelemetry-importer-v*)
+                REQUESTED_PACKAGE=opentelemetry-importer
+                REQUESTED_VERSION=${PACKAGE_TAG#opentelemetry-importer-v}
+                ;;
+              *)
+                echo "::error::Unsupported plugin tag: $PACKAGE_TAG"
+                exit 1
+                ;;
+            esac
+          else
+            REQUESTED_PACKAGE="$INPUT_PACKAGE"
+            REQUESTED_VERSION="$INPUT_VERSION"
+            PACKAGE_TAG="$REQUESTED_PACKAGE-v$REQUESTED_VERSION"
+          fi
           PROJECT_DIR="plugins/packages/$REQUESTED_PACKAGE"
           PACKAGE_VERSION=$(uv version --project "$PROJECT_DIR" --short)
           PACKAGE_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' "$PROJECT_DIR/pyproject.toml")
           test -n "$PACKAGE_NAME"
           test "$PACKAGE_VERSION" = "$REQUESTED_VERSION"
+          test "$PACKAGE_TAG" = "$REQUESTED_PACKAGE-v$PACKAGE_VERSION"
           {
             printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR"
             printf 'PACKAGE_NAME=%s\n' "$PACKAGE_NAME"
             printf 'PACKAGE_VERSION=%s\n' "$PACKAGE_VERSION"
-            printf 'PACKAGE_TAG=%s-v%s\n' "$REQUESTED_PACKAGE" "$PACKAGE_VERSION"
+            printf 'PACKAGE_TAG=%s\n' "$PACKAGE_TAG"
           } >> "$GITHUB_ENV"
-      - name: Validate release is new
-        if: ${{ !inputs.dry-run }}
+          {
+            printf 'package_name=%s\n' "$PACKAGE_NAME"
+            printf 'package_version=%s\n' "$PACKAGE_VERSION"
+            printf 'package_tag=%s\n' "$PACKAGE_TAG"
+          } >> "$GITHUB_OUTPUT"
+      - name: Validate tagged commit is on main
+        if: github.event_name == 'push'
         run: |
           set -euo pipefail
-          if git rev-parse "refs/tags/$PACKAGE_TAG" >/dev/null 2>&1; then
-            echo "::error::Tag $PACKAGE_TAG already exists."
+          git fetch origin main
+          RELEASE_SHA=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$RELEASE_SHA" origin/main; then
+            echo "::error::Tag $PACKAGE_TAG points to $RELEASE_SHA, which is not on main."
             exit 1
           fi
+      - name: Validate release is new
+        if: github.event_name == 'push'
+        run: |
+          set -euo pipefail
           STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
             "https://pypi.org/pypi/$PACKAGE_NAME/$PACKAGE_VERSION/json")
           if [ "$STATUS" = 200 ]; then
@@ -89,18 +149,39 @@ jobs:
           --package "$PROJECT_DIR"
       - name: Build package
         run: uv build --project "$PROJECT_DIR" --out-dir "plugins/dist/$PACKAGE_NAME"
+      - name: Upload package artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: plugin-distribution
+          path: plugins/dist/${{ steps.metadata.outputs.package_name }}/*
+          if-no-files-found: error
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download package artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: plugin-distribution
+          path: plugins/dist
       - name: Publish package
-        if: ${{ !inputs.dry-run }}
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
         with:
-          packages-dir: plugins/dist/${{ env.PACKAGE_NAME }}
-      - name: Tag release
-        if: ${{ !inputs.dry-run }}
+          packages-dir: plugins/dist
+      - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |-
-          git tag "$PACKAGE_TAG"
-          git push origin "$PACKAGE_TAG"
-          gh release create "$PACKAGE_TAG" "plugins/dist/$PACKAGE_NAME"/* \
-            --title "$PACKAGE_NAME $PACKAGE_VERSION" \
-            --generate-notes
+          GH_REPO: ${{ github.repository }}
+          PACKAGE_NAME: ${{ needs.build.outputs.package_name }}
+          PACKAGE_TAG: ${{ needs.build.outputs.package_tag }}
+          PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
+        run: >-
+          gh release create "$PACKAGE_TAG" plugins/dist/*
+          --verify-tag
+          --title "$PACKAGE_NAME $PACKAGE_VERSION"
+          --generate-notes
