@@ -43,13 +43,17 @@ ever triggered an incident. [Imported sessions](import-langfuse-traces.md)
 qualify exactly like recorded ones — your Langfuse history from before
 Kitaru existed is admissible evidence, and if you imported it with
 `--tag`, the tag *is* your selection
-(`kitaru session list --tag imported-baseline`).
+(`kitaru session list --tag imported-baseline`). Recorded live rather
+than imported? Select by `--agent` or a `--filter` instead — any
+selection works.
 
 ## 2. Freeze it into a cohort version
 
-From the CLI, one command — `cohort create` takes the same selection
-flags as `session evaluate` (`--tag`, `--session`, `--sessions-file`,
-`--filter`) and freezes the match into version 1:
+From the CLI, one command — `cohort create` takes a session selection
+(`--tag`, `--session`, `--sessions-file`, `--filter` — the same surface
+`session evaluate` offers) and freezes the match into version 1.
+`--agent` is not a selector here; it names the agent the cohort belongs
+to:
 
 ```bash
 kitaru cohort create refund-regression --agent support-agent \
@@ -101,6 +105,10 @@ experiment = await client.experiments.create(
 )
 ```
 
+Both evaluators must already be registered — `tone-judge` stands in for
+whatever second lens you've written;
+[Write an evaluator](write-an-evaluator.md) is the recipe.
+
 Testing a **code** change instead? Leave `override` out entirely and
 register your branch as a new agent version — the run supplies it next.
 The `history` policy scoped to `cohort_version` answers tool calls from
@@ -117,6 +125,9 @@ kitaru experiment create cheaper-model \
 ```
 
 ## 4. Run it and read it
+
+Register the candidate first if it doesn't exist yet —
+`kitaru agent version register` is what mints `support-agent@2`:
 
 ```bash
 kitaru experiment run start cheaper-model \

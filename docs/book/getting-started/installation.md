@@ -17,13 +17,13 @@ Kitaru requires **Python 3.11 or newer**.
 {% tabs %}
 {% tab title="uv (recommended)" %}
 ```bash
-uv add "kitaru[cli,pydantic-ai]"
+uv add "kitaru[cli,worker,pydantic-ai]"
 ```
 {% endtab %}
 
 {% tab title="pip" %}
 ```bash
-pip install "kitaru[cli,pydantic-ai]"
+pip install "kitaru[cli,worker,pydantic-ai]"
 ```
 {% endtab %}
 {% endtabs %}

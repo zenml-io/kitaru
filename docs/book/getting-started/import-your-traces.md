@@ -73,7 +73,7 @@ kitaru session list --agent support-agent --origin imported
 ```
 
 The same import is two calls on the
-[Python client](../concepts/agents-and-sessions.md) when you'd rather
+[Python client](../deploy/configuration.md) when you'd rather
 script it — upload the export with `client.blobs.upload(...)`, then
 create the import with `client.imports.create(ImportCreateRequest(
 importer="langfuse", agent_id=..., payload_blob_id=...))`.

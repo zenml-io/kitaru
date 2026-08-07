@@ -1,5 +1,5 @@
 ---
-description: Seven nouns and one verb — how sessions, replays, evaluators, cohorts, experiments, and workers fit together.
+description: A handful of nouns and one verb — how sessions, replays, evaluators, cohorts, experiments, investigations, and workers fit together.
 icon: lightbulb
 ---
 
@@ -23,6 +23,10 @@ Kitaru's object model is small, and every piece exists to serve one loop:
   versions, so results stay comparable.
 * **[Experiments](experiments.md)** replay a cohort against a change and
   score both sides — what improved, what regressed, before you ship.
+* **[Investigations](investigations.md)** structure human review:
+  questions asked over a set of sessions, answers stored as
+  **annotations** pinned to exact trace locations — distinct from
+  evaluations, and the raw material for calibrating them.
 * **[Workers](workers.md)** execute all of it in your environment. The
   server coordinates; your infrastructure runs the code and holds the data.
 
@@ -49,4 +53,4 @@ population, and criteria that produced it.
 
 ## Where to start
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Agents &#x26; Sessions</strong></td><td>The identity and the recording.</td><td><a href="agents-and-sessions.md">agents-and-sessions.md</a></td></tr><tr><td><strong>Replay</strong></td><td>Baselines, forks, overrides, and tool policies.</td><td><a href="replay.md">replay.md</a></td></tr><tr><td><strong>Evaluators &#x26; Evaluations</strong></td><td>Evaluating sessions, human labels, calibration.</td><td><a href="evaluators.md">evaluators.md</a></td></tr><tr><td><strong>Cohorts</strong></td><td>Immutable populations for comparable results.</td><td><a href="cohorts.md">cohorts.md</a></td></tr><tr><td><strong>Experiments</strong></td><td>A change, replayed and evaluated at population scale.</td><td><a href="experiments.md">experiments.md</a></td></tr><tr><td><strong>Workers</strong></td><td>Execution in your environment.</td><td><a href="workers.md">workers.md</a></td></tr><tr><td><strong>Under the Hood</strong></td><td>Server, workers, tasks, and blobs — the machinery.</td><td><a href="under-the-hood.md">under-the-hood.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Agents &#x26; Sessions</strong></td><td>The identity and the recording.</td><td><a href="agents-and-sessions.md">agents-and-sessions.md</a></td></tr><tr><td><strong>Replay</strong></td><td>Baselines, forks, overrides, and tool policies.</td><td><a href="replay.md">replay.md</a></td></tr><tr><td><strong>Evaluators &#x26; Evaluations</strong></td><td>Evaluating sessions, human labels, calibration.</td><td><a href="evaluators.md">evaluators.md</a></td></tr><tr><td><strong>Cohorts</strong></td><td>Immutable populations for comparable results.</td><td><a href="cohorts.md">cohorts.md</a></td></tr><tr><td><strong>Experiments</strong></td><td>A change, replayed and evaluated at population scale.</td><td><a href="experiments.md">experiments.md</a></td></tr><tr><td><strong>Investigations &#x26; Annotations</strong></td><td>Structured human review; labels with an address.</td><td><a href="investigations.md">investigations.md</a></td></tr><tr><td><strong>Workers</strong></td><td>Execution in your environment.</td><td><a href="workers.md">workers.md</a></td></tr><tr><td><strong>Under the Hood</strong></td><td>Server, workers, tasks, and blobs — the machinery.</td><td><a href="under-the-hood.md">under-the-hood.md</a></td></tr></tbody></table>

@@ -62,7 +62,8 @@ there is nothing to write. Braintrust and OpenTelemetry (OTLP)
 importers are in the works.
 
 The Langfuse importer parses **Langfuse JSONL exports** — up to 50 MiB per
-payload — and understands three record shapes: `trace`, `observation`,
+payload (the importer's own cap, separate from the server's
+configurable blob limit) — and understands three record shapes: `trace`, `observation`,
 and raw `ingestion_event` lines. Traces map to sessions; observations map
 to nodes with their parent relationships, timings, model names, token
 usage, and cost preserved. `params`:
@@ -109,7 +110,6 @@ def parse(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedSession | Im
             name=record.title,
             inputs=record.question,
             outputs=record.answer,
-            expected=None,
             error=None,
             started_at=record.started_at,
             ended_at=record.ended_at,

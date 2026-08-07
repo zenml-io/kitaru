@@ -12,7 +12,7 @@ thing changed, and read what the change did. One sitting, one ticket:
 
 > Refund order #4821 — the card reader was double-charged.
 
-You need a running server and a connection — two commands, covered in
+You need a running server and a connection, covered in
 [Installation](installation.md). Already collecting traces in Langfuse or
 elsewhere? You can skip wrapping entirely and start from
 [Import your traces](import-your-traces.md) — everything from
@@ -85,7 +85,7 @@ automatically, so nothing about it changes.
 The Python client is async and reads its connection from the environment:
 
 ```python
-# inspect.py
+# show_session.py
 import asyncio
 from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.session import SessionListParams
@@ -108,6 +108,9 @@ asyncio.run(main())
   1 tool_call    refund_payment
   2 llm_call     support-agent
 ```
+
+Keep the session id this prints — the replay snippets in steps 6 and 7
+refer to it as `SESSION_ID`.
 
 The recording is the whole conversation between your agent and the world:
 what the model saw, what the tool returned, what it cost.

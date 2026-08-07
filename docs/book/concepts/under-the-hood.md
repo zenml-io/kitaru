@@ -29,8 +29,9 @@ Between them sits the **job/task** layer. Commands like "replay this
 session," "import this export," or "score these sessions" create a job
 holding one or more tasks — every job carries its kind (`session_run`,
 `import`, `evaluation`, `replay`), so `kitaru job` listings filter
-cleanly. Workers claim tasks (scoped by kind or label), heartbeat while
-running them, and report results. Crashed workers lose their claim; the
+cleanly. Workers claim tasks scoped by *task* kind — `agent`, `evaluator`,
+`importer`, a different axis than job kinds — or by label, heartbeat
+while running them, and report results. Crashed workers lose their claim; the
 server requeues or fails the task, so no replay is ever silently
 stranded. `kitaru job watch <id>` follows any of it live.
 

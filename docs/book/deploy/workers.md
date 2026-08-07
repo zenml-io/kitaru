@@ -34,7 +34,7 @@ kitaru worker start
 |---|---|---|
 | `KITARU_WORKER_NAME` | hostname-pid | Stable name; restarts reuse the worker registration. In Kubernetes the pod name works out of the box. |
 | `KITARU_WORKER_CONCURRENCY` | 1 | Tasks run in parallel |
-| `KITARU_WORKER_SCOPE__KINDS` | all | JSON list of task kinds to claim |
+| `KITARU_WORKER_SCOPE__KINDS` | all | JSON list of task kinds to claim — `agent`, `evaluator`, `importer` (task kinds, not job kinds) |
 | `KITARU_WORKER_SCOPE__SELECTORS` | — | JSON label selectors (e.g. limit to one agent version's environment) |
 | `KITARU_WORKER_SCOPE__JOB_ID` | — | Claim one job's tasks, drain, exit |
 | `KITARU_WORKER_TIMEOUT` | — | Wall-clock lifetime; unset runs until stopped |

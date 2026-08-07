@@ -25,7 +25,7 @@ parsed and replayed on your workers. Nothing needs to leave your systems.
    server image against your managed Postgres. Start here.
    On Kubernetes, use the [Helm chart](helm.md).
 2. Create [accounts and API keys](authentication.md) for your team and
-   your CI.
+   your CI (Python client today; CLI verbs are on the way).
 3. Start [workers](workers.md) in each environment agents run in.
 4. Store provider credentials the server should manage as
    [secrets](secrets.md), and set client defaults via
