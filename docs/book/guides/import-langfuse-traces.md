@@ -74,9 +74,9 @@ usage, and cost preserved. `params`:
 
 Import in slices as often as you like — dedup makes it safe.
 
-## Dedup: one session per (provider, external_id)
+## Dedup: one session per (imported_from, external_id)
 
-Every imported session records its source identity: the `provider`
+Every imported session records its source identity: `imported_from`
 (`langfuse`) and the trace's `external_id`. That pair is unique on the
 server, so re-importing an overlapping export **skips** what's already
 stored — the stats report it as `skipped`, not as an error. This is the

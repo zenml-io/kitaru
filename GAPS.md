@@ -192,6 +192,32 @@ publish.
   `agent-native/mcp-server.md` should gain a skills section alongside
   MCP.
 
+## Aug 7 deltas (docs updated Aug 7)
+
+- **Session `provider` renamed to `imported_from`** (`f11166b5`), CLI
+  filter now `--imported-from`; sessions also gained a `framework`
+  field (importers can report which agent framework produced the
+  trace — "parser framework"). Docs swept (dedup sections). The
+  *importer* record keeps its own `provider` attribute — only the
+  session side renamed.
+- **Startup plugin seeding returned half-way (#684)** — the server
+  again registers default plugins at startup via
+  `register_default_plugins`, **but `DEFAULT_PLUGIN_DEFINITIONS` is an
+  empty tuple at the tip** — presumably populated at build/packaging
+  time. `scripts/seed_default_plugins.py` still exists and remains the
+  operative dev path. Docs' "seeded as part of setting it up" wording
+  still stands; the TODO in `import-your-traces.md` stays until the
+  list is actually populated.
+- **Session `expected` field removed** — never documented; no impact.
+- **Perf hardening** (#683 lock contention, #686 node-read batching) —
+  no docs impact. Agent-guidance refresh merged.
+- **In-flight branches to watch**: `codex/login-local-runtime`
+  (movement on open item 3, `kitaru login --local`),
+  `feat/built-in-deterministic-evaluators` (likely grows the built-in
+  evaluator set), `codex/surface-session-prompts`,
+  `codex/v2-importer-braintrust-otlp` (still cooking), and
+  `misc/improvements`.
+
 ## Claims that need verification before publish
 
 1. **Branch union** — mostly closed: as of Aug 5 13:36, `cli-620`

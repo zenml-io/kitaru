@@ -80,7 +80,7 @@ importer="langfuse", agent_id=..., payload_blob_id=...))`.
 
 ## Re-runs are safe
 
-Every imported session keeps its source identity (`provider` +
+Every imported session keeps its source identity (`imported_from` +
 `external_id`). Importing the same export twice — or a bigger export that
 overlaps an earlier one — skips what's already there instead of
 duplicating it. Import incrementally, as often as you like.
