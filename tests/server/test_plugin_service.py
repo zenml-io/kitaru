@@ -139,10 +139,10 @@ async def test_create_plugin_duplicate_name(evaluator_service: PluginService) ->
 
 
 async def test_create_plugin_reserved_name(evaluator_service: PluginService) -> None:
-    """Reject a name that uses the reserved default-plugin prefix."""
+    """Reject a name that uses the reserved namespace."""
     with pytest.raises(
         ReservedPluginName,
-        match="Plugin name 'kitaru/accuracy' uses the reserved prefix 'kitaru/'",
+        match="Plugin name 'kitaru/accuracy' uses the reserved namespace 'kitaru'",
     ):
         await evaluator_service.create_plugin(
             PluginCreate(

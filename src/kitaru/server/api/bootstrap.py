@@ -27,6 +27,7 @@ from kitaru.server.application.interfaces.server_settings_repository import (
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.names import RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
@@ -93,7 +94,7 @@ class DefaultPluginDefinition(FrozenModel):
 DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
-        name="kitaru/braintrust",
+        name=f"{RESERVED_NAMESPACE}/braintrust",
         description="Import Braintrust project-log and UI exports.",
         provider="braintrust",
         entrypoint="kitaru_braintrust_importer.importer:parse",
@@ -102,7 +103,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
-        name="kitaru/kitaru-jsonl",
+        name=f"{RESERVED_NAMESPACE}/kitaru-jsonl",
         description="Import sessions matching the Kitaru JSONL contract.",
         provider="kitaru-jsonl",
         entrypoint="kitaru_jsonl_importer.importer:parse",
@@ -111,7 +112,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
-        name="kitaru/langfuse",
+        name=f"{RESERVED_NAMESPACE}/langfuse",
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:parse",
@@ -120,7 +121,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
-        name="kitaru/langsmith",
+        name=f"{RESERVED_NAMESPACE}/langsmith",
         description="Import LangSmith run-query and bulk-export records.",
         provider="langsmith",
         entrypoint="kitaru_langsmith_importer.importer:parse",
@@ -129,7 +130,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
-        name="kitaru/opentelemetry",
+        name=f"{RESERVED_NAMESPACE}/opentelemetry",
         description="Import OpenTelemetry, Arize, and Logfire JSON exports.",
         provider="opentelemetry",
         entrypoint="kitaru_opentelemetry_importer.importer:parse",
@@ -138,7 +139,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/cost",
+        name=f"{RESERVED_NAMESPACE}/cost",
         description="Report the total recorded session cost.",
         provider=None,
         entrypoint="kitaru_evaluator.basic:cost",
@@ -147,7 +148,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/latency",
+        name=f"{RESERVED_NAMESPACE}/latency",
         description="Measure session wall-clock duration.",
         provider=None,
         entrypoint="kitaru_evaluator.basic:latency",
@@ -156,7 +157,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/tool-call-patterns",
+        name=f"{RESERVED_NAMESPACE}/tool-call-patterns",
         description="Count repeated calls to the same tool.",
         provider=None,
         entrypoint="kitaru_evaluator.basic:tool_call_patterns",
@@ -165,7 +166,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/session-diagnostics",
+        name=f"{RESERVED_NAMESPACE}/session-diagnostics",
         description="Check session completeness and internal consistency.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:session_diagnostics",
@@ -174,7 +175,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/output-contract",
+        name=f"{RESERVED_NAMESPACE}/output-contract",
         description="Check output against exact and structural rules.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:output_contract",
@@ -183,7 +184,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/trajectory-signals",
+        name=f"{RESERVED_NAMESPACE}/trajectory-signals",
         description="Report repetition, failed retries, and short tool cycles.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:trajectory_signals",
@@ -192,7 +193,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/tool-health",
+        name=f"{RESERVED_NAMESPACE}/tool-health",
         description="Report recorded tool failures and result anomalies.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:tool_health",
@@ -201,7 +202,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/timing-profile",
+        name=f"{RESERVED_NAMESPACE}/timing-profile",
         description="Report recorded wall-clock and node timing.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:timing_profile",
@@ -210,7 +211,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/resource-budget",
+        name=f"{RESERVED_NAMESPACE}/resource-budget",
         description="Apply configured ceilings to recorded resource use.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:resource_budget",
@@ -219,7 +220,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/tool-policy",
+        name=f"{RESERVED_NAMESPACE}/tool-policy",
         description="Apply exact tool requirements, prohibitions, and limits.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:tool_policy",
@@ -228,7 +229,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/llm-call-signals",
+        name=f"{RESERVED_NAMESPACE}/llm-call-signals",
         description="Report LLM failures, repetition, and metadata coverage.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:llm_call_signals",
@@ -237,7 +238,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/model-policy",
+        name=f"{RESERVED_NAMESPACE}/model-policy",
         description="Apply exact model and provider rules.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:model_policy",
@@ -246,7 +247,7 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name="kitaru/workflow-conformance",
+        name=f"{RESERVED_NAMESPACE}/workflow-conformance",
         description="Compare recorded tool order with a configured workflow.",
         provider=None,
         entrypoint="kitaru_evaluator.deterministic:workflow_conformance",

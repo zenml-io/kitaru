@@ -22,13 +22,13 @@ from kitaru.server.api.bootstrap import (
     DefaultPluginDefinition,
     register_default_plugins,
 )
-from kitaru.server.domain.names import RESERVED_PLUGIN_NAME_PREFIX
+from kitaru.server.domain.names import RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind
 
 DEFINITIONS = (
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}importer",
+        name=f"{RESERVED_NAMESPACE}/importer",
         description="Test importer.",
         provider="langfuse",
         logo_url="https://example.com/langfuse.svg",
@@ -38,7 +38,7 @@ DEFINITIONS = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
-        name=f"{RESERVED_PLUGIN_NAME_PREFIX}evaluator",
+        name=f"{RESERVED_NAMESPACE}/evaluator",
         description="Test evaluator.",
         provider=None,
         entrypoint="package.evaluator:evaluate",
