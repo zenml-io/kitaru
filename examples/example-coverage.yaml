@@ -349,7 +349,7 @@ examples:
     coverage:
       deterministic_pytest:
         status: covered
-        test_file: plugins/tests/adapters/pydantic_ai/test_adapter.py
+        test_file: tests/adapters/pydantic_ai/test_adapter.py
         notes: covers recording, replay overrides, tool policies, streaming, and concurrent runs without provider calls
       local_smoke:
         status: smoke_only

@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-04T14:07:42.520869Z"
+exclude-newer = "2026-08-05T16:38:05.237857Z"
 exclude-newer-span = "P3D"
 
 [[package]]
@@ -936,6 +936,9 @@ otel = [
     { name = "opentelemetry-instrumentation-sqlalchemy" },
     { name = "opentelemetry-sdk" },
 ]
+pydantic-ai = [
+    { name = "pydantic-ai-slim", extra = ["openai"] },
+]
 server = [
     { name = "alembic" },
     { name = "asyncpg" },
@@ -984,6 +987,7 @@ requires-dist = [
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2,<3" },
+    { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'pydantic-ai'", specifier = ">=2.14.1,<2.23" },
     { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.14" },
     { name = "pydantic-settings", marker = "extra == 'worker'", specifier = ">=2.14" },
     { name = "pyjwt", marker = "extra == 'server'", specifier = ">=2.13" },
@@ -994,7 +998,7 @@ requires-dist = [
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["mcp", "cli", "server", "worker", "otel"]
+provides-extras = ["mcp", "cli", "pydantic-ai", "server", "worker", "otel"]
 
 [package.metadata.requires-dev]
 dev = [
