@@ -24,7 +24,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from pydantic import TypeAdapter
-from pydantic_ai import UserPromptNode
 from pydantic_ai.capabilities import (
     AbstractCapability,
     CapabilityOrdering,
@@ -88,6 +87,7 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
+from pydantic_ai import UserPromptNode
 
 ADAPTER_VERSION = "0.1.0"
 FRAMEWORK = "pydantic_ai"
@@ -612,26 +612,29 @@ class _KitaruCapability(AbstractCapability[Any]):
         try:
             response = await handler(effective)
         except BaseException as error:
-            await self._buffer_node(
-                SessionNodeCreateRequest(
-                    index=node_index,
-                    parent_index=0,
-                    node_type=NodeType.LLM_CALL,
-                    name="model_request",
-                    status=NodeStatus.FAILED,
-                    error=_error_text(error),
-                    started_at=started_at,
-                    ended_at=datetime.now(UTC),
-                    input_text_selector=input_text_selector,
-                    system_prompt_selector=system_prompt_selector,
-                    inputs=input_payload,
-                    outputs=None,
-                    requested_model=requested_model,
-                    model=_model_identifier(effective),
-                    model_params=_jsonable(effective.model_settings),
-                    attributes={},
+            try:
+                await self._buffer_node(
+                    SessionNodeCreateRequest(
+                        index=node_index,
+                        parent_index=0,
+                        node_type=NodeType.LLM_CALL,
+                        name="model_request",
+                        status=NodeStatus.FAILED,
+                        error=_error_text(error),
+                        started_at=started_at,
+                        ended_at=datetime.now(UTC),
+                        input_text_selector=input_text_selector,
+                        system_prompt_selector=system_prompt_selector,
+                        inputs=input_payload,
+                        outputs=None,
+                        requested_model=requested_model,
+                        model=_model_identifier(effective),
+                        model_params=_jsonable(effective.model_settings),
+                        attributes={},
+                    )
                 )
-            )
+            except BaseException as recording_error:
+                raise error from recording_error
             raise
 
         unpaired_native_calls = _unpaired_native_calls(response)
@@ -652,7 +655,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             outputs=output_payload,
             requested_model=requested_model,
             model=response.model_name or _model_identifier(effective),
-            provider=response.provider_name,
+            model_provider=response.provider_name,
             tokens=_token_usage(response),
             cost=None,
             model_params=_jsonable(effective.model_settings),
@@ -731,18 +734,21 @@ class _KitaruCapability(AbstractCapability[Any]):
             else:  # pragma: no cover - discriminated DTO union guards this branch
                 raise ToolPolicyError(f"Unsupported tool policy '{policy.type}'")
         except BaseException as error:
-            await self._record_tool(
-                node_index=node_index,
-                parent_index=state.latest_llm_index or 0,
-                tool_name=call.tool_name,
-                arguments=json_args,
-                result=None,
-                started_at=started_at,
-                status=NodeStatus.FAILED,
-                error=_error_text(error),
-                attributes={},
-                external_id=call.tool_call_id,
-            )
+            try:
+                await self._record_tool(
+                    node_index=node_index,
+                    parent_index=state.latest_llm_index or 0,
+                    tool_name=call.tool_name,
+                    arguments=json_args,
+                    result=None,
+                    started_at=started_at,
+                    status=NodeStatus.FAILED,
+                    error=_error_text(error),
+                    attributes={},
+                    external_id=call.tool_call_id,
+                )
+            except BaseException as recording_error:
+                raise error from recording_error
             raise
 
         attributes = {"mocked": True, "policy": mocked_policy} if mocked_policy else {}
@@ -945,7 +951,19 @@ class _KitaruCapability(AbstractCapability[Any]):
                     attributes={},
                 )
             )
-            await self._flush_locked(state)
+            try:
+                await self._flush_locked(state)
+            except BaseException as recording_error:
+                with suppress(BaseException):
+                    await state.client.sessions.update(
+                        state.session_id,
+                        SessionUpdateRequest(
+                            status=SessionStatus.FAILED,
+                            error=_error_text(recording_error),
+                            ended_at=ended_at,
+                        ),
+                    )
+                raise
         await state.client.sessions.update(
             state.session_id,
             SessionUpdateRequest(
