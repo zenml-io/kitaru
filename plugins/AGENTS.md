@@ -5,6 +5,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 ## Package boundaries
 
 - Treat each directory under `plugins/packages/` as an independent Python distribution.
+- Adapter distributions are installed directly by agent projects and do not belong in the default server plugin catalog.
 - Release one importer distribution when only that provider changes.
 - Release `kitaru-evaluator` when any built-in evaluator changes.
 - Do not bump unrelated plugin distributions.
@@ -13,8 +14,8 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 ## Required updates
 
 - Update the selected package version with `uv version --project plugins --package DISTRIBUTION VERSION --no-sync`.
-- Update the same distribution pin in `plugins/default-requirements.txt`.
-- Update the same requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+- For a default importer or evaluator, update the same distribution pin in `plugins/default-requirements.txt` and the same requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+- Do not add adapter distributions to the default requirements or server catalog.
 - Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
 - Commit the resulting `plugins/uv.lock` change.
 - Keep `.github/workflows/ci.yml`, `.github/workflows/release-plugins.yml`, and `plugins/packages/` aligned when you add or remove a distribution.

@@ -1,6 +1,6 @@
 # Kitaru plugins
 
-Each importer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
+Each adapter and importer under `packages/` is an independently versioned Python distribution. The built-in evaluators share the `kitaru-evaluator` distribution and are released together.
 
 Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At startup, the server records each exact distribution requirement and `module:callable` entrypoint without installing or importing the plugin package.
 
@@ -14,6 +14,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer |
 | `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer |
 | `opentelemetry-importer` | `kitaru-opentelemetry-importer` | OpenTelemetry importer |
+| `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
 
 ## Development and releases
 
@@ -29,4 +30,4 @@ Run the main package gate from the repository root:
 just plugin-artifact-smoke
 ```
 
-`default-requirements.txt` mirrors the exact package versions in Kitaru's default catalog. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
+`default-requirements.txt` mirrors the exact package versions in Kitaru's default catalog. Adapter distributions are installed by agent projects and are not included in that file. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
