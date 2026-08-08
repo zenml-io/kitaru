@@ -62,7 +62,6 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 - Treat `tests/mcp/snapshots/metrics.json` and `src/kitaru/mcp/registry.py` as the tool-inventory authorities. Do not hardcode copied inventory counts in instructions.
 - Run `just mcp-schema-check` after any input/output model, registry, annotation, description, or MCP SDK change. Snapshot changes require explicit MCP API review.
 - Build the wheel and run `just mcp-wheel-smoke` after launcher, packaging, lifecycle, or optional-import changes.
-- Build the wheel and run `just adapter-wheel-smoke` after changing an adapter, its optional dependency, or its packaging.
 - Preserve stable request-ID forwarding, mixed-version refusal, bounded preflight reads, and text/structured response parity where the existing contracts require them.
 
 ## Bug Fix Workflow

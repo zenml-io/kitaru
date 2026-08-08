@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Focused contract tests for the PydanticAI adapter."""
+"""Focused contract tests for the PydanticAI adapter plugin."""
 
 import asyncio
 import json
@@ -23,8 +23,6 @@ from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 
 import pytest
-from pydantic_ai import Agent
-from pydantic_ai.agent import WrapperAgent
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -41,8 +39,8 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-import kitaru.adapters.pydantic_ai.capability as capability_module
-from kitaru.adapters.pydantic_ai import (
+import adapters.pydantic_ai.capability as capability_module
+from adapters.pydantic_ai import (
     KitaruAgent,
     ToolPolicyError,
     ToolPolicyMissError,
@@ -68,6 +66,8 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
+from pydantic_ai import Agent
+from pydantic_ai.agent import WrapperAgent
 
 
 class _FakeSessions:
@@ -953,7 +953,7 @@ async def test_history_policy_without_cache_key_uses_miss_behavior(
         ),
     )
     monkeypatch.setattr(
-        "kitaru.adapters.pydantic_ai.capability.compute_tool_cache_key",
+        "adapters.pydantic_ai.capability.compute_tool_cache_key",
         lambda *_: None,
     )
     agent = KitaruAgent(
