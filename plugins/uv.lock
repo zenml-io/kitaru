@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-08-04T14:07:42.911465Z"
+exclude-newer = "2026-08-05T14:11:48.498202Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -810,7 +810,7 @@ dev = [
 
 [[package]]
 name = "kitaru-braintrust-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/braintrust-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -821,7 +821,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-evaluator"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/evaluator" }
 dependencies = [
     { name = "kitaru" },
@@ -843,7 +843,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -854,7 +854,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langsmith-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/langsmith-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -865,7 +865,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-opentelemetry-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/opentelemetry-importer" }
 dependencies = [
     { name = "kitaru" },

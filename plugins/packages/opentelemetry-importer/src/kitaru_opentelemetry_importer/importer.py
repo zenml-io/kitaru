@@ -173,7 +173,13 @@ def _role(value: dict[str, Any]) -> str | None:
     return None
 
 
-def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch | None:
+def _content_match(
+    value: Any,
+    selector: str = "",
+    depth: int = 0,
+    *,
+    visible_output_only: bool = False,
+) -> _TextMatch | None:
     """Return one scalar text value and its selector."""
     if depth > 8:
         return None
@@ -186,7 +192,10 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
             for index, item in enumerate(value)
             if (
                 match := _content_match(
-                    item, _child_selector(selector, index), depth + 1
+                    item,
+                    _child_selector(selector, index),
+                    depth + 1,
+                    visible_output_only=visible_output_only,
                 )
             )
             is not None
@@ -194,10 +203,30 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
         return matches[-1] if matches else None
     if not isinstance(value, dict):
         return None
+    if visible_output_only:
+        kind = next(
+            (
+                candidate.lower().replace("_", "-")
+                for key in ("type", "part_kind", "kind", "event.name")
+                if isinstance((candidate := value.get(key)), str)
+            ),
+            None,
+        )
+        if kind in {
+            "reasoning",
+            "thinking",
+            "tool-call",
+            "tool-use",
+            "function-call",
+        }:
+            return None
     for key in ("text", "content", "parts", "kwargs", "data"):
         if key in value and (
             match := _content_match(
-                value[key], _child_selector(selector, key), depth + 1
+                value[key],
+                _child_selector(selector, key),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         ):
             return match
@@ -205,7 +234,12 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
 
 
 def _message_matches(
-    value: Any, target_role: str, selector: str = "", depth: int = 0
+    value: Any,
+    target_role: str,
+    selector: str = "",
+    depth: int = 0,
+    *,
+    visible_output_only: bool = False,
 ) -> list[_TextMatch]:
     """Return text matches for one nested message role."""
     if depth > 12:
@@ -215,7 +249,11 @@ def _message_matches(
             match
             for index, item in enumerate(value)
             for match in _message_matches(
-                item, target_role, _child_selector(selector, index), depth + 1
+                item,
+                target_role,
+                _child_selector(selector, index),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         ]
     if not isinstance(value, dict):
@@ -224,7 +262,10 @@ def _message_matches(
         for key in ("content", "text", "parts", "kwargs", "data"):
             if key in value and (
                 match := _content_match(
-                    value[key], _child_selector(selector, key), depth + 1
+                    value[key],
+                    _child_selector(selector, key),
+                    depth + 1,
+                    visible_output_only=visible_output_only,
                 )
             ):
                 return [match]
@@ -232,7 +273,11 @@ def _message_matches(
     for key, child in value.items():
         matches.extend(
             _message_matches(
-                child, target_role, _child_selector(selector, key), depth + 1
+                child,
+                target_role,
+                _child_selector(selector, key),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         )
     return matches
@@ -256,7 +301,7 @@ def _input_text_selector(value: Any) -> str | None:
 
 def _output_text_selector(value: Any) -> str | None:
     """Return the primary assistant output selector."""
-    messages = _message_matches(value, "assistant")
+    messages = _message_matches(value, "assistant", visible_output_only=True)
     if messages:
         return messages[-1].selector
     if isinstance(value, str):
@@ -264,7 +309,11 @@ def _output_text_selector(value: Any) -> str | None:
     if isinstance(value, dict):
         for key in ("answer", "result", "response", "output", "text", "content"):
             if key in value and (
-                match := _content_match(value[key], _child_selector("", key))
+                match := _content_match(
+                    value[key],
+                    _child_selector("", key),
+                    visible_output_only=True,
+                )
             ):
                 return match.selector
     return None
@@ -1180,7 +1229,7 @@ def _parse_session(
                             )
                             else None
                         ),
-                        provider=(
+                        model_provider=(
                             str(value)
                             if (
                                 value := _attribute(

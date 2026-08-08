@@ -66,6 +66,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- Default importers, the PydanticAI adapter, and deterministic evaluators now use the `model_provider` session-node field introduced by the consolidated v2 specification.
+- Importer output selectors now ignore reasoning, thinking, and tool-call parts, leaving the selector unset when a model response has no visible text.
+- Langfuse imports now treat scrubbed or redacted session identifiers as missing and fall back to trace identifiers instead of merging unrelated traces.
 - Stack creation now verifies discovered service connectors before reusing them for local cloud storage or Modal stacks, failing fast with an actionable error instead of letting runs fail later; `--no-verify` skips the check.
 - `--credentials aws-profile:NAME` is now rejected when connected to a remote ZenML server, because the server cannot resolve AWS profiles that only exist on the local machine; portable `aws-access-keys`/`aws-session-token` credentials remain supported.
 - Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.

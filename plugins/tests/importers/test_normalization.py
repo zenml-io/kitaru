@@ -58,6 +58,35 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)
+def test_output_selector_skips_reasoning_and_tool_parts(importer: ModuleType) -> None:
+    """Select visible assistant text instead of hidden model output parts."""
+    output = {
+        "role": "assistant",
+        "parts": [
+            {"type": "thinking", "content": "Inspect private evidence."},
+            {"type": "tool_call", "content": "lookup_order"},
+            {"type": "text", "content": "The order shipped."},
+        ],
+    }
+
+    assert importer._output_text_selector(output) == "/parts/2/content"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_output_selector_is_empty_for_non_visible_parts(importer: ModuleType) -> None:
+    """Leave the output selector empty when no visible assistant text exists."""
+    output = {
+        "role": "assistant",
+        "parts": [
+            {"type": "reasoning", "content": "Inspect private evidence."},
+            {"type": "function_call", "content": "lookup_order"},
+        ],
+    }
+
+    assert importer._output_text_selector(output) is None
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
 def test_detects_framework_locally(importer: ModuleType) -> None:
     """Keep framework detection inside each provider plugin."""
     assert importer._detect_framework({"otel.scope.name": "pydantic_ai"}) == (

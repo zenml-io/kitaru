@@ -652,7 +652,7 @@ class _KitaruCapability(AbstractCapability[Any]):
             outputs=output_payload,
             requested_model=requested_model,
             model=response.model_name or _model_identifier(effective),
-            provider=response.provider_name,
+            model_provider=response.provider_name,
             tokens=_token_usage(response),
             cost=None,
             model_params=_jsonable(effective.model_settings),

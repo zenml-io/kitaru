@@ -73,7 +73,7 @@ def _node(
         outputs=outputs,
         requested_model=requested_model,
         model=model,
-        provider=provider,
+        model_provider=provider,
         tokens=tokens,
         cost=cost,
         tool_name=tool_name,
