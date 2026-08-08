@@ -10,6 +10,7 @@ kitaru = { path = "..", editable = true }
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "pydantic-ai-slim[openai]>=2.14.1,<2.23",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.11",

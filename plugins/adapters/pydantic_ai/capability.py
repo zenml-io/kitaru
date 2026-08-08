@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""PydanticAI capability implementing Kitaru recording and replay."""
+"""PydanticAI plugin capability implementing Kitaru recording and replay."""
 
 import asyncio
 import json
@@ -24,7 +24,6 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from pydantic import TypeAdapter
-from pydantic_ai import UserPromptNode
 from pydantic_ai.capabilities import (
     AbstractCapability,
     CapabilityOrdering,
@@ -88,6 +87,7 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
+from pydantic_ai import UserPromptNode
 
 ADAPTER_VERSION = "0.1.0"
 FRAMEWORK = "pydantic_ai"
