@@ -14,6 +14,7 @@ on:
           - langfuse-importer
           - langsmith-importer
           - opentelemetry-importer
+          - pydantic-ai
       version:
         description: Package version already committed in its pyproject.toml.
         required: true
@@ -26,6 +27,7 @@ on:
       - langfuse-importer-v*
       - langsmith-importer-v*
       - opentelemetry-importer-v*
+      - pydantic-ai-v*
 permissions: {}
 concurrency:
   group: >-
@@ -86,6 +88,10 @@ jobs:
               opentelemetry-importer-v*)
                 REQUESTED_PACKAGE=opentelemetry-importer
                 REQUESTED_VERSION=${PACKAGE_TAG#opentelemetry-importer-v}
+                ;;
+              pydantic-ai-v*)
+                REQUESTED_PACKAGE=pydantic-ai
+                REQUESTED_VERSION=${PACKAGE_TAG#pydantic-ai-v}
                 ;;
               *)
                 echo "::error::Unsupported plugin tag: $PACKAGE_TAG"

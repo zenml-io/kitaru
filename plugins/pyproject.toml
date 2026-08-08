@@ -6,11 +6,12 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-pydantic-ai = { workspace = true }
 
 [dependency-groups]
 dev = [
     "kitaru[server]",
-    "pydantic-ai-slim[openai]>=2.14.1,<2.23",
+    "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",
     "ruff>=0.11",
@@ -19,7 +20,7 @@ dev = [
 
 [tool.ruff]
 target-version = "py311"
-src = ["adapters", "packages", "tests"]
+src = ["packages", "tests"]
 line-length = 88
 
 [tool.ruff.lint]
@@ -30,7 +31,6 @@ convention = "google"
 
 [tool.ruff.lint.isort]
 known-first-party = [
-    "adapters",
     "kitaru",
     "kitaru_evaluator",
     "kitaru_braintrust_importer",
@@ -38,10 +38,11 @@ known-first-party = [
     "kitaru_langfuse_importer",
     "kitaru_langsmith_importer",
     "kitaru_opentelemetry_importer",
+    "kitaru_pydantic_ai",
 ]
 
 [tool.ty.src]
-include = ["adapters/**/*.py", "packages/*/src/**/*.py", "tests/**/*.py"]
+include = ["packages/*/src/**/*.py", "tests/**/*.py"]
 
 [tool.ty.environment]
 python-version = "3.11"
