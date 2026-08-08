@@ -99,6 +99,10 @@ cli-artifact-smoke:
 plugin-artifact-smoke:
     uv run --no-sync python scripts/smoke_plugin_artifacts.py
 
+# Verify optional adapters from the single wheel under dist/
+adapter-wheel-smoke:
+    uv run --no-sync python scripts/smoke_adapter_wheel.py dist
+
 # Verify the measured MCP schemas and committed snapshots
 mcp-schema-check:
     uv run --extra mcp python scripts/report_mcp_schema.py --check

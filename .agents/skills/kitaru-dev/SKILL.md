@@ -33,6 +33,7 @@ Use this when you need the command catalog beyond the daily loop in the root `AG
 - `just build`: build wheel and sdist locally
 - `just cli-artifact-smoke`: verify clean CLI wheel and source installations
 - `just plugin-artifact-smoke`: build every default-plugin wheel, load its configured entrypoints, and verify default registration
+- `just adapter-wheel-smoke`: verify the base wheel excludes adapter dependencies and optional adapter extras install from the wheel
 - `just mcp-schema-check`: verify public MCP registry budgets and committed snapshots
 - `just mcp-wheel-smoke`: verify clean base and `[mcp]` installs from the wheel under `dist/`
 - `just migration-check`: compare Alembic migrations with the ORM schema; requires PostgreSQL

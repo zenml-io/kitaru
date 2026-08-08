@@ -280,6 +280,8 @@ jobs:
           --candidate-dir plugins/candidate-wheels
       - name: Test clean base and MCP wheel installations
         run: KITARU_TEST_WHEEL=dist uv run pytest tests/mcp/test_installed_contract.py
+      - name: Test clean base and PydanticAI wheel installations
+        run: uv run --no-sync python scripts/smoke_adapter_wheel.py dist
       - name: List build artifacts
         run: ls -lh dist/
 
