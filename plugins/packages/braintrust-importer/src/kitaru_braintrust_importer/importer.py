@@ -407,6 +407,35 @@ def _decode_json(value: Any) -> Any:
         return value
 
 
+def _path_value(value: Any, path: str) -> Any:
+    """Resolve a dotted path or JSON Pointer against one provider record."""
+    if not path.strip():
+        raise InvalidImport("join_on must be a non-empty path")
+    if path.startswith("/"):
+        for token in path[1:].split("/"):
+            if re.search(r"~(?:[^01]|$)", token):
+                raise InvalidImport("join_on contains an invalid JSON Pointer escape")
+        parts = [
+            part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
+        ]
+    else:
+        parts = path.split(".")
+    current = value
+    for part in parts:
+        current = _decode_json(current)
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (IndexError, ValueError):
+                return None
+            continue
+        return None
+    return _decode_json(current)
+
+
 def _decimal(value: Any) -> Decimal | None:
     """Parse one provider decimal."""
     if value is None or value == "":
@@ -516,6 +545,25 @@ def _session_id(record: dict[str, Any]) -> str | None:
         if value not in (None, ""):
             return str(value)
     return None
+
+
+def _join_value(record: dict[str, Any], params: dict[str, Any], trace_id: str) -> str:
+    """Resolve the session grouping value for one trace root."""
+    selected = params.get("join_on")
+    if selected is None:
+        return _session_id(record) or trace_id
+    if not isinstance(selected, str):
+        raise InvalidImport("join_on must be a dotted path or JSON pointer")
+    value = _path_value(record, selected)
+    if value in (None, ""):
+        raise InvalidImport(
+            f"Trace '{trace_id}' has no value at join_on path '{selected}'"
+        )
+    if isinstance(value, dict | list):
+        raise InvalidImport(
+            f"Trace '{trace_id}' has a non-scalar value at join_on path '{selected}'"
+        )
+    return str(value)
 
 
 def _source_instance(record: dict[str, Any], params: dict[str, Any]) -> str:
@@ -696,21 +744,28 @@ class BraintrustProjectLogImporter:
                 for record in records
             ]
         )
+        trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for record in records:
+            trace_records[_trace_id(record)].append(record)
+
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
         sessions: list[ImportedSession] = []
         failures: list[ImportFailure] = []
-        for record in records:
+        for trace_id, rows in trace_records.items():
+            root = _root_record(rows, trace_id)
             try:
-                source_instance = _source_instance(record, params)
+                source_instance = _source_instance(root, params)
+                session_id = _join_value(root, params, trace_id)
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
-                        line=len(failures) + 1, external_id=None, error=str(exc)
+                        line=len(failures) + 1,
+                        external_id=trace_id,
+                        error=str(exc),
                     )
                 )
                 continue
-            session_id = _session_id(record) or _trace_id(record)
-            grouped[(source_instance, session_id)].append(record)
+            grouped[(source_instance, session_id)].extend(rows)
 
         for (source_instance, source_id), session_records in sorted(grouped.items()):
             try:
@@ -721,6 +776,11 @@ class BraintrustProjectLogImporter:
                         session_records,
                         full_export=full_export,
                         file_framework=file_framework,
+                        join_on=(
+                            params.get("join_on")
+                            if isinstance(params.get("join_on"), str)
+                            else None
+                        ),
                     )
                 )
             except InvalidImport as exc:
@@ -741,6 +801,7 @@ class BraintrustProjectLogImporter:
         *,
         full_export: bool,
         file_framework: str | None,
+        join_on: str | None,
     ) -> ImportedSession:
         """Parse one Braintrust session."""
         trace_records: dict[str, list[dict[str, Any]]] = defaultdict(list)
@@ -938,6 +999,8 @@ class BraintrustProjectLogImporter:
             "source_completeness": "full" if full_export else "flat",
             "normalization_warnings": warnings,
         }
+        if join_on is not None:
+            metadata["braintrust.join_on"] = join_on
         framework = (
             _detect_framework(
                 [

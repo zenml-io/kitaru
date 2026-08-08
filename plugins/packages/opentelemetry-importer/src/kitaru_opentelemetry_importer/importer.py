@@ -491,6 +491,35 @@ def _decode_json(value: Any) -> Any:
         return value
 
 
+def _path_value(value: Any, path: str) -> Any:
+    """Resolve a dotted path or JSON Pointer against one normalized span."""
+    if not path.strip():
+        raise InvalidImport("join_on must be a non-empty path")
+    if path.startswith("/"):
+        for token in path[1:].split("/"):
+            if re.search(r"~(?:[^01]|$)", token):
+                raise InvalidImport("join_on contains an invalid JSON Pointer escape")
+        parts = [
+            part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
+        ]
+    else:
+        parts = path.split(".")
+    current = value
+    for part in parts:
+        current = _decode_json(current)
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            try:
+                current = current[int(part)]
+            except (IndexError, ValueError):
+                return None
+            continue
+        return None
+    return _decode_json(current)
+
+
 def _decode_any_value(value: Any) -> Any:
     """Decode an OTLP AnyValue JSON object."""
     if not isinstance(value, dict):
@@ -1142,6 +1171,7 @@ def _parse_session(
     source_instance: str,
     fallback_source: bool,
     file_framework: str | None,
+    join_on: str | None,
 ) -> ImportedSession:
     """Parse one conversation or trace-derived session."""
     warnings: list[str] = []
@@ -1309,6 +1339,8 @@ def _parse_session(
         **metadata_values,
         "normalization_warnings": warnings,
     }
+    if join_on is not None:
+        metadata["otlp.join_on"] = join_on
     framework = (
         _detect_framework(
             [
@@ -1396,24 +1428,59 @@ class OTLPJSONImporter:
             defaultdict(list)
         )
         fallback_sources: dict[tuple[str, str], bool] = {}
+        selected = params.get("join_on")
+        if selected is not None and not isinstance(selected, str):
+            raise InvalidImport("join_on must be a dotted path or JSON pointer")
         for trace_id, records in traces.items():
-            conversation_ids: set[str] = set()
-            for conversation_key in _CONVERSATION_KEYS:
-                conversation_ids = {
-                    str(value)
+            if isinstance(selected, str):
+                join_values = [
+                    value
                     for record in records
-                    if (value := _attribute(record, conversation_key)) not in (None, "")
-                }
-                if conversation_ids:
-                    break
-            if len(conversation_ids) > 1:
+                    if (value := _path_value(record.model_dump(mode="json"), selected))
+                    not in (None, "")
+                ]
+                if any(isinstance(value, dict | list) for value in join_values):
+                    errors.append(
+                        ImportFailure(
+                            line=len(errors) + 1,
+                            external_id=trace_id,
+                            error=(
+                                f"Trace '{trace_id}' has a non-scalar value at "
+                                f"join_on path '{selected}'"
+                            ),
+                        )
+                    )
+                    continue
+                conversation_ids = {str(value) for value in join_values}
+            else:
+                conversation_ids: set[str] = set()
+                for conversation_key in _CONVERSATION_KEYS:
+                    conversation_ids = {
+                        str(value)
+                        for record in records
+                        if (value := _attribute(record, conversation_key))
+                        not in (None, "")
+                    }
+                    if conversation_ids:
+                        break
+            if not conversation_ids and selected is not None:
                 errors.append(
                     ImportFailure(
                         line=len(errors) + 1,
                         external_id=trace_id,
                         error=(
-                            f"Trace '{trace_id}' contains conflicting conversation ids"
+                            f"Trace '{trace_id}' has no value at join_on path "
+                            f"'{selected}'"
                         ),
+                    )
+                )
+                continue
+            if len(conversation_ids) > 1:
+                errors.append(
+                    ImportFailure(
+                        line=len(errors) + 1,
+                        external_id=trace_id,
+                        error=(f"Trace '{trace_id}' contains conflicting join values"),
                     )
                 )
                 continue
@@ -1440,6 +1507,7 @@ class OTLPJSONImporter:
                         source_instance,
                         fallback_sources[(source_instance, source_id)],
                         file_framework,
+                        selected if isinstance(selected, str) else None,
                     )
                 )
             except InvalidImport as exc:

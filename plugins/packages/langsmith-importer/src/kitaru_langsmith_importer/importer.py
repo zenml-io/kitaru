@@ -484,6 +484,9 @@ def _path_value(value: Any, path: str) -> Any:
     if not path.strip():
         raise InvalidImport("join_on must be a non-empty path")
     if path.startswith("/"):
+        for token in path[1:].split("/"):
+            if re.search(r"~(?:[^01]|$)", token):
+                raise InvalidImport("join_on contains an invalid JSON Pointer escape")
         parts = [
             part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
         ]
@@ -553,6 +556,11 @@ def _join_value(
         if value in (None, ""):
             raise InvalidImport(
                 f"Trace '{trace_id}' has no value at join_on path '{selected}'"
+            )
+        if isinstance(value, dict | list):
+            raise InvalidImport(
+                f"Trace '{trace_id}' has a non-scalar value at join_on path "
+                f"'{selected}'"
             )
         return str(value), selected, False
     for path in _DEFAULT_JOIN_PATHS:

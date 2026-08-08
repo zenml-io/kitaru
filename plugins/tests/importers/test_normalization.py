@@ -21,6 +21,21 @@ def test_json_pointer_tokens_are_escaped(importer: ModuleType) -> None:
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)
+def test_join_path_resolves_json_pointer(importer: ModuleType) -> None:
+    """Resolve escaped RFC 6901 tokens used to group source traces."""
+    payload = {"metadata": {"customer/case~id": "case-42"}}
+
+    assert importer._path_value(payload, "/metadata/customer~1case~0id") == "case-42"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_join_path_rejects_invalid_json_pointer_escape(importer: ModuleType) -> None:
+    """Reject malformed RFC 6901 escape sequences."""
+    with pytest.raises(importer.InvalidImport, match="invalid JSON Pointer escape"):
+        importer._path_value({"metadata": {}}, "/metadata/customer~2id")
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
 def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -> None:
     """Keep each provider plugin responsible for its normalized node fields."""
     node = ImportedNode(

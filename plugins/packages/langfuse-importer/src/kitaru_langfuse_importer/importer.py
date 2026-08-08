@@ -467,6 +467,9 @@ def _path_value(value: Any, path: str) -> Any:
     if not path.strip():
         raise InvalidImport("join path must be non-empty")
     if path.startswith("/"):
+        for token in path[1:].split("/"):
+            if re.search(r"~(?:[^01]|$)", token):
+                raise InvalidImport("join path contains an invalid JSON Pointer escape")
         parts = [
             part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
         ]
@@ -513,11 +516,11 @@ def _join_value(
         if not isinstance(join_on, str):
             raise InvalidImport("join_on must be a dotted path or JSON pointer")
         selector = join_on
-        values = {
-            str(value)
+        selected_values = [
+            value
             for record in observations
             if not _is_missing_join_value(value := _path_value(record, join_on))
-        }
+        ]
     elif join_key is not None or join_path is not None:
         if not isinstance(join_key, str) or not join_key.strip():
             raise InvalidImport("join_key must be a non-empty string")
@@ -528,13 +531,13 @@ def _join_value(
             if join_path.startswith("/")
             else f"{join_path}.{join_key}"
         )
-        values: set[str] = set()
+        selected_values: list[Any] = []
         for record in observations:
             container = _path_value(record, join_path)
             if isinstance(container, dict):
                 value = container.get(join_key)
                 if not _is_missing_join_value(value):
-                    values.add(str(value))
+                    selected_values.append(value)
     else:
         session_ids = {
             str(value)
@@ -550,6 +553,11 @@ def _join_value(
         if session_ids:
             return next(iter(session_ids)), "sessionId", False
         return trace_id, "traceId", True
+    if any(isinstance(value, dict | list) for value in selected_values):
+        raise InvalidImport(
+            f"Trace '{trace_id}' has a non-scalar value at join selector '{selector}'"
+        )
+    values = {str(value) for value in selected_values}
     if not values:
         raise InvalidImport(
             f"Trace '{trace_id}' has no value at join selector '{selector}'"
