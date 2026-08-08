@@ -54,9 +54,6 @@ cli = [
     "pyyaml>=6.0",
     "rich>=13.0",
 ]
-pydantic-ai = [
-    "pydantic-ai-slim[openai]>=2.14.1,<2.23",
-]
 server = [
     "fastapi>=0.139",
     "sqlalchemy[asyncio]>=2.0.51",
