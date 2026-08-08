@@ -1614,10 +1614,10 @@ export interface paths {
          * Create Experiment
          * @description Create an experiment.
          *
-         *     Clients observe HTTP 201 on success, 404 when an evaluator config names
-         *     an unknown evaluator or version, 409 when the name is already
-         *     registered, and 422 on invalid input, including a duplicate resolved
-         *     evaluator version.
+         *     Clients observe HTTP 201 on success, 404 when the agent does not exist
+         *     or an evaluator config names an unknown evaluator or version, 409 when
+         *     the name is already registered, and 422 on invalid input, including a
+         *     duplicate resolved evaluator version.
          *
          *     Args:
          *         body: Experiment create request.
@@ -1710,8 +1710,9 @@ export interface paths {
          *
          *     Clients observe HTTP 201 on success, 404 when the experiment, the
          *     cohort version, or the resolved agent version does not exist, and 422
-         *     when the cohort version has no sessions or the resolved agent version
-         *     has no run spec.
+         *     when the cohort version has no sessions, the cohort version or agent
+         *     version belongs to another agent, or the resolved agent version has no
+         *     run spec.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2653,7 +2654,7 @@ export interface paths {
          *
          *     A task principal's session is always linked to its own task, regardless
          *     of the request's task_id. Clients observe HTTP 201 on success, 409 when
-         *     the provider and external id pair is already registered, and 422 on
+         *     the imported_from and external id pair is already registered, and 422 on
          *     invalid input.
          *
          *     Args:
@@ -2758,6 +2759,40 @@ export interface paths {
          *         Stored evaluations in request order.
          */
         post: operations["merge_session_evaluations_v1_sessions__session_id__evaluations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/sessions/{session_id}/full": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session With Nodes
+         * @description Get a session together with every one of its nodes.
+         *
+         *     The node list is not paginated, so one call carries a whole session.
+         *
+         *     Clients observe HTTP 200 on success, 403 when a task token neither owns
+         *     nor reads this session, and 404 when no session has this id.
+         *
+         *     Args:
+         *         session_id: Id of the session.
+         *         service: Session service.
+         *         node_service: Session node service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Session with every node, ordered by index.
+         */
+        get: operations["get_session_with_nodes_v1_sessions__session_id__full_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -3723,7 +3758,7 @@ export interface components {
             part?: components["schemas"]["AnnotationSelectorPart"] | null;
             /**
              * Path
-             * @description JSON Pointer within the targeted payload.
+             * @description RFC 6901 JSON Pointer within the targeted payload.
              */
             path?: string | null;
             /** @description Character range within the resolved string. */
@@ -3734,7 +3769,7 @@ export interface components {
          * @description Payload of a session node an annotation selector targets.
          * @enum {string}
          */
-        AnnotationSelectorPart: "input" | "output" | "error" | "metadata";
+        AnnotationSelectorPart: "input" | "output" | "error" | "metadata" | "attributes" | "model_params";
         /**
          * AnnotationSpan
          * @description Annotation span.
@@ -4523,6 +4558,11 @@ export interface components {
              */
             description?: string | null;
             /**
+             * Logo Url
+             * @description Evaluator logo URL.
+             */
+            logo_url?: string | null;
+            /**
              * Metadata
              * @description Arbitrary metadata.
              */
@@ -4563,6 +4603,11 @@ export interface components {
              */
             latest_version: number;
             /**
+             * Logo Url
+             * @description Evaluator logo URL.
+             */
+            logo_url: string | null;
+            /**
              * Metadata
              * @description Arbitrary metadata.
              */
@@ -4576,10 +4621,9 @@ export interface components {
             name: string;
             /**
              * Owner Id
-             * Format: uuid
-             * @description Id of the owning account.
+             * @description Id of the owning account, null for a default plugin.
              */
-            owner_id: string;
+            owner_id: string | null;
             /**
              * Updated
              * Format: date-time
@@ -4597,6 +4641,11 @@ export interface components {
              * @description New evaluator description.
              */
             description?: string | null;
+            /**
+             * Logo Url
+             * @description New logo URL.
+             */
+            logo_url?: string | null;
             /**
              * Metadata
              * @description New metadata.
@@ -4683,6 +4732,12 @@ export interface components {
          */
         ExperimentCreateRequest: {
             /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the experiment's runs belong to.
+             */
+            agent_id: string;
+            /**
              * Description
              * @description Experiment description.
              */
@@ -4707,6 +4762,12 @@ export interface components {
          * @description Experiment response.
          */
         ExperimentResponse: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the experiment's runs belong to.
+             */
+            agent_id: string;
             /**
              * Created
              * Format: date-time
@@ -5056,6 +5117,11 @@ export interface components {
              */
             description?: string | null;
             /**
+             * Logo Url
+             * @description Importer logo URL.
+             */
+            logo_url?: string | null;
+            /**
              * Metadata
              * @description Arbitrary metadata.
              */
@@ -5101,6 +5167,11 @@ export interface components {
              */
             latest_version: number;
             /**
+             * Logo Url
+             * @description Importer logo URL.
+             */
+            logo_url: string | null;
+            /**
              * Metadata
              * @description Arbitrary metadata.
              */
@@ -5114,10 +5185,9 @@ export interface components {
             name: string;
             /**
              * Owner Id
-             * Format: uuid
-             * @description Id of the owning account.
+             * @description Id of the owning account, null for a default plugin.
              */
-            owner_id: string;
+            owner_id: string | null;
             /**
              * Provider
              * @description Source system this importer reads.
@@ -5140,6 +5210,11 @@ export interface components {
              * @description New importer description.
              */
             description?: string | null;
+            /**
+             * Logo Url
+             * @description New logo URL.
+             */
+            logo_url?: string | null;
             /**
              * Metadata
              * @description New metadata.
@@ -6473,11 +6548,6 @@ export interface components {
              */
             error?: string | null;
             /**
-             * Expected
-             * @description Expected outputs.
-             */
-            expected: unknown;
-            /**
              * External Id
              * @description Id from the source system.
              */
@@ -6487,6 +6557,11 @@ export interface components {
              * @description Agent framework used.
              */
             framework?: string | null;
+            /**
+             * Imported From
+             * @description Source system the session was imported from.
+             */
+            imported_from?: string | null;
             /**
              * Inputs
              * @description Session inputs.
@@ -6511,11 +6586,6 @@ export interface components {
              * @description Session outputs.
              */
             outputs: unknown;
-            /**
-             * Provider
-             * @description Source system naming the session.
-             */
-            provider?: string | null;
             /**
              * Started At
              * @description Time the session started.
@@ -6582,6 +6652,11 @@ export interface components {
              */
             index: number;
             /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from node inputs.
+             */
+            input_text_selector?: string | null;
+            /**
              * Inputs
              * @description Node inputs.
              */
@@ -6606,12 +6681,22 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Model Provider
+             * @description Model provider.
+             */
+            model_provider?: string | null;
+            /**
              * Name
              * @description Node name.
              */
             name: string;
             /** @description Kind of work the node records. */
             node_type: components["schemas"]["NodeType"];
+            /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from node outputs.
+             */
+            output_text_selector?: string | null;
             /**
              * Outputs
              * @description Node outputs.
@@ -6623,10 +6708,10 @@ export interface components {
              */
             parent_index?: number | null;
             /**
-             * Provider
-             * @description Model provider.
+             * Reasoning
+             * @description Visible reasoning produced by the model call.
              */
-            provider?: string | null;
+            reasoning?: string | null;
             /**
              * Requested Model
              * @description Model requested by the call.
@@ -6649,6 +6734,11 @@ export interface components {
              * @description Subagent invoked.
              */
             subagent_id?: string | null;
+            /**
+             * System Prompt Selector
+             * @description RFC 6901 JSON Pointer selecting the system prompt from node inputs.
+             */
+            system_prompt_selector?: string | null;
             /** @description Token usage. */
             tokens?: components["schemas"]["TokenUsage"] | null;
             /**
@@ -6709,6 +6799,11 @@ export interface components {
              */
             index: number;
             /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from node inputs.
+             */
+            input_text_selector?: string | null;
+            /**
              * Inputs
              * @description Node inputs, null unless include_payloads.
              */
@@ -6733,12 +6828,22 @@ export interface components {
                 [key: string]: unknown;
             } | null;
             /**
+             * Model Provider
+             * @description Model provider.
+             */
+            model_provider?: string | null;
+            /**
              * Name
              * @description Node name.
              */
             name: string;
             /** @description Kind of work the node records. */
             node_type: components["schemas"]["NodeType"];
+            /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from node outputs.
+             */
+            output_text_selector?: string | null;
             /**
              * Outputs
              * @description Node outputs, null unless include_payloads.
@@ -6755,10 +6860,10 @@ export interface components {
              */
             parent_index: number | null;
             /**
-             * Provider
-             * @description Model provider.
+             * Reasoning
+             * @description Visible reasoning, null unless payloads are included.
              */
-            provider?: string | null;
+            reasoning?: string | null;
             /**
              * Requested Model
              * @description Model requested by the call.
@@ -6792,6 +6897,11 @@ export interface components {
              * @description Subagent invoked.
              */
             subagent_id?: string | null;
+            /**
+             * System Prompt Selector
+             * @description RFC 6901 JSON Pointer selecting the system prompt from node inputs.
+             */
+            system_prompt_selector?: string | null;
             /** @description Token usage. */
             tokens?: components["schemas"]["TokenUsage"] | null;
             /**
@@ -6854,11 +6964,6 @@ export interface components {
              */
             error?: string | null;
             /**
-             * Expected
-             * @description Expected outputs.
-             */
-            expected: unknown;
-            /**
              * External Id
              * @description Id from the source system.
              */
@@ -6874,6 +6979,11 @@ export interface components {
              * @description Session id.
              */
             id: string;
+            /**
+             * Imported From
+             * @description Source system the session was imported from.
+             */
+            imported_from?: string | null;
             /**
              * Inputs
              * @description Session inputs.
@@ -6914,11 +7024,6 @@ export interface components {
              * @description Id of the owning account.
              */
             owner_id: string;
-            /**
-             * Provider
-             * @description Source system naming the session.
-             */
-            provider?: string | null;
             /**
              * Started At
              * @description Time the session started.
@@ -6988,11 +7093,6 @@ export interface components {
              */
             error?: string | null;
             /**
-             * Expected
-             * @description New expected outputs.
-             */
-            expected?: unknown;
-            /**
              * Metadata
              * @description New metadata.
              */
@@ -7011,6 +7111,19 @@ export interface components {
             outputs?: unknown;
             /** @description New session status. */
             status?: components["schemas"]["SessionStatus"] | null;
+        };
+        /**
+         * SessionWithNodesResponse
+         * @description Session with nodes response.
+         */
+        SessionWithNodesResponse: {
+            /**
+             * Nodes
+             * @description Every node of the session, ordered by index ascending.
+             */
+            nodes: components["schemas"]["SessionNodeResponse"][];
+            /** @description Session. */
+            session: components["schemas"]["SessionResponse"];
         };
         /**
          * StaticCase
@@ -11516,6 +11629,37 @@ export interface operations {
             };
         };
     };
+    get_session_with_nodes_v1_sessions__session_id__full_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionWithNodesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_session_nodes_v1_sessions__session_id__nodes_get: {
         parameters: {
             query?: {
@@ -11523,7 +11667,7 @@ export interface operations {
                 cursor?: string | null;
                 /** @description Items per page. */
                 size?: number;
-                /** @description Include inputs, outputs, and attributes. */
+                /** @description Include reasoning, inputs, outputs, and attributes. */
                 include_payloads?: boolean;
             };
             header?: never;

@@ -94,7 +94,7 @@ describe("step recording", () => {
       inputs: { request: "tools" },
       model: "effective-tools",
       model_params: { temperature: 0.3 },
-      provider: "test-provider",
+      model_provider: "test-provider",
       requested_model: "requested-model",
       tokens: { input_tokens: 3, output_tokens: 2 },
     });

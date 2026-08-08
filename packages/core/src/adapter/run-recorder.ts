@@ -99,7 +99,6 @@ export class RunRecorder {
       name: options.name,
       origin: options.replayId ? "replay" : "recorded",
       outputs: null,
-      expected: null,
       started_at: startedAt,
       status: "in_progress",
     });

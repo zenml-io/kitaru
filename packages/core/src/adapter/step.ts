@@ -95,7 +95,7 @@ export async function recordNormalizedStep(
       node_type: "llm_call",
       outputs: step.outputs,
       parent_index: state.rootIndex,
-      provider: step.provider,
+      model_provider: step.provider,
       requested_model: state.requestedModelId,
       status: step.failed ? "failed" : "completed",
       tokens: step.tokens ?? null,

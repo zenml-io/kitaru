@@ -42,7 +42,7 @@ describe("createKitaruGenerateText", () => {
     expect(llmNode).toMatchObject({
       inputs: null,
       model: "mock-model-id",
-      provider: "mock-provider",
+      model_provider: "mock-provider",
       status: "completed",
     });
     expect(llmNode?.attributes).toMatchObject({ provider_metadata: null });

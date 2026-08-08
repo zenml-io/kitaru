@@ -34,6 +34,7 @@ describe("normalized run lifecycle", () => {
     await run.complete(result);
 
     expect(client.created).toHaveLength(1);
+    expect(client.created[0]).not.toHaveProperty("expected");
     expect(client.nodes.map((batch) => batch.nodes[0]?.node_type)).toEqual([
       "span",
       "llm_call",
