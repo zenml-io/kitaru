@@ -519,6 +519,40 @@ def isolated_client_environment(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
+class RequestRecordingTransport(httpx.AsyncBaseTransport):
+    """Transport wrapper recording every request it saw."""
+
+    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
+        """Wrap a transport and start with no recorded requests.
+
+        Args:
+            transport: Transport to delegate every request to.
+        """
+        self._transport = transport
+        self.requests: list[httpx.Request] = []
+
+    @property
+    def paths(self) -> list[str]:
+        """Paths of the recorded requests.
+
+        Returns:
+            Paths of the recorded requests.
+        """
+        return [request.url.path for request in self.requests]
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        """Record the request and delegate to the wrapped transport.
+
+        Args:
+            request: Outgoing HTTP request.
+
+        Returns:
+            Response from the wrapped transport.
+        """
+        self.requests.append(request)
+        return await self._transport.handle_async_request(request)
+
+
 def asgi_api_client(
     app: FastAPI,
     credential_store: CredentialStore | None = None,
@@ -546,6 +580,31 @@ def asgi_api_client(
         headers=client._http.headers,
     )
     return client
+
+
+def recording_asgi_api_client(
+    app: FastAPI,
+    credential_store: CredentialStore | None = None,
+) -> tuple[KitaruAPIClient, RequestRecordingTransport]:
+    """Build an SDK client routed to the app, recording every request.
+
+    Args:
+        app: Application to route requests to.
+        credential_store: Store holding the credentials the client
+            authenticates with.
+
+    Returns:
+        Client wired to an ASGI transport, and the transport recording
+        requests.
+    """
+    client = KitaruAPIClient(base_url="http://test", credential_store=credential_store)
+    recorder = RequestRecordingTransport(httpx.ASGITransport(app=app))
+    client._http = httpx.AsyncClient(
+        transport=RetryTransport(recorder),
+        base_url="http://test",
+        headers=client._http.headers,
+    )
+    return client, recorder
 
 
 def _renewed_timestamp(previous: datetime | None) -> datetime:
@@ -785,11 +844,15 @@ class FakeAccountRepository:
         self._accounts[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, account_id: uuid.UUID) -> Account:
+    async def get(
+        self, account_id: uuid.UUID, is_service_account: bool | None = None
+    ) -> Account:
         """Load an account by id.
 
         Args:
             account_id: Id of the account.
+            is_service_account: Whether to look up a service account, ``None``
+                allows both kinds.
 
         Raises:
             AccountNotFound: No account has this id.
@@ -799,6 +862,11 @@ class FakeAccountRepository:
         """
         account = self._accounts.get(account_id)
         if account is None:
+            raise AccountNotFound(account_id)
+        if (
+            is_service_account is not None
+            and account.is_service_account != is_service_account
+        ):
             raise AccountNotFound(account_id)
         return account.model_copy()
 

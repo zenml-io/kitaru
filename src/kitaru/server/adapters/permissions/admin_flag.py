@@ -26,6 +26,7 @@ from kitaru.server.domain.account import Account
 ADMIN_ONLY_PERMISSIONS: frozenset[tuple[ResourceType, Action]] = frozenset(
     {
         (ResourceType.ACCOUNT, Action.CREATE),
+        (ResourceType.ACCOUNT, Action.UPDATE),
         (ResourceType.ACCOUNT, Action.DEACTIVATE),
         (ResourceType.ACCOUNT, Action.SET_ADMIN),
     }

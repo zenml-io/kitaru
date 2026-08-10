@@ -25,8 +25,8 @@ from kitaru.api_models.v1.base import (
 from kitaru.api_models.v1.filter import FilterableListParams
 
 
-class AccountCreateRequest(RequestModel):
-    """Account create request."""
+class UserCreateRequest(RequestModel):
+    """User create request."""
 
     name: str = Field(description="Account name.")
     email: str | None = Field(default=None, description="Contact email.")
@@ -36,8 +36,8 @@ class AccountCreateRequest(RequestModel):
     )
 
 
-class AccountUpdateRequest(RequestModel):
-    """Account update request."""
+class UserUpdateRequest(RequestModel):
+    """User update request."""
 
     password: str | None = Field(default=None, description="New login password.")
     old_password: str | None = Field(
@@ -49,11 +49,27 @@ class AccountUpdateRequest(RequestModel):
     is_admin: bool | None = Field(default=None, description="New admin rights state.")
 
 
-class AccountActivateRequest(RequestModel):
-    """Account activate request."""
+class UserActivateRequest(RequestModel):
+    """User activate request."""
 
     activation_token: str = Field(description="Activation token.")
     password: str = Field(description="Login password to set.")
+
+
+class ServiceAccountCreateRequest(RequestModel):
+    """Service account create request."""
+
+    name: str = Field(description="Account name.")
+    email: str | None = Field(default=None, description="Contact email.")
+
+
+class ServiceAccountUpdateRequest(RequestModel):
+    """Service account update request."""
+
+    metadata: dict[str, JsonValue] | None = Field(
+        default=None, description="New metadata."
+    )
+    active: bool | None = Field(default=None, description="New active state.")
 
 
 class AccountListParams(FilterableListParams):
@@ -72,7 +88,7 @@ class AccountResponse(TimestampedResponseModel):
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
 
 
-class AccountActivationTokenResponse(AccountResponse):
-    """Account response carrying a newly minted activation token."""
+class UserActivationTokenResponse(AccountResponse):
+    """User response carrying a newly minted activation token."""
 
     activation_token: str = Field(description="Plaintext token, shown once.")

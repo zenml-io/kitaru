@@ -16,13 +16,16 @@
 import uuid
 from pathlib import Path
 
-import httpx
 import pytest
 from device_fakes import FakeDeviceRepository, build_device_auth_app
-from fastapi import FastAPI, HTTPException, status
+from fastapi import HTTPException, status
 
-from conftest import FakeAccountRepository, FakeApiKeyRepository, create_api_key
-from kitaru.client.api_client import KitaruAPIClient
+from conftest import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    create_api_key,
+    recording_asgi_api_client,
+)
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.exceptions import AuthenticationError
@@ -31,56 +34,8 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.device import Device, DeviceStatus
 from kitaru.server.domain.keys import generate_secret, hash_secret
-from kitaru.transport import RetryTransport
 
 BASE_URL = "http://test"
-
-
-class RequestRecordingTransport(httpx.AsyncBaseTransport):
-    """ASGI transport wrapper recording the path of every request it saw."""
-
-    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
-        """Wrap a transport and start with an empty recording.
-
-        Args:
-            transport: Transport to delegate every request to.
-        """
-        self._transport = transport
-        self.paths: list[str] = []
-
-    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        """Record the request path and delegate to the wrapped transport.
-
-        Args:
-            request: Outgoing HTTP request.
-
-        Returns:
-            Response from the wrapped transport.
-        """
-        self.paths.append(request.url.path)
-        return await self._transport.handle_async_request(request)
-
-
-def _client(
-    app: FastAPI, store: CredentialStore
-) -> tuple[KitaruAPIClient, RequestRecordingTransport]:
-    """Build an SDK client routed to the app and backed by a credential store.
-
-    Args:
-        app: Application to route requests to.
-        store: Credential store the client authenticates from.
-
-    Returns:
-        Client wired to an ASGI transport, and the transport recording paths.
-    """
-    client = KitaruAPIClient(base_url=BASE_URL, credential_store=store)
-    recorder = RequestRecordingTransport(httpx.ASGITransport(app=app))
-    client._http = httpx.AsyncClient(
-        transport=RetryTransport(recorder),
-        base_url=BASE_URL,
-        headers=client._http.headers,
-    )
-    return client, recorder
 
 
 async def _reject_every_request() -> AuthContext:
@@ -129,7 +84,7 @@ async def test_stored_api_key_authenticates_directly(tmp_path: Path) -> None:
     )
     store = CredentialStore(path=tmp_path / "credentials.json")
     store.set_api_key(BASE_URL, plaintext_key)
-    client, recorder = _client(app, store)
+    client, recorder = recording_asgi_api_client(app, store)
 
     page = await client.devices.list()
 
@@ -149,7 +104,7 @@ async def test_device_code_is_exchanged_for_a_token(tmp_path: Path) -> None:
     )
     store = CredentialStore(path=tmp_path / "credentials.json")
     store.set_device(BASE_URL, device_id, device_code)
-    client, recorder = _client(app, store)
+    client, recorder = recording_asgi_api_client(app, store)
 
     page = await client.devices.list()
 
@@ -174,7 +129,7 @@ async def test_stale_token_is_retried_once_with_renewed_token(
     # A cached token that looks fresh to the store but that the server has
     # never issued, so the first request is rejected and a renewal is needed.
     store.set_token(BASE_URL, ApiToken(access_token="bogus-token", leeway_seconds=30))
-    client, recorder = _client(app, store)
+    client, recorder = recording_asgi_api_client(app, store)
 
     page = await client.devices.list()
 
@@ -201,7 +156,7 @@ async def test_no_infinite_loop_when_renewed_token_is_also_rejected(
     app.dependency_overrides[authorize] = _reject_every_request
     store = CredentialStore(path=tmp_path / "credentials.json")
     store.set_device(BASE_URL, device_id, device_code)
-    client, recorder = _client(app, store)
+    client, recorder = recording_asgi_api_client(app, store)
 
     with pytest.raises(AuthenticationError):
         await client.devices.list()

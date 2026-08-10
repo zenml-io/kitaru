@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
 
 import pytest
 
@@ -24,14 +25,10 @@ from conftest import (
     asgi_api_client,
     local_settings,
 )
-from kitaru.api_models.v1.account import (
-    AccountCreateRequest,
-    AccountListParams,
-    AccountResponse,
-)
+from kitaru.api_models.v1.account import AccountListParams, UserCreateRequest
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
 from kitaru.server.api.app import create_app
@@ -40,7 +37,15 @@ from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.domain.account import Account
 
-ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="admin", is_admin=True))
+ACTOR = AuthContext(
+    account=Account(
+        id=uuid.uuid4(),
+        name="admin",
+        is_admin=True,
+        created=datetime.now(UTC),
+        updated=datetime.now(UTC),
+    )
+)
 
 
 @pytest.fixture
@@ -58,31 +63,10 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         yield client
 
 
-async def test_create(api_client: KitaruAPIClient) -> None:
-    """Create an account through the SDK."""
-    account = await api_client.accounts.create(
-        AccountCreateRequest(name="alice", email="alice@example.com", password="secret")
-    )
-    assert isinstance(account, AccountResponse)
-    assert account.name == "alice"
-    assert account.email == "alice@example.com"
-    assert account.is_service_account is False
-    assert account.active is True
-
-
-async def test_create_duplicate_name(api_client: KitaruAPIClient) -> None:
-    """Surface HTTP 409 as a typed error."""
-    await api_client.accounts.create(AccountCreateRequest(name="alice"))
-    with pytest.raises(APIError) as exc_info:
-        await api_client.accounts.create(AccountCreateRequest(name="alice"))
-    assert exc_info.value.status_code == 409
-    assert exc_info.value.detail == "Account name 'alice' is already registered"
-
-
 async def test_get(api_client: KitaruAPIClient) -> None:
     """Get an account by id through the SDK."""
-    created = await api_client.accounts.create(
-        AccountCreateRequest(name="alice", password="secret")
+    created = await api_client.users.create(
+        UserCreateRequest(name="alice", password="secret")
     )
     loaded = await api_client.accounts.get(created.id)
     assert loaded == created
@@ -94,10 +78,18 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
         await api_client.accounts.get(uuid.uuid4())
 
 
+async def test_get_current(api_client: KitaruAPIClient) -> None:
+    """Get the calling account through the SDK."""
+    account = await api_client.accounts.get_current()
+    assert account.id == ACTOR.account.id
+    assert account.name == "admin"
+    assert account.is_admin is True
+
+
 async def test_list(api_client: KitaruAPIClient) -> None:
     """List accounts newest-first with filters through the SDK."""
     for name in ["alice", "bob", "carol"]:
-        await api_client.accounts.create(AccountCreateRequest(name=name))
+        await api_client.users.create(UserCreateRequest(name=name))
 
     page = await api_client.accounts.list()
     assert page.next_cursor is None
@@ -115,7 +107,7 @@ async def test_list(api_client: KitaruAPIClient) -> None:
 async def test_list_walks_pages_with_cursor(api_client: KitaruAPIClient) -> None:
     """Walk every page of accounts via next_cursor through the SDK."""
     for name in ["alice", "bob", "carol"]:
-        await api_client.accounts.create(AccountCreateRequest(name=name))
+        await api_client.users.create(UserCreateRequest(name=name))
 
     collected: list[str] = []
     params = AccountListParams(size=2)
@@ -132,18 +124,10 @@ async def test_list_walks_pages_with_cursor(api_client: KitaruAPIClient) -> None
 async def test_iter(api_client: KitaruAPIClient) -> None:
     """Iterate every account across pages through the SDK."""
     for name in ["alice", "bob", "carol"]:
-        await api_client.accounts.create(AccountCreateRequest(name=name))
+        await api_client.users.create(UserCreateRequest(name=name))
 
     collected = [
         item.name async for item in api_client.accounts.iter(AccountListParams(size=2))
     ]
 
     assert collected == ["carol", "bob", "alice"]
-
-
-async def test_update(api_client: KitaruAPIClient) -> None:
-    """Update an account through the SDK."""
-    created = await api_client.accounts.create(AccountCreateRequest(name="alice"))
-    deactivated = await api_client.accounts.deactivate(created.id)
-    assert deactivated.active is False
-    assert deactivated.activation_token
