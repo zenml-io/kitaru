@@ -54,6 +54,9 @@ cli = [
     "pyyaml>=6.0",
     "rich>=13.0",
 ]
+examples = [
+    "langfuse>=4.14,<5",
+]
 server = [
     "fastapi>=0.139",
     "sqlalchemy[asyncio]>=2.0.51",
@@ -153,7 +156,7 @@ exclude = ["examples/**"]
 
 [tool.ty.environment]
 python-version = "3.11"
-root = ["src", "scripts", "tests"]
+root = [".", "src", "scripts", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

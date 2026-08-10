@@ -80,16 +80,85 @@ jobs:
         run: |
           awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
             .github/pip-audit-ignored.txt | xargs uv run pip-audit
-  example-coverage-audit:
+  canonical-example:
+    name: Canonical example end to end
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: password
+        ports: [5433:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+      - name: Install canonical example runtime
+        run: >-
+          uv sync --frozen
+          --extra server
+          --extra cli
+          --extra worker
+          --extra examples
+      - name: Build local plugin candidates
+        run: >-
+          uv run --no-sync python scripts/smoke_plugin_artifacts.py
+          --candidate-dir plugins/candidate-wheels
+      - name: Install canonical example adapter
+        run: >-
+          uv pip install
+          --find-links plugins/candidate-wheels
+          'kitaru-pydantic-ai[openai]==0.1.0'
+      - name: Start local Kitaru server
+        run: |
+          uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/kitaru-server.pid"
+        env:
+          KITARU_SERVER_AUTH_SCHEME: none
+          KITARU_SERVER_DB_HOST: 127.0.0.1
+          KITARU_SERVER_DB_PORT: 5433
+          KITARU_SERVER_DB_PWD: password
+          KITARU_SERVER_SECRET_ENCRYPTION_KEY: ci-only-encryption-key-ci-only-encryption-key
+          KITARU_SERVER_JWT_SIGNING_KEY: ci-only-signing-key-ci-only-signing-key
+          KITARU_SERVER_ANALYTICS_OPT_IN: false
+      - name: Wait for local Kitaru server
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health/live; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/kitaru-server.log"
+          exit 1
       - name: Audit public example coverage manifest
         run: uv run --with pyyaml python scripts/audit-example-coverage.py
+      - name: Test canonical example contracts
+        run: PYTHONPATH=. uv run pytest -q tests/test_canonical_example.py
+      - name: Run canonical example end to end
+        run: uv run pytest -q tests/integration/test_canonical_example_e2e.py
+        env:
+          KITARU_CANONICAL_E2E: '1'
+          KITARU_CANONICAL_SERVER_URL: http://127.0.0.1:8000
+          KITARU_CANONICAL_API_KEY: canonical-ci-worker
+          UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
+      - name: Dump canonical example logs on failure
+        if: failure()
+        run: cat "$RUNNER_TEMP/kitaru-server.log"
+      - name: Stop local Kitaru server
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/kitaru-server.pid"; then
+            kill "$(cat "$RUNNER_TEMP/kitaru-server.pid")" || true
+          fi
   links:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

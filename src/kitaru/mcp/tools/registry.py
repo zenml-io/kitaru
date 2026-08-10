@@ -15,7 +15,7 @@ from kitaru.api_models.v1.experiment import ExperimentListParams
 from kitaru.api_models.v1.importer import ImporterListParams
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
-from kitaru.mcp.models.common import PageData, PageMetadata
+from kitaru.mcp.models.common import PageData, PageMetadata, RegistryItem
 from kitaru.mcp.models.registry import (
     RegistryGetRequest,
     RegistryGetVersionRequest,
@@ -56,7 +56,7 @@ async def handle_registry_read(
             page = await client.evaluators.list(
                 EvaluatorListParams.model_validate(common)
             )
-        return build_page_data(page, request.size)
+        return build_page_data(page, request.size, PageData[RegistryItem])
     if isinstance(request, RegistryListVersionsRequest):
         kind = ParentKind(request.kind)
         parent = await resolve_parent(client, kind, request.parent_reference)
@@ -77,7 +77,7 @@ async def handle_registry_read(
             page = await client.evaluators.list_versions(
                 parent.id, ListParams.model_validate(common)
             )
-        return build_page_data(page, request.size)
+        return build_page_data(page, request.size, PageData[RegistryItem])
     return await _get_version(state, request)
 
 
@@ -117,11 +117,17 @@ async def _get_version(
 
 
 PageItemT = TypeVar("PageItemT", bound=ResponseModel)
+PageSourceT = TypeVar("PageSourceT", bound=ResponseModel)
 
 
-def build_page_data(page: Page[PageItemT], requested_size: int) -> PageData:
-    return PageData(
-        items=[item.model_dump(mode="json") for item in page.items],
+def build_page_data(
+    page: Page[PageSourceT],
+    requested_size: int,
+    page_data_type: type[PageData[PageItemT]],
+) -> PageData[PageItemT]:
+    """Build a page using the result envelope's concrete item types."""
+    return page_data_type(
+        items=page.items,
         page=PageMetadata(
             size=requested_size,
             next_cursor=page.next_cursor,

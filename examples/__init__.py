@@ -1,1 +1,1 @@
-"""Runnable Kitaru workflow examples."""
+"""Runnable Kitaru example."""

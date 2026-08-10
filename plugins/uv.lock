@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-07T14:58:22.298339Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -955,6 +955,7 @@ requires-dist = [
     { name = "cyclopts", marker = "extra == 'cli'", specifier = ">=4.22" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139" },
     { name = "httpx", specifier = ">=0.27,<1" },
+    { name = "langfuse", marker = "extra == 'examples'", specifier = ">=4.14,<5" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0,<3" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.65b0" },
@@ -975,7 +976,7 @@ requires-dist = [
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["mcp", "cli", "server", "worker", "otel"]
+provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel"]
 
 [package.metadata.requires-dev]
 dev = [

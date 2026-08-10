@@ -49,6 +49,23 @@ def test_cost_reports_session_rollup() -> None:
     assert result.score == 0.0125
 
 
+def test_cost_reports_unavailable_when_llm_cost_is_missing() -> None:
+    """Do not present an unrecorded replay cost as a real zero."""
+    view = _view(cost=Decimal("0"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model_request",
+            cost=None,
+        )
+    ]
+
+    result = cost(view)
+
+    assert result.score is None
+    assert result.value == "unavailable"
+
+
 def test_tool_call_patterns_counts_repeated_tools() -> None:
     """Label sessions that call the same tool more than once."""
     view = _view()
