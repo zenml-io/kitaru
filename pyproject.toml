@@ -142,7 +142,8 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = [
     "kitaru",
-    "plugins",
+    "kitaru_openai_agents",
+    "kitaru_pydantic_ai",
 ]
 
 [tool.ty.src]

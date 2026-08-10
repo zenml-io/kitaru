@@ -7,12 +7,14 @@ members = ["packages/*"]
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
 kitaru-langgraph = { workspace = true }
+kitaru-openai-agents = { workspace = true }
 kitaru-pydantic-ai = { workspace = true }
 
 [dependency-groups]
 dev = [
     "kitaru[server]",
     "kitaru-langgraph[deepagents]",
+    "kitaru-openai-agents",
     "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",
@@ -40,6 +42,7 @@ known-first-party = [
     "kitaru_langfuse_importer",
     "kitaru_langgraph",
     "kitaru_langsmith_importer",
+    "kitaru_openai_agents",
     "kitaru_opentelemetry_importer",
     "kitaru_pydantic_ai",
 ]

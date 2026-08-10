@@ -258,6 +258,7 @@ Use the package directory and distribution name from this table:
 | `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |
 | `langgraph` | `kitaru-langgraph` | `langgraph-vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
+| `openai-agents` | `kitaru-openai-agents` | `openai-agents-vX.Y.Z` |
 | `opentelemetry-importer` | `kitaru-opentelemetry-importer` | `opentelemetry-importer-vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `pydantic-ai-vX.Y.Z` |
 

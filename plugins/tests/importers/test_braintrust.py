@@ -343,7 +343,7 @@ def test_maps_otel_conversation_model_provider_and_cost() -> None:
     )
     assert node.requested_model == "requested-model"
     assert node.model == "resolved-model"
-    assert node.provider == "openai"
+    assert node.model_provider == "openai"
     assert node.cost == Decimal("0.00125")
     assert node.tokens is not None
     assert node.tokens.input_tokens == 5

@@ -794,7 +794,7 @@ class BraintrustProjectLogImporter:
                             or metadata.get("model"),
                             model=metadata.get("gen_ai.response.model")
                             or metadata.get("model"),
-                            provider=metadata.get("gen_ai.provider.name")
+                            model_provider=metadata.get("gen_ai.provider.name")
                             or metadata.get("provider"),
                             tokens=_token_usage(row),
                             cost=_decimal(_metrics(row).get("estimated_cost")),

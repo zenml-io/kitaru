@@ -149,11 +149,9 @@ There is no CLI watcher yet. Use the Python watcher for now.
 Some agent adapters publish their own live events while an adapter-owned
 checkpoint is running. For example, the PydanticAI adapter emits `pydantic_ai.stream.event` when you use PydanticAI streaming hooks, and the Claude Agent SDK adapter emits `claude_agent_sdk.stream.event` when you call `KitaruClaudeRunner.run_stream(...)` or `run_stream_sync(...)`. These events may come from inside synthetic checkpoints created by the adapter, but the mechanism is the same as custom checkpoint live events: watch them with `KitaruClient().executions.events(...)`, and treat them as best-effort progress rather than saved state. The LangGraph v2 adapter supports `invoke(...)` and `ainvoke(...)`; it does not expose LangGraph streaming methods.
 
-See [PydanticAI Adapter](../adapters/pydantic-ai.md#streaming),
-[OpenAI Agents Adapter](../adapters/openai-agents.md#streaming-with-kitaru-durability),
-[Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability),
-and [LangGraph Adapter](../adapters/langgraph.md#interrupts-and-unsupported-invocation-modes) for
-adapter-specific details and runnable examples.
+The separately packaged OpenAI Agents v2 adapter (`kitaru-openai-agents`) does not support `run_streamed` or publish adapter streaming events. The separately packaged LangGraph v2 adapter (`kitaru-langgraph`) rejects streaming and batch entry points before delegation.
+
+See [PydanticAI Adapter](../adapters/pydantic-ai.md#streaming), [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability), and [LangGraph Adapter](../adapters/langgraph.md#interrupts-and-unsupported-invocation-modes) for adapter-specific details and runnable examples.
 
 ## Backend requirements
 

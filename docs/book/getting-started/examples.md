@@ -32,9 +32,7 @@ source from a saved execution.
 Most examples can be run from the repository root with `uv run python path/to/script.py`. Some end-to-end examples (including the Agent Harness Platform tour) tell you to `cd` into their directory first because they read a local `.env` file or have a multi-step README.
 
 {% hint style="info" %}
-Adapting an existing PydanticAI, OpenAI Agents, LangGraph, Claude Agent SDK,
-Gemini Interactions, or Google ADK project? See [Agent Skills](../agent-native/claude-code-skill.md)
-for migration skills that guide a coding agent through the adapter-specific path.
+Adapting an existing PydanticAI, LangGraph, Claude Agent SDK, Gemini Interactions, or Google ADK project? See [Agent Skills](../agent-native/claude-code-skill.md) for migration skills that guide a coding agent through the adapter-specific path.
 {% endhint %}
 
 ## Connection context
@@ -73,7 +71,6 @@ Production-shaped examples that exercise multiple primitives in one runnable sce
 | Example | Demonstrates | Path |
 |---|---|---|
 | Compliance review | Multi-stage Claude audit using the [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python). Each agent turn is a checkpoint; later stages add domain decomposition with partial replay and conversational `kitaru.wait()` resume across crashes. | [`examples/end_to_end/compliance_review/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/compliance_review) |
-| OpenAI research bot | Multi-agent OpenAI research bot using `KitaruRunner(checkpoint_strategy="runner_call")` — planner/writer runner checkpoints with submitted search fan-out. Publishes `research_plan`, `search_summaries`, and `final_report` artifacts. | [`examples/end_to_end/openai_research_bot/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/openai_research_bot) |
 | Coding agent | Interactive coding agent built directly on provider SDKs (no PydanticAI, no LangChain). Demos parallel tool execution, durable HITL via `kitaru.wait()`, custom materializers, and descriptive checkpoint names supplied by the LLM. | [`examples/end_to_end/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/coding_agent) |
 | News scout | PydanticAI agent that scores news across your interest list — `checkpoint_strategy="calls"` makes every search/fetch/score call replayable. Interests come from CLI flags or a built-in default list. No Docker required. | [`examples/end_to_end/news_scout/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/news_scout) |
 
@@ -109,9 +106,7 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 | `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` | Wrap a PydanticAI agent with granular Kitaru replay boundaries | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
 | `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` | Watch best-effort `pydantic_ai.stream.*` live events while `.wait()` returns the durable final answer | [PydanticAI Adapter](../adapters/pydantic-ai.md#streaming) |
 | `integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py` | Let a PydanticAI model call `run_sandbox_command`; the dashboard shows `run_sandbox_command_tool` before the final answer checkpoint (`OPENAI_API_KEY` and one sandbox on your current stack required) | [PydanticAI Adapter](../adapters/pydantic-ai.md#sandbox-command-toolset) |
-| `integrations/openai_agents_agent/openai_agents_adapter.py` | Wrap an OpenAI Agents SDK agent with call-level or runner-call durability in a real API-backed support flow | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
-| `integrations/openai_agents_agent/openai_agents_sandbox_tool.py` | Let an OpenAI agent call `kitaru_sandbox_command`, which runs a command through your current stack's sandbox and returns compact JSON | [OpenAI Agents sandbox tool](../adapters/openai-agents.md#sandbox-command-tool) |
-| `integrations/openai_agents_agent/openai_agents_streaming.py` | Watch best-effort `openai_agents.stream.*` live events while `.wait()` returns the durable `OpenAIRunResult` | [OpenAI Agents Adapter](../adapters/openai-agents.md#streaming-with-kitaru-durability) |
+| `integrations/openai_agents_v2/agent.py` | Run a non-streaming OpenAI Agents SDK agent through the separately packaged `kitaru-openai-agents` adapter, return the native `RunResult`, and record one Kitaru session with child nodes | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` | Wrap one Claude Agent SDK invocation as one Kitaru checkpoint, with final text, session ID, usage/cost, and audit artifacts (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
 | `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` | Watch best-effort `claude_agent_sdk.stream.*` live events while `.wait()` returns the durable `ClaudeRunResult` (`ANTHROPIC_API_KEY` or Claude SDK provider credentials required) | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability) |
 | `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` | Wrap one Gemini Interactions API response as one Kitaru checkpoint, with no-network previews, streaming mode, and an Antigravity managed-agent path | [Gemini Interactions Adapter](../adapters/gemini-interactions.md) |
@@ -121,12 +116,11 @@ Small examples that demo one primitive in isolation. Pick by the thing you want 
 
 | `end_to_end/coding_agent/agent.py` | A tool-using coding agent whose LLM calls and tool decisions are visible as durable execution state | [Tracked LLM Calls](../guides/llm-calls.md) |
 | `end_to_end/news_scout/scout.py` | PydanticAI news monitor with per-model/per-tool checkpoints, explicit run inputs, and remote-secret image config | [Examples index](examples.md) |
-| `end_to_end/openai_research_bot/research_bot.py` | Multi-agent OpenAI research bot with planner/writer runner checkpoints, submitted search fan-out, and published report artifacts | [Research bot section](../adapters/openai-agents.md#end-to-end-research-bot-example) |
 | `end_to_end/compliance_review/README.md` | Four-stage Claude Agent SDK audit: checkpointed turns, partial replay, and durable wait/resume conversation | [Replay and Overrides](../guides/replay-and-overrides.md) |
 | `v2/mcp/README.md` | Configure the native Kitaru v2 MCP server in its default read-only mode | [MCP Server](../agent-native/mcp-server.md) |
 
 {% hint style="info" %}
-The LLM and most adapter examples require additional dependencies and provider API keys. The Gemini Interactions example has `--help` and `--dry-run` paths that require no credentials or network. The Google ADK examples have local no-provider paths, but they must run in an isolated no-dev `google-adk` environment while local/dev extras remain intentionally blocked. The OpenAI Agents sandbox-tool example also needs your current stack to have exactly one sandbox component. The LangGraph v2 example is deterministic and provider-free, but it still needs a configured Kitaru v2 server and an existing agent or agent-version ID. Check each example's README before running it.
+The LLM and most adapter examples require additional dependencies and provider API keys. The Gemini Interactions example has `--help` and `--dry-run` paths that require no credentials or network. The Google ADK examples have local no-provider paths, but they must run in an isolated no-dev `google-adk` environment while local/dev extras remain intentionally blocked. The OpenAI Agents v2 example has a no-cost `--help` check; a real run requires the plugin workspace, OpenAI credentials, and Kitaru identity or a worker task. The LangGraph v2 example is deterministic and provider-free, but it still needs a configured Kitaru v2 server and an existing agent or agent-version ID. Check each example's README before running a real model-backed example.
 {% endhint %}
 
 ## If you'd rather build up primitive-by-primitive first
@@ -145,15 +139,12 @@ Agent Harness Platform is the recommended starting point for most readers — it
 10. `integrations/pydantic_ai_agent/pydantic_ai_adapter.py` — [PydanticAI Adapter](../adapters/pydantic-ai.md).
 11. `integrations/pydantic_ai_agent/pydantic_ai_streaming.py` — [PydanticAI streaming](../adapters/pydantic-ai.md#streaming).
 12. `integrations/pydantic_ai_agent/pydantic_ai_sandbox_toolset.py` — [PydanticAI sandbox toolset](../adapters/pydantic-ai.md#sandbox-command-toolset).
-13. `integrations/openai_agents_agent/openai_agents_adapter.py` — [OpenAI Agents Adapter](../adapters/openai-agents.md).
-14. `integrations/openai_agents_agent/openai_agents_sandbox_tool.py` — [OpenAI Agents sandbox tool](../adapters/openai-agents.md#sandbox-command-tool).
-15. `integrations/openai_agents_agent/openai_agents_streaming.py` — [OpenAI Agents streaming](../adapters/openai-agents.md#streaming-with-kitaru-durability).
-16. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
-17. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability).
-18. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
-19. `integrations/google_adk_agent/google_adk_adapter.py` — [Google ADK Adapter](../adapters/google-adk.md). Run it with isolated `--no-dev --extra google-adk`.
-20. `integrations/google_adk_agent/google_adk_workflow.py` — [Google ADK Adapter](../adapters/google-adk.md). Persisted calls-mode workflow with explicit model/tool checkpoints.
-21. `integrations/langgraph_v2/` — [LangGraph Adapter](../adapters/langgraph.md).
-22. `end_to_end/openai_research_bot/research_bot.py` — [Research bot](../adapters/openai-agents.md#end-to-end-research-bot-example).
-23. `v2/mcp/README.md` — [MCP Server](../agent-native/mcp-server.md).
-24. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.
+13. `integrations/openai_agents_v2/agent.py --help` — [OpenAI Agents Adapter](../adapters/openai-agents.md). The import check for the separately packaged `kitaru-openai-agents` adapter does not call a model.
+14. `integrations/claude_agent_sdk_agent/claude_agent_sdk_adapter.py` — [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md).
+15. `integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py` — [Claude Agent SDK streaming](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability).
+16. `integrations/gemini_interactions_agent/gemini_interactions_adapter.py` — [Gemini Interactions Adapter](../adapters/gemini-interactions.md).
+17. `integrations/google_adk_agent/google_adk_adapter.py` — [Google ADK Adapter](../adapters/google-adk.md). Run it with isolated `--no-dev --extra google-adk`.
+18. `integrations/google_adk_agent/google_adk_workflow.py` — [Google ADK Adapter](../adapters/google-adk.md). Persisted calls-mode workflow with explicit model/tool checkpoints.
+19. `integrations/langgraph_v2/` — [LangGraph Adapter](../adapters/langgraph.md).
+20. `v2/mcp/README.md` — [MCP Server](../agent-native/mcp-server.md).
+21. **[Agents guide](https://docs.zenml.io/user-guides/agents-guide)** — the same primitives, woven into one runnable agent harness platform.

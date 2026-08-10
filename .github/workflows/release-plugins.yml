@@ -14,6 +14,7 @@ on:
           - langfuse-importer
           - langgraph
           - langsmith-importer
+          - openai-agents
           - opentelemetry-importer
           - pydantic-ai
       version:
@@ -28,6 +29,7 @@ on:
       - langfuse-importer-v*
       - langgraph-v*
       - langsmith-importer-v*
+      - openai-agents-v*
       - opentelemetry-importer-v*
       - pydantic-ai-v*
 permissions: {}
@@ -90,6 +92,10 @@ jobs:
               langsmith-importer-v*)
                 REQUESTED_PACKAGE=langsmith-importer
                 REQUESTED_VERSION=${PACKAGE_TAG#langsmith-importer-v}
+                ;;
+              openai-agents-v*)
+                REQUESTED_PACKAGE=openai-agents
+                REQUESTED_VERSION=${PACKAGE_TAG#openai-agents-v}
                 ;;
               opentelemetry-importer-v*)
                 REQUESTED_PACKAGE=opentelemetry-importer

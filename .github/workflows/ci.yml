@@ -258,6 +258,7 @@ jobs:
           - langfuse-importer
           - langgraph
           - langsmith-importer
+          - openai-agents
           - opentelemetry-importer
           - pydantic-ai
     name: plugin package (${{ matrix.package }})
