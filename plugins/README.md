@@ -13,6 +13,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `jsonl-importer` | `kitaru-jsonl-importer` | Kitaru JSONL importer |
 | `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer |
 | `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer |
+| `openai-agents` | `kitaru-openai-agents` | OpenAI Agents SDK recording adapter |
 | `opentelemetry-importer` | `kitaru-opentelemetry-importer` | OpenTelemetry importer |
 | `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
 

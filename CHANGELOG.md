@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- A non-streaming OpenAI Agents adapter, shipped as the independently versioned `kitaru-openai-agents` distribution with the `kitaru_openai_agents` import package, that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.
 - Bare `kitaru` and `kitaru --help` now report Kitaru agent-skill discovery and the canonical installation action, while `kitaru doctor` checks skill availability without treating absent skills as unhealthy.
 - The PydanticAI recording and replay adapter now ships as the independently versioned `kitaru-pydantic-ai` distribution with the `kitaru_pydantic_ai` import package.
 - Ten versioned offline deterministic evaluator plugins distributed with the existing basic evaluators in `kitaru-evaluator`, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs.

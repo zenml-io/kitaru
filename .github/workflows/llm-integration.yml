@@ -31,11 +31,6 @@ on:
         required: false
         type: boolean
         default: true
-      include_research_bot:
-        description: Include the OpenAI research bot extended live check
-        required: false
-        type: boolean
-        default: false
       include_google_adk:
         description: Include the isolated Google ADK/Gemini live check
         required: false
@@ -184,20 +179,17 @@ jobs:
           INPUT_SUITE: ${{ inputs.suite }}
           INPUT_OPENAI: ${{ inputs.include_openai }}
           INPUT_ANTHROPIC: ${{ inputs.include_anthropic }}
-          INPUT_RESEARCH_BOT: ${{ inputs.include_research_bot }}
           INPUT_GOOGLE_ADK: ${{ inputs.include_google_adk }}
         run: |
           set -euo pipefail
           suite="${INPUT_SUITE:-provider-core}"
           include_openai="${INPUT_OPENAI:-true}"
           include_anthropic="${INPUT_ANTHROPIC:-true}"
-          include_research_bot="${INPUT_RESEARCH_BOT:-false}"
           include_google_adk="${INPUT_GOOGLE_ADK:-false}"
           if [ "$EVENT_NAME" = "schedule" ]; then
             suite="provider-core"
             include_openai="true"
             include_anthropic="true"
-            include_research_bot="false"
             include_google_adk="false"
           fi
           providers=()
@@ -209,9 +201,6 @@ jobs:
           if [ "$include_anthropic" = "true" ]; then
             providers+=("anthropic")
             provider_markers+=("live_anthropic")
-          fi
-          if [ "$include_research_bot" = "true" ]; then
-            providers+=("research-bot")
           fi
           if [ "$include_google_adk" = "true" ]; then
             providers+=("google-adk")
@@ -238,7 +227,6 @@ jobs:
             printf 'suite=%s\n' "$suite"
             printf 'include_openai=%s\n' "$include_openai"
             printf 'include_anthropic=%s\n' "$include_anthropic"
-            printf 'include_research_bot=%s\n' "$include_research_bot"
             printf 'include_google_adk=%s\n' "$include_google_adk"
             printf 'providers=%s\n' "$providers_csv"
             printf 'marker_expr=%s\n' "$marker_expr"
@@ -268,7 +256,6 @@ jobs:
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           INCLUDE_OPENAI: ${{ steps.plan.outputs.include_openai }}
           INCLUDE_ANTHROPIC: ${{ steps.plan.outputs.include_anthropic }}
-          INCLUDE_RESEARCH_BOT: ${{ steps.plan.outputs.include_research_bot }}
           INCLUDE_GOOGLE_ADK: ${{ steps.plan.outputs.include_google_adk }}
         run: |
           set -euo pipefail
@@ -280,9 +267,6 @@ jobs:
           fi
           if [ "$INCLUDE_ANTHROPIC" = "true" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then
             missing+=("ANTHROPIC_API_KEY")
-          fi
-          if [ "$INCLUDE_RESEARCH_BOT" = "true" ] && [ -z "${OPENAI_API_KEY:-}" ]; then
-            missing+=("OPENAI_API_KEY")
           fi
           if [ "$INCLUDE_GOOGLE_ADK" = "true" ] \
             && [ -z "${GEMINI_API_KEY:-}" ] \
@@ -328,7 +312,6 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           MARKER_EXPR: ${{ steps.plan.outputs.marker_expr }}
           SUITE: ${{ steps.plan.outputs.suite }}
-          INCLUDE_RESEARCH_BOT: ${{ steps.plan.outputs.include_research_bot }}
         run: |
           set +euo pipefail
           log_path="../llm-integration-results/logs/pytest.log"
@@ -369,14 +352,6 @@ jobs:
           errors=$(grep '^errors=' "$counts_path" | cut -d= -f2)
           if [ "$status" -eq 5 ]; then
             echo "No pytest tests were selected for marker expression: $MARKER_EXPR" | tee -a "$log_path"
-            if [ "$SUITE" = "provider-extended" ] && [ "$INCLUDE_RESEARCH_BOT" = "true" ]; then
-              # No provider_extended-marked pytest tests exist yet; the
-              # research-bot command is currently the only extended check.
-              # Record a visible skip instead of a failure so extended
-              # dispatches that include the research bot stay usable.
-              echo "status=skipped-no-tests" > ../llm-integration-results/pytest.status
-              exit 0
-            fi
             echo "status=no-tests" > ../llm-integration-results/pytest.status
             echo "No live pytest tests selected for $SUITE." > ../llm-integration-results/pytest.failure
             exit 0
@@ -459,28 +434,6 @@ jobs:
             exit 0
           fi
           echo "status=passed" > ../llm-integration-results/google-adk.status
-      - name: Run OpenAI research bot extended check
-        id: research_bot
-        if: ${{ steps.secret_preflight.outputs.ready == 'true' && steps.plan.outputs.include_research_bot == 'true' }}
-        working-directory: kitaru
-        shell: bash
-        env:
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          KITARU_SMOKE_RESEARCH_BOT: '1'
-        run: |
-          set +euo pipefail
-          log_path="../llm-integration-results/logs/research-bot.log"
-          uv run python examples/end_to_end/openai_research_bot/research_bot.py \
-            "AI agent durability in one paragraph" --max-searches 2 \
-            --fail-on-search-error 2>&1 | tee "$log_path"
-          status=${PIPESTATUS[0]}
-          set -euo pipefail
-          if [ "$status" -ne 0 ]; then
-            echo "status=failed" > ../llm-integration-results/research-bot.status
-            echo "OpenAI research bot extended check failed." > ../llm-integration-results/research-bot.failure
-            exit 0
-          fi
-          echo "status=passed" > ../llm-integration-results/research-bot.status
       - name: Record artifact provenance
         id: provenance
         if: always()
@@ -567,7 +520,6 @@ jobs:
           SUITE: ${{ steps.plan.outputs.suite }}
           PROVIDERS: ${{ steps.plan.outputs.providers }}
           MARKER_EXPR: ${{ steps.plan.outputs.marker_expr }}
-          INCLUDE_RESEARCH_BOT: ${{ steps.plan.outputs.include_research_bot }}
           INCLUDE_GOOGLE_ADK: ${{ steps.plan.outputs.include_google_adk }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{
             github.run_id }}
@@ -626,9 +578,6 @@ jobs:
           if [ -f "$results_dir/pytest.failure" ]; then
             cat "$results_dir/pytest.failure" >> "$failures_file"
           fi
-          if [ -f "$results_dir/research-bot.failure" ]; then
-            cat "$results_dir/research-bot.failure" >> "$failures_file"
-          fi
           if [ -f "$results_dir/google-adk.failure" ]; then
             cat "$results_dir/google-adk.failure" >> "$failures_file"
           fi
@@ -640,7 +589,6 @@ jobs:
           secret_status="not-run"
           pytest_status="not-run"
           pytest_counts="not-available"
-          research_status="not-run"
           google_adk_status="not-run"
           google_adk_counts="not-available"
           if [ -f "$results_dir/secret-preflight.status" ]; then
@@ -651,9 +599,6 @@ jobs:
           fi
           if [ -f "$results_dir/pytest.counts.env" ]; then
             pytest_counts=$(tr '\n' ' ' < "$results_dir/pytest.counts.env" | sed 's/[[:space:]]*$//')
-          fi
-          if [ -f "$results_dir/research-bot.status" ]; then
-            research_status=$(cut -d= -f2 "$results_dir/research-bot.status")
           fi
           if [ -f "$results_dir/google-adk.status" ]; then
             google_adk_status=$(cut -d= -f2 "$results_dir/google-adk.status")
@@ -680,7 +625,6 @@ jobs:
             echo "| Secret preflight status | \`$secret_status\` |"
             echo "| Live pytest status | \`$pytest_status\` |"
             echo "| Live pytest counts | \`$pytest_counts\` |"
-            echo "| Research bot status | \`$research_status\` |"
             echo "| Google ADK status | \`$google_adk_status\` |"
             echo "| Google ADK counts | \`$google_adk_counts\` |"
             echo "| Failures | \`$fail_count\` |"
