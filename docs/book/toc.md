@@ -39,6 +39,7 @@
 - [Write an evaluator](guides/write-an-evaluator.md)
 - [Import Langfuse traces](guides/import-langfuse-traces.md)
 - [Import any trace format](guides/importing-sessions.md)
+- [Export an experiment for Harbor or Verifiers](guides/exporting-experiments.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)

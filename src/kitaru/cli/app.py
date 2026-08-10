@@ -41,6 +41,7 @@ from kitaru.cli import (
     cohorts,
     diagnostics,
     evaluations,
+    experiment_exports,
     experiment_runs,
     experiments,
     investigations,
@@ -2350,6 +2351,118 @@ async def experiment_get(experiment: str, /) -> CommandResult:
     """Get one exact experiment."""
     async with _open_asset_client() as client:
         return await experiments.get_experiment(client, experiment)
+
+
+@_register(
+    experiment_app,
+    _spec(
+        ("experiment", "export"),
+        "Export a frozen cohort and local agent source for an external eval runtime.",
+        parameters=(
+            ParameterSpec(
+                "EXPERIMENT", "reference", "argument", True, "Experiment UUID or name."
+            ),
+            ParameterSpec(
+                "--cohort-version",
+                "reference",
+                "option",
+                True,
+                "Cohort version UUID or COHORT@VERSION.",
+            ),
+            ParameterSpec(
+                "--agent", "reference", "option", True, "Exact AGENT@VERSION reference."
+            ),
+            ParameterSpec(
+                "--format",
+                "harbor|verifiers-v1",
+                "option",
+                True,
+                "Target export format.",
+            ),
+            ParameterSpec(
+                "--source-root", "path", "option", True, "Local agent source directory."
+            ),
+            ParameterSpec(
+                "--destination", "path", "option", True, "New artifact directory."
+            ),
+            ParameterSpec(
+                "--primary-reward",
+                "selector",
+                "option",
+                True,
+                "EVALUATOR:RESULT:score or EVALUATOR:RESULT:passed.",
+            ),
+            ParameterSpec(
+                "--required-env",
+                "name[]",
+                "option",
+                False,
+                "Environment variable name required at runtime; repeatable.",
+            ),
+            ParameterSpec(
+                "--trace-format", "atif|kitaru", "option", False, "Harbor trace format."
+            ),
+            ParameterSpec(
+                "--trace-path",
+                "path",
+                "option",
+                False,
+                "Absolute in-sandbox Harbor trace path.",
+            ),
+            ParameterSpec(
+                "--archive",
+                "boolean",
+                "option",
+                False,
+                "Also write a deterministic ZIP beside the bundle.",
+            ),
+            ParameterSpec(
+                "--dry-run",
+                "boolean",
+                "option",
+                False,
+                "Resolve and preflight without writing files.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("reads_local_file", "writes_local_file"),
+        idempotency="fails_if_destination_exists",
+        errors=(*_ASSET_READ_ERRORS, "conflict"),
+    ),
+)
+async def experiment_export(
+    experiment: str,
+    /,
+    *,
+    cohort_version: str,
+    agent: str,
+    format: Literal["harbor", "verifiers-v1"],
+    source_root: Path,
+    destination: Path,
+    primary_reward: str,
+    required_env: list[str] | None = None,
+    trace_format: Literal["atif", "kitaru"] | None = None,
+    trace_path: str | None = None,
+    archive: bool = False,
+    dry_run: bool = False,
+) -> CommandResult:
+    """Export one experiment cohort for Harbor or Verifiers v1."""
+    async with _open_asset_client() as client:
+        return await experiment_exports.export_experiment_command(
+            client,
+            experiment,
+            cohort_version=cohort_version,
+            agent=agent,
+            format=format,
+            source_root=source_root,
+            destination=destination,
+            primary_reward=primary_reward,
+            required_env=required_env,
+            trace_format=trace_format,
+            trace_path=trace_path,
+            archive=archive,
+            dry_run=dry_run,
+        )
 
 
 @_register(

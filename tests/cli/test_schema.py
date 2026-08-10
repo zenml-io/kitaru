@@ -320,6 +320,7 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
     assert set(commands) == {
         "experiment.create",
         "experiment.delete",
+        "experiment.export",
         "experiment.get",
         "experiment.list",
         "experiment.run.cancel",
@@ -370,6 +371,15 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
         "--force"
     ]
     assert force["type"] == "boolean"
+
+    export = commands["experiment.export"]
+    assert export["side_effects"]["reads_local_file"] is True
+    assert export["side_effects"]["writes_local_file"] is True
+    export_parameters = {
+        parameter["name"]: parameter for parameter in export["parameters"]
+    }
+    assert export_parameters["--primary-reward"]["required"] is True
+    assert export_parameters["--dry-run"]["required"] is False
 
     start = commands["experiment.run.start"]
     assert start["read_only"] is False

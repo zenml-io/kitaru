@@ -10147,6 +10147,338 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Export exact experiment inputs and local agent code for an eval runtime.",
+    "inputSchema": {
+      "$defs": {
+        "ExperimentExportRequest": {
+          "additionalProperties": false,
+          "description": "Export exact Kitaru resources and a local source tree.",
+          "properties": {
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "archive": {
+              "default": false,
+              "title": "Archive",
+              "type": "boolean"
+            },
+            "cohort_version_id": {
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "destination": {
+              "minLength": 1,
+              "title": "Destination",
+              "type": "string"
+            },
+            "dry_run": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            },
+            "experiment_id": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "harbor",
+                "verifiers-v1"
+              ],
+              "title": "Format",
+              "type": "string"
+            },
+            "primary_reward": {
+              "description": "EVALUATOR:RESULT:score or EVALUATOR:RESULT:passed.",
+              "pattern": "^[^:]+:[^:]+:(score|passed)$",
+              "title": "Primary Reward",
+              "type": "string"
+            },
+            "required_environment_names": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Required Environment Names",
+              "type": "array"
+            },
+            "source_root": {
+              "minLength": 1,
+              "title": "Source Root",
+              "type": "string"
+            },
+            "trace_format": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "atif",
+                    "kitaru"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Trace Format"
+            },
+            "trace_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Trace Path"
+            }
+          },
+          "required": [
+            "experiment_id",
+            "cohort_version_id",
+            "agent_version_id",
+            "format",
+            "source_root",
+            "destination",
+            "primary_reward"
+          ],
+          "title": "ExperimentExportRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/ExperimentExportRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "experiment_export_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_experiment_export",
+    "outputSchema": {
+      "$defs": {
+        "ExperimentExportReceipt": {
+          "additionalProperties": false,
+          "description": "Receipt for a local export preflight or publication.",
+          "properties": {
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "archive_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Archive Path"
+            },
+            "bundle_digest": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bundle Digest"
+            },
+            "cohort_version_id": {
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "destination": {
+              "title": "Destination",
+              "type": "string"
+            },
+            "dry_run": {
+              "title": "Dry Run",
+              "type": "boolean"
+            },
+            "evaluator_count": {
+              "title": "Evaluator Count",
+              "type": "integer"
+            },
+            "experiment_id": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "harbor",
+                "verifiers-v1"
+              ],
+              "title": "Format",
+              "type": "string"
+            },
+            "operation": {
+              "const": "experiment_export",
+              "default": "experiment_export",
+              "title": "Operation",
+              "type": "string"
+            },
+            "session_count": {
+              "title": "Session Count",
+              "type": "integer"
+            },
+            "source_digest": {
+              "title": "Source Digest",
+              "type": "string"
+            },
+            "validation_level": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Validation Level"
+            }
+          },
+          "required": [
+            "format",
+            "dry_run",
+            "experiment_id",
+            "cohort_version_id",
+            "agent_version_id",
+            "session_count",
+            "evaluator_count",
+            "source_digest",
+            "destination"
+          ],
+          "title": "ExperimentExportReceipt",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed experiment export result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentExportReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ExperimentExportResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": true,

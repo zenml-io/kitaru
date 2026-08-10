@@ -7,6 +7,7 @@ import math
 import os
 from collections.abc import Mapping
 from enum import StrEnum
+from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -36,6 +37,7 @@ class MCPSettings(BaseModel):
     pool_size: int = Field(default=20, ge=1, le=1000)
     max_concurrency: int = Field(default=10, ge=1, le=1000)
     debug: bool = False
+    workspace_roots: tuple[Path, ...] = ()
 
     @field_validator("server_url")
     @classmethod
@@ -43,6 +45,20 @@ class MCPSettings(BaseModel):
         if value is not None and not value.strip():
             raise ValueError("explicit server target must not be blank")
         return value
+
+    @field_validator("workspace_roots")
+    @classmethod
+    def _validate_workspace_roots(cls, value: tuple[Path, ...]) -> tuple[Path, ...]:
+        roots: list[Path] = []
+        for path in value:
+            if not path.is_absolute():
+                raise ValueError("workspace roots must be absolute")
+            resolved = path.resolve(strict=True)
+            if not resolved.is_dir():
+                raise ValueError("workspace roots must be existing directories")
+            if resolved not in roots:
+                roots.append(resolved)
+        return tuple(roots)
 
     @model_validator(mode="after")
     def _validate_settings(self) -> "MCPSettings":
@@ -72,6 +88,11 @@ class MCPSettings(BaseModel):
                 values[field] = value
         if "server_url" not in values and env.get("KITARU_API_URL") is not None:
             values["server_url"] = env["KITARU_API_URL"]
+        workspace_roots = env.get("KITARU_MCP_WORKSPACE_ROOTS")
+        if workspace_roots is not None:
+            values["workspace_roots"] = tuple(
+                Path(value) for value in workspace_roots.split(os.pathsep) if value
+            )
         values.update(
             {key: value for key, value in overrides.items() if value is not None}
         )

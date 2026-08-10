@@ -1,6 +1,9 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Settings precedence, stable error mapping, and redaction tests."""
 
+import os
+from pathlib import Path
+
 import httpx
 import pytest
 from pydantic import ValidationError
@@ -42,6 +45,17 @@ def test_settings_default_and_explicit_over_environment_precedence() -> None:
         ).server_url
         == "https://mcp.example"
     )
+
+
+def test_workspace_roots_load_from_path_separated_environment(tmp_path: Path) -> None:
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    first.mkdir()
+    second.mkdir()
+    settings = MCPSettings.from_environment(
+        {"KITARU_MCP_WORKSPACE_ROOTS": f"{first}{os.pathsep}{second}"}
+    )
+    assert settings.workspace_roots == (first.resolve(), second.resolve())
 
 
 def test_settings_reject_nonfinite_and_invalid_bounds() -> None:
