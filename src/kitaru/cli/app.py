@@ -82,6 +82,11 @@ from kitaru.cli.schema import (
     is_offline,
     register_spec,
 )
+from kitaru.cli.skill_discovery import (
+    INSTALL_COMMAND,
+    SKILLS_URL,
+    get_kitaru_skill_status,
+)
 from kitaru.client.config import get_config_path
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.credential_store import CredentialStore
@@ -345,6 +350,14 @@ async def _launch(
             exception=error,
         )
     if command == app.help_print:
+        if not tokens:
+            return _emit_root_result(
+                lambda: command(*bound.args, **bound.kwargs),
+                output=output,
+                machine=bool(machine),
+                debug=debug,
+                traceback=traceback,
+            )
         with suppress(BrokenPipeError):
             command(*bound.args, **bound.kwargs)
         return 0
@@ -420,6 +433,53 @@ async def _launch(
         )
     finally:
         _INVOCATION.reset(invocation_token)
+        reset_output_context(output_token)
+
+
+def _emit_root_result(
+    render_help: Callable[[], Any],
+    *,
+    output: OutputMode,
+    machine: bool,
+    debug: bool,
+    traceback: bool,
+) -> int:
+    """Render root help with agent-skill onboarding."""
+    try:
+        mode = resolve_output_mode(output, is_tty=sys.stdout.isatty())
+    except CLIError as error:
+        return _emit_early_error(
+            error,
+            tokens=(),
+            output=output,
+            machine=machine,
+            non_interactive=False,
+            debug=debug,
+            traceback=traceback,
+        )
+    machine = machine or mode != "text" or not sys.stdout.isatty()
+    context = OutputContext(
+        command="kitaru",
+        mode=mode,
+        debug=debug,
+        traceback=traceback or debug,
+        stdout=sys.stdout,
+        stderr=sys.stderr,
+        rich=mode == "text" and sys.stdout.isatty() and not machine,
+    )
+    output_token = set_output_context(context)
+    try:
+        if mode == "text":
+            render_help()
+        skill_status = get_kitaru_skill_status()
+        return emit_result(
+            CommandResult(
+                item={"skills": skill_status},
+                links={"skills": SKILLS_URL},
+                next_actions=[] if skill_status["installed"] else [INSTALL_COMMAND],
+            )
+        )
+    finally:
         reset_output_context(output_token)
 
 
@@ -3810,6 +3870,28 @@ def main(argv: Sequence[str] | None = None) -> int:
     """
     tokens = list(sys.argv[1:] if argv is None else argv)
     try:
+        if _is_root_help_invocation(tokens):
+            output_value = _extract_output_value(tokens)
+            if output_value is not None and output_value not in {
+                "auto",
+                "text",
+                "json",
+                "jsonl",
+            }:
+                return _emit_unparsed_error(
+                    CLIError(
+                        "invalid_arguments",
+                        f"Invalid output mode {output_value!r}.",
+                    ),
+                    tokens=tokens,
+                )
+            return _emit_root_result(
+                lambda: app.help_print([]),
+                output="text" if output_value is None else _extract_output(tokens),
+                machine="--machine" in tokens,
+                debug="--debug" in tokens,
+                traceback="--traceback" in tokens,
+            )
         try:
             result = app.meta(
                 tokens,
@@ -3967,16 +4049,52 @@ def _validate_config_key(key: str) -> None:
 
 def _extract_output(tokens: Sequence[str]) -> OutputMode:
     """Best-effort extraction of serialization mode for parser failures."""
-    for index, token in enumerate(tokens):
-        if token.startswith("--output="):
-            value = token.partition("=")[2]
-        elif token in {"--output", "-o"} and index + 1 < len(tokens):
-            value = tokens[index + 1]
-        else:
-            continue
-        if value in {"auto", "text", "json", "jsonl"}:
-            return value  # type: ignore[return-value]
+    value = _extract_output_value(tokens)
+    if value in {"auto", "text", "json", "jsonl"}:
+        return value  # type: ignore[return-value]
     return "auto"
+
+
+def _extract_output_value(tokens: Sequence[str]) -> str | None:
+    """Extract the raw explicit serialization mode when one is present."""
+    for index, token in enumerate(tokens):
+        if token.startswith(("--output=", "-o=")):
+            return token.partition("=")[2]
+        if token in {"--output", "-o"} and index + 1 < len(tokens):
+            return tokens[index + 1]
+    return None
+
+
+def _is_root_help_invocation(tokens: Sequence[str]) -> bool:
+    """Return whether tokens request root help with supported global options."""
+    options_with_values = {"--output", "-o", "--server", "--request-timeout"}
+    boolean_options = {
+        "--machine",
+        "--no-machine",
+        "--non-interactive",
+        "--no-browser",
+        "--debug",
+        "--traceback",
+    }
+    value_prefixes = ("--output=", "-o=", "--server=", "--request-timeout=")
+    help_requested = False
+    index = 0
+    while index < len(tokens):
+        token = tokens[index]
+        if token in {"--help", "-h"}:
+            help_requested = True
+            index += 1
+            continue
+        if token in options_with_values:
+            if index + 1 >= len(tokens):
+                return False
+            index += 2
+            continue
+        if token in boolean_options or token.startswith(value_prefixes):
+            index += 1
+            continue
+        return False
+    return help_requested
 
 
 def _guess_command(tokens: Sequence[str]) -> str:
