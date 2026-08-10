@@ -6,8 +6,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from kitaru_pydantic_ai import KitaruAgent
 from pydantic_ai import Agent
+
+from kitaru_pydantic_ai import KitaruAgent
 
 PROMPT = """
 Call both available tools exactly once:

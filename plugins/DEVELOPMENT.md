@@ -62,7 +62,7 @@ uv run --no-sync python scripts/smoke_plugin_artifacts.py \
 ls -lh plugins/candidate-wheels/*.whl
 ```
 
-The directory must contain the Kitaru wheel and one wheel per directory under `packages/`.
+The directory must contain the Kitaru wheel plus one wheel per directory under `plugins/packages/`.
 
 Git ignores generated files under `plugins/candidate-wheels/`. Commit changes to `plugins/candidate.Dockerfile` and `plugins/docker-compose.candidate.yml`, but do not commit wheel files.
 
@@ -256,6 +256,7 @@ Use the package directory and distribution name from this table:
 | `evaluator` | `kitaru-evaluator` | `evaluator-vX.Y.Z` |
 | `jsonl-importer` | `kitaru-jsonl-importer` | `jsonl-importer-vX.Y.Z` |
 | `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |
+| `langgraph` | `kitaru-langgraph` | `langgraph-vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `openai-agents-vX.Y.Z` |
 | `opentelemetry-importer` | `kitaru-opentelemetry-importer` | `opentelemetry-importer-vX.Y.Z` |

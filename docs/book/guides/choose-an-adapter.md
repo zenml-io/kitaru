@@ -17,10 +17,12 @@ The **recorded boundary** column states what Kitaru persists for that integratio
 | PydanticAI agent | `KitaruAgent` | **Per model/tool/MCP call** by default, or one turn checkpoint | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
 | OpenAI Agents SDK agent | `KitaruRunner` | One result session with observed model, tool, hosted-tool, and handoff nodes | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
 | Claude Agent SDK invocation | `KitaruClaudeRunner` | One completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
-| LangGraph graph | `KitaruGraphRunner` | One graph call, or middleware-wrapped model/tool calls | [LangGraph Adapter](../adapters/langgraph.md) |
+| LangGraph, LangChain, or Deep Agents graph | `KitaruGraphRunner` from `kitaru-langgraph` | One invocation session; factory construction adds observable model/tool nodes and replay controls, not node-boundary replay | [LangGraph Adapter](../adapters/langgraph.md) |
 
 {% hint style="info" %}
 The separately packaged OpenAI Agents v2 adapter (`kitaru-openai-agents`) records observations as session nodes that are not independently replayable. A worker-managed replay can override the prompt, instructions, run-level model, model settings, and a static value for a directly attached `FunctionTool`. The adapter has no per-run replay argument. Use the Kitaru replay and task flow to select a replay through `KITARU_REPLAY_ID`, and use PydanticAI when you need its per-call replay behavior.
+
+The separately packaged LangGraph v2 adapter (`kitaru-langgraph`) records each invocation as one session. Factory-built LangChain and Deep Agents expose model/tool nodes and can apply live request overrides or supported tool substitution, but native LangGraph checkpoint reconstruction and node-boundary replay are deferred.
 {% endhint %}
 
 ## Pick by goal
@@ -46,7 +48,7 @@ Start with:
 - [Wait, Input, and Resume](wait-and-resume.md)
 - [PydanticAI human-in-the-loop tools](../adapters/pydantic-ai.md#ask-the-human-from-a-tool-body)
 - [OpenAI adapter exclusions](../adapters/openai-agents.md#deliberate-exclusions)
-- [LangGraph interrupt and resume](../adapters/langgraph.md#interrupt-and-resume)
+- [LangGraph interrupts and unsupported invocation modes](../adapters/langgraph.md#interrupts-and-unsupported-invocation-modes)
 
 ## Next
 
