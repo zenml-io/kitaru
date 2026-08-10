@@ -802,17 +802,6 @@
             "description": "Targeted node.",
             "title": "Node Id"
           },
-          "part": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AnnotationSelectorPart"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Payload of the node targeted."
-          },
           "path": {
             "anyOf": [
               {
@@ -822,7 +811,7 @@
                 "type": "null"
               }
             ],
-            "description": "RFC 6901 JSON Pointer within the targeted payload.",
+            "description": "RFC 6901 JSON Pointer into the targeted node or the session response.",
             "title": "Path"
           },
           "span": {
@@ -839,19 +828,6 @@
         },
         "title": "AnnotationSelector",
         "type": "object"
-      },
-      "AnnotationSelectorPart": {
-        "description": "Payload of a session node an annotation selector targets.",
-        "enum": [
-          "input",
-          "output",
-          "error",
-          "metadata",
-          "attributes",
-          "model_params"
-        ],
-        "title": "AnnotationSelectorPart",
-        "type": "string"
       },
       "AnnotationSpan": {
         "additionalProperties": false,

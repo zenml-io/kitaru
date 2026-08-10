@@ -107,7 +107,7 @@ async def test_manual_annotation_persists_across_requests(
         "/v1/annotations",
         json={
             "session_id": session_id,
-            "selector": {"node_id": node_id, "part": "input"},
+            "selector": {"node_id": node_id},
             "value": "Looks fine",
         },
     )

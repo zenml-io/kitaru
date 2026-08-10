@@ -176,7 +176,7 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
                 {
                     "label": "Failure",
                     "description": "The tool returned an error.",
-                    "selectors": [{"node_id": str(node_id), "part": "error"}],
+                    "selectors": [{"node_id": str(node_id)}],
                 }
             ],
         }
@@ -214,7 +214,6 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
                             "selectors": [
                                 {
                                     "node_id": str(node_id),
-                                    "part": "error",
                                 }
                             ],
                         }

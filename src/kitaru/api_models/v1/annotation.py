@@ -14,23 +14,12 @@
 """Annotation API models."""
 
 import uuid
-from enum import StrEnum
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue, OwnedResponseModel, RequestModel
 from kitaru.api_models.v1.filter import FilterableListParams
-
-
-class AnnotationSelectorPart(StrEnum):
-    """Payload of a session node an annotation selector targets."""
-
-    INPUT = "input"
-    OUTPUT = "output"
-    ERROR = "error"
-    METADATA = "metadata"
-    ATTRIBUTES = "attributes"
-    MODEL_PARAMS = "model_params"
 
 
 class AnnotationSpan(RequestModel):
@@ -44,15 +33,28 @@ class AnnotationSelector(RequestModel):
     """Annotation selector."""
 
     node_id: uuid.UUID | None = Field(default=None, description="Targeted node.")
-    part: AnnotationSelectorPart | None = Field(
-        default=None, description="Payload of the node targeted."
-    )
     path: str | None = Field(
-        default=None, description="RFC 6901 JSON Pointer within the targeted payload."
+        default=None,
+        description="RFC 6901 JSON Pointer into the targeted node or the "
+        "session response.",
     )
     span: AnnotationSpan | None = Field(
         default=None, description="Character range within the resolved string."
     )
+
+    @model_validator(mode="after")
+    def _span_requires_path(self) -> Self:
+        """Reject a span without a path.
+
+        Raises:
+            ValueError: span is set but path is not.
+
+        Returns:
+            The validated selector.
+        """
+        if self.span is not None and self.path is None:
+            raise ValueError("span requires path")
+        return self
 
 
 class ManualAnnotationCreateRequest(RequestModel):
