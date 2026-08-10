@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
-- A source-only, non-streaming OpenAI Agents adapter that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.
+- A non-streaming OpenAI Agents adapter, shipped as the independently versioned `kitaru-openai-agents` distribution with the `kitaru_openai_agents` import package, that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.
 - The PydanticAI recording and replay adapter now ships as the independently versioned `kitaru-pydantic-ai` distribution with the `kitaru_pydantic_ai` import package.
 - Ten versioned offline deterministic evaluator plugins distributed with the existing basic evaluators in `kitaru-evaluator`, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs.
 - The server persists a generated server id on first startup, seeded from `KITARU_SERVER_SERVER_ID` when set. Analytics events carry that id together with the auth scheme, runtime environment, operating system, Python version, and, when available, the enrolled workspace id, the acting account's service account flag, and its control plane user id. The default account is identified at startup, and identify traits carry an `account_origin` (`bootstrap`, `api`, or `control_plane`).

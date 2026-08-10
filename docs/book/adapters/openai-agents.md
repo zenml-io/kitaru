@@ -1,5 +1,5 @@
 ---
-description: Record and replay non-streaming OpenAI Agents SDK runs with the source-only Kitaru v2 adapter
+description: Record and replay non-streaming OpenAI Agents SDK runs with the separately packaged Kitaru v2 adapter
 icon: robot
 ---
 
@@ -8,15 +8,21 @@ icon: robot
 The Kitaru v2 OpenAI Agents adapter records a native OpenAI Agents SDK run as one Kitaru session. Model calls, tools, hosted tools, and handoffs appear as child nodes inside that session. The OpenAI SDK still executes the agent and returns its own result object.
 
 {% hint style="warning" %}
-This adapter is source-only. It is available from a Kitaru repository checkout at `plugins.adapters.openai_agents`; it is not exported by the installed `kitaru` package. Do not import it from `kitaru.adapters`.
+This adapter ships as its own separately versioned distribution, `kitaru-openai-agents` (`uv add kitaru-openai-agents`); it is not exported by the installed `kitaru` package. Do not import it from `kitaru.adapters`.
 {% endhint %}
 
 ## Run an agent
 
-From the repository root, sync the plugin workspace:
+Install the adapter package:
 
 ```bash
-uv sync --project plugins
+uv add kitaru-openai-agents
+```
+
+In a Kitaru repository checkout, sync the plugin workspace instead:
+
+```bash
+uv sync --project plugins --all-packages
 ```
 
 Create the OpenAI agent as usual, then pass it to `KitaruRunner.run(...)` or `KitaruRunner.run_sync(...)`:
@@ -26,7 +32,7 @@ import uuid
 
 from agents import Agent
 
-from plugins.adapters.openai_agents import KitaruRunner
+from kitaru_openai_agents import KitaruRunner
 
 agent = Agent(
     name="support_agent",
@@ -107,13 +113,13 @@ This first v2 adapter release does not provide:
 - a Kitaru sandbox helper for OpenAI tools
 - an adapter-specific request or result envelope
 - `RunState` input or durable approval interruption and resume
-- adapter-specific CLI, MCP, server, or packaging support
+- adapter-specific CLI, MCP, or server support
 
 Approval interruptions fail closed instead of completing the Kitaru session. `RunState` input is rejected because Kitaru v2 does not yet have a durable interrupted-session state to resume.
 
 ## Exceptions after OpenAI starts
 
-The adapter exposes two public exceptions from `plugins.adapters.openai_agents`:
+The adapter exposes two public exceptions in `kitaru_openai_agents` for failures after OpenAI starts:
 
 - `KitaruRecordingError` means OpenAI produced a native result but Kitaru failed while reconciling observations, finalizing the session, or closing the client. Its `result` field preserves that `RunResult`; `session_id` identifies the Kitaru session when available; and `phase` names the failed recording phase. It sets `retry_safe=False` and `side_effects_possible=True`, because automatically running the model or tools again could duplicate work or side effects.
 - `UnsupportedInterruptionError` means OpenAI returned an approval interruption that this adapter cannot durably resume. Its `result` field preserves the interrupted native `RunResult`.

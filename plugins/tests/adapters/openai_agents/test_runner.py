@@ -22,8 +22,6 @@ from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
 
-import adapters.openai_agents.recording as recording_module
-import adapters.openai_agents.runner as runner_module
 import pytest
 from agents import (
     Agent,
@@ -45,12 +43,8 @@ from agents.items import ToolCallItem, ToolCallOutputItem
 from openai.types.responses import ResponseFunctionToolCall
 from packaging.version import Version
 
-from adapters.openai_agents import (
-    KitaruRecordingError,
-    KitaruRunner,
-    SessionObserver,
-    UnsupportedInterruptionError,
-)
+import kitaru_openai_agents.recording as recording_module
+import kitaru_openai_agents.runner as runner_module
 from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
 from kitaru.api_models.v1.replay_config import (
     PassthroughConfig,
@@ -60,6 +54,12 @@ from kitaru.api_models.v1.replay_config import (
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
+from kitaru_openai_agents import (
+    KitaruRecordingError,
+    KitaruRunner,
+    SessionObserver,
+    UnsupportedInterruptionError,
+)
 
 
 class _RunnerFakeSessions:

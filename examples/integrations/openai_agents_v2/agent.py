@@ -1,4 +1,4 @@
-"""Run an OpenAI Agents SDK agent through the source-only Kitaru adapter."""
+"""Run an OpenAI Agents SDK agent through the `kitaru-openai-agents` adapter."""
 
 import argparse
 import os
@@ -6,7 +6,7 @@ import uuid
 
 from agents import Agent, function_tool
 
-from plugins.adapters.openai_agents import KitaruRunner
+from kitaru_openai_agents import KitaruRunner
 
 _DEFAULT_PROMPT = "Use the order lookup tool for ORD-1007"
 
@@ -22,7 +22,7 @@ def lookup_order(order_id: str) -> str:
 def _parse_args() -> argparse.Namespace:
     """Parse command-line arguments."""
     parser = argparse.ArgumentParser(
-        description="Run the source-only Kitaru OpenAI Agents v2 example."
+        description="Run the Kitaru OpenAI Agents v2 example (kitaru-openai-agents)."
     )
     parser.add_argument(
         "prompt",

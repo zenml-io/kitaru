@@ -408,7 +408,7 @@ All adapters use `checkpoint_strategy`, but the values name the real boundary ea
 
 So `"calls"` is a shared idea, not a promise of identical mechanics. It means Kitaru can create per-call checkpoints only where the adapter physically owns a replay-safe call body.
 
-The source-only OpenAI Agents v2 adapter uses a different model: one Kitaru session contains nodes that observe the native SDK run. It does not expose `checkpoint_strategy`, `"calls"`, or `"runner_call"`.
+The separately packaged OpenAI Agents v2 adapter (`kitaru-openai-agents`) uses a different model: one Kitaru session contains nodes that observe the native SDK run. It does not expose `checkpoint_strategy`, `"calls"`, or `"runner_call"`.
 
 ## Streaming
 

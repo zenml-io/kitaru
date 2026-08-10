@@ -20,14 +20,7 @@ from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 from unittest.mock import AsyncMock
 
-import adapters.openai_agents.recording as recording_module
 import pytest
-from adapters.openai_agents.recording import (
-    KitaruRecordingError,
-    RunRecorder,
-    UnsupportedInterruptionError,
-    finalize_failure,
-)
 from agents import (
     Agent,
     ModelResponse,
@@ -48,11 +41,18 @@ from openai.types.responses import (
     ResponseOutputText,
 )
 
-from adapters.openai_agents import KitaruRunner
+import kitaru_openai_agents.recording as recording_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.client import KitaruAPIClient
+from kitaru_openai_agents import KitaruRunner
+from kitaru_openai_agents.recording import (
+    KitaruRecordingError,
+    RunRecorder,
+    UnsupportedInterruptionError,
+    finalize_failure,
+)
 
 
 class _FakeSessions:

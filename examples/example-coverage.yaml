@@ -435,7 +435,7 @@ examples:
       - examples/README.md
       - docs/book/getting-started/examples.md
       - docs/book/adapters/openai-agents.md
-    owner_area: source-only OpenAI Agents SDK v2 adapter
+    owner_area: separately packaged OpenAI Agents SDK v2 adapter (kitaru-openai-agents)
     coverage:
       deterministic_pytest:
         status: covered

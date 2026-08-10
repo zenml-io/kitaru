@@ -1,13 +1,13 @@
 # OpenAI Agents v2 adapter example
 
-This example runs a real non-streaming OpenAI Agents SDK agent through Kitaru's source-only v2 adapter. The SDK returns its native `RunResult`; Kitaru records the run as one session with child observations.
+This example runs a real non-streaming OpenAI Agents SDK agent through the separately packaged Kitaru OpenAI Agents v2 adapter (`kitaru-openai-agents`). The SDK returns its native `RunResult`; Kitaru records the run as one session with child observations.
 
 ## Check the example without a model call
 
 From the repository root, sync and use the plugin workspace:
 
 ```bash
-uv sync --project plugins
+uv sync --project plugins --all-packages
 uv run --project plugins python -m examples.integrations.openai_agents_v2.agent --help
 ```
 

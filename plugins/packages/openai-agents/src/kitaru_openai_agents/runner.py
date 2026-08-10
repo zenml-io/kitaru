@@ -54,7 +54,7 @@ _CLIENT_CLOSE_FAILURE_NOTE = "Kitaru could not close the recording client."
 
 
 class KitaruRunner(Generic[TContext]):
-    """Run OpenAI agents through the repository-local Kitaru adapter."""
+    """Run OpenAI agents while recording each run as a Kitaru session."""
 
     def __init__(
         self,

@@ -158,7 +158,7 @@ the mechanism is the same as custom checkpoint live events: watch them with
 `KitaruClient().executions.events(...)`, and treat them as best-effort progress
 rather than saved state.
 
-The source-only OpenAI Agents v2 adapter does not support `run_streamed` or publish adapter streaming events.
+The separately packaged OpenAI Agents v2 adapter (`kitaru-openai-agents`) does not support `run_streamed` or publish adapter streaming events.
 
 See [PydanticAI Adapter](../adapters/pydantic-ai.md#streaming), [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md#live-streaming-with-kitaru-durability), and [LangGraph Adapter](../adapters/langgraph.md#graph-call-streaming) for adapter-specific details and runnable examples.
 
