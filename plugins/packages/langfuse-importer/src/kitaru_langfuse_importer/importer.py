@@ -1049,7 +1049,7 @@ class LangfuseJSONLImporter:
                             or _first_nonempty(record, "model", "modelId", "model_id")
                             or _metadata_value(record, "gen_ai.request.model")
                         ),
-                        provider=(
+                        model_provider=(
                             _first_nonempty(record, "modelProvider", "model_provider")
                             or _metadata_value(
                                 record,
