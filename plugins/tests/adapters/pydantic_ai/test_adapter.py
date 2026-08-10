@@ -19,6 +19,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import date
+from importlib.metadata import version
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
 
@@ -41,12 +42,7 @@ from pydantic_ai.messages import (
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 from pydantic_ai.models.test import TestModel
 
-import adapters.pydantic_ai.capability as capability_module
-from adapters.pydantic_ai import (
-    KitaruAgent,
-    ToolPolicyError,
-    ToolPolicyMissError,
-)
+import kitaru_pydantic_ai.capability as capability_module
 from kitaru.api_models.v1.replay import (
     ReplayResponse,
     ReplayStatus,
@@ -68,6 +64,11 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
+from kitaru_pydantic_ai import (
+    KitaruAgent,
+    ToolPolicyError,
+    ToolPolicyMissError,
+)
 
 
 class _FakeSessions:
@@ -90,7 +91,10 @@ class _FakeSessions:
         return None
 
     async def ingest_nodes(self, session_id: uuid.UUID, request: Any) -> list[Any]:
-        if self._client.ingest_error is not None:
+        if self._client.ingest_error is not None and (
+            self._client.ingest_error_after is None
+            or len(self.node_batches) >= self._client.ingest_error_after
+        ):
             raise self._client.ingest_error
         self.node_batches.append((session_id, request))
         self._client.events.append("nodes:upsert")
@@ -128,6 +132,7 @@ class _FakeClient:
         found=False, result=None
     )
     next_ingest_error: ClassVar[BaseException | None] = None
+    next_ingest_error_after: ClassVar[int | None] = None
     next_update_error: ClassVar[BaseException | None] = None
 
     def __init__(self, **kwargs: Any) -> None:
@@ -139,6 +144,7 @@ class _FakeClient:
         self.inputs = fixture.inputs if fixture else None
         self.lookup_response = type(self).next_lookup_response
         self.ingest_error = type(self).next_ingest_error
+        self.ingest_error_after = type(self).next_ingest_error_after
         self.update_error = type(self).next_update_error
         self.events: list[str] = []
         self.sessions = _FakeSessions(self)
@@ -168,6 +174,7 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeClient.next_fixture = None
     _FakeClient.next_lookup_response = ToolLookupResponse(found=False, result=None)
     _FakeClient.next_ingest_error = None
+    _FakeClient.next_ingest_error_after = None
     _FakeClient.next_update_error = None
     monkeypatch.setattr(capability_module, "KitaruAPIClient", _FakeClient)
 
@@ -244,6 +251,10 @@ def _tool_agent(
         return {"source": "real", **arguments}
 
     return agent
+
+
+def test_adapter_version_matches_distribution() -> None:
+    assert version("kitaru-pydantic-ai") == capability_module.ADAPTER_VERSION
 
 
 def test_uses_pydantic_ai_wrapper_agent() -> None:
@@ -332,6 +343,7 @@ def test_run_sync_preserves_result_and_records_lifecycle() -> None:
     ]
     assert nodes[0].index == nodes[-1].index
     llm = next(node for node in nodes if node.node_type is NodeType.LLM_CALL)
+    assert llm.model_provider == "test"
     assert llm.cost is None
     assert llm.input_text_selector == "/0/parts/0/content"
     assert llm.output_text_selector == "/parts/0/content"
@@ -376,6 +388,48 @@ async def test_recording_failure_does_not_replace_agent_failure() -> None:
     assert isinstance(exc_info.value.__cause__, RuntimeError)
     assert str(exc_info.value.__cause__) == "recording failed"
     assert _FakeClient.instances[0].closed
+
+
+async def test_batch_failure_does_not_replace_model_failure() -> None:
+    """Keep a model failure primary when recording its failed node also fails."""
+
+    def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        raise ValueError("model failed")
+
+    _FakeClient.next_ingest_error = RuntimeError("batch failed")
+    _FakeClient.next_ingest_error_after = 1
+    agent = KitaruAgent(
+        Agent(FunctionModel(model)),
+        agent_id=uuid.uuid4(),
+        batch_size=1,
+    )
+
+    with pytest.raises(ValueError, match="model failed") as exc_info:
+        await agent.run("prompt")
+
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert str(exc_info.value.__cause__) == "batch failed"
+    client = _FakeClient.instances[0]
+    assert client.sessions.updated[0][1].status is SessionStatus.FAILED
+    assert client.closed
+
+
+async def test_terminal_batch_failure_marks_session_failed() -> None:
+    """Do not leave a session running when its terminal node batch fails."""
+    _FakeClient.next_ingest_error = RuntimeError("terminal batch failed")
+    _FakeClient.next_ingest_error_after = 1
+    agent = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+        agent_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(RuntimeError, match="terminal batch failed"):
+        await agent.run("prompt")
+
+    client = _FakeClient.instances[0]
+    assert client.sessions.updated[0][1].status is SessionStatus.FAILED
+    assert client.sessions.updated[0][1].error == "terminal batch failed"
+    assert client.closed
 
 
 async def test_replay_resolves_input_and_replaces_request_configuration(
@@ -643,6 +697,110 @@ async def test_concurrent_runs_on_one_wrapper_keep_state_isolated() -> None:
     )
 
 
+async def test_many_concurrent_runs_keep_sessions_and_nodes_isolated() -> None:
+    """Stress one wrapper with many overlapping run-local capabilities."""
+    run_count = 64
+    agent = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+        agent_id=uuid.uuid4(),
+        batch_size=1,
+    )
+
+    results = await asyncio.gather(
+        *(agent.run(f"prompt-{index}") for index in range(run_count))
+    )
+
+    assert len(results) == run_count
+    assert len(_FakeClient.instances) == run_count
+    assert {client.sessions.created[0].inputs for client in _FakeClient.instances} == {
+        f"prompt-{index}" for index in range(run_count)
+    }
+    for client in _FakeClient.instances:
+        nodes = _nodes(client)
+        assert [node.index for node in nodes] == [0, 1, 0]
+        assert client.sessions.updated[0][1].status is SessionStatus.COMPLETED
+        assert client.closed
+
+
+async def test_cancelled_run_fails_session_and_closes_client() -> None:
+    """Clean up Kitaru state when the caller cancels an active model request."""
+    model_started = asyncio.Event()
+    release_model = asyncio.Event()
+
+    async def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        model_started.set()
+        await release_model.wait()
+        return ModelResponse(parts=[TextPart("unused")])
+
+    agent = KitaruAgent(
+        Agent(FunctionModel(model)),
+        agent_id=uuid.uuid4(),
+    )
+    task = asyncio.create_task(agent.run("prompt"))
+    await model_started.wait()
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    client = _FakeClient.instances[0]
+    assert client.sessions.updated[0][1].status is SessionStatus.FAILED
+    assert client.sessions.updated[0][1].error == "CancelledError"
+    assert client.closed
+
+
+async def test_parallel_tool_calls_respect_batching_and_parentage() -> None:
+    """Stress concurrent tool hooks across several node batch boundaries."""
+    tool_count = 40
+    real_calls: list[dict[str, Any]] = []
+
+    def model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        if any(
+            isinstance(part, ToolReturnPart)
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+        ):
+            return ModelResponse(parts=[TextPart("finished")])
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    "lookup",
+                    {"value": index},
+                    tool_call_id=f"lookup-{index}",
+                )
+                for index in range(tool_count)
+            ]
+        )
+
+    original = Agent(FunctionModel(model, model_name="parallel-tools"))
+
+    @original.tool_plain
+    async def lookup(value: int) -> int:
+        await asyncio.sleep(0)
+        real_calls.append({"value": value})
+        return value * 2
+
+    agent = KitaruAgent(original, agent_id=uuid.uuid4(), batch_size=7)
+
+    result = await agent.run("run tools")
+
+    assert result.output == "finished"
+    assert {call["value"] for call in real_calls} == set(range(tool_count))
+    client = _FakeClient.instances[0]
+    nodes = _nodes(client)
+    children = [node for node in nodes if node.index != 0]
+    tool_nodes = [node for node in children if node.node_type is NodeType.TOOL_CALL]
+    llm_nodes = [node for node in children if node.node_type is NodeType.LLM_CALL]
+    assert len(tool_nodes) == tool_count
+    assert len(llm_nodes) == 2
+    assert {node.index for node in children} == set(range(1, tool_count + 3))
+    assert {node.parent_index for node in tool_nodes} == {llm_nodes[0].index}
+    assert all(len(batch.nodes) <= 7 for _, batch in client.sessions.node_batches[1:])
+    assert client.sessions.updated[0][1].status is SessionStatus.COMPLETED
+    assert client.closed
+
+
 async def test_replay_uses_spec_input_when_environment_input_is_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -800,7 +958,7 @@ async def test_history_policy_without_cache_key_uses_miss_behavior(
         ),
     )
     monkeypatch.setattr(
-        "adapters.pydantic_ai.capability.compute_tool_cache_key",
+        "kitaru_pydantic_ai.capability.compute_tool_cache_key",
         lambda *_: None,
     )
     agent = KitaruAgent(

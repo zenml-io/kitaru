@@ -3,6 +3,7 @@
 
 import argparse
 import asyncio
+import importlib
 import uuid
 from typing import cast
 
@@ -78,7 +79,12 @@ class _MemoryPluginRepository:
             raise PluginVersionNotFound(plugin_id, version) from error
 
 
-async def _probe(expected_requirements: set[str]) -> None:
+async def _probe(expected_requirements: set[str], import_modules: set[str]) -> None:
+    for module_name in import_modules:
+        module = importlib.import_module(module_name)
+        if not getattr(module, "__all__", None):
+            raise RuntimeError(f"Standalone package {module_name!r} has no public API")
+
     definitions = tuple(
         definition
         for definition in DEFAULT_PLUGIN_DEFINITIONS
@@ -136,11 +142,17 @@ def main() -> int:
     parser.add_argument(
         "--requirement",
         action="append",
-        required=True,
+        default=[],
         help="Exact installed plugin requirement expected in the default catalog.",
     )
+    parser.add_argument(
+        "--module",
+        action="append",
+        default=[],
+        help="Standalone package module that must import from the installed wheel.",
+    )
     arguments = parser.parse_args()
-    asyncio.run(_probe(set(arguments.requirement)))
+    asyncio.run(_probe(set(arguments.requirement), set(arguments.module)))
     print("Installed plugin artifact probe passed")
     return 0
 
