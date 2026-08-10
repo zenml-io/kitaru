@@ -18,12 +18,8 @@ from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING
 
 from kitaru.api_models.v1.account import (
-    AccountActivateRequest,
-    AccountActivationTokenResponse,
-    AccountCreateRequest,
     AccountListParams,
     AccountResponse,
-    AccountUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
 from kitaru.client.resources.pagination import iterate_pages
@@ -43,23 +39,16 @@ class AccountsResource:
         """
         self._client = client
 
-    async def create(self, request: AccountCreateRequest) -> AccountResponse:
-        """Create an account.
-
-        Args:
-            request: Account create request.
+    async def get_current(self) -> AccountResponse:
+        """Get the calling account.
 
         Raises:
-            APIError: The request failed, including 409 for a duplicate name.
+            APIError: The request failed.
 
         Returns:
-            Created account.
+            Calling account.
         """
-        response = await self._client.request(
-            "POST",
-            "/v1/accounts",
-            json=request.model_dump(mode="json", exclude_unset=True),
-        )
+        response = await self._client.request("GET", "/v1/accounts/me")
         return AccountResponse.model_validate(response.json())
 
     async def get(self, account_id: uuid.UUID) -> AccountResponse:
@@ -117,65 +106,3 @@ class AccountsResource:
         """
         async for item in iterate_pages(params or AccountListParams(), self.list):
             yield item
-
-    async def update(
-        self, account_id: uuid.UUID, request: AccountUpdateRequest
-    ) -> AccountResponse:
-        """Partially update an account.
-
-        Args:
-            account_id: Id of the account.
-            request: Account update request, unset fields stay unchanged.
-
-        Raises:
-            APIError: The request failed, including 404 for a missing account.
-
-        Returns:
-            Updated account.
-        """
-        response = await self._client.request(
-            "PATCH",
-            f"/v1/accounts/{account_id}",
-            json=request.model_dump(mode="json", exclude_unset=True),
-        )
-        return AccountResponse.model_validate(response.json())
-
-    async def activate(
-        self, account_id: uuid.UUID, request: AccountActivateRequest
-    ) -> AccountResponse:
-        """Activate an account with its activation token and a new password.
-
-        Args:
-            account_id: Id of the account.
-            request: Account activate request.
-
-        Raises:
-            APIError: The request failed, including 403 for a token mismatch.
-
-        Returns:
-            Activated account.
-        """
-        response = await self._client.request(
-            "POST",
-            f"/v1/accounts/{account_id}/activate",
-            json=request.model_dump(mode="json", exclude_unset=True),
-        )
-        return AccountResponse.model_validate(response.json())
-
-    async def deactivate(self, account_id: uuid.UUID) -> AccountActivationTokenResponse:
-        """Deactivate an account and read back its activation token.
-
-        Args:
-            account_id: Id of the account.
-
-        Raises:
-            APIError: The request failed, including 403 for the calling
-                account and 404 for a missing account.
-
-        Returns:
-            Deactivated account carrying its activation token.
-        """
-        response = await self._client.request(
-            "POST", f"/v1/accounts/{account_id}/deactivate"
-        )
-        return AccountActivationTokenResponse.model_validate(response.json())

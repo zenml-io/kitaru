@@ -1,154 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AccountActivateRequest": {
-        "additionalProperties": false,
-        "description": "Account activate request.",
-        "properties": {
-          "activation_token": {
-            "description": "Activation token.",
-            "title": "Activation Token",
-            "type": "string"
-          },
-          "password": {
-            "description": "Login password to set.",
-            "title": "Password",
-            "type": "string"
-          }
-        },
-        "required": [
-          "activation_token",
-          "password"
-        ],
-        "title": "AccountActivateRequest",
-        "type": "object"
-      },
-      "AccountActivationTokenResponse": {
-        "description": "Account response carrying a newly minted activation token.",
-        "properties": {
-          "activation_token": {
-            "description": "Plaintext token, shown once.",
-            "title": "Activation Token",
-            "type": "string"
-          },
-          "active": {
-            "description": "Whether the account can authenticate.",
-            "title": "Active",
-            "type": "boolean"
-          },
-          "created": {
-            "description": "Creation time.",
-            "format": "date-time",
-            "title": "Created",
-            "type": "string"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Contact email.",
-            "title": "Email"
-          },
-          "id": {
-            "description": "Account id.",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "is_admin": {
-            "description": "Whether the account has admin rights.",
-            "title": "Is Admin",
-            "type": "boolean"
-          },
-          "is_service_account": {
-            "description": "Whether this is a service account.",
-            "title": "Is Service Account",
-            "type": "boolean"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "description": "Arbitrary metadata.",
-            "title": "Metadata",
-            "type": "object"
-          },
-          "name": {
-            "description": "Account name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "updated": {
-            "description": "Last modification time.",
-            "format": "date-time",
-            "title": "Updated",
-            "type": "string"
-          }
-        },
-        "required": [
-          "created",
-          "updated",
-          "id",
-          "name",
-          "email",
-          "is_service_account",
-          "is_admin",
-          "active",
-          "metadata",
-          "activation_token"
-        ],
-        "title": "AccountActivationTokenResponse",
-        "type": "object"
-      },
-      "AccountCreateRequest": {
-        "additionalProperties": false,
-        "description": "Account create request.",
-        "properties": {
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Contact email.",
-            "title": "Email"
-          },
-          "is_admin": {
-            "default": false,
-            "description": "Whether the account has admin rights.",
-            "title": "Is Admin",
-            "type": "boolean"
-          },
-          "name": {
-            "description": "Account name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Login password.",
-            "title": "Password"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "AccountCreateRequest",
-        "type": "object"
-      },
       "AccountResponse": {
         "description": "Account response.",
         "properties": {
@@ -221,63 +73,6 @@
           "metadata"
         ],
         "title": "AccountResponse",
-        "type": "object"
-      },
-      "AccountUpdateRequest": {
-        "additionalProperties": false,
-        "description": "Account update request.",
-        "properties": {
-          "is_admin": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New admin rights state.",
-            "title": "Is Admin"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New metadata.",
-            "title": "Metadata"
-          },
-          "old_password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Current login password.",
-            "title": "Old Password"
-          },
-          "password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New login password.",
-            "title": "Password"
-          }
-        },
-        "title": "AccountUpdateRequest",
         "type": "object"
       },
       "AgentCapabilities": {
@@ -5740,6 +5535,67 @@
         "title": "ServerInfoResponse",
         "type": "object"
       },
+      "ServiceAccountCreateRequest": {
+        "additionalProperties": false,
+        "description": "Service account create request.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ServiceAccountCreateRequest",
+        "type": "object"
+      },
+      "ServiceAccountUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Service account update request.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New active state.",
+            "title": "Active"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New metadata.",
+            "title": "Metadata"
+          }
+        },
+        "title": "ServiceAccountUpdateRequest",
+        "type": "object"
+      },
       "SessionCreateRequest": {
         "additionalProperties": false,
         "description": "Session create request.",
@@ -7915,6 +7771,211 @@
         "title": "ToolPolicyOnMiss",
         "type": "string"
       },
+      "UserActivateRequest": {
+        "additionalProperties": false,
+        "description": "User activate request.",
+        "properties": {
+          "activation_token": {
+            "description": "Activation token.",
+            "title": "Activation Token",
+            "type": "string"
+          },
+          "password": {
+            "description": "Login password to set.",
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activation_token",
+          "password"
+        ],
+        "title": "UserActivateRequest",
+        "type": "object"
+      },
+      "UserActivationTokenResponse": {
+        "description": "Account response carrying a newly minted activation token.",
+        "properties": {
+          "activation_token": {
+            "description": "Plaintext token, shown once.",
+            "title": "Activation Token",
+            "type": "string"
+          },
+          "active": {
+            "description": "Whether the account can authenticate.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "id": {
+            "description": "Account id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_admin": {
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "is_service_account": {
+            "description": "Whether this is a service account.",
+            "title": "Is Service Account",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "id",
+          "name",
+          "email",
+          "is_service_account",
+          "is_admin",
+          "active",
+          "metadata",
+          "activation_token"
+        ],
+        "title": "UserActivationTokenResponse",
+        "type": "object"
+      },
+      "UserCreateRequest": {
+        "additionalProperties": false,
+        "description": "User create request.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "is_admin": {
+            "default": false,
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Login password.",
+            "title": "Password"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "UserCreateRequest",
+        "type": "object"
+      },
+      "UserUpdateRequest": {
+        "additionalProperties": false,
+        "description": "User update request.",
+        "properties": {
+          "is_admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New admin rights state.",
+            "title": "Is Admin"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New metadata.",
+            "title": "Metadata"
+          },
+          "old_password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current login password.",
+            "title": "Old Password"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New login password.",
+            "title": "Password"
+          }
+        },
+        "title": "UserUpdateRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -8447,51 +8508,25 @@
         "tags": [
           "accounts"
         ]
-      },
-      "post": {
-        "description": "Create an account.\n\nAn account created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
-        "operationId": "create_account_v1_accounts_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
+      }
+    },
+    "/v1/accounts/me": {
+      "get": {
+        "description": "Get the calling account.\n\nClients observe HTTP 200 on success.\n\nArgs:\n    actor: Caller context.\n\nReturns:\n    Calling account.",
+        "operationId": "get_current_account_v1_accounts_me_get",
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountActivationTokenResponse"
-                    }
-                  ],
-                  "title": "Response Create Account V1 Accounts Post"
+                  "$ref": "#/components/schemas/AccountResponse"
                 }
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
-        "summary": "Create Account",
+        "summary": "Get Current Account",
         "tags": [
           "accounts"
         ]
@@ -8536,156 +8571,6 @@
           }
         },
         "summary": "Get Account",
-        "tags": [
-          "accounts"
-        ]
-      },
-      "patch": {
-        "description": "Partially update an account.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password or the\nadmin flag outside the ``local`` auth scheme, when writing another\naccount's password or metadata, when changing the calling account's own\nadmin flag, when making a service account an admin, and when the\nsupplied current password is missing or wrong, 404 when the account does\nnot exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Updated account.",
-        "operationId": "update_account_v1_accounts__account_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "account_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Account Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountUpdateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Account",
-        "tags": [
-          "accounts"
-        ]
-      }
-    },
-    "/v1/accounts/{account_id}/activate": {
-      "post": {
-        "description": "Activate an account with its activation token and a new password.\n\nThe route is unauthenticated, because the account it activates cannot log\nin until it holds a password.\n\nClients observe HTTP 200 on success, 403 when the account has no pending\ntoken or the token does not match, 404 when the account does not exist,\nand 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account activate request.\n    service: Account service.\n\nReturns:\n    Activated account.",
-        "operationId": "activate_account_v1_accounts__account_id__activate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "account_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Account Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountActivateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Activate Account",
-        "tags": [
-          "accounts"
-        ]
-      }
-    },
-    "/v1/accounts/{account_id}/deactivate": {
-      "post": {
-        "description": "Deactivate an account and return its fresh activation token once.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth scheme\nand when deactivating the calling account, and 404 when the account does\nnot exist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Deactivated account carrying its activation token.",
-        "operationId": "deactivate_account_v1_accounts__account_id__deactivate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "account_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Account Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountActivationTokenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Deactivate Account",
         "tags": [
           "accounts"
         ]
@@ -14315,6 +14200,102 @@
         ]
       }
     },
+    "/v1/service-accounts": {
+      "post": {
+        "description": "Create a service account, active without credentials.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme and when the caller may not create accounts, 409 when the name is\nalready registered, and 422 on invalid input.\n\nArgs:\n    body: Service account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "operationId": "create_service_account_v1_service_accounts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Service Account",
+        "tags": [
+          "service-accounts"
+        ]
+      }
+    },
+    "/v1/service-accounts/{account_id}": {
+      "patch": {
+        "description": "Partially update a service account.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth\nscheme and when the caller may not update service accounts, 404 when the\nservice account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Service account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
+        "operationId": "update_service_account_v1_service_accounts__account_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Service Account",
+        "tags": [
+          "service-accounts"
+        ]
+      }
+    },
     "/v1/session-runs": {
       "post": {
         "description": "Run an agent version once, as a job holding one agent task.\n\nClients observe HTTP 201 on success, 404 when no agent version has this\nid, and 422 when the agent version carries no run spec.\n\nArgs:\n    body: Session run create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
@@ -15509,6 +15490,208 @@
         "summary": "Get Task Spec",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/v1/users": {
+      "post": {
+        "description": "Create a user.\n\nA user created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: User create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "operationId": "create_user_v1_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserActivationTokenResponse"
+                    }
+                  ],
+                  "title": "Response Create User V1 Users Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{account_id}": {
+      "patch": {
+        "description": "Partially update a user.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password or the\nadmin flag outside the ``local`` auth scheme, when writing another\naccount's password or metadata, when changing the calling account's own\nadmin flag, and when the supplied current password is missing or wrong,\n404 when the user does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: User update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Updated account.",
+        "operationId": "update_user_v1_users__account_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{account_id}/activate": {
+      "post": {
+        "description": "Activate a user with its activation token and a new password.\n\nThe route is unauthenticated, because the account it activates cannot log\nin until it holds a password.\n\nClients observe HTTP 200 on success, 403 when the account has no pending\ntoken or the token does not match, 404 when the user does not exist, and\n422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: User activate request.\n    service: Account service.\n\nReturns:\n    Activated account.",
+        "operationId": "activate_user_v1_users__account_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{account_id}/deactivate": {
+      "post": {
+        "description": "Deactivate a user and return its fresh activation token once.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth scheme\nand when deactivating the calling account, and 404 when the user does not\nexist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Deactivated account carrying its activation token.",
+        "operationId": "deactivate_user_v1_users__account_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserActivationTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deactivate User",
+        "tags": [
+          "users"
         ]
       }
     },

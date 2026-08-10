@@ -14,9 +14,9 @@
 """Account DTO conversions."""
 
 from kitaru.api_models.v1.account import (
-    AccountActivationTokenResponse,
     AccountListParams,
     AccountResponse,
+    UserActivationTokenResponse,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.account import AccountFilter
@@ -49,7 +49,7 @@ def account_to_response(account: Account) -> AccountResponse:
 
 def account_to_activation_token_response(
     account: Account, activation_token: str
-) -> AccountActivationTokenResponse:
+) -> UserActivationTokenResponse:
     """Convert an account entity and its new token to a response DTO.
 
     Args:
@@ -57,9 +57,9 @@ def account_to_activation_token_response(
         activation_token: Plaintext token minted for the account.
 
     Returns:
-        Account activation token response.
+        User activation token response.
     """
-    return AccountActivationTokenResponse(
+    return UserActivationTokenResponse(
         **account_to_response(account).model_dump(),
         activation_token=activation_token,
     )

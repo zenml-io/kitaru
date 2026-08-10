@@ -26,4 +26,5 @@ class AccountFilter(ListFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "name": FilterField(value_type=str, ops=STRING_OPS),
         "active": FilterField(value_type=bool, ops=BOOLEAN_OPS),
+        "is_service_account": FilterField(value_type=bool, ops=BOOLEAN_OPS),
     }

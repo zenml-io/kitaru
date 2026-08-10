@@ -27,6 +27,7 @@ class Action(StrEnum):
     """Action."""
 
     CREATE = "create"
+    UPDATE = "update"
     DEACTIVATE = "deactivate"
     SET_ADMIN = "set_admin"
 
