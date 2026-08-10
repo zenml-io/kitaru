@@ -25,6 +25,7 @@ from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.cli import app as app_module
 from kitaru.cli import diagnostics
 from kitaru.cli.config import ResolvedCredential, ResolvedTarget
+from kitaru.cli.skill_discovery import INSTALL_COMMAND
 from kitaru.client.credential_store import CredentialStore
 
 
@@ -179,6 +180,7 @@ async def test_doctor_reports_every_check_when_no_server_is_configured(
         "compatibility",
         "authentication",
         "worker_extra",
+        "kitaru_skills",
         "uv",
     ]
     assert checks[2]["status"] == "fail"
@@ -324,6 +326,7 @@ def test_doctor_continues_without_reusing_malformed_credentials(
         "compatibility",
         "authentication",
         "worker_extra",
+        "kitaru_skills",
         "uv",
     ]
     credential_check = checks[1]
@@ -350,3 +353,71 @@ async def test_doctor_worker_extra_hint_names_cli_and_worker(
     )
     assert worker_extra["status"] == "warn"
     assert worker_extra["detail"] == "Install kitaru[cli,worker] to run workers."
+
+
+async def test_doctor_reports_missing_kitaru_skills_without_failing(
+    tmp_path, monkeypatch
+) -> None:
+    """Missing agent skills are useful tooling guidance, not a health failure."""
+    monkeypatch.delenv("KITARU_API_URL", raising=False)
+    monkeypatch.setattr(
+        diagnostics,
+        "get_kitaru_skill_status",
+        lambda: {
+            "installed": False,
+            "skill_count": 0,
+            "skills": [],
+            "installations": [],
+            "locations_checked": ["/tmp/project/.agents/skills"],
+        },
+    )
+
+    result = await diagnostics.doctor(
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server=None,
+        timeout=0.1,
+    )
+
+    check = next(
+        item for item in result.item["checks"] if item["name"] == "kitaru_skills"
+    )
+    assert check["status"] == "warn"
+    assert check["required"] is False
+    assert INSTALL_COMMAND in check["detail"]
+    assert check["data"]["installed"] is False
+    assert result.exit_code == 2
+
+
+async def test_doctor_reports_detected_kitaru_skills(tmp_path, monkeypatch) -> None:
+    """Doctor exposes discovered skill names and locations to machines."""
+    monkeypatch.delenv("KITARU_API_URL", raising=False)
+    status = {
+        "installed": True,
+        "skill_count": 2,
+        "skills": ["kitaru-investigation", "kitaru-replay-lab"],
+        "installations": [
+            {
+                "name": "kitaru-investigation",
+                "scope": "user",
+                "host": "codex",
+                "path": "/home/user/.codex/skills/kitaru-investigation",
+            }
+        ],
+        "locations_checked": ["/home/user/.codex/skills"],
+    }
+    monkeypatch.setattr(diagnostics, "get_kitaru_skill_status", lambda: status)
+
+    result = await diagnostics.doctor(
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+        explicit_server=None,
+        timeout=0.1,
+    )
+
+    check = next(
+        item for item in result.item["checks"] if item["name"] == "kitaru_skills"
+    )
+    assert check["status"] == "pass"
+    assert check["detail"] == (
+        "2 Kitaru agent skills detected: kitaru-investigation, kitaru-replay-lab."
+    )
+    assert check["data"] == status

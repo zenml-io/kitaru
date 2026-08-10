@@ -28,6 +28,7 @@ from rich.text import Text
 
 from kitaru.cli.presentation import HumanField, HumanView, get_human_view
 from kitaru.cli.redaction import redact, redact_data
+from kitaru.cli.skill_discovery import select_visible_skill_names
 
 OutputMode = Literal["auto", "text", "json", "jsonl"]
 
@@ -353,6 +354,10 @@ def _emit_text(context: OutputContext, result: CommandResult) -> None:
             print(_display_value(item), file=context.stdout)
     elif value is not None:
         print(_display_value(value), file=context.stdout)
+    for label, link in result.links.items():
+        print(f"{label}: {_display_value(link)}", file=context.stdout)
+    for action in result.next_actions:
+        print(f"Next: {_display_value(action)}", file=context.stdout)
     for warning in result.warnings:
         print(f"Warning: {warning}", file=context.stderr)
 
@@ -426,6 +431,9 @@ def _emit_human_detail(
     console: Console, value: dict[str, Any], view: HumanView
 ) -> None:
     """Render a selected detail summary in meaningful sections."""
+    if view.renderer == "root":
+        _emit_root(console, value)
+        return
     if view.renderer == "doctor":
         _emit_doctor(console, value)
         return
@@ -441,6 +449,27 @@ def _emit_human_detail(
         )
         if present:
             _emit_human_section(console, section.title, value, present)
+
+
+def _emit_root(console: Console, value: dict[str, Any]) -> None:
+    """Render concise agent-skill onboarding after root help."""
+    skills = value.get("skills")
+    if not isinstance(skills, dict):
+        return
+    names = skills.get("skills")
+    if skills.get("installed") and isinstance(names, list):
+        visible_names, remainder = select_visible_skill_names(
+            [str(name) for name in names]
+        )
+        suffix = f", and {remainder} more" if remainder else ""
+        escaped_names = (_escape_terminal_controls(name) for name in visible_names)
+        line = Text("Kitaru agent skills detected", style="green")
+        line.append(f": {', '.join(escaped_names)}{suffix}.")
+        console.print(line)
+        return
+    console.print(
+        "Install the Kitaru agent skills for guided setup and investigation workflows."
+    )
 
 
 def _emit_doctor(console: Console, value: dict[str, Any]) -> None:
