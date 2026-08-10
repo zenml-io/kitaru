@@ -8,8 +8,10 @@
     "node": ">=22.22.0 <23"
   },
   "scripts": {
+    "baseline": "node dist/baseline.js",
     "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",
     "lint": "biome check .",
+    "smoke": "KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 KITARU_VERCEL_AI_SMOKE=1 node dist/main.js",
     "test": "vitest run test",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
