@@ -21,6 +21,40 @@ def test_json_pointer_tokens_are_escaped(importer: ModuleType) -> None:
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)
+def test_join_path_resolves_json_pointer(importer: ModuleType) -> None:
+    """Resolve escaped RFC 6901 tokens used to group source traces."""
+    payload = {"metadata": {"customer/case~id": "case-42"}}
+
+    assert importer._path_value(payload, "/metadata/customer~1case~0id") == "case-42"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_join_path_rejects_invalid_json_pointer_escape(importer: ModuleType) -> None:
+    """Reject malformed RFC 6901 escape sequences."""
+    with pytest.raises(importer.InvalidImport, match="invalid JSON Pointer escape"):
+        importer._path_value({"metadata": {}}, "/metadata/customer~2id")
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+@pytest.mark.parametrize("token", ["01", "+1", " 1", "-1", "1_0"])
+def test_join_path_rejects_invalid_array_index(
+    importer: ModuleType, token: str
+) -> None:
+    """Reject array indices outside the RFC 6901 grammar."""
+    payload = {"items": [str(index) for index in range(11)]}
+
+    assert importer._path_value(payload, f"/items/{token}") is None
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_join_path_preserves_numeric_object_keys(importer: ModuleType) -> None:
+    """Treat numeric-looking tokens as ordinary keys inside objects."""
+    payload = {"items": {"01": "value"}}
+
+    assert importer._path_value(payload, "/items/01") == "value"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
 def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -> None:
     """Keep each provider plugin responsible for its normalized node fields."""
     node = ImportedNode(
@@ -55,6 +89,62 @@ def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -
     assert node.system_prompt_selector == "/messages/0/content"
     assert node.reasoning == "The tracking event says shipped."
     assert later_node.system_prompt_selector == "/messages/0/content"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_output_selector_skips_reasoning_and_tool_parts(importer: ModuleType) -> None:
+    """Select visible assistant text instead of hidden model output parts."""
+    output = {
+        "role": "assistant",
+        "parts": [
+            {"type": "thinking", "content": "Inspect private evidence."},
+            {"type": "tool_call", "content": "lookup_order"},
+            {"type": "text", "content": "The order shipped."},
+        ],
+    }
+
+    assert importer._output_text_selector(output) == "/parts/2/content"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_output_selector_is_empty_for_non_visible_parts(importer: ModuleType) -> None:
+    """Leave the output selector empty when no visible assistant text exists."""
+    output = {
+        "role": "assistant",
+        "parts": [
+            {"type": "reasoning", "content": "Inspect private evidence."},
+            {"type": "function_call", "content": "lookup_order"},
+        ],
+    }
+
+    assert importer._output_text_selector(output) is None
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+@pytest.mark.parametrize(
+    "output",
+    [
+        {
+            "role": "assistant",
+            "parts": [
+                {"text": "Inspect private evidence.", "thought": True},
+                {"functionCall": {"name": "lookup_order", "args": {}}},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "redacted_thinking", "data": "encrypted"},
+                {"type": "tool_use", "name": "lookup_order", "input": {}},
+            ],
+        },
+    ],
+)
+def test_output_selector_is_empty_for_provider_reasoning_parts(
+    importer: ModuleType, output: dict[str, object]
+) -> None:
+    """Exclude provider-specific hidden reasoning from visible output."""
+    assert importer._output_text_selector(output) is None
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)

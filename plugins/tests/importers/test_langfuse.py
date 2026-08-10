@@ -136,6 +136,23 @@ def test_unified_parse_preserves_node_trace_id() -> None:
     assert parsed[0].nodes[0].trace_id == "trace-1"
 
 
+def test_redacted_session_ids_fall_back_to_trace_ids() -> None:
+    """Do not merge unrelated traces that share a redaction placeholder."""
+    parsed = LangfuseJSONLImporter().parse(
+        jsonl(
+            observation("root-1", "trace-1", session_id="[Scrubbed due to 'session']"),
+            observation("root-2", "trace-2", session_id="[Scrubbed due to 'session']"),
+        ),
+        {},
+    )
+
+    imported = [item for item in parsed if isinstance(item, ImportedSession)]
+    assert [session.external_id for session in imported] == [
+        "project-1:trace-1",
+        "project-1:trace-2",
+    ]
+
+
 def test_imports_pretty_printed_json_array() -> None:
     """Accept the JSON array format advertised by the importer."""
     content = json.dumps(

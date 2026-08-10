@@ -89,7 +89,10 @@ async def test_create_import(
             "importer": "csv",
             "agent_id": str(agent.id),
             "payload_blob_id": str(payload.id),
-            "params": {"delimiter": ","},
+            "params": {
+                "delimiter": ",",
+                "join_on": "/metadata/customer~1case_id",
+            },
         },
     )
     assert response.status_code == 201
@@ -104,6 +107,10 @@ async def test_create_import(
     assert isinstance(task, ImportTask)
     assert task.kind.value == "importer"
     assert task.plugin_version_id == version.id
+    assert task.params == {
+        "delimiter": ",",
+        "join_on": "/metadata/customer~1case_id",
+    }
 
 
 async def test_create_import_not_found_for_unknown_importer(

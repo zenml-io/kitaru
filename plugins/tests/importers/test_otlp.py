@@ -451,6 +451,38 @@ def test_groups_jsonl_requests_into_ordered_turns() -> None:
     ]
 
 
+def test_groups_traces_by_json_pointer() -> None:
+    """Group traces by a scalar selected from normalized OTLP spans."""
+    first = request(
+        span(
+            TRACE_1,
+            ROOT,
+            start=1_700_000_000_000_000_000,
+            attrs=attributes(**{"customer/case_id": "case-42", "input.value": "first"}),
+        )
+    )
+    second = request(
+        span(
+            TRACE_2,
+            ROOT,
+            start=1_700_000_100_000_000_000,
+            attrs=attributes(
+                **{"customer/case_id": "case-42", "input.value": "second"}
+            ),
+        )
+    )
+    content = b"\n".join(json.dumps(item).encode() for item in (second, first))
+
+    [session] = sessions(
+        content,
+        {**params(), "join_on": "/attributes/customer~1case_id"},
+    )
+
+    assert session.external_id.endswith(":case-42")
+    assert session.metadata["otlp.trace_ids"] == [TRACE_1, TRACE_2]
+    assert session.metadata["otlp.join_on"] == "/attributes/customer~1case_id"
+
+
 def test_uses_trace_id_without_conversation_and_explicit_source_override() -> None:
     """Fall back to trace grouping and honor an explicit source instance."""
     session = sessions(
