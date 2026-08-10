@@ -113,9 +113,7 @@ async def test_create_supports_manual_annotations_and_investigation_answers() ->
         session_id=session_id,
         investigation_session_id=None,
         question_key=None,
-        selector=json.dumps(
-            {"node_id": str(node_id), "part": "output", "path": "/message"}
-        ),
+        selector=json.dumps({"node_id": str(node_id), "path": "/message"}),
     )
     request = client.create_calls[-1]
     assert isinstance(request, ManualAnnotationCreateRequest)
@@ -123,7 +121,6 @@ async def test_create_supports_manual_annotations_and_investigation_answers() ->
         "session_id": str(session_id),
         "selector": {
             "node_id": str(node_id),
-            "part": "output",
             "path": "/message",
         },
         "value": {"label": "failure", "confidence": 0.8},

@@ -28,7 +28,7 @@ from conftest import (
     pg_session_with_engine,
     postgres_available,
 )
-from kitaru.api_models.v1.annotation import AnnotationSelector, AnnotationSelectorPart
+from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import QuestionItem
 from kitaru.api_models.v1.session import SessionOrigin
@@ -277,13 +277,13 @@ async def test_create_upserts_same_question(setup: Setup) -> None:
             owner_id,
             session_id,
             investigation_session_id,
-            selector=AnnotationSelector(part=AnnotationSelectorPart.OUTPUT),
+            selector=AnnotationSelector(path="/output"),
             value="second answer",
         )
     )
     assert second.id == first.id
     assert second.value == "second answer"
-    assert second.selector == AnnotationSelector(part=AnnotationSelectorPart.OUTPUT)
+    assert second.selector == AnnotationSelector(path="/output")
     assert first.updated is not None
     assert second.updated is not None
     assert second.updated >= first.updated
@@ -450,11 +450,11 @@ async def test_update_leaves_selector_untouched(setup: Setup) -> None:
     """Persist only the value change, ignoring other fields on the incoming entity."""
     annotations, _, owner_id, make_session_id, _ = setup
     session_id = await make_session_id()
-    original_selector = AnnotationSelector(part=AnnotationSelectorPart.INPUT)
+    original_selector = AnnotationSelector(path="/input")
     created = await _create_manual_annotation(
         annotations, owner_id, session_id, selector=original_selector
     )
-    created.selector = AnnotationSelector(part=AnnotationSelectorPart.OUTPUT)
+    created.selector = AnnotationSelector(path="/output")
     created.update_value("revised")
     updated = await annotations.update(created)
     assert updated.selector == original_selector
