@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Contract tests for evaluation repositories."""
 
+import itertools
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -541,13 +542,13 @@ async def test_query_filters_by_agent() -> None:
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner = await SQLAccountRepository(session).create(Account(name="owner"))
         agents = SQLAgentRepository(session)
         agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
         other_agent = await agents.create(Agent(owner_id=owner.id, name="other"))
-        scored = await _create_session_row(session, owner.id, agent.id)
-        elsewhere = await _create_session_row(session, owner.id, other_agent.id)
+        scored = await _create_session_row(session, engine, owner.id, agent.id)
+        elsewhere = await _create_session_row(session, engine, owner.id, other_agent.id)
 
         repository = SQLEvaluationRepository(session)
         await repository.merge_session_evaluations(
@@ -575,11 +576,11 @@ async def test_query_filters_by_cohort_spanning_versions() -> None:
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner_id, agent_id = await _create_owner_and_agent(session)
-        in_first = await _create_session_row(session, owner_id, agent_id)
-        in_second = await _create_session_row(session, owner_id, agent_id)
-        uncohorted = await _create_session_row(session, owner_id, agent_id)
+        in_first = await _create_session_row(session, engine, owner_id, agent_id, 1)
+        in_second = await _create_session_row(session, engine, owner_id, agent_id, 2)
+        uncohorted = await _create_session_row(session, engine, owner_id, agent_id, 3)
 
         cohorts = SQLCohortRepository(session)
         cohort_versions = SQLCohortVersionRepository(session)
@@ -626,7 +627,7 @@ async def test_query_filters_by_experiment_run() -> None:
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
-    async with pg_session() as session:
+    async with pg_session_with_engine() as (session, engine):
         owner_id, agent_id = await _create_owner_and_agent(session)
         agent_version = await SQLAgentVersionRepository(session).create(
             AgentVersion(owner_id=owner_id, agent_id=agent_id)
@@ -640,7 +641,12 @@ async def test_query_filters_by_experiment_run() -> None:
             )
         )
         experiment = await experiments.create(
-            Experiment(owner_id=owner_id, name="experiment", replay_config_id=config.id)
+            Experiment(
+                owner_id=owner_id,
+                name="experiment",
+                agent_id=agent_id,
+                replay_config_id=config.id,
+            )
         )
         cohort = await SQLCohortRepository(session).create(
             Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
@@ -672,6 +678,10 @@ async def test_query_filters_by_experiment_run() -> None:
         tasks = SQLTaskRepository(session)
         repository = SQLEvaluationRepository(session)
 
+        # Sessions are unique per agent and number, and every session here
+        # belongs to the same agent.
+        session_numbers = itertools.count(1)
+
         async def score_in_run(
             experiment_run_id: uuid.UUID | None, name: str
         ) -> uuid.UUID:
@@ -683,7 +693,9 @@ async def test_query_filters_by_experiment_run() -> None:
             job = await jobs.create(
                 Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
             )
-            baseline = await _create_session_row(session, owner_id, agent_id)
+            baseline = await _create_session_row(
+                session, engine, owner_id, agent_id, next(session_numbers)
+            )
             await replays.create(
                 Replay(
                     owner_id=owner_id,
@@ -737,7 +749,9 @@ async def test_query_filters_by_experiment_run() -> None:
         # A session-level evaluation carries no task, and an IN subquery would
         # negate to NOT IN, which is null for a null task_id and would drop
         # exactly the rows a negated run filter must return.
-        loose = await _create_session_row(session, owner_id, agent_id)
+        loose = await _create_session_row(
+            session, engine, owner_id, agent_id, next(session_numbers)
+        )
         await repository.merge_session_evaluations(
             loose, [_evaluation(owner_id, loose, "session-scoped", score=1.0)]
         )

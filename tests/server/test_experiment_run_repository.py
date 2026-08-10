@@ -505,7 +505,12 @@ async def test_query_filters_by_cohort_spanning_versions() -> None:
             )
         )
         experiment = await experiments.create(
-            Experiment(owner_id=owner.id, name="experiment", replay_config_id=config.id)
+            Experiment(
+                owner_id=owner.id,
+                name="experiment",
+                agent_id=agent.id,
+                replay_config_id=config.id,
+            )
         )
         cohorts = SQLCohortRepository(session)
         cohort_versions = SQLCohortVersionRepository(session)
@@ -592,7 +597,12 @@ async def test_query_filters_by_agent_spanning_versions() -> None:
             )
         )
         experiment = await experiments.create(
-            Experiment(owner_id=owner.id, name="experiment", replay_config_id=config.id)
+            Experiment(
+                owner_id=owner.id,
+                name="experiment",
+                agent_id=agent.id,
+                replay_config_id=config.id,
+            )
         )
         cohorts = SQLCohortRepository(session)
         cohort_versions = SQLCohortVersionRepository(session)

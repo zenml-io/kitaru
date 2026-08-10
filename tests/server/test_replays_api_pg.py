@@ -190,7 +190,6 @@ async def test_replay_pipeline_completes_through_the_api(
                 "origin": "recorded",
                 "inputs": {"q": "hi again"},
                 "outputs": None,
-                "expected": None,
             },
         )
     ).json()
