@@ -80,7 +80,7 @@ def _collect_non_secret_env() -> dict[str, str]:
 # pod imports this module before the run's secret is applied to the environment,
 # so a module-scope agent would crash at import with a missing-key error.
 # Building the agent inside the flow body defers that to run time, once the
-# secret is present. (Same pattern as the openai_research_bot example.)
+# secret is present.
 #
 # The "calls" strategy makes every model/tool call its own Kitaru checkpoint.
 # ---------------------------------------------------------------------------
