@@ -72,7 +72,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Default importers, the PydanticAI adapter, and deterministic evaluators now use the `model_provider` session-node field introduced by the consolidated v2 specification.
-- Importer output selectors now ignore reasoning, thinking, and tool-call parts, leaving the selector unset when a model response has no visible text.
+- Importer output selectors now ignore reasoning, thinking, Gemini thought, Anthropic redacted-thinking, and tool-call parts, leaving the selector unset when a model response has no visible text.
+- Importer JSON Pointer grouping now rejects invalid array indices instead of accepting Python-specific negative, signed, whitespace-padded, leading-zero, or underscored forms.
 - Langfuse imports now treat scrubbed or redacted session identifiers as missing and fall back to trace identifiers instead of merging unrelated traces.
 - Stack creation now verifies discovered service connectors before reusing them for local cloud storage or Modal stacks, failing fast with an actionable error instead of letting runs fail later; `--no-verify` skips the check.
 - `--credentials aws-profile:NAME` is now rejected when connected to a remote ZenML server, because the server cannot resolve AWS profiles that only exist on the local machine; portable `aws-access-keys`/`aws-session-token` credentials remain supported.

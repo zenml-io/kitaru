@@ -158,8 +158,9 @@ def _content_match(
             ),
             None,
         )
-        if kind in {
+        if value.get("thought") is True or kind in {
             "reasoning",
+            "redacted-thinking",
             "thinking",
             "tool-call",
             "tool-use",
@@ -427,6 +428,8 @@ def _path_value(value: Any, path: str) -> Any:
             current = current[part]
             continue
         if isinstance(current, list):
+            if re.fullmatch(r"0|[1-9][0-9]*", part) is None:
+                return None
             try:
                 current = current[int(part)]
             except (IndexError, ValueError):

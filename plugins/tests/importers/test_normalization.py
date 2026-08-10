@@ -36,6 +36,25 @@ def test_join_path_rejects_invalid_json_pointer_escape(importer: ModuleType) -> 
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)
+@pytest.mark.parametrize("token", ["01", "+1", " 1", "-1", "1_0"])
+def test_join_path_rejects_invalid_array_index(
+    importer: ModuleType, token: str
+) -> None:
+    """Reject array indices outside the RFC 6901 grammar."""
+    payload = {"items": [str(index) for index in range(11)]}
+
+    assert importer._path_value(payload, f"/items/{token}") is None
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+def test_join_path_preserves_numeric_object_keys(importer: ModuleType) -> None:
+    """Treat numeric-looking tokens as ordinary keys inside objects."""
+    payload = {"items": {"01": "value"}}
+
+    assert importer._path_value(payload, "/items/01") == "value"
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
 def test_normalizes_node_selectors_and_visible_reasoning(importer: ModuleType) -> None:
     """Keep each provider plugin responsible for its normalized node fields."""
     node = ImportedNode(
@@ -98,6 +117,33 @@ def test_output_selector_is_empty_for_non_visible_parts(importer: ModuleType) ->
         ],
     }
 
+    assert importer._output_text_selector(output) is None
+
+
+@pytest.mark.parametrize("importer", IMPORTERS)
+@pytest.mark.parametrize(
+    "output",
+    [
+        {
+            "role": "assistant",
+            "parts": [
+                {"text": "Inspect private evidence.", "thought": True},
+                {"functionCall": {"name": "lookup_order", "args": {}}},
+            ],
+        },
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "redacted_thinking", "data": "encrypted"},
+                {"type": "tool_use", "name": "lookup_order", "input": {}},
+            ],
+        },
+    ],
+)
+def test_output_selector_is_empty_for_provider_reasoning_parts(
+    importer: ModuleType, output: dict[str, object]
+) -> None:
+    """Exclude provider-specific hidden reasoning from visible output."""
     assert importer._output_text_selector(output) is None
 
 
