@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 - `kitaru session import --join-on /json/pointer` groups provider traces into sessions by a scalar selected with an RFC 6901 JSON Pointer. The CLI passes the pointer through importer parameters, and Braintrust, Langfuse, LangSmith, and OpenTelemetry importers support the same `join_on` parameter.
+- A Kitaru v2 LangGraph adapter, shipped as the independently versioned `kitaru-langgraph` distribution with the `kitaru_langgraph` import package, for synchronous and asynchronous invocation recording across compiled LangGraph runnables, LangChain agents, and Deep Agents. Factory-built agents support live model-request overrides and capability-gated static or recorded-history tool-result substitution; streaming, batch invocation, native checkpoint reconstruction, and worker-managed interrupt resume remain unsupported.
 - A non-streaming OpenAI Agents adapter, shipped as the independently versioned `kitaru-openai-agents` distribution with the `kitaru_openai_agents` import package, that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.
 - Bare `kitaru` and `kitaru --help` now report Kitaru agent-skill discovery and the canonical installation action, while `kitaru doctor` checks skill availability without treating absent skills as unhealthy.
 - The PydanticAI recording and replay adapter now ships as the independently versioned `kitaru-pydantic-ai` distribution with the `kitaru_pydantic_ai` import package.

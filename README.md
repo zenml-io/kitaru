@@ -154,7 +154,7 @@ Adapters for six agent frameworks — wrap your existing agent, no rewrite:
 | PydanticAI | `kitaru.adapters.pydantic_ai.KitaruAgent` |
 | OpenAI Agents SDK | `kitaru_openai_agents.KitaruRunner` (install `kitaru-openai-agents`) |
 | Claude Agent SDK | `kitaru.adapters.claude_agent_sdk.KitaruClaudeRunner` |
-| LangGraph | `kitaru.adapters.langgraph.KitaruGraphRunner` |
+| LangGraph, LangChain, and Deep Agents | `kitaru_langgraph.KitaruGraphRunner` (install `kitaru-langgraph`) |
 | Gemini | `kitaru.adapters.gemini.KitaruGeminiInteractionsRunner` |
 | Google ADK | `kitaru.adapters.google_adk.KitaruADKRunner` |
 
