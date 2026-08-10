@@ -4,7 +4,7 @@ This example runs the canonical ten-ticket returns story with TypeScript, AI SDK
 
 All customers, orders, shipments, and actions are synthetic. Every invocation gets a fresh in-memory store. Passthrough replay is safe here for that reason only; do not copy that policy to tools that contact payment, fulfillment, or support systems.
 
-The default `MockLanguageModelV4` path is scripted. Its fixed outcomes prove the adapter, recording, evaluation, cohort, and replay workflow. They do not prove that prompting caused a real model to improve. The optional OpenAI path is paid, non-deterministic evidence to inspect and never promises the fixed result table below.
+The default `MockLanguageModelV4` path is scripted. Its recordings use the requested model ID `openai/gpt-5-nano` and fixed synthetic token counts, so token and cost figures are scripted rather than measured. Its fixed outcomes prove the adapter, recording, evaluation, cohort, and replay workflow. They do not prove that prompting caused a real model to improve. The optional OpenAI path is paid, non-deterministic evidence to inspect and never promises the fixed result table below.
 
 Run commands from `v2_examples/vercel_ai_ticket_resolver` unless a command says otherwise.
 
@@ -93,7 +93,7 @@ If a process stops after Kitaru writes a session ID but before the manifest comm
 pnpm baseline -- --adopt ticket-004=SESSION_ID
 ```
 
-The general recovery form is `--adopt ticket-id=session-id`. If the session failed or is still in progress, do not adopt it; preserve the file for operator inspection and resolve that remote state first.
+The general recovery form is `--adopt ticket-id=session-id`. If the session failed or is still in progress, do not adopt it. After you inspect the exact remote session and confirm it failed, use `--retry ticket-id=session-id`. Retry archives the local orphan marker, records a new remote session, and never deletes remote state.
 
 Only the rendered ticket ID, sender, subject, and body enter the recorded prompt. The fixture's `scenario` and `expected_action` fields are verification oracles and are not recorded inputs. Do not use them to decide annotations or cohort membership before investigating trace evidence.
 
@@ -456,7 +456,7 @@ The scripted contract is: `ticket-004` and `ticket-007` change from refund/fail 
 
 ## Recovery and optional paid evidence
 
-A failed baseline keeps completed manifest entries and resumes missing tickets. An ambiguous orphan requires inspection and explicit `--adopt ticket-id=session-id`. A failed replay remains attached to its run; inspect its jobs, register another immutable agent version if needed, and rerun the same cohorts rather than hiding the failure.
+A failed baseline keeps completed manifest entries and resumes missing tickets. An ambiguous orphan requires inspection and explicit `--adopt ticket-id=session-id` when the remote session completed or `--retry ticket-id=session-id` when it failed. Retry archives the local orphan marker and records a new session without deleting the failed remote state. A failed replay remains attached to its run; inspect its jobs, register another immutable agent version if needed, and rerun the same cohorts rather than hiding the failure.
 
 The OpenAI path makes paid network calls and requires both a key and explicit opt-in. Ask the person paying before running it. It should use a fresh evidence set and its observed outcomes must be reported without the deterministic eight/two guarantee:
 
@@ -464,6 +464,17 @@ The OpenAI path makes paid network calls and requires both a key and explicit op
 export OPENAI_API_KEY="YOUR_KEY"
 export RETURNS_ALLOW_PAID_MODEL=1
 pnpm baseline -- --provider openai --fresh
+```
+
+`--fresh` archives the previous evidence set. Regenerate every session-ID file before scoring or creating cohorts, otherwise those files still refer to archived evidence:
+
+```bash
+jq -r '.sessions | to_entries[] | .value.session_id' \
+  .state/baseline-sessions.json > .state/baseline-session-ids.txt
+jq -r '.sessions["ticket-004"].session_id, .sessions["ticket-007"].session_id' \
+  .state/baseline-sessions.json > .state/target-session-ids.txt
+jq -r '.sessions["ticket-001"].session_id, .sessions["ticket-009"].session_id, .sessions["ticket-010"].session_id' \
+  .state/baseline-sessions.json > .state/control-session-ids.txt
 ```
 
 ## Shutdown

@@ -148,6 +148,21 @@ SETTLED_REPLAY_STATUSES = {
     ReplayStatus.FAILED,
     ReplayStatus.CANCELED,
 }
+REQUIRE_POSTGRES_ENVIRONMENT_VARIABLE = "KITARU_REQUIRE_POSTGRES"
+
+
+async def _require_postgres() -> None:
+    """Require PostgreSQL for the documented command or skip ambient collection."""
+    if await postgres_available():
+        return
+    message = (
+        "PostgreSQL is not reachable on the configured Kitaru test database port. "
+        "Start it with `docker compose -f ../../docker-compose.yml up -d --build` "
+        "from this example directory, then rerun `pnpm test:e2e`."
+    )
+    if os.environ.get(REQUIRE_POSTGRES_ENVIRONMENT_VARIABLE) == "1":
+        pytest.fail(message)
+    pytest.skip(message)
 
 
 def _available_port() -> int:
@@ -158,10 +173,7 @@ def _available_port() -> int:
 
 @asynccontextmanager
 async def _network_server() -> AsyncIterator[str]:
-    if not await postgres_available():
-        pytest.skip(
-            "PostgreSQL is not reachable on the configured Kitaru test database port"
-        )
+    await _require_postgres()
     settings = db_settings()
     await DatabaseService.create_db(settings)
     port = _available_port()
@@ -456,10 +468,6 @@ async def _replays_for_run(
 
 async def test_typescript_canonical_improvement_loop(tmp_path: Path) -> None:
     """Record, score, cohort, and replay the deterministic TypeScript story."""
-    if not await postgres_available():
-        pytest.skip(
-            "PostgreSQL is not reachable on the configured Kitaru test database port"
-        )
     _build_compiled_commands()
 
     async with _network_server() as api_url:

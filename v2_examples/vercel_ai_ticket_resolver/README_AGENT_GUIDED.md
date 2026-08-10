@@ -2,13 +2,13 @@
 
 This path asks a coding agent to conduct the same evidence-first walkthrough through Kitaru's standard-mode MCP server and the CLI. You do not choose session IDs or write evaluator code. The coding agent explains concepts as they become useful, asks one question at a time, persists your judgment, and reports exact resource identities.
 
-All commerce data and actions are synthetic and each invocation has a fresh in-memory store. The default model is scripted integration proof, not evidence that prompting caused a real model to improve. Optional OpenAI calls are paid and require separate approval.
+All commerce data and actions are synthetic and each invocation has a fresh in-memory store. The default model is scripted integration proof, not evidence that prompting caused a real model to improve. Its recordings use requested model ID `openai/gpt-5-nano` and fixed synthetic token counts, so token and cost figures are scripted rather than measured. Optional OpenAI calls are paid and require separate approval.
 
 ## Prepare the checkout and baseline
 
 Run the setup, registration, worker, and direct-recording steps in [README.md](README.md) through the creation of `.state/baseline-sessions.json`. Direct Vercel-adapter recording replaces the Python example's Langfuse import. Python and uv remain required because the Kitaru evaluator and worker ABI is Python.
 
-The coding agent must select only session IDs from `.state/baseline-sessions.json`. A normal restart resumes missing tickets. `--fresh` archives the old manifest and starts a new evidence set, so it requires approval. If `.state/attempts/` contains an uncommitted session file, the agent must inspect the remote session and ask before using `--adopt ticket-id=session-id`; it must never guess or silently discard the orphan.
+The coding agent must select only session IDs from `.state/baseline-sessions.json`. A normal restart resumes missing tickets. `--fresh` archives the old manifest and starts a new evidence set, so it requires approval. If `.state/attempts/` contains an uncommitted session file, the agent must inspect the exact remote session and ask before using `--adopt ticket-id=session-id` when it completed or `--retry ticket-id=session-id` when it failed. It must never guess or silently discard the orphan. Retry archives the local orphan marker, records a new remote session, and never deletes remote state.
 
 Recorded prompts contain ticket ID, sender, subject, and body. They do not contain `scenario` or `expected_action`. During discovery, the coding agent must not read those fixture oracle fields or use the expected target/control list as proof.
 
@@ -69,7 +69,7 @@ annotation, cohort, experiment, evaluation, replay, and polling operations.
 Use the CLI only where local source or registration requires it.
 
 Ask for approval before every cohort or experiment write, evaluator or agent
-registration, source change, --fresh or --adopt recovery action, replay start,
+registration, source change, --fresh, --adopt, or --retry recovery action, replay start,
 or optional paid model call. Never enable OpenAI unless I explicitly approve,
 RETURNS_ALLOW_PAID_MODEL=1 is set, and OPENAI_API_KEY exists.
 
@@ -97,7 +97,7 @@ The expected reviewed rule is that above-threshold refunds and risk-flagged orde
 
 After the behavior brief is approved, the coding agent creates `evaluator.py` locally from README.md. The evaluator parses Vercel `session.outputs.text`, supports the older imported-turn shape for comparison, and accepts only one matching completed `NodeType.TOOL_CALL` terminal node with `accepted: true`. Missing text, malformed JSON, missing or conflicting accepted actions, and mismatched refund amounts are errors rather than guesses.
 
-The agent uses CLI commands for the local evaluator test and file-backed registration. The deterministic baseline must produce eight passes and failures only on `ticket-004` and `ticket-007`. If it does not, the agent stops and investigates.
+The agent uses CLI commands for the local evaluator test and file-backed registration. The deterministic baseline must produce eight passes and failures only on `ticket-004` and `ticket-007`. If it does not, the agent stops and investigates. If an approved paid run uses `--fresh`, it regenerates `.state/baseline-session-ids.txt`, `.state/target-session-ids.txt`, and `.state/control-session-ids.txt` from the new manifest before scoring or creating cohorts; otherwise those files point to archived evidence.
 
 After separate approval, it registers the strict TypeScript version, creates the exact target and control cohort versions and experiment through standard-mode MCP, and starts both runs. Passthrough is safe only because every tool call uses a new isolated in-memory store.
 

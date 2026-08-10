@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 import {
   type BaselineManifest,
   loadBaselineManifest,
+  parseBaselineArguments,
   recordBaseline,
 } from "../src/baseline.js";
 
@@ -147,6 +148,74 @@ describe("resumable baseline manifest", () => {
 
     expect(manifest.sessions["ticket-001"]?.session_id).toBe(adoptedId);
     expect(recorded).not.toContain("ticket-001");
+  });
+
+  it("archives an exact failed orphan before retrying it", async () => {
+    const dir = await stateDir();
+    const orphanedId = sessionId(310);
+    let crashed = false;
+
+    await expect(
+      recordBaseline({
+        recordTicket: async ({ sessionIdFile }) => {
+          await writeFile(sessionIdFile, orphanedId, "utf8");
+          crashed = true;
+          throw new Error("crash after session ID write");
+        },
+        stateDir: dir,
+      }),
+    ).rejects.toThrow("crash after session ID write");
+    expect(crashed).toBe(true);
+
+    await expect(
+      recordBaseline({ recordTicket: async () => {}, stateDir: dir }),
+    ).rejects.toThrow(`--retry ticket-001=${orphanedId}`);
+
+    await expect(
+      recordBaseline({
+        recordTicket: async () => {},
+        retries: { "ticket-001": sessionId(311) },
+        stateDir: dir,
+      }),
+    ).rejects.toThrow(
+      `Cannot retry ticket-001: expected ambiguous session ${orphanedId}`,
+    );
+
+    const archivedPath = join(
+      dir,
+      "attempts",
+      (await loadBaselineManifest(dir))?.evidence_set_id ?? "missing",
+      "archived",
+      `ticket-001.${orphanedId}.session-id`,
+    );
+    const recorded: string[] = [];
+    const manifest = await recordBaseline({
+      recordTicket: async ({ sessionIdFile, ticket }) => {
+        if (ticket.ticket_id === "ticket-001") {
+          expect(await readFile(archivedPath, "utf8")).toBe(orphanedId);
+        }
+        recorded.push(ticket.ticket_id);
+        await writeFile(
+          sessionIdFile,
+          sessionId(recorded.length + 600),
+          "utf8",
+        );
+      },
+      retries: { "ticket-001": orphanedId },
+      stateDir: dir,
+    });
+
+    expect(recorded[0]).toBe("ticket-001");
+    expect(manifest.sessions["ticket-001"]?.session_id).toBe(sessionId(601));
+    expect(await readFile(archivedPath, "utf8")).toBe(orphanedId);
+  });
+
+  it("parses an explicit retry identity", () => {
+    const retryId = sessionId(320);
+
+    expect(
+      parseBaselineArguments(["--retry", `ticket-001=${retryId}`]).retries,
+    ).toEqual({ "ticket-001": retryId });
   });
 
   it("requires --fresh semantics before creating a second evidence set", async () => {

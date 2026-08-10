@@ -41,6 +41,7 @@ export interface RecordBaselineOptions {
   fresh?: boolean;
   provider?: ModelProvider;
   recordTicket?: (context: RecordTicketContext) => Promise<void>;
+  retries?: Readonly<Record<string, string>>;
   stateDir?: string;
 }
 
@@ -88,8 +89,13 @@ function parseManifest(value: unknown): BaselineManifest {
       status: "completed",
     };
   }
-  if (value.status === "completed" && Object.keys(sessions).length !== 10) {
-    throw new Error("baseline manifest is completed without ten sessions");
+  if (
+    value.status === "completed" &&
+    Object.keys(sessions).length !== ticketCases.length
+  ) {
+    throw new Error(
+      `baseline manifest is completed without ${ticketCases.length} sessions`,
+    );
   }
   return {
     evidence_set_id: value.evidence_set_id,
@@ -184,6 +190,30 @@ function validateAdoptions(adoptions: Readonly<Record<string, string>>): void {
   }
 }
 
+function validateRetries(retries: Readonly<Record<string, string>>): void {
+  for (const [ticketId, sessionId] of Object.entries(retries)) {
+    if (
+      !ticketCases.some(({ ticket }) => ticket.ticket_id === ticketId) ||
+      !UUID_PATTERN.test(sessionId)
+    ) {
+      throw new Error(`Invalid retry ${ticketId}=${sessionId}`);
+    }
+  }
+}
+
+async function archiveAttempt(
+  attemptsDir: string,
+  ticketId: string,
+  sessionId: string,
+): Promise<void> {
+  const archiveDir = join(attemptsDir, "archived");
+  await mkdir(archiveDir, { recursive: true });
+  await rename(
+    join(attemptsDir, `${ticketId}.session-id`),
+    join(archiveDir, `${ticketId}.${sessionId}.session-id`),
+  );
+}
+
 function assertUnusedSessionId(
   manifest: BaselineManifest,
   sessionId: string,
@@ -205,7 +235,14 @@ export async function recordBaseline(
   const baseEnvironment = options.environment ?? process.env;
   validateModelProviderEnvironment(provider, baseEnvironment);
   const adoptions = options.adoptions ?? {};
+  const retries = options.retries ?? {};
   validateAdoptions(adoptions);
+  validateRetries(retries);
+  for (const ticketId of Object.keys(adoptions)) {
+    if (retries[ticketId] !== undefined) {
+      throw new Error(`Cannot adopt and retry ${ticketId} in the same run`);
+    }
+  }
   await mkdir(stateDir, { recursive: true });
 
   let manifest = await loadBaselineManifest(stateDir);
@@ -253,22 +290,48 @@ export async function recordBaseline(
     if (attemptedSession !== undefined) {
       const attemptedSessionId = attemptedSession.trim();
       const adoptedSessionId = adoptions[ticket.ticket_id];
-      if (adoptedSessionId !== attemptedSessionId) {
+      const retrySessionId = retries[ticket.ticket_id];
+      if (adoptedSessionId !== undefined) {
+        if (adoptedSessionId !== attemptedSessionId) {
+          throw new Error(
+            `Cannot adopt ${ticket.ticket_id}: expected ambiguous session ${attemptedSessionId || "<empty>"}, received ${adoptedSessionId}`,
+          );
+        }
+        assertUnusedSessionId(manifest, adoptedSessionId);
+        manifest.sessions[ticket.ticket_id] = {
+          session_id: adoptedSessionId,
+          status: "completed",
+        };
+        await writeJsonAtomically(join(stateDir, MANIFEST_NAME), manifest);
+        continue;
+      }
+      if (retrySessionId !== undefined) {
+        if (retrySessionId !== attemptedSessionId) {
+          throw new Error(
+            `Cannot retry ${ticket.ticket_id}: expected ambiguous session ${attemptedSessionId || "<empty>"}, received ${retrySessionId}`,
+          );
+        }
+        await archiveAttempt(attemptsDir, ticket.ticket_id, attemptedSessionId);
+      } else {
         throw new Error(
-          `Ambiguous attempt for ${ticket.ticket_id}: session ${attemptedSessionId || "<empty>"} is not committed. Inspect its remote status, then pass --adopt ${ticket.ticket_id}=${attemptedSessionId} only if it completed.`,
+          `Ambiguous attempt for ${ticket.ticket_id}: session ${attemptedSessionId || "<empty>"} is not committed. Inspect its remote status, then pass --adopt ${ticket.ticket_id}=${attemptedSessionId} if it completed or --retry ${ticket.ticket_id}=${attemptedSessionId} if it failed.`,
         );
       }
-      assertUnusedSessionId(manifest, adoptedSessionId);
-      manifest.sessions[ticket.ticket_id] = {
-        session_id: adoptedSessionId,
-        status: "completed",
-      };
-      await writeJsonAtomically(join(stateDir, MANIFEST_NAME), manifest);
-      continue;
     }
-    if (adoptions[ticket.ticket_id] !== undefined) {
+    if (
+      attemptedSession === undefined &&
+      adoptions[ticket.ticket_id] !== undefined
+    ) {
       throw new Error(
         `Cannot adopt ${ticket.ticket_id}: no ambiguous session-ID file exists`,
+      );
+    }
+    if (
+      attemptedSession === undefined &&
+      retries[ticket.ticket_id] !== undefined
+    ) {
+      throw new Error(
+        `Cannot retry ${ticket.ticket_id}: no ambiguous session-ID file exists`,
       );
     }
 
@@ -302,6 +365,7 @@ interface BaselineArguments {
   adoptions: Record<string, string>;
   fresh: boolean;
   provider: ModelProvider;
+  retries: Record<string, string>;
 }
 
 export function parseBaselineArguments(args: string[]): BaselineArguments {
@@ -309,6 +373,7 @@ export function parseBaselineArguments(args: string[]): BaselineArguments {
     adoptions: {},
     fresh: false,
     provider: "deterministic",
+    retries: {},
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
@@ -334,6 +399,16 @@ export function parseBaselineArguments(args: string[]): BaselineArguments {
       parsed.adoptions[adoption.slice(0, separator)] = adoption.slice(
         separator + 1,
       );
+      index += 1;
+      continue;
+    }
+    if (argument === "--retry") {
+      const retry = args[index + 1];
+      const separator = retry?.indexOf("=") ?? -1;
+      if (!retry || separator < 1) {
+        throw new Error("--retry must be followed by ticket-id=session-id");
+      }
+      parsed.retries[retry.slice(0, separator)] = retry.slice(separator + 1);
       index += 1;
       continue;
     }
