@@ -4,7 +4,7 @@ This guide explains how to test and publish the plugin distributions in `plugins
 
 ## Understand the package model
 
-Each importer is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution.
+Each adapter and importer is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. Adapter distributions are installed directly in agent environments and are not registered in the server's default plugin catalog.
 
 The default catalog lives in `src/kitaru/server/api/bootstrap.py`. Server startup stores one package source for each definition. The source contains an exact requirement and a `module:callable` entrypoint. The server does not install or import the plugin package.
 
@@ -62,7 +62,7 @@ uv run --no-sync python scripts/smoke_plugin_artifacts.py \
 ls -lh plugins/candidate-wheels/*.whl
 ```
 
-The directory must contain the Kitaru wheel and all six plugin wheels.
+The directory must contain the Kitaru wheel and all seven extension wheels.
 
 Git ignores generated files under `plugins/candidate-wheels/`. Commit changes to `plugins/candidate.Dockerfile` and `plugins/docker-compose.candidate.yml`, but do not commit wheel files.
 
@@ -93,7 +93,7 @@ docker run --rm kitaru-plugin-e2e:local \
   python -c 'from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; print(f"definitions={len(DEFAULT_PLUGIN_DEFINITIONS)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in DEFAULT_PLUGIN_DEFINITIONS]'
 ```
 
-The current catalog contains five importers and thirteen evaluators.
+The current catalog contains five importers and thirteen evaluators. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
 
 ## Start the candidate server
 
@@ -258,6 +258,7 @@ Use the package directory and distribution name from this table:
 | `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
 | `opentelemetry-importer` | `kitaru-opentelemetry-importer` | `opentelemetry-importer-vX.Y.Z` |
+| `pydantic-ai` | `kitaru-pydantic-ai` | `pydantic-ai-vX.Y.Z` |
 
 Release only the distribution that contains the change. A change to any built-in evaluator releases the shared `kitaru-evaluator` distribution.
 
@@ -271,8 +272,8 @@ The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
 uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
 ```
 
-2. Change the matching line in `plugins/default-requirements.txt` to `kitaru-langfuse-importer==0.2.0`.
-3. Change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+2. For an importer or evaluator in the default catalog, change the matching line in `plugins/default-requirements.txt` to the new exact version.
+3. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. Skip both catalog steps for an adapter distribution.
 4. Add or update focused tests.
 5. Verify that no unrelated plugin package version changed.
 

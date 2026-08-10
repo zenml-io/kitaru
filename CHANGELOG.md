@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- Bare `kitaru` and `kitaru --help` now report Kitaru agent-skill discovery and the canonical installation action, while `kitaru doctor` checks skill availability without treating absent skills as unhealthy.
+- The PydanticAI recording and replay adapter now ships as the independently versioned `kitaru-pydantic-ai` distribution with the `kitaru_pydantic_ai` import package.
 - Ten versioned offline deterministic evaluator plugins distributed with the existing basic evaluators in `kitaru-evaluator`, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs.
 - The server persists a generated server id on first startup, seeded from `KITARU_SERVER_SERVER_ID` when set. Analytics events carry that id together with the auth scheme, runtime environment, operating system, Python version, and, when available, the enrolled workspace id, the acting account's service account flag, and its control plane user id. The default account is identified at startup, and identify traits carry an `account_origin` (`bootstrap`, `api`, or `control_plane`).
 - Evaluators and importers carry an optional `logo_url`, set at creation, changed through the update endpoints, and returned in responses. Default plugin definitions can supply one.

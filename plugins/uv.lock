@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [options]
-exclude-newer = "2026-08-04T14:07:42.911465Z"
+exclude-newer = "2026-08-05T20:53:28.038681Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -14,12 +14,13 @@ members = [
     "kitaru-langfuse-importer",
     "kitaru-langsmith-importer",
     "kitaru-opentelemetry-importer",
+    "kitaru-pydantic-ai",
 ]
 
 [manifest.dependency-groups]
 dev = [
     { name = "kitaru", extras = ["server"], editable = "../" },
-    { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.14.1,<2.23" },
+    { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.11" },
@@ -873,6 +874,28 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "kitaru", editable = "../" }]
+
+[[package]]
+name = "kitaru-pydantic-ai"
+version = "0.1.0"
+source = { editable = "packages/pydantic-ai" }
+dependencies = [
+    { name = "kitaru" },
+    { name = "pydantic-ai-slim" },
+]
+
+[package.optional-dependencies]
+openai = [
+    { name = "pydantic-ai-slim", extra = ["openai"] },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kitaru", editable = "../" },
+    { name = "pydantic-ai-slim", specifier = ">=2.14.1,<2.23" },
+    { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'openai'", specifier = ">=2.14.1,<2.23" },
+]
+provides-extras = ["openai"]
 
 [[package]]
 name = "logfire-api"

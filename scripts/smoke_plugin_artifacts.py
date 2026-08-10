@@ -107,6 +107,26 @@ def _project_metadata(project: Path) -> tuple[str, str]:
         raise SmokeFailure(f"Invalid plugin project metadata: {pyproject}") from error
 
 
+def _artifact_import_module(project: Path) -> str | None:
+    """Read an optional standalone package import contract."""
+    pyproject = project / "pyproject.toml"
+    try:
+        document = tomllib.loads(pyproject.read_text())
+    except (FileNotFoundError, tomllib.TOMLDecodeError) as error:
+        raise SmokeFailure(f"Invalid plugin project metadata: {pyproject}") from error
+    value = (
+        document.get("tool", {})
+        .get("kitaru", {})
+        .get("artifact", {})
+        .get("import-module")
+    )
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value:
+        raise SmokeFailure(f"Invalid artifact import module in {pyproject}")
+    return value
+
+
 def _read_default_requirements(path: Path) -> dict[str, str]:
     """Map normalized distribution names to exact default requirements."""
     requirements: dict[str, str] = {}
@@ -216,6 +236,7 @@ def _smoke_candidate_wheels(
     kitaru_wheel: Path,
     plugin_wheels: list[Path],
     requirements: list[str],
+    import_modules: list[str],
     environment: dict[str, str],
 ) -> None:
     """Install candidate wheels and probe their configured entrypoints."""
@@ -232,7 +253,7 @@ def _smoke_candidate_wheels(
     python = _environment_python(environment_path)
     kitaru_requirement = f"kitaru[server] @ {kitaru_wheel.as_uri()}"
     _expect_success(
-        "install candidate plugin wheels",
+        "install candidate Kitaru wheel",
         _run(
             [
                 uv,
@@ -241,6 +262,32 @@ def _smoke_candidate_wheels(
                 "--python",
                 python,
                 kitaru_requirement,
+            ],
+            environment=environment,
+            cwd=root,
+        ),
+    )
+    for import_module in import_modules:
+        result = _run(
+            [
+                python,
+                "-c",
+                "import importlib.util,sys; "
+                f"sys.exit(importlib.util.find_spec({import_module!r}) is not None)",
+            ],
+            environment=environment,
+            cwd=root,
+        )
+        _expect_success(f"exclude {import_module} from the Kitaru wheel", result)
+    _expect_success(
+        "install candidate extension wheels",
+        _run(
+            [
+                uv,
+                "pip",
+                "install",
+                "--python",
+                python,
                 *(wheel.as_uri() for wheel in plugin_wheels),
             ],
             environment=environment,
@@ -259,6 +306,8 @@ def _smoke_candidate_wheels(
     command: list[str | Path] = [python, probe]
     for requirement in requirements:
         command.extend(("--requirement", requirement))
+    for import_module in import_modules:
+        command.extend(("--module", import_module))
     _expect_success(
         "probe installed plugin artifacts",
         _run(command, environment=environment, cwd=root),
@@ -318,12 +367,16 @@ def main() -> int:
             )
             plugin_wheels: list[Path] = []
             requirements: list[str] = []
+            import_modules: list[str] = []
             for project in projects:
                 name, version = _project_metadata(project)
                 requirement = defaults.get(_canonicalize_name(name))
-                if requirement is None:
-                    raise SmokeFailure(f"{name} has no pin in default-requirements.txt")
-                if requirement != f"{name}=={version}":
+                import_module = _artifact_import_module(project)
+                if requirement is None and import_module is None:
+                    raise SmokeFailure(
+                        f"{name} has neither a default pin nor an artifact import"
+                    )
+                if requirement is not None and requirement != f"{name}=={version}":
                     raise SmokeFailure(
                         f"{name}=={version} is not pinned in default-requirements.txt"
                     )
@@ -332,7 +385,10 @@ def main() -> int:
                         uv, repository, project, candidate_directory, environment
                     )
                 )
-                requirements.append(requirement)
+                if requirement is not None:
+                    requirements.append(requirement)
+                if import_module is not None:
+                    import_modules.append(import_module)
             _smoke_candidate_wheels(
                 uv,
                 repository,
@@ -340,6 +396,7 @@ def main() -> int:
                 kitaru_wheel,
                 plugin_wheels,
                 requirements,
+                import_modules,
                 environment,
             )
             _remove_generated_ignore(candidate_directory)

@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""PydanticAI recording and replay adapter."""
+"""PydanticAI recording and replay adapter for Kitaru."""
 
 from .agent import KitaruAgent
 from .capability import (
