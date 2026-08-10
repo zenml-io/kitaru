@@ -83,6 +83,17 @@ def _config(tool_policy: ToolPolicy) -> ReplayConfig:
     )
 
 
+def test_evaluator_config_accepts_default_plugin_name() -> None:
+    """Accept the reserved namespace used by server-provided evaluators."""
+    config = EvaluatorConfig(
+        evaluator="kitaru/cost",
+        version=1,
+        evaluator_version_id=uuid.uuid4(),
+    )
+
+    assert config.evaluator == "kitaru/cost"
+
+
 def test_check_standalone_allows_passthrough() -> None:
     """Accept a standalone replay with a passthrough default."""
     config = _config(default_tool_policy())
