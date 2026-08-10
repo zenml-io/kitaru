@@ -1,0 +1,9 @@
+{
+  "shipments": [
+    {
+      "tracking_no": "TRACK-48217",
+      "status": "lost",
+      "detail": "Carrier investigation closed: package lost in transit."
+    }
+  ]
+}
