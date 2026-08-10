@@ -67,7 +67,9 @@ async def control_plane_login(
             credential = await session.login_with_api_key(api_key)
         else:
             credential = await session.device_login(
-                open_browser=open_browser, prompt=prompt
+                open_browser=open_browser,
+                prompt=prompt,
+                workspace_id=str(info.id) if info.id else None,
             )
     finally:
         await session.close()

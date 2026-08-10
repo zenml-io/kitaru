@@ -102,6 +102,8 @@ class SessionService:
         Raises:
             TaskNotFound: No task has the principal's task id.
             TaskNotRunning: The principal's task is not running.
+            TaskAttemptMismatch: The principal's token is fenced by an attempt
+                the task has moved past.
             TaskResultSessionAlreadyLinked: The principal's agent task already
                 links a session.
             SessionAgentVersionMismatch: The command names a different agent
@@ -121,12 +123,14 @@ class SessionService:
             Created session.
         """
         task_id = None
+        task = None
         if isinstance(actor.principal, TaskPrincipal):
             task_id = actor.principal.task_id
-        task = None
-        if task_id is not None:
             task = await self._tasks.get(task_id, exclusive=True)
             task.check_running()
+            # Check the attempt on the locked task so a requeue cannot race
+            # the result link.
+            task.check_attempt(actor.principal.attempt)
             if isinstance(task, AgentTask) and task.result_session_id is not None:
                 raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)

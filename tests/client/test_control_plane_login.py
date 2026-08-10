@@ -79,18 +79,22 @@ class FakeControlPlaneSession:
         return ApiToken.issued(CONTROL_PLANE_TOKEN, 3600)
 
     async def device_login(
-        self, open_browser: bool = True, prompt: object = None
+        self,
+        open_browser: bool = True,
+        prompt: object = None,
+        workspace_id: str | None = None,
     ) -> ApiToken:
         """Record the call and issue the fixed token.
 
         Args:
             open_browser: Whether to open the verification page.
             prompt: Called with the authorization.
+            workspace_id: Workspace ID preselected on the verification page.
 
         Returns:
             Fixed token.
         """
-        self.calls.append("device")
+        self.calls.append(f"device:{workspace_id}")
         return ApiToken.issued(CONTROL_PLANE_TOKEN, 3600)
 
     async def get_token(self) -> str | None:
@@ -186,7 +190,8 @@ async def test_login_without_an_api_key_runs_the_device_flow(
         api_client, SERVER_URL, credential_store, open_browser=False
     )
 
-    assert session_calls == ["device"]
+    info = await api_client.info.get()
+    assert session_calls == [f"device:{info.id}"]
 
 
 async def test_stored_control_plane_entry_renews_the_session_token(
