@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from typing import Literal
 
-from kitaru._exports.models import ExportError, SourceFile, SourceInventory
+from kitaru.exports.models import ExportError, SourceFile, SourceInventory
 
 DEFAULT_MAX_FILE_BYTES = 100 * 1024 * 1024
 DEFAULT_MAX_TOTAL_BYTES = 1024 * 1024 * 1024

@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import Field, model_validator
 
-from kitaru._exports.operation import ExportReceipt
+from kitaru.exports.operation import ExportReceipt
 from kitaru.mcp.models.common import MCPModel, ToolResult
 
 

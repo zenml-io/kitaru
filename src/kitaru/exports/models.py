@@ -1,4 +1,4 @@
-"""Private models shared by experiment export formats."""
+"""Models shared by experiment export formats."""
 
 import uuid
 from dataclasses import dataclass

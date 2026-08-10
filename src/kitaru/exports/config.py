@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from kitaru._exports.models import ExportError, RewardSelector
+from kitaru.exports.models import ExportError, RewardSelector
 
 ExportFormat = Literal["harbor", "verifiers-v1"]
 TraceFormat = Literal["atif", "kitaru"]

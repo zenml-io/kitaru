@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from kitaru._exports.config import ExportRequest
-from kitaru._exports.models import ExportError, ExportManifest, ValidationReceipt
-from kitaru._exports.operation import export_experiment
+from kitaru.exports.config import ExportRequest
+from kitaru.exports.models import ExportError, ExportManifest, ValidationReceipt
+from kitaru.exports.operation import export_experiment
 
 
 def test_harbor_requires_an_explicit_trace_contract(tmp_path: Path) -> None:
@@ -43,7 +43,7 @@ async def test_dry_run_resolves_without_calling_a_renderer(
     async def fake_resolve(*_args: Any, **_kwargs: Any) -> Any:
         return resolved
 
-    monkeypatch.setattr("kitaru._exports.operation.resolve_export", fake_resolve)
+    monkeypatch.setattr("kitaru.exports.operation.resolve_export", fake_resolve)
     destination = tmp_path / "out"
     receipt = await export_experiment(
         object(),
@@ -126,8 +126,8 @@ async def test_operation_publishes_renderer_output(
             ),
         )
 
-    monkeypatch.setattr("kitaru._exports.operation.resolve_export", fake_resolve)
-    monkeypatch.setattr("kitaru._exports.operation.render_verifiers_v1", fake_render)
+    monkeypatch.setattr("kitaru.exports.operation.resolve_export", fake_resolve)
+    monkeypatch.setattr("kitaru.exports.operation.render_verifiers_v1", fake_render)
     destination = tmp_path / "bundle"
     receipt = await export_experiment(
         object(),

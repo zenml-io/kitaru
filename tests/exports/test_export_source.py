@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from kitaru._exports.models import ExportError
-from kitaru._exports.source import copy_source, inventory_source
+from kitaru.exports.models import ExportError
+from kitaru.exports.source import copy_source, inventory_source
 
 
 def test_inventory_source_is_stable_and_excludes_sensitive_files(

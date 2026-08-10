@@ -5,9 +5,9 @@
 
 from pathlib import Path
 
-from kitaru._exports.config import ExportRequest
-from kitaru._exports.models import ExportError, get_export_error_kind
-from kitaru._exports.operation import export_experiment
+from kitaru.exports.config import ExportRequest
+from kitaru.exports.models import ExportError, get_export_error_kind
+from kitaru.exports.operation import export_experiment
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.exports import (

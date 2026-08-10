@@ -10,19 +10,6 @@ from pathlib import Path
 
 import pytest
 
-from kitaru._exports.formats.harbor import (
-    HARBOR_VERSION,
-    harbor_task_digest,
-    render_harbor,
-    validate_harbor,
-)
-from kitaru._exports.models import (
-    ExportError,
-    MaterializedEvaluator,
-    ResolvedExport,
-    RewardSelector,
-)
-from kitaru._exports.source import inventory_source
 from kitaru.api_models.v1.agent_version import AgentVersionResponse, RunSpec
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
@@ -34,6 +21,19 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
+from kitaru.exports.formats.harbor import (
+    HARBOR_VERSION,
+    harbor_task_digest,
+    render_harbor,
+    validate_harbor,
+)
+from kitaru.exports.models import (
+    ExportError,
+    MaterializedEvaluator,
+    ResolvedExport,
+    RewardSelector,
+)
+from kitaru.exports.source import inventory_source
 
 
 def _resolved(source_root: Path, *, session_count: int = 2) -> ResolvedExport:

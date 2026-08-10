@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from kitaru._exports.models import ExportError
-from kitaru._exports.writer import (
+from kitaru.exports.models import ExportError
+from kitaru.exports.writer import (
     directory_digest,
     publish_bundle,
     write_canonical_json,

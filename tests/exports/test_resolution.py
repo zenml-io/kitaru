@@ -7,9 +7,9 @@ from typing import Any
 
 import pytest
 
-from kitaru._exports.models import ExportError, RewardSelector
-from kitaru._exports.resolve import resolve_export
-from kitaru._exports.source import inventory_source
+from kitaru.exports.models import ExportError, RewardSelector
+from kitaru.exports.resolve import resolve_export
+from kitaru.exports.source import inventory_source
 
 
 def _id() -> uuid.UUID:

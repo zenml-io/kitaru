@@ -8,22 +8,22 @@ import tomllib
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from kitaru._exports.config import normalize_environment_names
-from kitaru._exports.models import (
+from kitaru.api_models.v1.agent_version import RunSpec
+from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
+from kitaru.exports.config import normalize_environment_names
+from kitaru.exports.models import (
     ExportError,
     ExportManifest,
     ResolvedExport,
     ValidationReceipt,
 )
-from kitaru._exports.source import copy_source
-from kitaru._exports.writer import (
+from kitaru.exports.source import copy_source
+from kitaru.exports.writer import (
     directory_digest,
     file_digest,
     file_digests,
     write_canonical_json,
 )
-from kitaru.api_models.v1.agent_version import RunSpec
-from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 
 HARBOR_VERSION = "0.20.0"
 TASK_SCHEMA_VERSION = "1.3"

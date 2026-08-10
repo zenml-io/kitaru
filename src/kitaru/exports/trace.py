@@ -1,4 +1,4 @@
-"""Convert supported target traces into evaluator-facing Kitaru sessions."""
+"""Convert supported exported traces into evaluator-facing Kitaru sessions."""
 
 import json
 import uuid

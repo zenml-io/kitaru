@@ -6,8 +6,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
-from kitaru._exports.operation import ExportReceipt
 from kitaru.cli import experiment_exports
+from kitaru.exports.operation import ExportReceipt
 
 
 async def test_cli_resolves_references_before_shared_operation(

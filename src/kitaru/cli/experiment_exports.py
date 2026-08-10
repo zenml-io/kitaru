@@ -6,12 +6,12 @@
 from pathlib import Path
 from typing import Any, Literal
 
-from kitaru._exports.config import ExportRequest, TraceFormat
-from kitaru._exports.models import ExportError, get_export_error_kind
-from kitaru._exports.operation import export_experiment
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import get_agent_version, resolve_asset
 from kitaru.cli.session_selection import get_cohort_version
+from kitaru.exports.config import ExportRequest, TraceFormat
+from kitaru.exports.models import ExportError, get_export_error_kind
+from kitaru.exports.operation import export_experiment
 
 
 def _map_export_error(error: ExportError) -> CLIError:

@@ -10,7 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from kitaru._exports.models import ExportError, PublishedBundle
+from kitaru.exports.models import ExportError, PublishedBundle
 
 _COPY_BUFFER_BYTES = 1024 * 1024
 

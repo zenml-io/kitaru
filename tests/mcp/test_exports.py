@@ -7,7 +7,7 @@ from typing import Any, cast
 
 import pytest
 
-from kitaru._exports.operation import ExportReceipt
+from kitaru.exports.operation import ExportReceipt
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.exports import ExperimentExportRequest

@@ -8,16 +8,16 @@ from typing import Never
 
 import pytest
 
-from kitaru._exports.evaluators import evaluate_session, load_evaluator
-from kitaru._exports.models import (
-    ExportError,
-    MaterializedEvaluator,
-    RewardSelector,
-)
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
+from kitaru.exports.evaluators import evaluate_session, load_evaluator
+from kitaru.exports.models import (
+    ExportError,
+    MaterializedEvaluator,
+    RewardSelector,
+)
 from kitaru.task.evaluator import SessionView
 
 
@@ -114,7 +114,7 @@ def test_load_package_evaluator_uses_existing_loader(
         seen.append((ref, label))
         return sentinel
 
-    monkeypatch.setattr("kitaru._exports.evaluators.load_source_ref", fake_load)
+    monkeypatch.setattr("kitaru.exports.evaluators.load_source_ref", fake_load)
 
     assert load_evaluator(materialized) is sentinel
     assert seen == [("fixture_evaluator:evaluate", "Evaluator")]

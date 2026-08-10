@@ -10,13 +10,13 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-from kitaru._exports.config import ExportFormat, ExportRequest
-from kitaru._exports.formats.harbor import render_harbor
-from kitaru._exports.formats.verifiers_v1 import render_verifiers_v1
-from kitaru._exports.models import ExportError, ExportManifest, RewardSelector
-from kitaru._exports.resolve import resolve_export
-from kitaru._exports.source import inventory_source
-from kitaru._exports.writer import publish_bundle
+from kitaru.exports.config import ExportFormat, ExportRequest
+from kitaru.exports.formats.harbor import render_harbor
+from kitaru.exports.formats.verifiers_v1 import render_verifiers_v1
+from kitaru.exports.models import ExportError, ExportManifest, RewardSelector
+from kitaru.exports.resolve import resolve_export
+from kitaru.exports.source import inventory_source
+from kitaru.exports.writer import publish_bundle
 
 
 class ExportReceipt(BaseModel):

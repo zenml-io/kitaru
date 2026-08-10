@@ -19,16 +19,16 @@ import tomllib
 from importlib.metadata import version
 from pathlib import Path
 
-from kitaru._exports.config import normalize_environment_names
-from kitaru._exports.models import (
+from kitaru.api_models.v1.plugin import PackagePluginSource
+from kitaru.exports.config import normalize_environment_names
+from kitaru.exports.models import (
     ExportError,
     ExportManifest,
     ResolvedExport,
     ValidationReceipt,
 )
-from kitaru._exports.source import copy_source
-from kitaru._exports.writer import file_digests, write_canonical_json
-from kitaru.api_models.v1.plugin import PackagePluginSource
+from kitaru.exports.source import copy_source
+from kitaru.exports.writer import file_digests, write_canonical_json
 
 _TARGET_VERSION = "0.3.0"
 _PACKAGE = "kitaru_verifiers_v1"
@@ -84,9 +84,9 @@ import os
 from pathlib import Path
 from typing import Any
 
-from kitaru._exports.evaluators import evaluate_session, load_evaluator
-from kitaru._exports.models import MaterializedEvaluator, RewardSelector
-from kitaru._exports.trace import convert_trace
+from kitaru.exports.evaluators import evaluate_session, load_evaluator
+from kitaru.exports.models import MaterializedEvaluator, RewardSelector
+from kitaru.exports.trace import convert_trace
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
 
 

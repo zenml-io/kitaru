@@ -1,4 +1,4 @@
-"""Load exported evaluators and map their exact results to target rewards."""
+"""Load materialized evaluators and map their exact results to target rewards."""
 
 import hashlib
 import math
