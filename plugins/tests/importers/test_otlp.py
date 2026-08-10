@@ -206,7 +206,7 @@ def test_imports_span_graph_and_genai_fields() -> None:
     assert child.node_type is NodeType.LLM_CALL
     assert child.requested_model == "gpt-5-mini"
     assert child.model == "gpt-5-mini-2026-06-01"
-    assert child.provider == "openai"
+    assert child.model_provider == "openai"
     assert child.input_text_selector == "/0/content"
     assert child.output_text_selector == "/0/content"
     assert child.tokens and child.tokens.input_tokens == 120
