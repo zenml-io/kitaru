@@ -14,15 +14,7 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, GraphOutput, Interrupt
 
-import adapters.langgraph.agent as agent_module
-from adapters.langgraph import (
-    KitaruGraphRunner,
-    UnsupportedCapabilityError,
-    UnsupportedInvocationError,
-    UnsupportedWorkerInterruptError,
-)
-from adapters.langgraph.capability import _make_capability_manifest
-from adapters.langgraph.recording import get_active_invocation
+import kitaru_langgraph.agent as agent_module
 from kitaru.api_models.v1.replay_config import (
     PassthroughConfig,
     ReplayOverride,
@@ -32,6 +24,14 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicy,
     ToolPolicyOnMiss,
 )
+from kitaru_langgraph import (
+    KitaruGraphRunner,
+    UnsupportedCapabilityError,
+    UnsupportedInvocationError,
+    UnsupportedWorkerInterruptError,
+)
+from kitaru_langgraph.capability import _make_capability_manifest
+from kitaru_langgraph.recording import get_active_invocation
 
 
 class _RaisingRunnable(Runnable[Any, Any]):

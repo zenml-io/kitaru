@@ -15,7 +15,6 @@ from typing import Any, Generic, TypeVar, cast
 
 from langchain_core.runnables import Runnable
 from langchain_core.runnables.config import RunnableConfig, merge_configs
-
 from langgraph.types import Command
 
 from .capability import (
@@ -39,6 +38,20 @@ ResultT = TypeVar("ResultT")
 
 _FINALIZATION_TIMEOUT_SECONDS = 5.0
 _FINALIZATION_CLEANUP_TIMEOUT_SECONDS = 0.5
+
+
+def _import_supported_factories() -> tuple[
+    Callable[..., Runnable[Any, Any]],
+    Callable[..., Runnable[Any, Any]] | None,
+]:
+    """Return create_agent and, when deepagents is installed, create_deep_agent."""
+    from langchain.agents import create_agent
+
+    try:
+        from deepagents import create_deep_agent
+    except ImportError:
+        return create_agent, None
+    return create_agent, create_deep_agent
 
 
 class _LoopThreadBridge:
@@ -135,15 +148,16 @@ class KitaruGraphRunner(Generic[InputT, OutputT]):
         capture_policy: CapturePolicy | None = None,
     ) -> "KitaruGraphRunner[InputT, OutputT]":
         """Construct a supported agent with Kitaru middleware outermost."""
-        from deepagents import create_deep_agent
-        from langchain.agents import create_agent
+        create_agent, create_deep_agent = _import_supported_factories()
 
-        supported = (create_agent, create_deep_agent)
-        if not any(factory is candidate for candidate in supported):
-            raise ValueError(
+        if factory is not create_agent and factory is not create_deep_agent:
+            message = (
                 "factory must be langchain.agents.create_agent or "
                 "deepagents.create_deep_agent"
             )
+            if create_deep_agent is None:
+                message += "; Deep Agents support requires kitaru-langgraph[deepagents]"
+            raise ValueError(message)
         if local_subagents and factory is not create_deep_agent:
             raise ValueError("local_subagents require deepagents.create_deep_agent")
 
@@ -186,8 +200,7 @@ class KitaruGraphRunner(Generic[InputT, OutputT]):
         factory: Callable[..., Runnable[Any, Any]], kwargs: dict[str, Any]
     ) -> tuple[Runnable[Any, Any], object]:
         """Inject one middleware and call one known factory exactly once."""
-        from deepagents import create_deep_agent
-        from langchain.agents import create_agent
+        create_agent, create_deep_agent = _import_supported_factories()
 
         from .langchain import KitaruLangGraphMiddleware
 

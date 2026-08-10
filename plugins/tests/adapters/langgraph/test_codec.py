@@ -7,9 +7,9 @@ import pytest
 from langchain_core.messages import ToolMessage
 from langgraph.types import Command
 
-from adapters.langgraph import ToolPolicyError
-from adapters.langgraph.capture import CapturePolicy
-from adapters.langgraph.codec import (
+from kitaru_langgraph import ToolPolicyError
+from kitaru_langgraph.capture import CapturePolicy
+from kitaru_langgraph.codec import (
     coerce_static_tool_result,
     decode_tool_outcome,
     encode_tool_outcome,

@@ -16,6 +16,7 @@ members = [
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
+    "kitaru-langgraph",
     "kitaru-langsmith-importer",
     "kitaru-opentelemetry-importer",
     "kitaru-pydantic-ai",
@@ -23,12 +24,9 @@ members = [
 
 [manifest.dependency-groups]
 dev = [
-    { name = "deepagents", specifier = ">=0.7.4,<0.8" },
     { name = "kitaru", extras = ["server"], editable = "../" },
+    { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
-    { name = "langchain", specifier = ">=1.3.14,<2" },
-    { name = "langchain-core", specifier = ">=1.5.3,<2" },
-    { name = "langgraph", specifier = ">=1.2.10,<2" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.11" },
@@ -988,6 +986,32 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "kitaru", editable = "../" }]
+
+[[package]]
+name = "kitaru-langgraph"
+version = "0.1.0"
+source = { editable = "packages/langgraph" }
+dependencies = [
+    { name = "kitaru" },
+    { name = "langchain" },
+    { name = "langchain-core" },
+    { name = "langgraph" },
+]
+
+[package.optional-dependencies]
+deepagents = [
+    { name = "deepagents" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "deepagents", marker = "extra == 'deepagents'", specifier = ">=0.7.4,<0.8" },
+    { name = "kitaru", editable = "../" },
+    { name = "langchain", specifier = ">=1.3.14,<2" },
+    { name = "langchain-core", specifier = ">=1.5.3,<2" },
+    { name = "langgraph", specifier = ">=1.2.10,<2" },
+]
+provides-extras = ["deepagents"]
 
 [[package]]
 name = "kitaru-langsmith-importer"

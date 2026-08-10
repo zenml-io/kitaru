@@ -6,7 +6,7 @@ from typing import overload
 
 import pytest
 
-from adapters.langgraph.capture import (
+from kitaru_langgraph.capture import (
     CapturePolicy,
     capture_execution_view,
     capture_value,

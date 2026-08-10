@@ -6,7 +6,7 @@ from typing import Any, ClassVar
 
 import pytest
 
-import adapters.langgraph.recording as recording_module
+import kitaru_langgraph.recording as recording_module
 
 
 class FakeSessions:

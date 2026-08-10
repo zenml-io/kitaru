@@ -4,9 +4,8 @@ import os
 import uuid
 from typing import Any, NotRequired, TypedDict
 
+from kitaru_langgraph import KitaruGraphRunner
 from langgraph.graph import END, START, StateGraph
-
-from plugins.adapters.langgraph import KitaruGraphRunner
 
 
 class SupportState(TypedDict):

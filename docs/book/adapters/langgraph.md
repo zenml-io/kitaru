@@ -1,5 +1,5 @@
 ---
-description: Record LangGraph, LangChain, and Deep Agents invocations with the repository-local Kitaru v2 adapter
+description: Record LangGraph, LangChain, and Deep Agents invocations with the kitaru-langgraph adapter package
 icon: diagram-project
 ---
 
@@ -7,7 +7,19 @@ icon: diagram-project
 
 `KitaruGraphRunner` records supported `invoke()` and `ainvoke()` calls as Kitaru v2 sessions. It wraps an already compiled LangGraph runnable without recompiling it, replacing its checkpointer, or changing the graph result. LangChain agents and Deep Agents use the same adapter because their public factories return LangGraph runnables.
 
-The first release is repository-local under `plugins/adapters/langgraph/`. It is not a separately installable adapter package.
+The adapter ships as the installable `kitaru-langgraph` distribution with the `kitaru_langgraph` import package. Install it directly in the agent environment:
+
+```bash
+uv add kitaru-langgraph
+```
+
+Deep Agents support is an optional extra; the `langchain.agents.create_agent` factory and direct graph wrapping work without it, and constructing a runner through `deepagents.create_deep_agent` requires it:
+
+```bash
+uv add "kitaru-langgraph[deepagents]"
+```
+
+Model-provider packages are not bundled. An `init_chat_model` string like `"openai:gpt-5-nano"` needs the matching LangChain provider package, for example `langchain-openai`, installed by you.
 
 ## Capability matrix
 
@@ -24,14 +36,14 @@ Use `runner.capabilities` to inspect the immutable view produced by the adapter.
 
 ## Record a compiled graph
 
-Import the runner from the repository checkout:
+Import the runner from the installed package:
 
 ```python
 from typing import NotRequired, TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
-from plugins.adapters.langgraph import KitaruGraphRunner
+from kitaru_langgraph import KitaruGraphRunner
 
 
 class SupportState(TypedDict):
@@ -59,8 +71,8 @@ The wrapper returns the exact graph value or raises the exact graph exception. C
 Run the complete provider-free example from the repository root:
 
 ```bash
-uv sync
-uv run python -m examples.integrations.langgraph_v2
+uv sync --project plugins --all-packages
+uv run --project plugins python -m examples.integrations.langgraph_v2
 ```
 
 The local command needs an existing `KITARU_AGENT_ID` or `KITARU_AGENT_VERSION_ID` and a configured Kitaru v2 connection. It does not need a model-provider key or replay setup. See the example [README](https://github.com/zenml-io/kitaru/tree/develop/examples/integrations/langgraph_v2) for the full setup.
@@ -72,7 +84,7 @@ Model, prompt, system-prompt, and model-parameter overrides require construction
 ```python
 from langchain.agents import create_agent
 
-from plugins.adapters.langgraph import KitaruGraphRunner
+from kitaru_langgraph import KitaruGraphRunner
 
 runner = KitaruGraphRunner.from_agent_factory(
     create_agent,
@@ -144,7 +156,7 @@ The v2 adapter is a smaller recording and replay boundary, not a port of the v1 
 | Native checkpoint reconstruction, time travel, and node-boundary replay | Deferred; LangGraph keeps its checkpointer and thread state |
 | Worker-managed interrupt resume | Deferred; direct interrupts work, worker interrupts fail explicitly |
 | ZenML pipeline, flow, stack, and sandbox helpers | Not part of the v2 LangGraph adapter |
-| Separate adapter distribution | Deferred; import from `plugins.adapters.langgraph` in this repository |
+| Separate adapter distribution | Available; install `kitaru-langgraph` and import from `kitaru_langgraph` |
 
 If your integration depends on v1 streaming, checkpoint strategies, synthetic checkpoints, or worker-managed resume, keep it on v1 until the required capability has an explicit v2 contract. Do not translate those options into the v2 runner.
 

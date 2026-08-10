@@ -10,7 +10,6 @@ from itertools import islice
 from typing import Any, cast
 
 from langchain_core.messages import ToolMessage
-
 from langgraph.types import Command
 
 from .capability import ToolPolicyError

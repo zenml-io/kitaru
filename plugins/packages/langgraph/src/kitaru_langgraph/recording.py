@@ -14,7 +14,10 @@ from contextlib import suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from importlib.metadata import version
 from typing import Any, Protocol, TypeVar
+
+from langgraph.types import GraphOutput
 
 from kitaru.api_models.v1.replay import ReplayResponse
 from kitaru.api_models.v1.replay_config import ReplayOverride
@@ -32,12 +35,11 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.client import KitaruAPIClient
-from langgraph.types import GraphOutput
 
 from .capability import UnsupportedWorkerInterruptError
 from .capture import CaptureBudget, CapturePolicy, capture_execution_view, capture_value
 
-ADAPTER_VERSION = "0.1.0"
+ADAPTER_VERSION = version("kitaru-langgraph")
 FRAMEWORK = "langgraph"
 _LOGGER = logging.getLogger(__name__)
 
@@ -355,7 +357,6 @@ class InvocationRecorder:
             return
         if pending.node_type is NodeType.TOOL_CALL:
             from langchain_core.messages import ToolMessage
-
             from langgraph.types import Command
 
             from .codec import encode_tool_outcome
@@ -410,7 +411,6 @@ class InvocationRecorder:
         input_capture = capture_value(arguments, self.policy)
         if error is None:
             from langchain_core.messages import ToolMessage
-
             from langgraph.types import Command
 
             from .codec import encode_tool_outcome

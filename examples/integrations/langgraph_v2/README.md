@@ -1,13 +1,13 @@
 # LangGraph v2 recording example
 
-This provider-free example compiles a deterministic `StateGraph`, wraps it with the repository-local `KitaruGraphRunner`, and calls `invoke()` once. Kitaru records one session with the graph input, output, and observable graph nodes. The graph itself only normalizes text and formats a response, so it needs no model provider or replay configuration.
+This provider-free example compiles a deterministic `StateGraph`, wraps it with `KitaruGraphRunner` from the `kitaru-langgraph` package, and calls `invoke()` once. Kitaru records one session with the graph input, output, and observable graph nodes. The graph itself only normalizes text and formats a response, so it needs no model provider or replay configuration.
 
 ## Set up and run
 
 From the repository root:
 
 ```bash
-uv sync
+uv sync --project plugins --all-packages
 
 # Connect to a Kitaru v2 server if you have not already done so.
 uv run kitaru login https://your-kitaru-server.example.com
@@ -17,7 +17,7 @@ export KITARU_AGENT_ID="..."
 # Alternatively:
 # export KITARU_AGENT_VERSION_ID="..."
 
-uv run python -m examples.integrations.langgraph_v2
+uv run --project plugins python -m examples.integrations.langgraph_v2
 ```
 
 The script prints:

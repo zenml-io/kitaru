@@ -12,6 +12,7 @@ on:
           - evaluator
           - jsonl-importer
           - langfuse-importer
+          - langgraph
           - langsmith-importer
           - opentelemetry-importer
           - pydantic-ai
@@ -25,6 +26,7 @@ on:
       - evaluator-v*
       - jsonl-importer-v*
       - langfuse-importer-v*
+      - langgraph-v*
       - langsmith-importer-v*
       - opentelemetry-importer-v*
       - pydantic-ai-v*
@@ -80,6 +82,10 @@ jobs:
               langfuse-importer-v*)
                 REQUESTED_PACKAGE=langfuse-importer
                 REQUESTED_VERSION=${PACKAGE_TAG#langfuse-importer-v}
+                ;;
+              langgraph-v*)
+                REQUESTED_PACKAGE=langgraph
+                REQUESTED_VERSION=${PACKAGE_TAG#langgraph-v}
                 ;;
               langsmith-importer-v*)
                 REQUESTED_PACKAGE=langsmith-importer

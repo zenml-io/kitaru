@@ -5,10 +5,10 @@ from typing import Any
 
 from langchain_core.outputs import LLMResult
 
-from adapters.langgraph.callbacks import AsyncKitaruCallback
-from adapters.langgraph.capture import CapturePolicy
-from adapters.langgraph.recording import InvocationRecorder
 from kitaru.api_models.v1.session_node import NodeType
+from kitaru_langgraph.callbacks import AsyncKitaruCallback
+from kitaru_langgraph.capture import CapturePolicy
+from kitaru_langgraph.recording import InvocationRecorder
 
 
 async def test_nested_ancestor_is_persisted_before_child(fake_client: Any) -> None:

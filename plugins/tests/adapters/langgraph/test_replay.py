@@ -10,11 +10,6 @@ from langchain.agents.middleware.types import ModelRequest, ToolCallRequest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from adapters.langgraph import ToolPolicyMissError
-from adapters.langgraph.capture import CapturePolicy
-from adapters.langgraph.codec import encode_tool_outcome
-from adapters.langgraph.langchain import KitaruLangGraphMiddleware
-from adapters.langgraph.recording import _ACTIVE_INVOCATION
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     HistoryScope,
@@ -26,6 +21,11 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicy,
     ToolPolicyOnMiss,
 )
+from kitaru_langgraph import ToolPolicyMissError
+from kitaru_langgraph.capture import CapturePolicy
+from kitaru_langgraph.codec import encode_tool_outcome
+from kitaru_langgraph.langchain import KitaruLangGraphMiddleware
+from kitaru_langgraph.recording import _ACTIVE_INVOCATION
 
 
 class _SyncBridge:
@@ -84,7 +84,7 @@ def test_model_overrides_call_effective_model_once(
     )
     middleware = KitaruLangGraphMiddleware(requested_model="original:model")
     monkeypatch.setattr(
-        "adapters.langgraph.langchain.init_chat_model", lambda _: replacement_model
+        "kitaru_langgraph.langchain.init_chat_model", lambda _: replacement_model
     )
     observed: list[ModelRequest[Any]] = []
 

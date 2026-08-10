@@ -848,10 +848,10 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: plugins/tests/adapters/langgraph/test_compatibility.py
-        notes: exercises the same provider-free StateGraph through the repository-local runner
+        notes: exercises the same provider-free StateGraph through the kitaru-langgraph runner
       local_smoke:
         status: covered
-        command: uv run python -m examples.integrations.langgraph_v2
+        command: uv run --project plugins python -m examples.integrations.langgraph_v2
         requires_server: true
         timeout_seconds: 60
       live_provider:

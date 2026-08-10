@@ -25,7 +25,7 @@ single model or tool call instead of re-running the entire turn.
 | PydanticAI agent | `KitaruAgent` | **Per model/tool/MCP call** by default, or one turn checkpoint | [PydanticAI Adapter](../adapters/pydantic-ai.md) |
 | OpenAI Agents SDK agent | `KitaruRunner` | **Per call**, or one runner-call checkpoint | [OpenAI Agents Adapter](../adapters/openai-agents.md) |
 | Claude Agent SDK invocation | `KitaruClaudeRunner` | One completed Claude invocation | [Claude Agent SDK Adapter](../adapters/claude-agent-sdk.md) |
-| LangGraph, LangChain, or Deep Agents graph | Repository-local `KitaruGraphRunner` | One invocation session; factory construction adds observable model/tool nodes and replay controls, not node-boundary replay | [LangGraph Adapter](../adapters/langgraph.md) |
+| LangGraph, LangChain, or Deep Agents graph | `KitaruGraphRunner` from `kitaru-langgraph` | One invocation session; factory construction adds observable model/tool nodes and replay controls, not node-boundary replay | [LangGraph Adapter](../adapters/langgraph.md) |
 
 {% hint style="info" %}
 **Per-call checkpointing is fullest in the PydanticAI (`KitaruAgent`) and OpenAI Agents SDK (`KitaruRunner`) adapters.** The LangGraph v2 adapter records each invocation as one session. Factory-built LangChain and Deep Agents expose model/tool nodes and can apply live request overrides or supported tool substitution, but native LangGraph checkpoint reconstruction and node-boundary replay are deferred.

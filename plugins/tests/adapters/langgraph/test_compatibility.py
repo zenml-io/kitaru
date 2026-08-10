@@ -1,7 +1,9 @@
 """Public compatibility contracts for supported LangGraph constructions."""
 
 import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor
+from importlib.metadata import version
 from types import SimpleNamespace
 from typing import Any, TypedDict, cast
 
@@ -10,19 +12,26 @@ from langchain_core.runnables import RunnableLambda
 from langgraph.func import entrypoint
 from langgraph.graph import END, START, StateGraph
 
-from adapters.langgraph import (
+from kitaru.api_models.v1.replay_config import ReplayOverride
+from kitaru_langgraph import (
     CapabilityOperation,
     CapabilityTargetKind,
     LocalSubagentFactorySpec,
     UnsupportedCapabilityError,
 )
-from adapters.langgraph.capability import (
+from kitaru_langgraph.capability import (
     _direct_capability_view,
     _make_capability_manifest,
     _require_operation,
     _validate_manifest,
 )
-from kitaru.api_models.v1.replay_config import ReplayOverride
+from kitaru_langgraph.recording import ADAPTER_VERSION
+
+
+def test_adapter_version_matches_distribution() -> None:
+    # Guards against ADAPTER_VERSION being hardcoded again; it must always
+    # track the installed distribution.
+    assert version("kitaru-langgraph") == ADAPTER_VERSION
 
 
 def test_direct_wrapper_reports_only_universal_operations() -> None:
@@ -86,8 +95,8 @@ def test_factory_is_called_once_and_kitaru_middleware_is_outermost(
 ) -> None:
     import langchain.agents
 
-    from adapters.langgraph import KitaruGraphRunner
-    from adapters.langgraph.langchain import KitaruLangGraphMiddleware
+    from kitaru_langgraph import KitaruGraphRunner
+    from kitaru_langgraph.langchain import KitaruLangGraphMiddleware
 
     calls: list[dict[str, Any]] = []
     caller_middleware = object()
@@ -121,8 +130,8 @@ def test_factory_rejects_duplicate_kitaru_middleware(
 ) -> None:
     import langchain.agents
 
-    from adapters.langgraph import KitaruGraphRunner
-    from adapters.langgraph.langchain import KitaruLangGraphMiddleware
+    from kitaru_langgraph import KitaruGraphRunner
+    from kitaru_langgraph.langchain import KitaruLangGraphMiddleware
 
     def factory(**_: Any) -> Any:
         return RunnableLambda(lambda value: value)
@@ -139,13 +148,51 @@ def test_factory_rejects_duplicate_kitaru_middleware(
         )
 
 
+def test_create_agent_factory_works_without_deepagents(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import langchain.agents
+
+    from kitaru_langgraph import KitaruGraphRunner
+
+    def factory(**_: Any) -> Any:
+        return RunnableLambda(lambda value: value)
+
+    monkeypatch.setattr(langchain.agents, "create_agent", factory)
+    # A None entry makes "import deepagents" raise, simulating a base install
+    # without the deepagents extra.
+    monkeypatch.setitem(sys.modules, "deepagents", None)
+
+    runner = KitaruGraphRunner.from_agent_factory(
+        factory, factory_kwargs={"model": "provider:model", "tools": []}
+    )
+
+    assert runner.capabilities.get_target("main") is not None
+
+
+def test_unsupported_factory_names_the_deepagents_extra_when_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kitaru_langgraph import KitaruGraphRunner
+
+    monkeypatch.setitem(sys.modules, "deepagents", None)
+
+    def unknown_factory(**_: Any) -> Any:
+        return RunnableLambda(lambda value: value)
+
+    with pytest.raises(ValueError, match=r"kitaru-langgraph\[deepagents\]"):
+        KitaruGraphRunner.from_agent_factory(
+            unknown_factory, factory_kwargs={"model": "provider:model"}
+        )
+
+
 def test_deep_agent_local_factories_are_built_before_parent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import deepagents
     import langchain.agents
 
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     events: list[str] = []
 
@@ -185,7 +232,7 @@ def test_local_subagent_rejects_wrapped_supported_factory(
     import deepagents
     import langchain.agents
 
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     def local_factory(**_: Any) -> Any:
         return RunnableLambda(lambda value: value)
@@ -218,7 +265,7 @@ def test_mapped_model_override_requires_string_construction_model(
 ) -> None:
     import langchain.agents
 
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     def factory(**_: Any) -> Any:
         return RunnableLambda(lambda value: value)
@@ -238,7 +285,7 @@ def test_mapped_model_override_requires_string_construction_model(
 
 
 def test_real_state_graph_uses_same_runner(fake_client: Any) -> None:
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     class State(TypedDict, total=False):
         question: str
@@ -258,7 +305,7 @@ def test_real_state_graph_uses_same_runner(fake_client: Any) -> None:
 
 
 def test_functional_api_runnable_uses_same_runner() -> None:
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     @entrypoint()
     def workflow(value: str) -> dict[str, str]:
@@ -273,7 +320,7 @@ def test_real_langchain_factory_is_supported() -> None:
     from langchain.agents import create_agent
     from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     model = FakeListChatModel(responses=["done"])
     langchain_runner = KitaruGraphRunner.from_agent_factory(
@@ -285,7 +332,7 @@ def test_real_langchain_factory_is_supported() -> None:
 
 
 async def test_concurrent_async_calls_are_isolated(fake_client: Any) -> None:
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     async def run(value: str) -> dict[str, str]:
         await asyncio.sleep(0)
@@ -304,7 +351,7 @@ async def test_concurrent_async_calls_are_isolated(fake_client: Any) -> None:
 
 
 def test_concurrent_sync_calls_are_isolated(fake_client: Any) -> None:
-    from adapters.langgraph import KitaruGraphRunner
+    from kitaru_langgraph import KitaruGraphRunner
 
     runner = KitaruGraphRunner(RunnableLambda(lambda value: {"value": value}))
     with ThreadPoolExecutor(max_workers=2) as pool:

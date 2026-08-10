@@ -11,6 +11,7 @@ from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import ModelRequest, ToolCallRequest
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, ToolMessage
+from langgraph.types import Command
 
 from kitaru.api_models.v1.replay import ToolLookupRequest
 from kitaru.api_models.v1.replay_config import (
@@ -24,7 +25,6 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicyOnMiss,
 )
 from kitaru.cache_keys import compute_tool_cache_key
-from langgraph.types import Command
 
 from .capability import ToolPolicyError, ToolPolicyMissError
 from .capture import capture_value
