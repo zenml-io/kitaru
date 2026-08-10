@@ -48,7 +48,7 @@ def _node(
     tool_name: str | None = None,
     requested_model: str | None = None,
     model: str | None = None,
-    provider: str | None = None,
+    model_provider: str | None = None,
     tokens: TokenUsage | None = None,
     cost: Decimal | None = None,
 ) -> SessionNodeResponse:
@@ -73,7 +73,7 @@ def _node(
         outputs=outputs,
         requested_model=requested_model,
         model=model,
-        model_provider=provider,
+        model_provider=model_provider,
         tokens=tokens,
         cost=cost,
         tool_name=tool_name,
@@ -634,7 +634,7 @@ def test_resource_budget_reconciles_rollups_and_uses_inclusive_ceilings() -> Non
         ),
         cost=Decimal("1.25"),
         model="m",
-        provider="p",
+        model_provider="p",
     )
     view = _view(
         [llm], cost=Decimal("1.25"), tokens=TokenUsage(input_tokens=2, output_tokens=3)
@@ -783,7 +783,7 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
             outputs="",
             requested_model="requested",
             model="served",
-            provider="acme",
+            model_provider="acme",
             tokens=TokenUsage(input_tokens=1, output_tokens=0),
         ),
         _node(
@@ -793,7 +793,7 @@ def test_llm_signals_and_model_policy_use_recorded_metadata() -> None:
             outputs=None,
             requested_model="served",
             model="served",
-            provider=None,
+            model_provider=None,
             tokens=None,
         ),
     ]
