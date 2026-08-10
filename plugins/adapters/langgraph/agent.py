@@ -15,6 +15,7 @@ from typing import Any, Generic, TypeVar, cast
 
 from langchain_core.runnables import Runnable
 from langchain_core.runnables.config import RunnableConfig, merge_configs
+
 from langgraph.types import Command
 
 from .capability import (

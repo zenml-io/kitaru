@@ -682,7 +682,7 @@ def upgrade() -> None:
         ),
         sa.Column("requested_model", sa.Text(), nullable=True),
         sa.Column("model", sa.Text(), nullable=True),
-        sa.Column("provider", sa.Text(), nullable=True),
+        sa.Column("model_provider", sa.Text(), nullable=True),
         sa.Column("input_tokens", sa.BigInteger(), nullable=True),
         sa.Column("output_tokens", sa.BigInteger(), nullable=True),
         sa.Column("cached_input_tokens", sa.BigInteger(), nullable=True),

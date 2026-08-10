@@ -67,7 +67,7 @@ class SessionNode(DomainModel):
     outputs: Any = None
     requested_model: str | None = None
     model: str | None = None
-    provider: str | None = None
+    model_provider: str | None = None
     tokens: TokenUsage | None = None
     cost: Decimal | None = None
     model_params: dict[str, Any] | None = None

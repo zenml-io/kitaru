@@ -48,7 +48,7 @@ class AnnotationSelector(RequestModel):
         default=None, description="Payload of the node targeted."
     )
     path: str | None = Field(
-        default=None, description="JSON Pointer within the targeted payload."
+        default=None, description="RFC 6901 JSON Pointer within the targeted payload."
     )
     span: AnnotationSpan | None = Field(
         default=None, description="Character range within the resolved string."

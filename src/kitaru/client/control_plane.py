@@ -16,6 +16,7 @@
 import logging
 import webbrowser
 from collections.abc import Callable
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
 from pydantic import BaseModel, ConfigDict
@@ -136,6 +137,7 @@ class ControlPlaneSession:
         self,
         open_browser: bool = True,
         prompt: Callable[[ControlPlaneDeviceAuthorization], None] | None = None,
+        workspace_id: str | None = None,
     ) -> ApiToken:
         """Authorize this machine against the control plane.
 
@@ -146,6 +148,7 @@ class ControlPlaneSession:
             open_browser: Whether to open the verification page.
             prompt: Called with the authorization so the caller can show the
                 user code. Defaults to logging it.
+            workspace_id: Workspace ID preselected on the verification page.
 
         Raises:
             DeviceLoginError: The authorization expired or was refused.
@@ -163,6 +166,15 @@ class ControlPlaneSession:
         authorization = ControlPlaneDeviceAuthorization.model_validate(response.json())
         uri = authorization.verification_uri_complete or authorization.verification_uri
         verification_uri = self._url + uri if uri.startswith("/") else uri
+        if workspace_id is not None:
+            parsed = urlparse(verification_uri)
+            query_params = dict(parse_qsl(parsed.query))
+            query_params["workspace"] = workspace_id
+            verification_uri = urlunparse(
+                parsed._replace(query=urlencode(query_params))
+            )
+        # Written back so the prompt shows the same URL the browser opens.
+        authorization.verification_uri_complete = verification_uri
         if prompt is not None:
             prompt(authorization)
         else:
