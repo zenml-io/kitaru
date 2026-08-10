@@ -295,6 +295,7 @@ jobs:
           - langfuse-importer
           - langsmith-importer
           - opentelemetry-importer
+          - pydantic-ai
     name: plugin package (${{ matrix.package }})
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
