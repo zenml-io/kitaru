@@ -23,8 +23,21 @@ interface Script {
   tools: ToolCall[];
 }
 
+type ScriptedAction = Exclude<Resolution["action"], "reject">;
+
+function customerReply(action: ScriptedAction, customer: string): string {
+  switch (action) {
+    case "escalate":
+      return `Hi ${customer}, a specialist will review your request.`;
+    case "replacement":
+      return `Hi ${customer}, your replacement has been created.`;
+    case "refund":
+      return `Hi ${customer}, your refund has been issued.`;
+  }
+}
+
 function resolution(
-  action: Resolution["action"],
+  action: ScriptedAction,
   customer: string,
   options: { amount?: number; reason: string },
 ): Resolution {
@@ -32,33 +45,35 @@ function resolution(
     action,
     ...(options.amount === undefined ? {} : { amount: options.amount }),
     reason: options.reason,
-    customer_reply:
-      action === "escalate"
-        ? `Hi ${customer}, a specialist will review your request.`
-        : action === "replacement"
-          ? `Hi ${customer}, your replacement has been created.`
-          : `Hi ${customer}, your refund has been issued.`,
+    customer_reply: customerReply(action, customer),
   };
 }
 
 function scriptFor(ticketId: string, mode: PolicyMode): Script {
-  const escalate = (customer: string, reason: string): Script => ({
+  const escalate = (
+    customer: string,
+    reason: string,
+    investigation: ToolCall[] = [],
+  ): Script => ({
     resolution: resolution("escalate", customer, { reason }),
-    tools: [{ input: { reason }, name: "escalate_to_human" }],
+    tools: [...investigation, { input: { reason }, name: "escalate_to_human" }],
   });
   const refund = (
     customer: string,
     orderId: string,
     category: string,
     amount: number,
+    investigation: ToolCall[] = [
+      { input: { order_id: orderId }, name: "lookup_order" },
+      { input: { category }, name: "get_return_policy" },
+    ],
   ): Script => ({
     resolution: resolution("refund", customer, {
       amount,
       reason: "The reviewed refund is eligible.",
     }),
     tools: [
-      { input: { order_id: orderId }, name: "lookup_order" },
-      { input: { category }, name: "get_return_policy" },
+      ...investigation,
       { input: { amount, order_id: orderId }, name: "issue_refund" },
     ],
   });
@@ -66,53 +81,29 @@ function scriptFor(ticketId: string, mode: PolicyMode): Script {
   switch (ticketId) {
     case "ticket-001":
       return refund("Dana", "48213", "footwear", 98);
-    case "ticket-002": {
-      const outcome = escalate("Leo", "Final-sale return requires review.");
-      outcome.tools.unshift(
+    case "ticket-002":
+      return escalate("Leo", "Final-sale return requires review.", [
         { input: { order_id: "48214" }, name: "lookup_order" },
         { input: { category: "apparel" }, name: "get_return_policy" },
-      );
-      return outcome;
-    }
-    case "ticket-003": {
-      const outcome = escalate("Maya", "Return is outside the policy window.");
-      outcome.tools.unshift(
+      ]);
+    case "ticket-003":
+      return escalate("Maya", "Return is outside the policy window.", [
         { input: { order_id: "48215" }, name: "lookup_order" },
         { input: { category: "accessories" }, name: "get_return_policy" },
-      );
-      return outcome;
-    }
+      ]);
     case "ticket-004":
       if (mode === "baseline") {
         return refund("Sam", "48216", "luggage", 280);
       }
-      return {
-        resolution: resolution("escalate", "Sam", {
-          reason: "Refund requires human approval.",
-        }),
-        tools: [
-          { input: { order_id: "48216" }, name: "lookup_order" },
-          { input: { category: "luggage" }, name: "get_return_policy" },
-          {
-            input: { reason: "Refund requires human approval." },
-            name: "escalate_to_human",
-          },
-        ],
-      };
+      return escalate("Sam", "Refund requires human approval.", [
+        { input: { order_id: "48216" }, name: "lookup_order" },
+        { input: { category: "luggage" }, name: "get_return_policy" },
+      ]);
     case "ticket-005":
-      return {
-        resolution: resolution("escalate", "Priya", {
-          reason: "Order could not be identified.",
-        }),
-        tools: [
-          { input: { order_id: "99999" }, name: "lookup_order" },
-          { input: { email: "priya@example.test" }, name: "lookup_order" },
-          {
-            input: { reason: "Order could not be identified." },
-            name: "escalate_to_human",
-          },
-        ],
-      };
+      return escalate("Priya", "Order could not be identified.", [
+        { input: { order_id: "99999" }, name: "lookup_order" },
+        { input: { email: "priya@example.test" }, name: "lookup_order" },
+      ]);
     case "ticket-006":
       return {
         resolution: resolution("replacement", "Chris", {
@@ -128,48 +119,24 @@ function scriptFor(ticketId: string, mode: PolicyMode): Script {
       if (mode === "baseline") {
         return refund("Morgan", "48218", "apparel", 120);
       }
-      return {
-        resolution: resolution("escalate", "Morgan", {
-          reason: "Account risk flag requires human review.",
-        }),
-        tools: [
-          { input: { order_id: "48218" }, name: "lookup_order" },
-          { input: { category: "apparel" }, name: "get_return_policy" },
-          {
-            input: { reason: "Account risk flag requires human review." },
-            name: "escalate_to_human",
-          },
-        ],
-      };
+      return escalate("Morgan", "Account risk flag requires human review.", [
+        { input: { order_id: "48218" }, name: "lookup_order" },
+        { input: { category: "apparel" }, name: "get_return_policy" },
+      ]);
     case "ticket-008":
-      return {
-        resolution: resolution("escalate", "Alex", {
-          reason: "The order already has a recorded refund.",
-        }),
-        tools: [
-          { input: { order_id: "48219" }, name: "lookup_order" },
-          { input: { category: "footwear" }, name: "get_return_policy" },
-          { input: { amount: 82, order_id: "48219" }, name: "issue_refund" },
-          {
-            input: { reason: "The order already has a recorded refund." },
-            name: "escalate_to_human",
-          },
-        ],
-      };
+      return escalate("Alex", "The order already has a recorded refund.", [
+        { input: { order_id: "48219" }, name: "lookup_order" },
+        { input: { category: "footwear" }, name: "get_return_policy" },
+        { input: { amount: 82, order_id: "48219" }, name: "issue_refund" },
+      ]);
     case "ticket-009":
       return refund("Jamie", "48220", "apparel", 80);
-    case "ticket-010": {
-      const outcome = refund("Riley", "48222", "footwear", 98);
-      outcome.tools.splice(0, 1, {
-        input: { order_id: "48228" },
-        name: "lookup_order",
-      });
-      outcome.tools.splice(1, 0, {
-        input: { email: "riley@example.test" },
-        name: "lookup_order",
-      });
-      return outcome;
-    }
+    case "ticket-010":
+      return refund("Riley", "48222", "footwear", 98, [
+        { input: { order_id: "48228" }, name: "lookup_order" },
+        { input: { email: "riley@example.test" }, name: "lookup_order" },
+        { input: { category: "footwear" }, name: "get_return_policy" },
+      ]);
     default:
       throw new Error(`The deterministic model has no script for ${ticketId}`);
   }

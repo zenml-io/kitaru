@@ -1,7 +1,6 @@
 import { orders, policies, shipments } from "./fixtures.js";
 import type {
   ActionReceipt,
-  Order,
   OrderLookup,
   PolicyLookup,
   ShippingStatus,
@@ -17,14 +16,10 @@ const POLICY_ALIASES: Readonly<Record<string, string>> = {
   tote: "accessories",
 };
 
-function cloneOrder(order: Order): Order {
-  return { ...order, risk_flags: [...order.risk_flags] };
-}
-
 export class MockCommerceStore {
   readonly actions: ActionReceipt[] = [];
   readonly #orders = new Map(
-    orders.map((order) => [order.order_id, cloneOrder(order)]),
+    orders.map((order) => [order.order_id, structuredClone(order)]),
   );
 
   lookupOrder(input: { order_id?: string; email?: string }): OrderLookup {
@@ -33,7 +28,7 @@ export class MockCommerceStore {
       if (order !== undefined) {
         return {
           found: true,
-          orders: [cloneOrder(order)],
+          orders: [structuredClone(order)],
           message: "One order matched the supplied order number.",
         };
       }
@@ -41,7 +36,7 @@ export class MockCommerceStore {
     if (input.email !== undefined) {
       const matches = [...this.#orders.values()]
         .filter((order) => order.email === input.email)
-        .map(cloneOrder);
+        .map((order) => structuredClone(order));
       if (matches.length > 0) {
         return {
           found: true,

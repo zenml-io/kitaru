@@ -1,10 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  createTicketRun,
-  REQUESTED_MODEL_ID,
-  TOOL_NAMES,
-} from "../src/agent.js";
+import { createTicketRun } from "../src/agent.js";
 import { ticketCases } from "../src/fixtures.js";
 import { renderTicketPrompt } from "../src/models.js";
 import { SmokeClient } from "../src/smoke-client.js";
@@ -32,7 +28,14 @@ describe("Vercel returns resolver", () => {
     });
     const result = await run.generate();
 
-    expect(Object.keys(run.tools)).toEqual(TOOL_NAMES);
+    expect(Object.keys(run.tools)).toEqual([
+      "lookup_order",
+      "get_return_policy",
+      "check_shipping",
+      "issue_refund",
+      "create_replacement",
+      "escalate_to_human",
+    ]);
     expect(JSON.parse(result.text)).toMatchObject({
       action: "refund",
       amount: 98,
@@ -149,20 +152,13 @@ describe("Vercel returns resolver", () => {
     expect(client.created[0]?.inputs).toBe(replayPrompt);
   });
 
-  it("rejects unsupported replay models and missing identity", () => {
+  it("rejects missing identity", () => {
     expect(() =>
       createTicketRun({
         environment: {},
         prompt: "Ticket ID: ticket-001",
       }),
     ).toThrow("KITARU_AGENT_ID is required");
-    expect(() =>
-      createTicketRun({
-        environment: { KITARU_AGENT_ID: AGENT_ID },
-        prompt: "Ticket ID: ticket-001",
-        requestedModelId: "other/model",
-      }),
-    ).toThrow(`Unsupported model: other/model; expected ${REQUESTED_MODEL_ID}`);
   });
 
   it("fails an unknown deterministic ticket without guessing", async () => {

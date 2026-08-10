@@ -5,26 +5,18 @@ import type { AdapterClient } from "../../../packages/core/dist/adapter/index.js
 import type { KitaruEnvironmentVariables } from "../../../packages/core/dist/index.js";
 import { createKitaruGenerateText } from "../../../packages/vercel-ai/dist/index.js";
 import { createDeterministicModel } from "./deterministic-model.js";
-import type { Resolution } from "./models.js";
+import { type Resolution, resolutionActions } from "./models.js";
 import { createCommerceTools } from "./tools.js";
 
 export type PolicyMode = "baseline" | "strict";
 export type ModelProvider = "deterministic" | "openai";
 
 export const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
-export const TOOL_NAMES = [
-  "lookup_order",
-  "get_return_policy",
-  "check_shipping",
-  "issue_refund",
-  "create_replacement",
-  "escalate_to_human",
-] as const;
 
 const RESOLUTION_SCHEMA = jsonSchema<Resolution>({
   additionalProperties: false,
   properties: {
-    action: { enum: ["refund", "replacement", "escalate", "reject"] },
+    action: { enum: [...resolutionActions] },
     amount: { exclusiveMinimum: 0, type: "number" },
     customer_reply: { minLength: 1, type: "string" },
     reason: { minLength: 1, type: "string" },
@@ -115,18 +107,11 @@ export interface TicketRunOptions {
   mode?: PolicyMode;
   prompt: string;
   provider?: ModelProvider;
-  requestedModelId?: string;
 }
 
 export function createTicketRun(options: TicketRunOptions) {
   const environment = options.environment ?? process.env;
   const agentId = requiredEnvironment(environment, "KITARU_AGENT_ID");
-  const requestedModelId = options.requestedModelId ?? REQUESTED_MODEL_ID;
-  if (requestedModelId !== REQUESTED_MODEL_ID) {
-    throw new Error(
-      `Unsupported model: ${requestedModelId}; expected ${REQUESTED_MODEL_ID}`,
-    );
-  }
   const mode = options.mode ?? "baseline";
   const provider = options.provider ?? "deterministic";
   const model = providerModel({ environment, mode, provider });
@@ -137,7 +122,7 @@ export function createTicketRun(options: TicketRunOptions) {
     allowedReplayModels: [REQUESTED_MODEL_ID],
     client: options.client,
     environment,
-    requestedModelId,
+    requestedModelId: REQUESTED_MODEL_ID,
     resolveModel: (replacementId) => {
       if (replacementId !== REQUESTED_MODEL_ID) {
         throw new Error(`Unsupported model override: ${replacementId}`);

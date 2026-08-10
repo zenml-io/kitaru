@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
-import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
   createTicketRun,
   type ModelProvider,
-  type PolicyMode,
   validateModelProviderEnvironment,
 } from "./agent.js";
 import { ticketCases } from "./fixtures.js";
@@ -24,7 +23,7 @@ export interface ManifestSession {
 
 export interface BaselineManifest {
   evidence_set_id: string;
-  mode: PolicyMode;
+  mode: "baseline";
   provider: ModelProvider;
   schema_version: 1;
   sessions: Record<string, ManifestSession>;
@@ -57,7 +56,7 @@ function parseManifest(value: unknown): BaselineManifest {
     value.schema_version !== 1 ||
     typeof value.evidence_set_id !== "string" ||
     !UUID_PATTERN.test(value.evidence_set_id) ||
-    !["baseline", "strict"].includes(String(value.mode)) ||
+    value.mode !== "baseline" ||
     !["deterministic", "openai"].includes(String(value.provider)) ||
     !["recording", "completed"].includes(String(value.status)) ||
     !isRecord(value.sessions)
@@ -94,7 +93,7 @@ function parseManifest(value: unknown): BaselineManifest {
   }
   return {
     evidence_set_id: value.evidence_set_id,
-    mode: value.mode as PolicyMode,
+    mode: "baseline",
     provider: value.provider as ModelProvider,
     schema_version: 1,
     sessions,
@@ -102,12 +101,22 @@ function parseManifest(value: unknown): BaselineManifest {
   };
 }
 
-async function exists(path: string): Promise<boolean> {
+function isMissingFile(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    "code" in error &&
+    (error as NodeJS.ErrnoException).code === "ENOENT"
+  );
+}
+
+async function readOptionalFile(path: string): Promise<string | undefined> {
   try {
-    await access(path);
-    return true;
-  } catch {
-    return false;
+    return await readFile(path, "utf8");
+  } catch (error) {
+    if (isMissingFile(error)) {
+      return undefined;
+    }
+    throw error;
   }
 }
 
@@ -125,12 +134,13 @@ export async function loadBaselineManifest(
   stateDir = resolve(".state"),
 ): Promise<BaselineManifest | undefined> {
   const path = join(stateDir, MANIFEST_NAME);
-  if (!(await exists(path))) {
+  const contents = await readOptionalFile(path);
+  if (contents === undefined) {
     return undefined;
   }
   let raw: unknown;
   try {
-    raw = JSON.parse(await readFile(path, "utf8"));
+    raw = JSON.parse(contents);
   } catch (error) {
     throw new Error("baseline manifest is not valid JSON", { cause: error });
   }
@@ -174,6 +184,19 @@ function validateAdoptions(adoptions: Readonly<Record<string, string>>): void {
   }
 }
 
+function assertUnusedSessionId(
+  manifest: BaselineManifest,
+  sessionId: string,
+): void {
+  if (
+    Object.values(manifest.sessions).some(
+      ({ session_id }) => session_id === sessionId,
+    )
+  ) {
+    throw new Error(`Session ${sessionId} is already in the manifest`);
+  }
+}
+
 export async function recordBaseline(
   options: RecordBaselineOptions = {},
 ): Promise<BaselineManifest> {
@@ -199,6 +222,8 @@ export async function recordBaseline(
   if (manifest.status === "completed") {
     return manifest;
   }
+  const attemptsDir = join(stateDir, "attempts", manifest.evidence_set_id);
+  let attemptsDirectoryCreated = false;
 
   const recordTicket =
     options.recordTicket ??
@@ -219,30 +244,21 @@ export async function recordBaseline(
     if (manifest.sessions[ticket.ticket_id]) {
       continue;
     }
-    const sessionIdFile = join(
-      stateDir,
-      "attempts",
-      manifest.evidence_set_id,
-      `${ticket.ticket_id}.session-id`,
-    );
-    await mkdir(dirname(sessionIdFile), { recursive: true });
-    if (await exists(sessionIdFile)) {
-      const attemptedSessionId = (await readFile(sessionIdFile, "utf8")).trim();
+    if (!attemptsDirectoryCreated) {
+      await mkdir(attemptsDir, { recursive: true });
+      attemptsDirectoryCreated = true;
+    }
+    const sessionIdFile = join(attemptsDir, `${ticket.ticket_id}.session-id`);
+    const attemptedSession = await readOptionalFile(sessionIdFile);
+    if (attemptedSession !== undefined) {
+      const attemptedSessionId = attemptedSession.trim();
       const adoptedSessionId = adoptions[ticket.ticket_id];
       if (adoptedSessionId !== attemptedSessionId) {
         throw new Error(
           `Ambiguous attempt for ${ticket.ticket_id}: session ${attemptedSessionId || "<empty>"} is not committed. Inspect its remote status, then pass --adopt ${ticket.ticket_id}=${attemptedSessionId} only if it completed.`,
         );
       }
-      if (
-        Object.values(manifest.sessions).some(
-          ({ session_id }) => session_id === adoptedSessionId,
-        )
-      ) {
-        throw new Error(
-          `Session ${adoptedSessionId} is already in the manifest`,
-        );
-      }
+      assertUnusedSessionId(manifest, adoptedSessionId);
       manifest.sessions[ticket.ticket_id] = {
         session_id: adoptedSessionId,
         status: "completed",
@@ -257,26 +273,19 @@ export async function recordBaseline(
     }
 
     await recordTicket({ sessionIdFile, ticket });
-    if (!(await exists(sessionIdFile))) {
+    const completedSession = await readOptionalFile(sessionIdFile);
+    if (completedSession === undefined) {
       throw new Error(
         `Recording ${ticket.ticket_id} completed without a Kitaru session ID file`,
       );
     }
-    const completedSessionId = (await readFile(sessionIdFile, "utf8")).trim();
+    const completedSessionId = completedSession.trim();
     if (!UUID_PATTERN.test(completedSessionId)) {
       throw new Error(
         `Recording ${ticket.ticket_id} wrote an invalid Kitaru session ID`,
       );
     }
-    if (
-      Object.values(manifest.sessions).some(
-        ({ session_id }) => session_id === completedSessionId,
-      )
-    ) {
-      throw new Error(
-        `Session ${completedSessionId} is already in the manifest`,
-      );
-    }
+    assertUnusedSessionId(manifest, completedSessionId);
     manifest.sessions[ticket.ticket_id] = {
       session_id: completedSessionId,
       status: "completed",

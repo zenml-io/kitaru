@@ -3,15 +3,17 @@ import {
   type ModelProvider,
   type PolicyMode,
 } from "./agent.js";
+import { ticketCases } from "./fixtures.js";
+import { renderTicketPrompt } from "./models.js";
 import { SmokeClient } from "./smoke-client.js";
 
-const DEFAULT_PROMPT = `
-Ticket ID: ticket-001
-Customer: Dana <dana@example.test>
-Subject: Hole in my Merino Runners
-
-The Merino Runners from order #48213 arrived with a hole. Please refund them.
-`.trim();
+const defaultTicket = ticketCases.find(
+  ({ ticket }) => ticket.ticket_id === "ticket-001",
+)?.ticket;
+if (!defaultTicket) {
+  throw new Error("ticket-001 fixture is missing");
+}
+const DEFAULT_PROMPT = renderTicketPrompt(defaultTicket);
 
 function policyMode(): PolicyMode {
   const value = process.env.RETURNS_POLICY_MODE ?? "baseline";

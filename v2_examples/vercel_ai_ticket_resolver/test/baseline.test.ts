@@ -230,4 +230,24 @@ describe("resumable baseline manifest", () => {
       "baseline manifest",
     );
   });
+
+  it("rejects a non-baseline manifest mode", async () => {
+    const dir = await stateDir();
+    await writeFile(
+      join(dir, "baseline-sessions.json"),
+      JSON.stringify({
+        evidence_set_id: sessionId(702),
+        mode: "strict",
+        provider: "deterministic",
+        schema_version: 1,
+        sessions: {},
+        status: "recording",
+      }),
+      "utf8",
+    );
+
+    await expect(loadBaselineManifest(dir)).rejects.toThrow(
+      "baseline manifest",
+    );
+  });
 });
