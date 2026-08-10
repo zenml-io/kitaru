@@ -248,6 +248,7 @@ async def import_sessions(
     wait: bool,
     interval: float | None,
     timeout: float | None,
+    join_on: str | None = None,
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
     tags = _normalize_import_tags(tags, wait=wait)
@@ -255,6 +256,30 @@ async def import_sessions(
         wait=wait, interval=interval, timeout=timeout
     )
     parsed_params = parse_json_object(params, option="--params")
+    if join_on is not None:
+        if not join_on.startswith("/"):
+            raise CLIError(
+                "invalid_arguments",
+                "--join-on must be an RFC 6901 JSON Pointer starting with '/'.",
+            )
+        for token in join_on[1:].split("/"):
+            index = 0
+            while index < len(token):
+                if token[index] == "~":
+                    if index + 1 >= len(token) or token[index + 1] not in "01":
+                        raise CLIError(
+                            "invalid_arguments",
+                            "--join-on contains an invalid JSON Pointer escape.",
+                        )
+                    index += 2
+                else:
+                    index += 1
+        if "join_on" in parsed_params:
+            raise CLIError(
+                "invalid_arguments",
+                "--join-on cannot be combined with join_on in --params.",
+            )
+        parsed_params["join_on"] = join_on
     content = _read_payload(path)
     importer_parent, importer_version = await get_plugin_version(
         client.importers, importer, "Importer"

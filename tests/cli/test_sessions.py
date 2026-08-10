@@ -458,6 +458,7 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
         importer="jsonl@latest",
         agent="assistant@3",
         params='{"secret_value":"not-for-receipt"}',
+        join_on="/metadata/conversation~1id",
         media_type="application/jsonl",
         wait=False,
         interval=None,
@@ -472,7 +473,10 @@ async def test_session_import_uploads_once_and_returns_exact_created_receipt(
         "agent_version_id": str(client.agent_version.id),
         "version": 2,
         "payload_blob_id": str(client.blob.id),
-        "params": {"secret_value": "not-for-receipt"},
+        "params": {
+            "secret_value": "not-for-receipt",
+            "join_on": "/metadata/conversation~1id",
+        },
     }
     assert result.event == "created"
     assert result.item["operation"] == "session_import"
@@ -856,6 +860,8 @@ def test_session_import_argv_registers_streaming_created_receipt(
                 "jsonl@2",
                 "--agent",
                 "assistant@3",
+                "--join-on",
+                "/metadata/customer~1case_id",
                 "--media-type",
                 "application/jsonl",
             ]
@@ -869,6 +875,34 @@ def test_session_import_argv_registers_streaming_created_receipt(
     assert document["event"] == "created"
     assert document["item"]["job"]["id"] == str(client.job.id)
     assert client.uploads == [(b'{"x":1}', "application/jsonl", "payload.jsonl")]
+    assert client.requests[0].params == {"join_on": "/metadata/customer~1case_id"}
+
+
+@pytest.mark.parametrize("join_on", ["metadata.case_id", "/metadata/case~2id"])
+async def test_session_import_rejects_invalid_join_pointer_before_upload(
+    tmp_path: Path, join_on: str
+) -> None:
+    """Reject a malformed join pointer before uploading the payload."""
+    payload = tmp_path / "payload.jsonl"
+    payload.write_bytes(b'{"x":1}')
+    client = StubImportClient()
+
+    with pytest.raises(CLIError) as error:
+        await sessions.import_sessions(
+            client,
+            payload,
+            importer="jsonl@2",
+            agent="assistant@3",
+            params=None,
+            media_type="application/jsonl",
+            wait=False,
+            interval=None,
+            timeout=None,
+            join_on=join_on,
+        )
+
+    assert error.value.kind == "invalid_arguments"
+    assert client.uploads == []
 
 
 @pytest.mark.parametrize(

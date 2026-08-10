@@ -173,7 +173,13 @@ def _role(value: dict[str, Any]) -> str | None:
     return None
 
 
-def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch | None:
+def _content_match(
+    value: Any,
+    selector: str = "",
+    depth: int = 0,
+    *,
+    visible_output_only: bool = False,
+) -> _TextMatch | None:
     """Return one scalar text value and its selector."""
     if depth > 8:
         return None
@@ -186,7 +192,10 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
             for index, item in enumerate(value)
             if (
                 match := _content_match(
-                    item, _child_selector(selector, index), depth + 1
+                    item,
+                    _child_selector(selector, index),
+                    depth + 1,
+                    visible_output_only=visible_output_only,
                 )
             )
             is not None
@@ -194,10 +203,31 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
         return matches[-1] if matches else None
     if not isinstance(value, dict):
         return None
+    if visible_output_only:
+        kind = next(
+            (
+                candidate.lower().replace("_", "-")
+                for key in ("type", "part_kind", "kind", "event.name")
+                if isinstance((candidate := value.get(key)), str)
+            ),
+            None,
+        )
+        if value.get("thought") is True or kind in {
+            "reasoning",
+            "redacted-thinking",
+            "thinking",
+            "tool-call",
+            "tool-use",
+            "function-call",
+        }:
+            return None
     for key in ("text", "content", "parts", "kwargs", "data"):
         if key in value and (
             match := _content_match(
-                value[key], _child_selector(selector, key), depth + 1
+                value[key],
+                _child_selector(selector, key),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         ):
             return match
@@ -205,7 +235,12 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
 
 
 def _message_matches(
-    value: Any, target_role: str, selector: str = "", depth: int = 0
+    value: Any,
+    target_role: str,
+    selector: str = "",
+    depth: int = 0,
+    *,
+    visible_output_only: bool = False,
 ) -> list[_TextMatch]:
     """Return text matches for one nested message role."""
     if depth > 12:
@@ -215,7 +250,11 @@ def _message_matches(
             match
             for index, item in enumerate(value)
             for match in _message_matches(
-                item, target_role, _child_selector(selector, index), depth + 1
+                item,
+                target_role,
+                _child_selector(selector, index),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         ]
     if not isinstance(value, dict):
@@ -224,7 +263,10 @@ def _message_matches(
         for key in ("content", "text", "parts", "kwargs", "data"):
             if key in value and (
                 match := _content_match(
-                    value[key], _child_selector(selector, key), depth + 1
+                    value[key],
+                    _child_selector(selector, key),
+                    depth + 1,
+                    visible_output_only=visible_output_only,
                 )
             ):
                 return [match]
@@ -232,7 +274,11 @@ def _message_matches(
     for key, child in value.items():
         matches.extend(
             _message_matches(
-                child, target_role, _child_selector(selector, key), depth + 1
+                child,
+                target_role,
+                _child_selector(selector, key),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         )
     return matches
@@ -256,7 +302,7 @@ def _input_text_selector(value: Any) -> str | None:
 
 def _output_text_selector(value: Any) -> str | None:
     """Return the primary assistant output selector."""
-    messages = _message_matches(value, "assistant")
+    messages = _message_matches(value, "assistant", visible_output_only=True)
     if messages:
         return messages[-1].selector
     if isinstance(value, str):
@@ -264,7 +310,11 @@ def _output_text_selector(value: Any) -> str | None:
     if isinstance(value, dict):
         for key in ("answer", "result", "response", "output", "text", "content"):
             if key in value and (
-                match := _content_match(value[key], _child_selector("", key))
+                match := _content_match(
+                    value[key],
+                    _child_selector("", key),
+                    visible_output_only=True,
+                )
             ):
                 return match.selector
     return None
@@ -440,6 +490,37 @@ def _decode_json(value: Any) -> Any:
         return json.loads(candidate)
     except json.JSONDecodeError:
         return value
+
+
+def _path_value(value: Any, path: str) -> Any:
+    """Resolve a dotted path or JSON Pointer against one normalized span."""
+    if not path.strip():
+        raise InvalidImport("join_on must be a non-empty path")
+    if path.startswith("/"):
+        for token in path[1:].split("/"):
+            if re.search(r"~(?:[^01]|$)", token):
+                raise InvalidImport("join_on contains an invalid JSON Pointer escape")
+        parts = [
+            part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
+        ]
+    else:
+        parts = path.split(".")
+    current = value
+    for part in parts:
+        current = _decode_json(current)
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+            continue
+        if isinstance(current, list):
+            if re.fullmatch(r"0|[1-9][0-9]*", part) is None:
+                return None
+            try:
+                current = current[int(part)]
+            except (IndexError, ValueError):
+                return None
+            continue
+        return None
+    return _decode_json(current)
 
 
 def _decode_any_value(value: Any) -> Any:
@@ -1093,6 +1174,7 @@ def _parse_session(
     source_instance: str,
     fallback_source: bool,
     file_framework: str | None,
+    join_on: str | None,
 ) -> ImportedSession:
     """Parse one conversation or trace-derived session."""
     warnings: list[str] = []
@@ -1260,6 +1342,8 @@ def _parse_session(
         **metadata_values,
         "normalization_warnings": warnings,
     }
+    if join_on is not None:
+        metadata["otlp.join_on"] = join_on
     framework = (
         _detect_framework(
             [
@@ -1347,24 +1431,59 @@ class OTLPJSONImporter:
             defaultdict(list)
         )
         fallback_sources: dict[tuple[str, str], bool] = {}
+        selected = params.get("join_on")
+        if selected is not None and not isinstance(selected, str):
+            raise InvalidImport("join_on must be a dotted path or JSON pointer")
         for trace_id, records in traces.items():
-            conversation_ids: set[str] = set()
-            for conversation_key in _CONVERSATION_KEYS:
-                conversation_ids = {
-                    str(value)
+            if isinstance(selected, str):
+                join_values = [
+                    value
                     for record in records
-                    if (value := _attribute(record, conversation_key)) not in (None, "")
-                }
-                if conversation_ids:
-                    break
-            if len(conversation_ids) > 1:
+                    if (value := _path_value(record.model_dump(mode="json"), selected))
+                    not in (None, "")
+                ]
+                if any(isinstance(value, dict | list) for value in join_values):
+                    errors.append(
+                        ImportFailure(
+                            line=len(errors) + 1,
+                            external_id=trace_id,
+                            error=(
+                                f"Trace '{trace_id}' has a non-scalar value at "
+                                f"join_on path '{selected}'"
+                            ),
+                        )
+                    )
+                    continue
+                conversation_ids = {str(value) for value in join_values}
+            else:
+                conversation_ids: set[str] = set()
+                for conversation_key in _CONVERSATION_KEYS:
+                    conversation_ids = {
+                        str(value)
+                        for record in records
+                        if (value := _attribute(record, conversation_key))
+                        not in (None, "")
+                    }
+                    if conversation_ids:
+                        break
+            if not conversation_ids and selected is not None:
                 errors.append(
                     ImportFailure(
                         line=len(errors) + 1,
                         external_id=trace_id,
                         error=(
-                            f"Trace '{trace_id}' contains conflicting conversation ids"
+                            f"Trace '{trace_id}' has no value at join_on path "
+                            f"'{selected}'"
                         ),
+                    )
+                )
+                continue
+            if len(conversation_ids) > 1:
+                errors.append(
+                    ImportFailure(
+                        line=len(errors) + 1,
+                        external_id=trace_id,
+                        error=(f"Trace '{trace_id}' contains conflicting join values"),
                     )
                 )
                 continue
@@ -1391,6 +1510,7 @@ class OTLPJSONImporter:
                         source_instance,
                         fallback_sources[(source_instance, source_id)],
                         file_framework,
+                        selected if isinstance(selected, str) else None,
                     )
                 )
             except InvalidImport as exc:

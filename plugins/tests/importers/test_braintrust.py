@@ -249,6 +249,43 @@ def test_groups_multiple_root_traces_into_one_session() -> None:
     ]
 
 
+def test_groups_traces_by_json_pointer() -> None:
+    """Group traces by a scalar selected from each Braintrust trace root."""
+    first = event(
+        event_id="event-1",
+        span_id="root-1",
+        root_span_id="root-1",
+        name="turn-1",
+        span_type="task",
+        parents=[],
+        input_="first",
+        output="one",
+        start=1_785_000_000.0,
+        metadata={"case/id": "case-42"},
+    )
+    second = event(
+        event_id="event-2",
+        span_id="root-2",
+        root_span_id="root-2",
+        name="turn-2",
+        span_type="task",
+        parents=[],
+        input_="second",
+        output="two",
+        start=1_785_000_001.0,
+        metadata={"case/id": "case-42"},
+    )
+
+    [session] = sessions(
+        b"\n".join(json.dumps(row).encode() for row in (second, first)),
+        {**params(), "join_on": "/metadata/case~1id"},
+    )
+
+    assert session.external_id == "project-1:case-42"
+    assert session.metadata["braintrust.trace_ids"] == ["root-1", "root-2"]
+    assert session.metadata["braintrust.join_on"] == "/metadata/case~1id"
+
+
 def test_accepts_flat_ui_export_as_partial() -> None:
     """Accept Braintrust UI JSON with filename-based project identity."""
     rows = [
