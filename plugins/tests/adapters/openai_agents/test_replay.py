@@ -21,6 +21,11 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 import pytest
+from adapters.openai_agents.replay import (
+    ToolPolicyError,
+    ToolPolicyMissError,
+    prepare_replay,
+)
 from agents import (
     Agent,
     FunctionTool,
@@ -34,11 +39,6 @@ from agents import (
 )
 from agents.run_config import CallModelData, ModelInputData
 
-from adapters.openai_agents.replay import (
-    ToolPolicyError,
-    ToolPolicyMissError,
-    prepare_replay,
-)
 from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
