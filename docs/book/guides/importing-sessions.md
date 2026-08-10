@@ -45,7 +45,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `system_prompt_selector` | string or null | RFC 6901 JSON Pointer selecting the system prompt inside `inputs`. |
 | `reasoning` | string or null | Visible reasoning text when the source exports it. |
 | `inputs`, `outputs` | any JSON value | Complete source payloads. Importers preserve message history, tool arguments, multimodal parts, and provider-specific content here. |
-| `requested_model`, `model`, `provider` | string or null | Requested model, served model, and model provider. |
+| `requested_model`, `model`, `model_provider` | string or null | Requested model, served model, and model provider. |
 | `tokens` | object or null | Input, output, cached input, and reasoning token counts when reported. |
 | `cost` | decimal or null | Recorded or estimated call cost. |
 | `model_params` | object or null | Model request parameters. |
@@ -93,7 +93,7 @@ The formatted object below represents one JSONL record. Serialize it onto one li
       "inputs": [{"role": "system", "content": "Answer in one sentence."}, {"role": "user", "content": "What is the weather in Delft?"}],
       "outputs": [{"role": "assistant", "content": "Delft is rainy and 18 C."}],
       "model": "claude-haiku-4-5-20251001",
-      "provider": "anthropic",
+      "model_provider": "anthropic",
       "tokens": {"input_tokens": 24, "output_tokens": 11, "cached_input_tokens": 0, "reasoning_tokens": 0},
       "attributes": {},
       "metadata": {}
@@ -116,33 +116,74 @@ kitaru session import sessions.jsonl \
   --wait
 ```
 
-Use `--tag` with `--wait` to tag every created session. Use `--params` for provider-specific grouping and source settings.
+Use `--tag` with `--wait` to tag every created session. Use `--join-on` to group provider traces by a source value. Use `--params` for other provider-specific settings.
 
 ## Join provider traces into sessions
 
 Providers often record one conversation turn as one trace. Importers group related traces into one Kitaru session, then order the traces by start time with a stable trace-ID tie-breaker.
 
-Default grouping uses the provider's native conversation or session identifier. When that identifier is absent, each trace becomes one session. Langfuse and LangSmith also accept explicit selectors for internal metadata.
+Default grouping uses the provider's native conversation or session identifier. When that identifier is absent, each trace becomes one session. Use `--join-on` when the export carries the shared session identity in another field.
 
-For Langfuse, select a JSON object and a key inside it:
+The option takes an [RFC 6901 JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901.html) that selects one scalar value from each source trace:
 
 ```bash
 kitaru session import langfuse-observations.jsonl \
   --importer kitaru/langfuse@latest \
   --agent customer-service@latest \
-  --params '{"join_path":"/metadata/customer","join_key":"case_id"}' \
+  --join-on '/metadata/customer/case_id' \
   --wait
 ```
 
-The example reads `case_id` from the object at `/metadata/customer`. Five Langfuse traces with the same value become five ordered turns in one Kitaru session. JSON Pointer escaping follows RFC 6901: `~1` represents `/` and `~0` represents `~`.
+The example reads the scalar at `/metadata/customer/case_id`. Five traces with the value `case-42` become five ordered turns in the same Kitaru session. Traces with another value form another session.
 
-You can provide the complete dotted path or JSON Pointer with `join_on` instead:
+Escape source keys according to RFC 6901. Use `~1` for `/` and `~0` for `~`. For example, `/metadata/customer~1case~0id` selects the key `customer/case~id` inside `metadata`.
 
-```json
-{"join_on": "/metadata/customer/case_id"}
+The pointer root depends on the importer:
+
+| Importer | Pointer root | Example |
+|---|---|---|
+| Braintrust | Each raw trace-root record | `/metadata/customer~1case_id` |
+| Langfuse | Observation records belonging to one trace; every selected value must agree | `/metadata/customer/case_id` |
+| LangSmith | Each raw trace-root run | `/extra/metadata/thread_id` |
+| OpenTelemetry | Each normalized span, with decoded `attributes` and `resource_attributes` objects | `/attributes/gen_ai.conversation.id` |
+
+The selected value must be a non-empty string, number, or boolean. A missing, conflicting, object, or array value produces an isolated failure for that trace. Kitaru does not silently place the trace into a fallback session. Imported metadata records explicit grouping provenance under `braintrust.join_on`, `langfuse.join_paths`, `langsmith.join_paths`, or `otlp.join_on`.
+
+### SDK and REST
+
+The CLI validates `--join-on` and adds it to the importer parameter object. SDK callers pass the same `join_on` parameter directly:
+
+```python
+from kitaru.api_models.v1.imports import ImportCreateRequest
+
+job = await client.imports.create(
+    ImportCreateRequest(
+        importer="kitaru/langfuse",
+        version=1,
+        agent_id=agent_id,
+        agent_version_id=agent_version_id,
+        payload_blob_id=blob_id,
+        params={"join_on": "/metadata/customer/case_id"},
+    )
+)
 ```
 
-An explicit selector must resolve to exactly one non-empty value per source trace. A trace with a missing or conflicting value becomes an import failure. Kitaru does not silently split it into another session. Imported session metadata records the selector under `langfuse.join_paths` or `langsmith.join_paths`.
+The REST request uses the same structure:
+
+```json
+{
+  "importer": "kitaru/langfuse",
+  "version": 1,
+  "agent_id": "00000000-0000-0000-0000-000000000000",
+  "agent_version_id": "00000000-0000-0000-0000-000000000001",
+  "payload_blob_id": "00000000-0000-0000-0000-000000000002",
+  "params": {"join_on": "/metadata/customer/case_id"}
+}
+```
+
+Send this object to `POST /v1/imports`. The server stores `params` on the import task, the worker includes them in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`.
+
+Existing integrations can continue to send `params.join_on` as a dotted path. The explicit CLI option accepts JSON Pointer syntax only. Langfuse also retains its older `join_path` plus `join_key` parameters for compatibility, but new integrations should use `join_on`.
 
 ## What provider importers normalize
 
