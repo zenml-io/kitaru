@@ -32,7 +32,7 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
-from kitaru.server.domain.names import Name
+from kitaru.server.domain.names import NamespacedName
 
 
 class ReplayConfigNotFound(NotFoundError):
@@ -71,7 +71,7 @@ class ReplayOverride(FrozenModel):
 class EvaluatorConfig(FrozenModel):
     """Evaluator config."""
 
-    evaluator: Name
+    evaluator: NamespacedName
     version: int
     params: dict[str, Any] = Field(default_factory=dict)
     evaluator_version_id: uuid.UUID
