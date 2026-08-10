@@ -1,0 +1,25 @@
+Kitaru workers for pool "{{ .Values.pool.name }}" have been deployed against:
+
+  {{ .Values.kitaru.serverURL }}
+
+{{- if .Values.keda.enabled }}
+
+Replica count is managed by KEDA. It scales the deployment between {{ .Values.keda.minReplicaCount }} and {{ .Values.keda.maxReplicaCount }} replicas from the pool's pending task count.
+
+IMPORTANT: keda.enabled is true, but this chart does not install KEDA itself. Make sure KEDA is already installed in this cluster, or the ScaledObject below has nothing to drive it:
+
+  https://keda.sh/docs/latest/deploy/
+
+You can check the ScaledObject's status with:
+
+  kubectl get scaledobject --namespace {{ .Release.Namespace }} {{ include "kitaru-worker.fullname" . }}
+
+{{- else }}
+
+Running a fixed {{ .Values.replicaCount }} worker replica(s). Set keda.enabled to true to scale replicas automatically from the pool's pending task count instead.
+
+{{- end }}
+
+You can check the pool's stats directly with:
+
+  curl -H "Authorization: Bearer <api-key>" {{ .Values.kitaru.serverURL }}/v1/worker-pools/{{ .Values.pool.name }}/stats

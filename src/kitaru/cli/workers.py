@@ -28,6 +28,11 @@ from pydantic import ValidationError
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerListParams, WorkerScope
+from kitaru.api_models.v1.worker_pool import (
+    WorkerPoolCreateRequest,
+    WorkerPoolListParams,
+    WorkerPoolUpdateRequest,
+)
 from kitaru.cli.config import ResolvedTarget
 from kitaru.cli.output import (
     CLIError,
@@ -89,6 +94,7 @@ def load_worker_runtime() -> tuple[type[Any], type[Any]]:
 def build_worker_config(
     *,
     name: str | None = None,
+    pool: str | None = None,
     kinds: list[TaskKind] | None = None,
     selectors: list[str] | None = None,
     job_id: uuid.UUID | None = None,
@@ -121,6 +127,7 @@ def build_worker_config(
     updates: dict[str, Any] = {"scope": scope}
     explicit = {
         "name": name,
+        "pool": pool,
         "concurrency": concurrency,
         "claim_batch_size": claim_batch_size,
         "poll_interval": poll_interval,
@@ -316,6 +323,7 @@ def _worker_summary(config: Any) -> dict[str, Any]:
     """Return a non-secret lifecycle projection of worker configuration."""
     return {
         "name": config.name,
+        "pool": config.pool,
         "kinds": (
             [kind.value for kind in config.scope.kinds]
             if config.scope.kinds is not None
@@ -394,3 +402,132 @@ def _worker_item(worker: Any) -> dict[str, Any]:
     item = worker.model_dump(mode="json")
     item["status"] = "live" if worker.live else "stale"
     return item
+
+
+def _build_worker_pool_scope(
+    kinds: list[TaskKind] | None, selectors: list[str] | None
+) -> WorkerScope:
+    """Build a worker pool scope from CLI kinds and selector tokens."""
+    return WorkerScope(
+        kinds=kinds,
+        selectors=_parse_selectors(selectors) if selectors is not None else None,
+    )
+
+
+async def create_worker_pool(
+    client: Any,
+    *,
+    name: str,
+    kinds: list[TaskKind] | None,
+    selectors: list[str] | None,
+) -> CommandResult:
+    """Create a worker pool."""
+    created = await client.worker_pools.create(
+        WorkerPoolCreateRequest(
+            name=name, scope=_build_worker_pool_scope(kinds, selectors)
+        )
+    )
+    return CommandResult(item=created.model_dump(mode="json"))
+
+
+async def list_worker_pools(
+    client: Any,
+    *,
+    size: int,
+    cursor: str | None,
+    sort: str,
+    filter: str | None,
+) -> CommandResult:
+    """List one server page of worker pools."""
+    params = build_list_params(
+        WorkerPoolListParams,
+        size=size,
+        cursor=cursor,
+        sort=sort,
+        filter=filter,
+    )
+    page = await client.worker_pools.list(params)
+    return CommandResult(
+        items=[item.model_dump(mode="json") for item in page.items],
+        page={
+            "limit": size,
+            "next_cursor": page.next_cursor,
+            "truncated": page.next_cursor is not None,
+        },
+    )
+
+
+async def _resolve_worker_pool(client: Any, reference: str) -> Any:
+    """Resolve a worker pool by exact UUID or one bounded exact-name lookup."""
+    normalized = reference.strip()
+    if not normalized:
+        raise CLIError("invalid_arguments", "Worker pool reference cannot be blank.")
+    try:
+        pool_id = uuid.UUID(normalized)
+    except ValueError:
+        pool_id = None
+    if pool_id is not None:
+        return await client.worker_pools.get(pool_id)
+
+    params = WorkerPoolListParams(
+        size=2,
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=normalized),
+    )
+    page = await client.worker_pools.list(params)
+    matches = [pool for pool in page.items if pool.name == normalized]
+    if not matches:
+        raise CLIError("not_found", f"Worker pool {normalized!r} was not found.")
+    if len(matches) > 1:
+        raise CLIError(
+            "conflict",
+            f"More than one worker pool has the exact name {normalized!r}.",
+            details={"ids": [str(pool.id) for pool in matches[:2]]},
+        )
+    return matches[0]
+
+
+async def get_worker_pool(client: Any, reference: str) -> CommandResult:
+    """Get one worker pool by exact UUID or case-sensitive name."""
+    worker_pool = await _resolve_worker_pool(client, reference)
+    return CommandResult(item=worker_pool.model_dump(mode="json"))
+
+
+async def get_worker_pool_stats(client: Any, reference: str) -> CommandResult:
+    """Get one worker pool's queue depth and live worker count."""
+    stats = await client.worker_pools.stats(reference)
+    return CommandResult(item=stats.model_dump(mode="json"))
+
+
+async def update_worker_pool(
+    client: Any,
+    reference: str,
+    *,
+    name: str | None,
+    kinds: list[TaskKind] | None,
+    selectors: list[str] | None,
+) -> CommandResult:
+    """Update only explicitly selected worker pool fields."""
+    fields: dict[str, Any] = {}
+    if name is not None:
+        fields["name"] = name
+    if kinds is not None or selectors is not None:
+        fields["scope"] = _build_worker_pool_scope(kinds, selectors)
+    if not fields:
+        raise CLIError("invalid_arguments", "Select at least one worker pool update.")
+
+    worker_pool = await _resolve_worker_pool(client, reference)
+    updated = await client.worker_pools.update(
+        worker_pool.id, WorkerPoolUpdateRequest(**fields)
+    )
+    return CommandResult(item=updated.model_dump(mode="json"))
+
+
+async def delete_worker_pool(
+    client: Any, reference: str, *, force: bool
+) -> CommandResult:
+    """Delete one worker pool."""
+    if not force:
+        raise CLIError("invalid_arguments", "Deleting a worker pool requires --force.")
+    worker_pool = await _resolve_worker_pool(client, reference)
+    await client.worker_pools.delete(worker_pool.id)
+    return CommandResult(item={"id": str(worker_pool.id), "deleted": True})

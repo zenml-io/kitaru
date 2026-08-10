@@ -32,6 +32,7 @@ from conftest import (
     FakeSecretRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    FakeWorkerPoolRepository,
     FakeWorkerRepository,
     asgi_api_client,
     create_agent_task,
@@ -67,6 +68,8 @@ from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 
 RUNTIME = WorkerRuntime(platform="bare")
+RETENTION_SECONDS = 86400
+SWEEP_BATCH_LIMIT = 100
 
 
 @pytest.fixture
@@ -99,6 +102,12 @@ def worker_repository() -> FakeWorkerRepository:
 
 
 @pytest.fixture
+def worker_pool_repository() -> FakeWorkerPoolRepository:
+    """Provide the fake worker pool repository backing the app."""
+    return FakeWorkerPoolRepository()
+
+
+@pytest.fixture
 def task_repository() -> FakeTaskRepository:
     """Provide the fake task repository backing the app."""
     return FakeTaskRepository(sessions=FakeSessionRepository())
@@ -119,6 +128,7 @@ async def account_token(auth_service: AuthService, account: Account) -> str:
 @pytest.fixture
 async def api_client(
     worker_repository: FakeWorkerRepository,
+    worker_pool_repository: FakeWorkerPoolRepository,
     task_repository: FakeTaskRepository,
     job_repository: FakeJobRepository,
     auth_service: AuthService,
@@ -126,7 +136,12 @@ async def api_client(
 ) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client authenticated as the fixture account by default."""
     app = create_app(local_settings())
-    service = WorkerService(repository=worker_repository)
+    service = WorkerService(
+        repository=worker_repository,
+        worker_pool_repository=worker_pool_repository,
+        retention_seconds=RETENTION_SECONDS,
+        sweep_batch_limit=SWEEP_BATCH_LIMIT,
+    )
     agents = FakeAgentRepository()
     transitions = TaskTransitions(
         task_repository=task_repository,
@@ -145,6 +160,7 @@ async def api_client(
     task_service = TaskService(
         repository=task_repository,
         worker_repository=worker_repository,
+        worker_pool_repository=worker_pool_repository,
         session_repository=FakeSessionRepository(),
         job_repository=job_repository,
         spec_builder=spec_builder,

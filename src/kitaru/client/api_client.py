@@ -61,6 +61,7 @@ from kitaru.client.resources.session_runs import SessionRunsResource
 from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
+from kitaru.client.resources.worker_pools import WorkerPoolsResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
 
@@ -165,6 +166,7 @@ class KitaruAPIClient:
         self.sessions = SessionsResource(self)
         self.tags = TagsResource(self)
         self.tasks = TasksResource(self)
+        self.worker_pools = WorkerPoolsResource(self)
         self.workers = WorkersResource(self)
 
     def with_token(self, token: str) -> "KitaruAPIClient":

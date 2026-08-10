@@ -61,11 +61,13 @@ async def register_worker(
 ) -> WorkerRegistrationResponse:
     """Register a worker, upserting by name.
 
-    Re-registration refreshes the scope, runtime, and metadata, stamps
-    last_seen_at, and mints a fresh token, keeping the id and created time.
-    Re-registering with a fresh token is how a worker renews before its
-    current token expires. Clients observe HTTP 200 on both the first
-    registration and every re-registration, and 422 on invalid input.
+    Re-registration refreshes the pool, scope, runtime, and metadata,
+    stamps last_seen_at, and mints a fresh token, keeping the id and
+    created time. Re-registering with a fresh token is how a worker
+    renews before its current token expires. Clients observe HTTP 200 on
+    both the first registration and every re-registration, 404 when the
+    pool does not resolve, and 422 when both pool and scope are set or on
+    other invalid input.
 
     Args:
         body: Worker create request.
@@ -81,7 +83,9 @@ async def register_worker(
         name=body.name,
         scope=body.scope,
         runtime=body.runtime,
+        concurrency=body.concurrency,
         metadata=body.metadata,
+        pool=body.pool,
         actor=actor,
     )
     issued = auth_service.issue_worker_token(

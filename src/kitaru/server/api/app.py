@@ -68,6 +68,7 @@ from kitaru.server.adapters.rest.routers import (
     sessions,
     tags,
     tasks,
+    worker_pools,
     workers,
 )
 from kitaru.server.adapters.rest.routers.auth import TokenGrantError
@@ -356,5 +357,8 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
     app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
     app.include_router(tasks.router, prefix="/v1/tasks", tags=["tasks"])
+    app.include_router(
+        worker_pools.router, prefix="/v1/worker-pools", tags=["worker-pools"]
+    )
     app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
     return app

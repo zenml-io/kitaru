@@ -17,10 +17,11 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import CursorResult, delete, func, select, text, update
 from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.orm.task import IN_FLIGHT_PREDICATE, TaskORM
 from kitaru.server.adapters.db.orm.worker import (
     WORKER_NAME_UNIQUE_CONSTRAINT,
     WorkerORM,
@@ -29,7 +30,7 @@ from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.domain.worker import LiveWorkerStats, Worker, WorkerNotFound
 
 WORKER_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": WorkerORM.name,
@@ -74,8 +75,10 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         statement = statement.on_conflict_do_update(
             constraint=WORKER_NAME_UNIQUE_CONSTRAINT,
             set_={
+                "pool_id": statement.excluded.pool_id,
                 "scope": statement.excluded.scope,
                 "runtime": statement.excluded.runtime,
+                "concurrency": statement.excluded.concurrency,
                 "last_seen_at": statement.excluded.last_seen_at,
                 "metadata": statement.excluded["metadata"],
                 "updated": now,
@@ -156,6 +159,24 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         )
         return [row.to_domain() for row in rows], next_cursor
 
+    async def count_live_by_pool(
+        self, pool_id: uuid.UUID, cutoff: datetime
+    ) -> LiveWorkerStats:
+        """Count the pool's live workers and sum their concurrency.
+
+        Args:
+            pool_id: Id of the worker pool.
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Live worker count and summed concurrency in the pool.
+        """
+        statement = select(
+            func.count(WorkerORM.id), func.coalesce(func.sum(WorkerORM.concurrency), 0)
+        ).where(WorkerORM.pool_id == pool_id, WorkerORM.last_seen_at >= cutoff)
+        count, capacity = (await self._session.execute(statement)).one()
+        return LiveWorkerStats(count=count, capacity=capacity)
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 
@@ -166,3 +187,31 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
             WorkerNotFound: No worker has this id.
         """
         await self._delete_row(worker_id)
+
+    async def delete_stale(self, cutoff: datetime, limit: int) -> int:
+        """Delete workers last seen before a cutoff with no in-flight task.
+
+        The staleness check and the delete run as one statement, so a
+        worker claimed between the check and the delete is never removed.
+        Terminal tasks referencing a pruned worker keep their rows and lose
+        the reference through the foreign key's SET NULL.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of workers to delete.
+
+        Returns:
+            Number of deleted workers.
+        """
+        in_flight = select(TaskORM.id).where(
+            TaskORM.worker_id == WorkerORM.id, text(IN_FLIGHT_PREDICATE)
+        )
+        stale_ids = (
+            select(WorkerORM.id)
+            .where(WorkerORM.last_seen_at < cutoff, ~in_flight.exists())
+            .order_by(WorkerORM.id.asc())
+            .limit(limit)
+        )
+        statement = delete(WorkerORM).where(WorkerORM.id.in_(stale_ids))
+        result = await self._session.execute(statement)
+        return result.rowcount if isinstance(result, CursorResult) else 0

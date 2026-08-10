@@ -14,9 +14,12 @@
 """Worker use cases."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.server.application.interfaces.worker_pool_repository import (
+    WorkerPoolRepository,
+)
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.worker import WorkerFilter
@@ -26,20 +29,35 @@ from kitaru.server.domain.worker import Worker, WorkerAccessDenied
 class WorkerService:
     """Worker use cases."""
 
-    def __init__(self, repository: WorkerRepository) -> None:
+    def __init__(
+        self,
+        repository: WorkerRepository,
+        worker_pool_repository: WorkerPoolRepository,
+        retention_seconds: int,
+        sweep_batch_limit: int,
+    ) -> None:
         """Initialize the service.
 
         Args:
             repository: Worker repository.
+            worker_pool_repository: Worker pool repository.
+            retention_seconds: Retention window in seconds before a dead
+                worker is pruned.
+            sweep_batch_limit: Maximum workers pruned per sweep tick.
         """
         self._repository = repository
+        self._worker_pools = worker_pool_repository
+        self._retention_seconds = retention_seconds
+        self._sweep_batch_limit = sweep_batch_limit
 
     async def register_worker(
         self,
         name: str,
         scope: WorkerScope,
         runtime: WorkerRuntime,
+        concurrency: int,
         metadata: dict[str, str],
+        pool: str | None,
         actor: AuthContext,
     ) -> Worker:
         """Register a worker, refreshing an existing row with the same name.
@@ -48,17 +66,27 @@ class WorkerService:
             name: Worker name.
             scope: Claim scope the worker reports.
             runtime: Runtime the worker reports.
+            concurrency: Concurrent task capacity the worker reports.
             metadata: Arbitrary metadata.
+            pool: Pool the worker joins by name, None for an ad-hoc scope.
             actor: Caller context.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this name.
 
         Returns:
             Stored worker.
         """
+        pool_id = None
+        if pool is not None:
+            pool_id = (await self._worker_pools.get_by_name(pool)).id
         worker = Worker(
             owner_id=actor.account.id,
             name=name,
+            pool_id=pool_id,
             scope=scope,
             runtime=runtime,
+            concurrency=concurrency,
             metadata=metadata,
             last_seen_at=datetime.now(UTC),
         )
@@ -115,3 +143,15 @@ class WorkerService:
         """
         _ = actor
         await self._repository.delete(worker_id)
+
+    async def prune_dead_workers(self, now: datetime) -> int:
+        """Delete workers past the retention window with no in-flight task.
+
+        Args:
+            now: Current time.
+
+        Returns:
+            Number of deleted workers.
+        """
+        cutoff = now - timedelta(seconds=self._retention_seconds)
+        return await self._repository.delete_stale(cutoff, self._sweep_batch_limit)

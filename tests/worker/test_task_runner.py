@@ -41,6 +41,7 @@ from kitaru.client.exceptions import (
 from kitaru.worker import task_runner as task_runner_module
 from kitaru.worker.blob_cache import BlobCache
 from kitaru.worker.context import ExecutionContext
+from kitaru.worker.inflight import InflightTasks
 from kitaru.worker.process import ProcessResult, TaskProcess
 from kitaru.worker.task_runner import MAX_RESULT_BYTES, TaskRunner
 
@@ -98,7 +99,7 @@ async def test_exit_zero_without_a_result_file_completes_with_no_result(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(completed_task)
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -123,7 +124,7 @@ async def test_exit_zero_with_a_result_file_completes_with_the_result(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(completed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -147,7 +148,7 @@ async def test_oversized_result_fails_the_task(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(failed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -171,7 +172,7 @@ async def test_invalid_json_result_fails_the_task(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(failed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -195,7 +196,7 @@ async def test_nonzero_exit_fails_with_code_and_tail(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(failed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -221,7 +222,7 @@ async def test_nonzero_exit_attaches_a_readable_result_as_diagnostic(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(failed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -244,7 +245,7 @@ async def test_nonzero_exit_ignores_an_unreadable_result_file(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(failed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -267,10 +268,37 @@ async def test_killed_with_cancel_event_set_cancels_the_task(
 
     canceled = asyncio.Event()
     canceled.set()
-    await TaskRunner(_ctx(tmp_path, client)).execute(make_claimed(task, spec), canceled)
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
+        make_claimed(task, spec), canceled
+    )
 
     _, request = client.tasks.update_calls[-1]
     assert request.status == TaskStatus.CANCELED
+    assert request.error is None
+
+
+async def test_killed_with_a_released_task_reports_the_task_as_pending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A kill following a registry release reports the task as pending."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(None))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    spec = make_agent_spec(task.id)
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    released_task = running_task.model_copy(update={"status": TaskStatus.PENDING})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(released_task)
+
+    inflight = InflightTasks()
+    canceled = inflight.register(task.id)
+    inflight.release_all()
+    await TaskRunner(_ctx(tmp_path, client), inflight).execute(
+        make_claimed(task, spec), canceled
+    )
+
+    _, request = client.tasks.update_calls[-1]
+    assert request.status == TaskStatus.PENDING
     assert request.error is None
 
 
@@ -287,7 +315,7 @@ async def test_killed_without_cancel_event_times_out(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(timed_out_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -312,7 +340,7 @@ async def test_exit_before_kill_wins_over_a_requested_cancel(
 
     canceled = asyncio.Event()
     canceled.set()
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), canceled
     )
 
@@ -348,7 +376,7 @@ async def test_execute_scopes_client_calls_and_process_env_to_the_claimed_token(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(completed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec, token="claim-token-xyz"), asyncio.Event()
     )
 
@@ -369,7 +397,7 @@ async def test_prepare_failure_fails_the_task_with_the_label_and_exception(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(failed_task)
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -397,7 +425,7 @@ async def test_running_transition_conflict_abandons_without_running_the_process(
     spec = make_agent_spec(task.id)
     client.tasks.update_responses.append(APIError(409, "stale attempt"))
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -415,7 +443,7 @@ async def test_running_transition_hard_failure_abandons_the_attempt(
     spec = make_agent_spec(task.id)
     client.tasks.update_responses.append(httpx.ConnectError("down"))
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -449,7 +477,7 @@ async def test_running_transition_token_rejection_abandons_without_running_the_p
     spec = make_agent_spec(task.id)
     client.tasks.update_responses.append(error)
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -474,7 +502,7 @@ async def test_completion_conflict_with_reclaimed_attempt_drops_the_transition(
     )
     client.tasks.get_responses.append(reclaimed_task)
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -500,7 +528,7 @@ async def test_completion_conflict_agent_without_result_session(
         running_task.model_copy(update={"status": TaskStatus.FAILED})
     )
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -531,7 +559,7 @@ async def test_completion_conflict_agent_with_incomplete_session(
         running_task.model_copy(update={"status": TaskStatus.FAILED})
     )
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -556,7 +584,7 @@ async def test_completion_conflict_non_agent_missing_result(
         running_task.model_copy(update={"status": TaskStatus.FAILED})
     )
 
-    await TaskRunner(_ctx(tmp_path, client)).execute(
+    await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -579,7 +607,7 @@ async def test_completion_conflict_transport_failure_on_the_refetch_abandons(
     client.tasks.update_responses.append(APIError(409, "conflict"))
     client.tasks.get_responses.append(httpx.ConnectError("down"))
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -607,7 +635,7 @@ async def test_completion_conflict_token_rejection_on_the_refetch_abandons(
     client.tasks.update_responses.append(APIError(409, "conflict"))
     client.tasks.get_responses.append(error)
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -627,7 +655,7 @@ async def test_completion_hard_failure_returns_the_running_task(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(APIError(500, "boom"))
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 
@@ -654,7 +682,7 @@ async def test_completion_token_rejection_returns_the_running_task(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(error)
 
-    result = await TaskRunner(_ctx(tmp_path, client)).execute(
+    result = await TaskRunner(_ctx(tmp_path, client), InflightTasks()).execute(
         make_claimed(task, spec), asyncio.Event()
     )
 

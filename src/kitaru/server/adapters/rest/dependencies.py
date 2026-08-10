@@ -86,6 +86,9 @@ from kitaru.server.adapters.db.repositories.session_repository import (
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
 from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
+from kitaru.server.adapters.db.repositories.worker_pool_repository import (
+    SQLWorkerPoolRepository,
+)
 from kitaru.server.adapters.db.repositories.worker_repository import (
     SQLWorkerRepository,
 )
@@ -141,6 +144,7 @@ from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
+from kitaru.server.application.services.worker_pool_service import WorkerPoolService
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
@@ -524,6 +528,7 @@ def get_task_service(
     return TaskService(
         repository=SQLTaskRepository(session),
         worker_repository=SQLWorkerRepository(session),
+        worker_pool_repository=SQLWorkerPoolRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
         spec_builder=spec_builder,
@@ -784,18 +789,46 @@ def get_tag_service(
     return TagService(repository=SQLTagRepository(session))
 
 
+def get_worker_pool_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> WorkerPoolService:
+    """Return a worker pool service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Worker pool service bound to the SQL repositories.
+    """
+    return WorkerPoolService(
+        repository=SQLWorkerPoolRepository(session),
+        task_repository=SQLTaskRepository(session),
+        worker_repository=SQLWorkerRepository(session),
+        liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
+
+
 def get_worker_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> WorkerService:
     """Return a worker service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
         Worker service bound to the SQL repository.
     """
-    return WorkerService(repository=SQLWorkerRepository(session))
+    return WorkerService(
+        repository=SQLWorkerRepository(session),
+        worker_pool_repository=SQLWorkerPoolRepository(session),
+        retention_seconds=settings.WORKER_RETENTION_SECONDS,
+        sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
+    )
 
 
 def get_auth_service(

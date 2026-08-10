@@ -18,7 +18,7 @@ from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.worker import WorkerFilter
-from kitaru.server.domain.worker import Worker
+from kitaru.server.domain.worker import LiveWorkerStats, Worker
 
 
 class WorkerRepository(Protocol):
@@ -74,6 +74,20 @@ class WorkerRepository(Protocol):
         """
         ...
 
+    async def count_live_by_pool(
+        self, pool_id: uuid.UUID, cutoff: datetime
+    ) -> LiveWorkerStats:
+        """Count the pool's live workers and sum their concurrency.
+
+        Args:
+            pool_id: Id of the worker pool.
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Live worker count and summed concurrency in the pool.
+        """
+        ...
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 
@@ -82,5 +96,20 @@ class WorkerRepository(Protocol):
 
         Raises:
             WorkerNotFound: No worker has this id.
+        """
+        ...
+
+    async def delete_stale(self, cutoff: datetime, limit: int) -> int:
+        """Delete workers last seen before a cutoff with no in-flight task.
+
+        Terminal tasks referencing a pruned worker keep their rows and lose
+        the reference through the foreign key's SET NULL.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of workers to delete.
+
+        Returns:
+            Number of deleted workers.
         """
         ...

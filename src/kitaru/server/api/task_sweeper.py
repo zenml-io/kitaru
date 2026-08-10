@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Background stale-task and cancel-propagation sweep loop."""
+"""Background stale-task, cancel-propagation, and dead-worker sweep loop."""
 
 import asyncio
 import contextlib
@@ -28,14 +28,17 @@ from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.rest.dependencies import (
     get_server_analytics,
     get_task_service,
+    get_worker_service,
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.task_service import TaskService
+from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
 
 SweepUnit = Callable[[TaskService], Awaitable[None]]
+WorkerSweepUnit = Callable[[WorkerService], Awaitable[int]]
 
 
 async def _run_unit(
@@ -62,6 +65,35 @@ async def _run_unit(
         try:
             tracker = get_server_analytics(session, analytics)
             await unit(get_task_service(session, database.engine, settings, tracker))
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            if isinstance(exc, DBAPIError) and is_lock_not_available(exc):
+                logger.debug("Sweep unit %s skipped a contended row.", label)
+            else:
+                logger.warning("Sweep unit %s failed: %s", label, exc)
+
+
+async def _run_worker_unit(
+    database: DatabaseService,
+    settings: APISettings,
+    unit: WorkerSweepUnit,
+    label: str,
+) -> None:
+    """Run one worker sweep unit in its own transaction and commit it.
+
+    Builds the worker service the same way a request does. A failure rolls
+    the unit back and leaves the remaining units to run.
+
+    Args:
+        database: Database service the unit opens a session against.
+        settings: API settings for this process.
+        unit: Work to run against the service.
+        label: Name of the unit for the failure log.
+    """
+    async for session in database.get_async_session():
+        try:
+            await unit(get_worker_service(session, settings))
             await session.commit()
         except Exception as exc:
             await session.rollback()
@@ -105,10 +137,11 @@ async def sweep_once(
     settings: APISettings,
     analytics: AnalyticsClient,
 ) -> None:
-    """Propagate pending job cancels and rescue stale tasks, one item per transaction.
+    """Propagate pending job cancels, rescue stale tasks, and prune dead workers.
 
-    A candidate another replica already holds is skipped and picked up on a
-    later tick. A failing item logs and leaves the remaining items to run.
+    Each unit runs in its own transaction. A candidate another replica
+    already holds is skipped and picked up on a later tick. A failing unit
+    logs and leaves the remaining units to run.
 
     Args:
         database: Database service the sweep opens sessions against.
@@ -138,6 +171,12 @@ async def sweep_once(
             partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
             f"stale task {task_id}",
         )
+    await _run_worker_unit(
+        database,
+        settings,
+        partial(WorkerService.prune_dead_workers, now=now),
+        "dead worker prune",
+    )
 
 
 async def _run_sweep_loop(

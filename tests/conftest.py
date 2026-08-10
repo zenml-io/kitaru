@@ -101,6 +101,7 @@ from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.models.worker_pool import WorkerPoolFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -219,10 +220,17 @@ from kitaru.server.domain.task import (
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
+    QueueStats,
     Task,
     TaskNotFound,
 )
-from kitaru.server.domain.worker import Worker, WorkerNotFound
+from kitaru.server.domain.worker import LiveWorkerStats, Worker, WorkerNotFound
+from kitaru.server.domain.worker_pool import (
+    DuplicateWorkerPoolName,
+    WorkerPool,
+    WorkerPoolInUse,
+    WorkerPoolNotFound,
+)
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -3040,9 +3048,15 @@ async def create_cohort_version(
 class FakeWorkerRepository:
     """In-memory worker repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tasks: Fake task repository, restricting the stale prune when a
+                task still references the worker.
+        """
         self._workers: dict[uuid.UUID, Worker] = {}
+        self._tasks = tasks
 
     async def register(self, worker: Worker) -> Worker:
         """Persist a worker, refreshing an existing row with the same name.
@@ -3057,7 +3071,12 @@ class FakeWorkerRepository:
             if stored.name == worker.name:
                 refreshed = stored.model_copy()
                 refreshed.refresh(
-                    worker.scope, worker.runtime, worker.metadata, worker.last_seen_at
+                    worker.pool_id,
+                    worker.scope,
+                    worker.runtime,
+                    worker.concurrency,
+                    worker.metadata,
+                    worker.last_seen_at,
                 )
                 refreshed = refreshed.model_copy(
                     update={"updated": _renewed_timestamp(stored.updated)}
@@ -3133,6 +3152,27 @@ class FakeWorkerRepository:
         page, next_cursor = _paginate_fake(workers, worker_filter)
         return [worker.model_copy() for worker in page], next_cursor
 
+    async def count_live_by_pool(
+        self, pool_id: uuid.UUID, cutoff: datetime
+    ) -> LiveWorkerStats:
+        """Count the pool's live workers and sum their concurrency.
+
+        Args:
+            pool_id: Id of the worker pool.
+            cutoff: Bound the last heartbeat must be at or after.
+
+        Returns:
+            Live worker count and summed concurrency in the pool.
+        """
+        live = [
+            worker
+            for worker in self._workers.values()
+            if worker.pool_id == pool_id and worker.last_seen_at >= cutoff
+        ]
+        return LiveWorkerStats(
+            count=len(live), capacity=sum(worker.concurrency for worker in live)
+        )
+
     async def delete(self, worker_id: uuid.UUID) -> None:
         """Delete a worker by id.
 
@@ -3146,13 +3186,46 @@ class FakeWorkerRepository:
             raise WorkerNotFound(worker_id)
         del self._workers[worker_id]
 
+    async def delete_stale(self, cutoff: datetime, limit: int) -> int:
+        """Delete workers last seen before a cutoff with no in-flight task.
+
+        Terminal tasks referencing a pruned worker keep their rows and lose
+        the reference through the foreign key's SET NULL.
+
+        Args:
+            cutoff: Bound the last heartbeat must be older than.
+            limit: Maximum number of workers to delete.
+
+        Returns:
+            Number of deleted workers.
+        """
+        referenced = (
+            {
+                task.worker_id
+                for task in self._tasks._tasks.values()
+                if task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            }
+            if self._tasks is not None
+            else set()
+        )
+        stale = sorted(
+            worker.id
+            for worker in self._workers.values()
+            if worker.last_seen_at < cutoff and worker.id not in referenced
+        )[:limit]
+        for worker_id in stale:
+            del self._workers[worker_id]
+        return len(stale)
+
 
 async def create_worker(
     repository: FakeWorkerRepository,
     owner_id: uuid.UUID,
     name: str = "worker-1",
+    pool_id: uuid.UUID | None = None,
     scope: WorkerScope | None = None,
     runtime: WorkerRuntime | None = None,
+    concurrency: int = 1,
     metadata: dict[str, str] | None = None,
     last_seen_at: datetime | None = None,
 ) -> Worker:
@@ -3162,8 +3235,10 @@ async def create_worker(
         repository: Fake worker repository.
         owner_id: Id of the owning account.
         name: Worker name.
+        pool_id: Pool the worker joined.
         scope: Claim scope the worker reports.
         runtime: Runtime the worker reports.
+        concurrency: Concurrent task capacity the worker reports.
         metadata: Arbitrary metadata.
         last_seen_at: Time of the worker's last heartbeat.
 
@@ -3174,12 +3249,177 @@ async def create_worker(
         Worker(
             owner_id=owner_id,
             name=name,
+            pool_id=pool_id,
             scope=scope if scope is not None else WorkerScope(),
             runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
+            concurrency=concurrency,
             metadata=metadata if metadata is not None else {},
             last_seen_at=last_seen_at
             if last_seen_at is not None
             else datetime.now(UTC),
+        )
+    )
+
+
+class FakeWorkerPoolRepository:
+    """In-memory worker pool repository."""
+
+    def __init__(self, worker_repository: FakeWorkerRepository | None = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            worker_repository: Worker repository, restricting the delete
+                when a worker references the pool.
+        """
+        self._worker_pools: dict[uuid.UUID, WorkerPool] = {}
+        self._worker_repository = worker_repository
+
+    def _check_duplicate_name(self, worker_pool: WorkerPool) -> None:
+        for other in self._worker_pools.values():
+            if other.id != worker_pool.id and other.name == worker_pool.name:
+                raise DuplicateWorkerPoolName(worker_pool.name)
+
+    async def create(self, worker_pool: WorkerPool) -> WorkerPool:
+        """Persist a new worker pool.
+
+        Args:
+            worker_pool: Worker pool to store.
+
+        Raises:
+            DuplicateWorkerPoolName: The worker pool name is already registered.
+
+        Returns:
+            Stored worker pool with timestamps set.
+        """
+        self._check_duplicate_name(worker_pool)
+        now = datetime.now(UTC)
+        stored = worker_pool.model_copy(update={"created": now, "updated": now})
+        self._worker_pools[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, worker_pool_id: uuid.UUID) -> WorkerPool:
+        """Load a worker pool by id.
+
+        Args:
+            worker_pool_id: Id of the worker pool.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this id.
+
+        Returns:
+            Stored worker pool.
+        """
+        worker_pool = self._worker_pools.get(worker_pool_id)
+        if worker_pool is None:
+            raise WorkerPoolNotFound(worker_pool_id)
+        return worker_pool.model_copy()
+
+    async def get_by_name(self, name: str) -> WorkerPool:
+        """Load a worker pool by name.
+
+        Args:
+            name: Worker pool name.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this name.
+
+        Returns:
+            Stored worker pool.
+        """
+        for worker_pool in self._worker_pools.values():
+            if worker_pool.name == name:
+                return worker_pool.model_copy()
+        raise WorkerPoolNotFound(name)
+
+    async def query(
+        self, worker_pool_filter: WorkerPoolFilter
+    ) -> tuple[list[WorkerPool], str | None]:
+        """Query worker pools matching a filter.
+
+        Args:
+            worker_pool_filter: Filter and pagination parameters.
+
+        Returns:
+            Page of matching worker pools and the next cursor.
+        """
+        worker_pools = list(self._worker_pools.values())
+        if worker_pool_filter.expression is not None:
+            worker_pools = [
+                worker_pool
+                for worker_pool in worker_pools
+                if _evaluate_filter_expression(
+                    worker_pool, worker_pool_filter.expression
+                )
+            ]
+        page, next_cursor = _paginate_fake(worker_pools, worker_pool_filter)
+        return [worker_pool.model_copy() for worker_pool in page], next_cursor
+
+    async def update(self, worker_pool: WorkerPool) -> WorkerPool:
+        """Persist changes to an existing worker pool.
+
+        Args:
+            worker_pool: Worker pool with modified fields.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this id.
+            DuplicateWorkerPoolName: The worker pool name is already registered.
+
+        Returns:
+            Stored worker pool with the updated timestamp renewed.
+        """
+        stored = self._worker_pools.get(worker_pool.id)
+        if stored is None:
+            raise WorkerPoolNotFound(worker_pool.id)
+        self._check_duplicate_name(worker_pool)
+        now = _renewed_timestamp(stored.updated)
+        updated = worker_pool.model_copy(
+            update={"created": stored.created, "updated": now}
+        )
+        self._worker_pools[worker_pool.id] = updated
+        return updated.model_copy()
+
+    async def delete(self, worker_pool_id: uuid.UUID) -> None:
+        """Delete a worker pool by id.
+
+        Args:
+            worker_pool_id: Id of the worker pool.
+
+        Raises:
+            WorkerPoolNotFound: No worker pool has this id.
+            WorkerPoolInUse: A worker references the worker pool.
+        """
+        if worker_pool_id not in self._worker_pools:
+            raise WorkerPoolNotFound(worker_pool_id)
+        if self._worker_repository is not None and any(
+            worker.pool_id == worker_pool_id
+            for worker in self._worker_repository._workers.values()
+        ):
+            raise WorkerPoolInUse(worker_pool_id)
+        del self._worker_pools[worker_pool_id]
+
+
+async def create_worker_pool(
+    repository: FakeWorkerPoolRepository,
+    owner_id: uuid.UUID,
+    name: str = "pool-1",
+    scope: WorkerScope | None = None,
+) -> WorkerPool:
+    """Store a worker pool in the fake repository.
+
+    Args:
+        repository: Fake worker pool repository.
+        owner_id: Id of the owning account.
+        name: Worker pool name.
+        scope: Tasks the pool's workers claim.
+
+    Returns:
+        Stored worker pool.
+    """
+    return await repository.create(
+        WorkerPool(
+            owner_id=owner_id,
+            name=name,
+            scope=scope if scope is not None else WorkerScope(),
         )
     )
 
@@ -5007,6 +5247,36 @@ class FakeTaskRepository:
             claimed.append(await self.update(claimed_task))
         return claimed
 
+    async def get_queue_stats(self, scope: WorkerScope) -> QueueStats:
+        """Count pending and in-flight tasks matching a scope.
+
+        Args:
+            scope: Claim scope narrowing the queue.
+
+        Returns:
+            Queue stats matching the scope.
+        """
+        pending = [
+            task
+            for task in self._tasks.values()
+            if task.status is TaskStatus.PENDING and self._matches_scope(task, scope)
+        ]
+        in_flight = sum(
+            1
+            for task in self._tasks.values()
+            if task.status in (TaskStatus.CLAIMED, TaskStatus.RUNNING)
+            and self._matches_scope(task, scope)
+        )
+        oldest_pending_created = min(
+            (task.created for task in pending if task.created is not None),
+            default=None,
+        )
+        return QueueStats(
+            pending=len(pending),
+            in_flight=in_flight,
+            oldest_pending_created=oldest_pending_created,
+        )
+
     async def claim_stale(self, task_id: uuid.UUID, cutoff: datetime) -> Task | None:
         """Lock one task by id if it is still in flight and older than a cutoff.
 
@@ -5380,6 +5650,7 @@ class TaskSubstrate(NamedTuple):
     plugins: FakePluginRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    worker_pools: FakeWorkerPoolRepository
     tasks: FakeTaskRepository
     jobs: FakeJobRepository
 
@@ -5397,6 +5668,7 @@ def _build_task_substrate() -> TaskSubstrate:
     plugins = FakePluginRepository(blob_repository=blobs)
     secrets = FakeSecretRepository()
     workers = FakeWorkerRepository()
+    worker_pools = FakeWorkerPoolRepository(worker_repository=workers)
     tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
     tasks.jobs = jobs
@@ -5408,6 +5680,7 @@ def _build_task_substrate() -> TaskSubstrate:
         plugins=plugins,
         secrets=secrets,
         workers=workers,
+        worker_pools=worker_pools,
         tasks=tasks,
         jobs=jobs,
     )
@@ -5427,6 +5700,7 @@ class JobAndTaskServices(NamedTuple):
     blobs: FakeBlobRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    worker_pools: FakeWorkerPoolRepository
 
 
 def build_job_and_task_services(
@@ -5462,6 +5736,7 @@ def build_job_and_task_services(
     task_service = TaskService(
         repository=substrate.tasks,
         worker_repository=substrate.workers,
+        worker_pool_repository=substrate.worker_pools,
         session_repository=substrate.sessions,
         job_repository=substrate.jobs,
         spec_builder=spec_builder,
@@ -5491,6 +5766,7 @@ def build_job_and_task_services(
         blobs=substrate.blobs,
         secrets=substrate.secrets,
         workers=substrate.workers,
+        worker_pools=substrate.worker_pools,
     )
 
 
@@ -5517,6 +5793,7 @@ class ReplayServices(NamedTuple):
     blobs: FakeBlobRepository
     secrets: FakeSecretRepository
     workers: FakeWorkerRepository
+    worker_pools: FakeWorkerPoolRepository
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
 
@@ -5545,6 +5822,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     plugins = substrate.plugins
     secrets = substrate.secrets
     workers = substrate.workers
+    worker_pools = substrate.worker_pools
     tasks = substrate.tasks
     jobs = substrate.jobs
     tags = FakeTagRepository()
@@ -5589,6 +5867,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     task_service = TaskService(
         repository=tasks,
         worker_repository=workers,
+        worker_pool_repository=worker_pools,
         session_repository=sessions,
         job_repository=jobs,
         spec_builder=spec_builder,
@@ -5656,6 +5935,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         blobs=blobs,
         secrets=secrets,
         workers=workers,
+        worker_pools=worker_pools,
         evaluations=evaluations,
         tags=tags,
     )

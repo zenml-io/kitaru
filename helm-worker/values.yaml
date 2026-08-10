@@ -1,0 +1,106 @@
+# Default values for kitaru-worker.
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Connection settings for the Kitaru server this worker pool dials out to.
+kitaru:
+  # The URL where the Kitaru server API is reachable. Required.
+  serverURL:
+
+  # The Kitaru API key the worker authenticates with. Set this or
+  # apiKeySecret, but not both.
+  apiKey:
+
+  # Reference to an existing Kubernetes secret containing the Kitaru API key.
+  # If set, apiKey above is ignored and the key is sourced from the
+  # referenced secret instead.
+  apiKeySecret:
+    # name:
+    # key:
+
+# The worker pool this deployment serves.
+pool:
+  # The name of the worker pool. Workers register with this name instead of
+  # declaring their own scope. Required.
+  name:
+
+# The Kitaru worker image.
+image:
+  repository: zenmldocker/kitaru-worker
+  pullPolicy: Always
+  # Overrides the image tag whose default is the chart version.
+  tag:
+
+# Worker runtime settings.
+worker:
+  # The number of tasks a single worker process claims and runs concurrently.
+  concurrency: 1
+
+  # The number of seconds a worker waits for its in-flight tasks to finish
+  # before it releases them back to the queue and exits.
+  drainTimeoutSeconds: 300
+
+  # Extra environment variables merged into the worker container. Each entry
+  # is a standard Kubernetes EnvVar object.
+  extraEnv: []
+
+  resources: {}
+    # We usually recommend not to specify default resources and to leave this as a conscious
+    # choice for the user. This also increases chances charts run on environments with little
+    # resources, such as Minikube. If you do want to specify resources, uncomment the following
+    # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+    # limits:
+    #   cpu: 100m
+    #   memory: 128Mi
+    # requests:
+    #   cpu: 100m
+    #   memory: 128Mi
+
+  nodeSelector: {}
+
+  tolerations: []
+
+  affinity: {}
+
+  podAnnotations: {}
+
+  # The number of seconds Kubernetes waits after sending SIGTERM before it
+  # force-kills the pod. Defaults to drainTimeoutSeconds plus 30 seconds of
+  # slack for the worker process to exit after it releases its tasks.
+  terminationGracePeriodSeconds: 330
+
+# The number of worker replicas to run. Only used when keda.enabled is
+# false, since KEDA owns the replica count once autoscaling is active.
+replicaCount: 1
+
+# KEDA-based autoscaling. Scales the worker deployment from the pool's stats
+# endpoint instead of a fixed replica count.
+keda:
+  # Set to true to create a KEDA ScaledObject and TriggerAuthentication for
+  # this worker pool. Requires KEDA to already be installed in the cluster.
+  enabled: false
+
+  # The minimum number of replicas KEDA scales down to. Set to 0 to let the
+  # pool scale to zero when there are no pending tasks.
+  minReplicaCount: 0
+
+  # The maximum number of replicas KEDA scales up to.
+  maxReplicaCount: 10
+
+  # The number of seconds between KEDA polls of the pool's stats endpoint.
+  pollingInterval: 30
+
+  # The number of seconds KEDA waits after the last active scaling condition
+  # before it scales back down.
+  cooldownPeriod: 300
+
+  # The number of pending tasks KEDA targets per replica. Set this to the
+  # same value as worker.concurrency so KEDA scales roughly one replica per
+  # concurrency slot of pending work.
+  tasksPerReplica: 1
+
+  # The pending task count below which KEDA keeps the pool scaled to zero.
+  # The default of "0" scales up as soon as a single task is pending.
+  activationThreshold: "0"

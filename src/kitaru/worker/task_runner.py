@@ -40,6 +40,7 @@ from kitaru.client.exceptions import (
 )
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers import HANDLERS
+from kitaru.worker.inflight import InflightTasks
 from kitaru.worker.process import run_task_process
 
 logger = logging.getLogger(__name__)
@@ -60,13 +61,15 @@ _STALE_TOKEN_ERRORS = (AuthenticationError, AuthorizationError)
 class TaskRunner:
     """Executes exactly one claimed task from spec to its next status."""
 
-    def __init__(self, ctx: ExecutionContext) -> None:
+    def __init__(self, ctx: ExecutionContext, inflight: InflightTasks) -> None:
         """Initialize the runner.
 
         Args:
             ctx: Execution context.
+            inflight: In-flight task registry.
         """
         self._ctx = ctx
+        self._inflight = inflight
 
     async def execute(
         self, claimed: TaskWithSpec, canceled: asyncio.Event
@@ -130,6 +133,15 @@ class TaskRunner:
                     result_path,
                 )
             if canceled.is_set():
+                if self._inflight.was_released(task.id):
+                    logger.info("Task %s released back to the queue.", task.id)
+                    updated = await self._update(
+                        client,
+                        task.id,
+                        attempt,
+                        TaskUpdateRequest(status=TaskStatus.PENDING),
+                    )
+                    return updated if updated is not None else task
                 logger.info("Task %s canceled by the server.", task.id)
                 updated = await self._update(
                     client,

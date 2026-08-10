@@ -50,6 +50,7 @@ __all__ = [
     "PackagePluginSpec",
     "PayloadSpec",
     "PluginSpec",
+    "QueueStats",
     "ScriptPluginSpec",
     "Task",
     "TaskAccessDenied",
@@ -762,3 +763,11 @@ class TaskSpec(FrozenModel):
     env: dict[str, str] = Field(default_factory=dict)
     secret_env: dict[str, str] = Field(default_factory=dict)
     details: TaskDetails
+
+
+class QueueStats(FrozenModel):
+    """Queue stats."""
+
+    pending: int
+    in_flight: int
+    oldest_pending_created: datetime | None

@@ -1,0 +1,16 @@
+apiVersion: v2
+name: kitaru-worker
+version: "0.2.0"
+description: "Kitaru: Autoscaling worker pool for AI agents."
+type: application
+keywords:
+  - kitaru
+  - ai
+  - agents
+  - worker
+  - autoscaling
+  - keda
+home: https://kitaru.ai
+sources:
+  - https://github.com/zenml-io/kitaru
+icon: https://kitaru.ai/kitaru-logo.svg

@@ -33,6 +33,7 @@ class WorkerConfig(BaseSettings):
     )
 
     name: str | None = None
+    pool: str | None = None
     scope: WorkerScope = WorkerScope()
     concurrency: int = Field(default=1, ge=1)
     claim_batch_size: int | None = Field(default=None, ge=1)

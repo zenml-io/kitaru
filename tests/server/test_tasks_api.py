@@ -252,6 +252,35 @@ async def test_update_task_transitions(
     assert response.json()["status"] == "running"
 
 
+async def test_update_task_release_transitions_to_pending(
+    client: httpx.AsyncClient,
+    services: JobAndTaskServices,
+    account: Account,
+    auth_service: AuthService,
+) -> None:
+    """PATCH releases a claimed task back to pending using its claimed token."""
+    job = await create_job(services.jobs, account.id)
+    task = await _claimable_agent_task(services, job.id, account)
+    worker = await create_worker(services.workers, account.id)
+    worker_token = mint_worker_token(auth_service, worker.id, account)
+    claimed = (
+        await client.post(
+            "/v1/tasks/claim",
+            json={"max_tasks": 10},
+            headers={"Authorization": f"Bearer {worker_token}"},
+        )
+    ).json()
+    task_token = claimed["tasks"][0]["token"]
+
+    response = await client.patch(
+        f"/v1/tasks/{task.id}",
+        json={"status": "pending"},
+        headers={"Authorization": f"Bearer {task_token}"},
+    )
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+
 async def test_update_task_rejects_an_account_credential(
     client: httpx.AsyncClient, services: JobAndTaskServices, account: Account
 ) -> None:

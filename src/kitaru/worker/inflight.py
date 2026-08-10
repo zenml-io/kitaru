@@ -23,6 +23,7 @@ class InflightTasks:
     def __init__(self) -> None:
         """Initialize the registry."""
         self._registered: dict[uuid.UUID, asyncio.Event] = {}
+        self._released: set[uuid.UUID] = set()
 
     def register(self, task_id: uuid.UUID) -> asyncio.Event:
         """Report a task as held by this worker.
@@ -44,6 +45,7 @@ class InflightTasks:
             task_id: Id of the task no longer held.
         """
         self._registered.pop(task_id, None)
+        self._released.discard(task_id)
 
     def get_ids(self) -> list[uuid.UUID]:
         """List the ids of the held tasks.
@@ -67,3 +69,20 @@ class InflightTasks:
         """Request cancellation of every held task."""
         for event in self._registered.values():
             event.set()
+
+    def release_all(self) -> None:
+        """Request release of every held task."""
+        self._released.update(self._registered)
+        for event in self._registered.values():
+            event.set()
+
+    def was_released(self, task_id: uuid.UUID) -> bool:
+        """Report whether a held task's cancellation was requested as a release.
+
+        Args:
+            task_id: Id of the task.
+
+        Returns:
+            Whether the task was released rather than canceled.
+        """
+        return task_id in self._released
