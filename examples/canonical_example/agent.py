@@ -11,7 +11,7 @@ from pydantic_ai.models import KnownModelName, Model
 from examples.canonical_example.models import Resolution, TicketInput
 from examples.canonical_example.store import MockCommerceStore
 from kitaru.task import get_task_inputs
-from plugins.adapters.pydantic_ai import KitaruAgent
+from kitaru_pydantic_ai import KitaruAgent
 
 MODEL = cast(KnownModelName, os.environ.get("BASELINE_MODEL", "openai:gpt-5-nano"))
 

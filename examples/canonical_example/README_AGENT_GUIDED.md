@@ -2,7 +2,7 @@
 
 This walkthrough starts with ten recorded executions from an autonomous returns agent. Your coding agent uses Kitaru to find useful sessions, asks for your business judgment, stores the review, creates an evaluator, replays a candidate, and helps you decide whether the change worked.
 
-You do not need to know Kitaru terminology, select session IDs, or write evaluator code. The `kitaru-session-improvement` skill introduces each concept when it becomes useful and operates Kitaru for you.
+You do not need to know Kitaru terminology, select session IDs, or write evaluator code. Your coding agent uses the connected Kitaru MCP server and CLI, introduces each concept when it becomes useful, and operates Kitaru for you.
 
 All customers, orders, shipments, and actions are synthetic. Refund and replacement tools modify an in-memory store.
 
@@ -40,9 +40,12 @@ Install the example, worker, CLI, and MCP dependencies:
 uv sync \
   --extra cli \
   --extra worker \
-  --extra pydantic-ai \
   --extra examples \
   --extra mcp
+uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'
+uv run --no-sync python ../../scripts/smoke_plugin_artifacts.py \
+  --candidate-dir ../../plugins/candidate-wheels
+export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 ```
 
 Connect and confirm the server-provided plugins:
@@ -58,8 +61,11 @@ Start a worker in a second terminal and leave it running:
 
 ```bash
 set -a; source .env; set +a
+export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 uv run kitaru worker start --name returns-example-worker
 ```
+
+Keep `UV_FIND_LINKS` set while running a worker from a source checkout whose plugin versions have not been published yet.
 
 The checked-in Langfuse export is enough for the walkthrough. To generate a fresh export with paid OpenAI calls, add the OpenAI and Langfuse credentials to `.env` and run `./generate.sh`.
 
@@ -86,16 +92,16 @@ Configure your coding agent to start it in standard mode:
 
 Standard mode lets the coding agent inspect sessions, run evaluations and replays, conduct investigations, store annotations, and manage cohorts and experiments. Local trace upload plus agent and evaluator registration remain CLI operations because they use files from your repository.
 
-This example ships two reusable skills under `.agents/skills`: `kitaru-session-improvement` leads the workflow and `kitaru-evaluator-authoring` turns an approved behavior into a tested evaluator. Restart the coding-agent session after pulling repository skill changes.
+Restart the coding-agent session after adding the MCP configuration so it can discover Kitaru's tools.
 
 ## Step 3: Start the guided improvement
 
 Use this prompt:
 
 ```text
-Use $kitaru-session-improvement to help me improve the returns agent in this
-repository. Assume I do not know Kitaru and explain each concept when it first
-becomes useful.
+Help me improve the returns agent in this repository using the connected Kitaru
+MCP server and the Kitaru CLI. Assume I do not know Kitaru and explain each
+concept when it first becomes useful.
 
 The agent is examples/canonical_example/agent.py. The trace export is
 examples/canonical_example/traces/langfuse-traces.jsonl. Register the baseline
@@ -111,11 +117,11 @@ Refund-policy safety is a useful starting hypothesis for this demo. Tickets 004
 and 007 may be target cases, while tickets 001, 009, and 010 may be controls,
 but verify this from the sessions and my answers instead of assuming membership.
 Use separate target and control cohorts. After I approve the behavior brief,
-use $kitaru-evaluator-authoring to create, test, and register the evaluator.
+create, test, and register the evaluator from the approved behavior brief.
 Ask before cohort writes, agent changes, or paid replay calls.
 ```
 
-The returns-specific hints make the demo repeatable. They are absent from the reusable skills, which must discover behavior from the connected agent and its sessions.
+The returns-specific hints make the demo repeatable. The coding agent must still verify behavior from the connected agent and its sessions.
 
 ## Step 4: Inspect and measure the baseline
 
@@ -135,7 +141,7 @@ It uses that goal and the broad signals to select a bounded mix of likely proble
 - What should the agent have done?
 - Which policy condition or trace evidence determines the judgment?
 
-For each case, the skill shows a curated view of the relevant output and tool evidence. It asks one question at a time, stores the answer as an annotation, attaches the exact node selector when relevant, and marks the case complete after all questions have answers. The investigation can resume later without repeating completed work.
+For each case, the coding agent shows a curated view of the relevant output and tool evidence. It asks one question at a time, stores the answer as an annotation, attaches the exact node selector when relevant, and marks the case complete after all questions have answers. The investigation can resume later without repeating completed work.
 
 The expected domain answers for the canonical path are:
 
@@ -158,13 +164,13 @@ After approval, the skill derives separate immutable cohorts from the annotation
 | `unsafe-refund-baseline` | tickets 004 and 007 | Behavior that must change from refund to escalation. |
 | `safe-refund-control` | tickets 001, 009, and 010 | Nearby refund behavior that must remain correct. |
 
-These are expected results for this trace set. The skill must establish them from the review rather than hardcode them.
+These are expected results for this trace set. The coding agent must establish them from the review instead of hardcoding them.
 
 ## Step 7: Generate the evaluator
 
-The approved brief becomes one observable binary rubric. The session-improvement skill invokes `$kitaru-evaluator-authoring`, which creates `examples/canonical_example/evaluator.py`, tests it against imported and replay-shaped evidence, and registers an immutable `returns-policy` version.
+The approved brief becomes one observable binary rubric. The coding agent creates `examples/canonical_example/evaluator.py`, tests it against imported and replay-shaped evidence, and registers an immutable `returns-policy` version.
 
-The generated evaluator checks the final action, accepted terminal tool calls, and refund amount. It rejects a reported escalation if a refund was already accepted earlier. The baseline should produce eight passes and failures on tickets 004 and 007. If it does not, the skill revisits the brief or implementation before continuing.
+The generated evaluator checks the final action, accepted terminal tool calls, and refund amount. It rejects a reported escalation if a refund was already accepted earlier. The baseline should produce eight passes and failures on tickets 004 and 007. If it does not, the coding agent revisits the brief or implementation before continuing.
 
 The starter repository does not contain `evaluator.py`. In the guided path, evaluator code is a product of the review.
 

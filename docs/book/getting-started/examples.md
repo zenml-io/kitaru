@@ -26,10 +26,18 @@ cd examples/canonical_example
 cp .env.example .env
 set -a; source .env; set +a
 docker compose -f ../../docker-compose.yml up -d --build
-uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
+uv sync --extra cli --extra worker --extra examples
+uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'
+uv run --no-sync python ../../scripts/smoke_plugin_artifacts.py \
+  --candidate-dir ../../plugins/candidate-wheels
+export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 ```
 
 Continue with [`examples/canonical_example/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/canonical_example) for the complete CLI walkthrough.
+
+## Standalone adapter examples
+
+The separately packaged PydanticAI, OpenAI Agents, and LangGraph adapters live in the plugin workspace. The canonical returns example uses `kitaru-pydantic-ai`; see [`examples/integrations/`](https://github.com/zenml-io/kitaru/tree/develop/examples/integrations) for the OpenAI Agents and LangGraph examples.
 
 ## Native MCP configuration
 

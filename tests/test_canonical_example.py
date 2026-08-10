@@ -281,7 +281,8 @@ def test_trace_generator_uses_real_model_and_langfuse_credentials() -> None:
     script = (EXAMPLE_DIR / "generate.sh").read_text()
     generator = (EXAMPLE_DIR / "generate_traces.py").read_text()
 
-    assert "--extra pydantic-ai" in script
+    assert "--with-editable" in script
+    assert "plugins/packages/pydantic-ai[openai]" in script
     assert "--extra examples" in script
     assert "langfuse-traces.jsonl" in script
     assert "Agent.instrument_all()" in generator
@@ -303,6 +304,12 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
     assert "source .env" in readme
     assert "--env-file .env" not in readme
     assert r"\"summary\":\"A \$280 refund exceeded" in readme
+    assert (
+        "uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'"
+        in readme
+    )
+    assert "scripts/smoke_plugin_artifacts.py" in readme
+    assert "UV_FIND_LINKS" in readme
 
     for command in (
         "kitaru login --local",
@@ -358,13 +365,14 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
     assert "Which successful cases must remain correct?" in readme
 
 
-def test_agent_guided_readme_delegates_evaluator_authoring() -> None:
-    """Keep evaluator code out of the user's agent-guided responsibilities."""
+def test_coding_agent_readme_delegates_evaluator_authoring() -> None:
+    """Keep evaluator code out of the user's coding-agent responsibilities."""
     readme = (EXAMPLE_DIR / "README_AGENT_GUIDED.md").read_text()
 
     assert "You do not need to know Kitaru terminology" in readme
     assert "does not contain `evaluator.py`" in readme
-    assert "$kitaru-evaluator-authoring" in readme
+    assert "connected Kitaru MCP server" in readme
+    assert "create, test, and register the evaluator" in readme
     assert "You do not select IDs" in readme
     assert "stores the answer as an annotation" in readme
     assert "exact node selector" in readme

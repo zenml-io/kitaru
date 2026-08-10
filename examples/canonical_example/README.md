@@ -40,10 +40,16 @@ docker compose -f ../../docker-compose.yml up -d --build
 Install the dependencies and connect the CLI:
 
 ```bash
-uv sync --extra cli --extra worker --extra pydantic-ai --extra examples
+uv sync --extra cli --extra worker --extra examples
+uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'
+uv run --no-sync python ../../scripts/smoke_plugin_artifacts.py \
+  --candidate-dir ../../plugins/candidate-wheels
+export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 uv run kitaru login --local
 uv run kitaru status
 ```
+
+The second command installs the standalone `kitaru-pydantic-ai` package and its OpenAI provider dependency into the repository environment. The next commands build and expose local wheels for the independently packaged importers and evaluators. Keep `UV_FIND_LINKS` set in every terminal that runs a worker until those exact package versions are available from the configured package index.
 
 The server registers Kitaru's official importers and evaluators when it starts. Confirm that the `kitaru/langfuse` importer and the `kitaru/cost`, `kitaru/latency`, and `kitaru/tool-call-patterns` evaluators are available:
 
@@ -91,6 +97,7 @@ Registration creates the `returns-resolver` agent and version `1`.
 Open a second terminal in this directory and keep the worker active:
 
 ```bash
+export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 uv run kitaru worker start \
   --name returns-example-worker
 ```
@@ -150,7 +157,7 @@ uv run kitaru evaluation list --size 100
 
 ## Step 6: Record a review
 
-The agent-guided path selects a diverse review set and conducts the full investigation for you. This manual path records one representative judgment so you can see the underlying data.
+The coding-agent walkthrough selects a diverse review set and conducts the full investigation through Kitaru's MCP server. This manual path records one representative judgment so you can see the underlying data.
 
 Resolve ticket 004 and inspect its nodes:
 
@@ -235,7 +242,7 @@ For this example, the support lead gives these answers:
 - Valid refunds must remain refunds and cannot exceed the amount paid.
 - Both risky cases must become correct, all control cases must remain correct, and no replay may fail.
 
-The recommended path is the [agent-guided walkthrough](README_AGENT_GUIDED.md). The `kitaru-session-improvement` skill inspects the traces, asks these questions one at a time, proposes evidence-backed cohort membership, and carries the session IDs into Kitaru. It then hands the approved behavior brief to `kitaru-evaluator-authoring`, which validates or creates the evaluator used by the experiment.
+The [coding-agent walkthrough](README_AGENT_GUIDED.md) shows how to conduct the same workflow through Kitaru's MCP server. It inspects the traces, asks these questions one at a time, proposes evidence-backed cohort membership, and carries the session IDs into Kitaru. After you approve the behavior brief, it creates and validates the evaluator used by the experiment.
 
 The remaining commands show the same operations manually.
 

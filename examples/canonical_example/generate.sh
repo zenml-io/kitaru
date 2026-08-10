@@ -16,8 +16,8 @@ cd "${repository_root}"
 
 printf '%s\n' 'Generating 10 returns-resolution traces in Langfuse'
 uv run --env-file "${env_file}" \
-  --extra pydantic-ai \
   --extra examples \
+  --with-editable "${repository_root}/plugins/packages/pydantic-ai[openai]" \
   python -m examples.canonical_example.generate_traces "${trace_file}"
 
 printf 'Wrote %s\n' "${trace_file}"

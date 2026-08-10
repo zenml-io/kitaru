@@ -107,12 +107,16 @@ jobs:
           --extra server
           --extra cli
           --extra worker
-          --extra pydantic-ai
           --extra examples
       - name: Build local plugin candidates
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --candidate-dir plugins/candidate-wheels
+      - name: Install canonical example adapter
+        run: >-
+          uv pip install
+          --find-links plugins/candidate-wheels
+          'kitaru-pydantic-ai[openai]==0.1.0'
       - name: Start local Kitaru server
         run: |
           uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
