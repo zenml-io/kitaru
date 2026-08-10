@@ -39,6 +39,11 @@ from kitaru.cli.config import (
     resolve_target,
 )
 from kitaru.cli.output import CLIError, CommandResult
+from kitaru.cli.skill_discovery import (
+    INSTALL_COMMAND,
+    get_kitaru_skill_status,
+    select_visible_skill_names,
+)
 from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
@@ -350,6 +355,25 @@ async def doctor(
             else "Install kitaru[cli,worker] to run workers.",
         )
     )
+    skill_status = get_kitaru_skill_status()
+    if skill_status["installed"]:
+        names = skill_status["skills"]
+        visible_names, remainder = select_visible_skill_names(names)
+        suffix = f", and {remainder} more" if remainder else ""
+        noun = "skill" if skill_status["skill_count"] == 1 else "skills"
+        detail = (
+            f"{skill_status['skill_count']} Kitaru agent {noun} detected: "
+            f"{', '.join(visible_names)}{suffix}."
+        )
+        status = "pass"
+    else:
+        detail = (
+            f"No Kitaru agent skills detected. Install them with `{INSTALL_COMMAND}`."
+        )
+        status = "warn"
+    skill_check = _check("kitaru_skills", status, False, detail)
+    skill_check["data"] = skill_status
+    checks.append(skill_check)
     uv_path = shutil.which("uv")
     checks.append(
         _check(
