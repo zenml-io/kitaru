@@ -257,6 +257,7 @@ jobs:
           - jsonl-importer
           - langfuse-importer
           - langsmith-importer
+          - openai-agents
           - opentelemetry-importer
           - pydantic-ai
     name: plugin package (${{ matrix.package }})
