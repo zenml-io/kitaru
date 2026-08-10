@@ -29,7 +29,6 @@ Kitaru without pretending Kitaru can replay hidden framework internals.
 | Skill | Claude Code command | Use it for |
 |---|---|---|
 | `kitaru-pydantic-ai-migration` | `/kitaru:kitaru-pydantic-ai-migration` | Move existing PydanticAI code to `KitaruAgent`, choose `calls` vs `turn` boundaries, check human-in-the-loop safety, and produce a migration report. |
-| `kitaru-openai-agents-migration` | `/kitaru:kitaru-openai-agents-migration` | Move OpenAI Agents SDK code to `KitaruRunner`, `OpenAIRunRequest`, and `OpenAIRunResult`; handle runner-call vs per-call checkpoints, approvals, resumes, and context serialization. |
 | `kitaru-langgraph-migration` | `/kitaru:kitaru-langgraph-migration` | Move LangGraph, LangChain `create_agent(...)`, or Deep Agents-style code to `KitaruGraphRunner`; choose `graph_call` or middleware-backed `calls` boundaries. |
 | `kitaru-claude-agent-sdk-migration` | `/kitaru:kitaru-claude-agent-sdk-migration` | Move Claude Agent SDK code to `KitaruClaudeRunner` with one invocation checkpoint and explicit caveats for Claude-owned tools, Bash, MCP, sessions, and workspace files. |
 | `kitaru-gemini-interactions-migration` | `/kitaru:kitaru-gemini-interactions-migration` | Move Gemini Interactions, Google GenAI Interactions, or Antigravity managed-agent code to `KitaruGeminiInteractionsRunner`; handle stable responses, polling, `requires_action`, and Google-owned internals. |
@@ -76,7 +75,6 @@ plugin-qualified command names:
 /kitaru:kitaru-scoping
 /kitaru:kitaru-authoring
 /kitaru:kitaru-pydantic-ai-migration
-/kitaru:kitaru-openai-agents-migration
 /kitaru:kitaru-langgraph-migration
 /kitaru:kitaru-claude-agent-sdk-migration
 /kitaru:kitaru-gemini-interactions-migration
@@ -106,7 +104,6 @@ cp -R "$tmpdir/kitaru-skills/skills/kitaru-quickstart" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-scoping" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-authoring" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-pydantic-ai-migration" .claude/skills/
-cp -R "$tmpdir/kitaru-skills/skills/kitaru-openai-agents-migration" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-langgraph-migration" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-claude-agent-sdk-migration" .claude/skills/
 cp -R "$tmpdir/kitaru-skills/skills/kitaru-gemini-interactions-migration" .claude/skills/
@@ -142,7 +139,6 @@ include `references/` files that the agent reads during the guided workflow.
 ### Migration
 
 - "Use `/kitaru:kitaru-pydantic-ai-migration` on this PydanticAI agent and tell me which tools are safe for per-call checkpoints."
-- "Use `/kitaru:kitaru-openai-agents-migration` and choose between `calls` and `runner_call` for this OpenAI Agents workflow."
 - "Use `/kitaru:kitaru-langgraph-migration` on this LangGraph graph and explain whether `graph_call` or middleware-backed `calls` is honest here."
 - "Use `/kitaru:kitaru-claude-agent-sdk-migration` to make this Claude Agent SDK invocation durable without claiming granular tool replay."
 - "Use `/kitaru:kitaru-gemini-interactions-migration` to wrap this Antigravity interaction and flag polling or `requires_action` risks."

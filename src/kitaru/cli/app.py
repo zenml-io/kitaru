@@ -3270,6 +3270,13 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "--params", "JSON object", "option", False, "Importer parameters."
             ),
             ParameterSpec(
+                "--join-on",
+                "JSON Pointer",
+                "option",
+                False,
+                "Group source traces by the value at this RFC 6901 JSON Pointer.",
+            ),
+            ParameterSpec(
                 "--tag",
                 "text[]",
                 "option",
@@ -3302,6 +3309,7 @@ async def session_import(
     importer: str,
     agent: str,
     params: str | None = None,
+    join_on: str | None = None,
     tag: list[str] | None = None,
     media_type: str = "application/octet-stream",
     wait: bool = False,
@@ -3316,6 +3324,7 @@ async def session_import(
             importer=importer,
             agent=agent,
             params=params,
+            join_on=join_on,
             tags=tag,
             media_type=media_type,
             wait=wait,

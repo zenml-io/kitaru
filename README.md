@@ -152,15 +152,17 @@ Adapters for six agent frameworks — wrap your existing agent, no rewrite:
 | Framework | Adapter |
 |---|---|
 | PydanticAI | `kitaru.adapters.pydantic_ai.KitaruAgent` |
-| OpenAI Agents SDK | `kitaru.adapters.openai_agents.KitaruRunner` |
+| OpenAI Agents SDK | `kitaru_openai_agents.KitaruRunner` (install `kitaru-openai-agents`) |
 | Claude Agent SDK | `kitaru.adapters.claude_agent_sdk.KitaruClaudeRunner` |
-| LangGraph | `kitaru.adapters.langgraph.KitaruGraphRunner` |
+| LangGraph, LangChain, and Deep Agents | `kitaru_langgraph.KitaruGraphRunner` (install `kitaru-langgraph`) |
 | Gemini | `kitaru.adapters.gemini.KitaruGeminiInteractionsRunner` |
 | Google ADK | `kitaru.adapters.google_adk.KitaruADKRunner` |
 
 For raw-Python agents, `@flow` and `@checkpoint` around your calls give you
 the same recording without an adapter. Your model, your tools, your
 framework — Kitaru wraps them, not the other way around.
+
+The OpenAI Agents SDK adapter currently lives only in this repository's plugin workspace. It is not exported by the installed `kitaru` package.
 
 ### Inspect it from your coding agent
 

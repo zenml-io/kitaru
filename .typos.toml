@@ -1,6 +1,8 @@
 [files]
 extend-exclude = [
     "*.json",
+    "examples/document_processing/traces/*.jsonl",
+    "examples/pydantic_ai_ticket_resolver/traces/*.jsonl",
     "*.js",
     "*.ipynb",
     "uv.lock",

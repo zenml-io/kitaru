@@ -136,6 +136,23 @@ def test_unified_parse_preserves_node_trace_id() -> None:
     assert parsed[0].nodes[0].trace_id == "trace-1"
 
 
+def test_redacted_session_ids_fall_back_to_trace_ids() -> None:
+    """Do not merge unrelated traces that share a redaction placeholder."""
+    parsed = LangfuseJSONLImporter().parse(
+        jsonl(
+            observation("root-1", "trace-1", session_id="[Scrubbed due to 'session']"),
+            observation("root-2", "trace-2", session_id="[Scrubbed due to 'session']"),
+        ),
+        {},
+    )
+
+    imported = [item for item in parsed if isinstance(item, ImportedSession)]
+    assert [session.external_id for session in imported] == [
+        "project-1:trace-1",
+        "project-1:trace-2",
+    ]
+
+
 def test_imports_pretty_printed_json_array() -> None:
     """Accept the JSON array format advertised by the importer."""
     content = json.dumps(
@@ -366,7 +383,7 @@ def test_surfaces_flattened_model_metadata_and_terminal_output() -> None:
     assert session.outputs == {"role": "assistant", "content": "hi"}
     assert generation.requested_model == "requested-model"
     assert generation.model == "resolved-model"
-    assert generation.provider == "openai"
+    assert generation.model_provider == "openai"
 
 
 def test_imports_legacy_ingestion_events() -> None:
@@ -528,7 +545,7 @@ def test_maps_openai_agents_function_span_as_tool() -> None:
     tool = nodes["trace-1:function"]
     assert tool.node_type is NodeType.TOOL_CALL
     assert tool.tool_name == "get_weather"
-    assert tool.provider == "openai"
+    assert tool.model_provider == "openai"
     assert tool.metadata == {
         "langfuse.gen_ai.system": "openai",
         "langfuse.name": "get_weather",
@@ -562,7 +579,7 @@ def test_maps_flattened_openai_agents_function_span_as_tool() -> None:
     tool = nodes["trace-1:function"]
     assert tool.node_type is NodeType.TOOL_CALL
     assert tool.tool_name == "get_weather"
-    assert tool.provider == "openai"
+    assert tool.model_provider == "openai"
 
 
 def test_maps_model_provider_cost_and_bounded_metadata() -> None:
@@ -593,7 +610,7 @@ def test_maps_model_provider_cost_and_bounded_metadata() -> None:
     node = session.nodes[0]
     assert node.requested_model == "requested-model"
     assert node.model == "resolved-model"
-    assert node.provider == "openai"
+    assert node.model_provider == "openai"
     assert node.cost == Decimal("0.0125")
     assert "response" not in node.metadata
     assert node.metadata["langfuse.gen_ai.provider.name"] == "openai"

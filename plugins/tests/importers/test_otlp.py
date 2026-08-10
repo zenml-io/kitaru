@@ -206,7 +206,7 @@ def test_imports_span_graph_and_genai_fields() -> None:
     assert child.node_type is NodeType.LLM_CALL
     assert child.requested_model == "gpt-5-mini"
     assert child.model == "gpt-5-mini-2026-06-01"
-    assert child.provider == "openai"
+    assert child.model_provider == "openai"
     assert child.input_text_selector == "/0/content"
     assert child.output_text_selector == "/0/content"
     assert child.tokens and child.tokens.input_tokens == 120
@@ -449,6 +449,38 @@ def test_groups_jsonl_requests_into_ordered_turns() -> None:
         "first",
         "second",
     ]
+
+
+def test_groups_traces_by_json_pointer() -> None:
+    """Group traces by a scalar selected from normalized OTLP spans."""
+    first = request(
+        span(
+            TRACE_1,
+            ROOT,
+            start=1_700_000_000_000_000_000,
+            attrs=attributes(**{"customer/case_id": "case-42", "input.value": "first"}),
+        )
+    )
+    second = request(
+        span(
+            TRACE_2,
+            ROOT,
+            start=1_700_000_100_000_000_000,
+            attrs=attributes(
+                **{"customer/case_id": "case-42", "input.value": "second"}
+            ),
+        )
+    )
+    content = b"\n".join(json.dumps(item).encode() for item in (second, first))
+
+    [session] = sessions(
+        content,
+        {**params(), "join_on": "/attributes/customer~1case_id"},
+    )
+
+    assert session.external_id.endswith(":case-42")
+    assert session.metadata["otlp.trace_ids"] == [TRACE_1, TRACE_2]
+    assert session.metadata["otlp.join_on"] == "/attributes/customer~1case_id"
 
 
 def test_uses_trace_id_without_conversation_and_explicit_source_override() -> None:

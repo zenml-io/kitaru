@@ -13,7 +13,9 @@ from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent
 from pydantic import ValidationError
 
+from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.investigation import InvestigationSessionResponse
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityListRequest
@@ -77,6 +79,10 @@ class FakeClient:
         self.list_calls: list[object] = []
         self.get_calls: list[uuid.UUID] = []
         self.sessions = SimpleNamespace(list=self._list_sessions, get=self._get)
+        self.agents = SimpleNamespace(list=self._list_agents)
+        self.investigations = SimpleNamespace(
+            list_sessions=self._list_investigation_sessions
+        )
 
     async def _list_sessions(self, params: object) -> Page[SessionResponse]:
         self.list_calls.append(params)
@@ -85,6 +91,16 @@ class FakeClient:
     async def _get(self, _id: uuid.UUID) -> SessionResponse:
         self.get_calls.append(_id)
         return _get_session(_id)
+
+    async def _list_agents(self, params: object) -> Page[AgentResponse]:
+        self.list_calls.append(params)
+        return Page(items=[_get_agent()], next_cursor="opaque")
+
+    async def _list_investigation_sessions(
+        self, _investigation_id: uuid.UUID, params: object
+    ) -> Page[InvestigationSessionResponse]:
+        self.list_calls.append(params)
+        return Page(items=[_get_investigation_session()], next_cursor="opaque")
 
     async def close(self) -> None:
         self.closed += 1
@@ -104,6 +120,33 @@ def _get_session(session_id: uuid.UUID | None = None) -> SessionResponse:
         metadata={},
         llm_call_count=0,
         tool_call_count=0,
+        created=now,
+        updated=now,
+    )
+
+
+def _get_agent() -> AgentResponse:
+    now = datetime.now(UTC)
+    return AgentResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        name="returns-resolver",
+        description=None,
+        latest_version=1,
+        created=now,
+        updated=now,
+    )
+
+
+def _get_investigation_session() -> InvestigationSessionResponse:
+    now = datetime.now(UTC)
+    return InvestigationSessionResponse(
+        id=uuid.uuid4(),
+        investigation_id=uuid.uuid4(),
+        session_id=uuid.uuid4(),
+        position=0,
+        status="pending",
+        view=None,
         created=now,
         updated=now,
     )
@@ -142,6 +185,45 @@ async def test_activity_returns_exactly_one_page_and_preserves_cursor() -> None:
     assert result.page.size == 3
     assert result.page.next_cursor == "opaque"
     assert result.page.has_more is True
+
+
+async def test_public_sdk_serializes_non_empty_list_pages() -> None:
+    """Return populated activity, registry, and review pages through MCP."""
+    client = FakeClient()
+    server, context = _get_context(client, mode=CapabilityMode.STANDARD)
+    calls = (
+        (
+            "kitaru_activity_read",
+            {"request": {"operation": "list", "kind": "session", "size": 3}},
+        ),
+        (
+            "kitaru_registry_read",
+            {"request": {"operation": "list", "kind": "agent", "size": 3}},
+        ),
+        (
+            "kitaru_review_read",
+            {
+                "request": {
+                    "operation": "list_sessions",
+                    "investigation_id": str(uuid.uuid4()),
+                    "size": 3,
+                }
+            },
+        ),
+    )
+
+    for tool_name, arguments in calls:
+        result = await server.call_tool(tool_name, arguments, context)
+
+        assert isinstance(result, CallToolResult)
+        assert result.is_error is False
+        assert result.structured_content is not None
+        assert len(result.structured_content["data"]["items"]) == 1
+        assert result.structured_content["data"]["page"] == {
+            "size": 3,
+            "next_cursor": "opaque",
+            "has_more": True,
+        }
 
 
 async def test_public_sdk_call_has_canonical_structured_text_parity() -> None:

@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- `kitaru session import --join-on /json/pointer` groups provider traces into sessions by a scalar selected with an RFC 6901 JSON Pointer. The CLI passes the pointer through importer parameters, and Braintrust, Langfuse, LangSmith, and OpenTelemetry importers support the same `join_on` parameter.
+- A Kitaru v2 LangGraph adapter, shipped as the independently versioned `kitaru-langgraph` distribution with the `kitaru_langgraph` import package, for synchronous and asynchronous invocation recording across compiled LangGraph runnables, LangChain agents, and Deep Agents. Factory-built agents support live model-request overrides and capability-gated static or recorded-history tool-result substitution; streaming, batch invocation, native checkpoint reconstruction, and worker-managed interrupt resume remain unsupported.
+- A non-streaming OpenAI Agents adapter, shipped as the independently versioned `kitaru-openai-agents` distribution with the `kitaru_openai_agents` import package, that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.
 - Bare `kitaru` and `kitaru --help` now report Kitaru agent-skill discovery and the canonical installation action, while `kitaru doctor` checks skill availability without treating absent skills as unhealthy.
 - The PydanticAI recording and replay adapter now ships as the independently versioned `kitaru-pydantic-ai` distribution with the `kitaru_pydantic_ai` import package.
 - Ten versioned offline deterministic evaluator plugins distributed with the existing basic evaluators in `kitaru-evaluator`, covering session integrity, output contracts, trajectory signals, tool and LLM diagnostics, timing, resource budgets, tool and model policies, and workflow conformance. They run only through explicitly started evaluation Jobs.
@@ -68,6 +71,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- Default importers, the PydanticAI adapter, and deterministic evaluators now use the `model_provider` session-node field introduced by the consolidated v2 specification.
+- Importer output selectors now ignore reasoning, thinking, Gemini thought, Anthropic redacted-thinking, and tool-call parts, leaving the selector unset when a model response has no visible text.
+- Importer JSON Pointer grouping now rejects invalid array indices instead of accepting Python-specific negative, signed, whitespace-padded, leading-zero, or underscored forms.
+- Langfuse imports now treat scrubbed or redacted session identifiers as missing and fall back to trace identifiers instead of merging unrelated traces.
 - Stack creation now verifies discovered service connectors before reusing them for local cloud storage or Modal stacks, failing fast with an actionable error instead of letting runs fail later; `--no-verify` skips the check.
 - `--credentials aws-profile:NAME` is now rejected when connected to a remote ZenML server, because the server cannot resolve AWS profiles that only exist on the local machine; portable `aws-access-keys`/`aws-session-token` credentials remain supported.
 - Claude Agent SDK failures no longer copy raw `ResultMessage.result` content into Kitaru errors or durable failure records; allowlisted diagnostics remain available in durable records and live terminal events.

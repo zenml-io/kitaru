@@ -153,7 +153,7 @@ def _input_envelope(view: SessionView) -> dict[str, Any]:
             "outputs": node.outputs,
             "parent_id": node.parent_id,
             "parent_index": node.parent_index,
-            "provider": node.provider,
+            "provider": node.model_provider,
             "requested_model": node.requested_model,
             "secondary_parent_ids": node.secondary_parent_ids,
             "secondary_parent_indexes": node.secondary_parent_indexes,
@@ -1409,7 +1409,7 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
                 {
                     "complete_model": sum(node.model is not None for node in calls),
                     "complete_provider": sum(
-                        node.provider is not None for node in calls
+                        node.model_provider is not None for node in calls
                     ),
                     "complete_requested_model": sum(
                         node.requested_model is not None for node in calls
@@ -1470,11 +1470,11 @@ def model_policy(
         )
     if providers is not None:
         violations = [
-            {"index": node.index, "provider": node.provider}
+            {"index": node.index, "provider": node.model_provider}
             for node in calls
-            if node.provider is not None and node.provider not in providers
+            if node.model_provider is not None and node.model_provider not in providers
         ]
-        complete = can_pass and all(node.provider is not None for node in calls)
+        complete = can_pass and all(node.model_provider is not None for node in calls)
         results.append(
             _json_result(
                 "allowed_providers",

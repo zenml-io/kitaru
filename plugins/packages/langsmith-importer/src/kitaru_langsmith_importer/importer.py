@@ -117,7 +117,13 @@ def _role(value: dict[str, Any]) -> str | None:
     return None
 
 
-def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch | None:
+def _content_match(
+    value: Any,
+    selector: str = "",
+    depth: int = 0,
+    *,
+    visible_output_only: bool = False,
+) -> _TextMatch | None:
     """Return one scalar text value and its selector."""
     if depth > 8:
         return None
@@ -130,7 +136,10 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
             for index, item in enumerate(value)
             if (
                 match := _content_match(
-                    item, _child_selector(selector, index), depth + 1
+                    item,
+                    _child_selector(selector, index),
+                    depth + 1,
+                    visible_output_only=visible_output_only,
                 )
             )
             is not None
@@ -138,10 +147,31 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
         return matches[-1] if matches else None
     if not isinstance(value, dict):
         return None
+    if visible_output_only:
+        kind = next(
+            (
+                candidate.lower().replace("_", "-")
+                for key in ("type", "part_kind", "kind", "event.name")
+                if isinstance((candidate := value.get(key)), str)
+            ),
+            None,
+        )
+        if value.get("thought") is True or kind in {
+            "reasoning",
+            "redacted-thinking",
+            "thinking",
+            "tool-call",
+            "tool-use",
+            "function-call",
+        }:
+            return None
     for key in ("text", "content", "parts", "kwargs", "data"):
         if key in value and (
             match := _content_match(
-                value[key], _child_selector(selector, key), depth + 1
+                value[key],
+                _child_selector(selector, key),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         ):
             return match
@@ -149,7 +179,12 @@ def _content_match(value: Any, selector: str = "", depth: int = 0) -> _TextMatch
 
 
 def _message_matches(
-    value: Any, target_role: str, selector: str = "", depth: int = 0
+    value: Any,
+    target_role: str,
+    selector: str = "",
+    depth: int = 0,
+    *,
+    visible_output_only: bool = False,
 ) -> list[_TextMatch]:
     """Return text matches for one nested message role."""
     if depth > 12:
@@ -159,7 +194,11 @@ def _message_matches(
             match
             for index, item in enumerate(value)
             for match in _message_matches(
-                item, target_role, _child_selector(selector, index), depth + 1
+                item,
+                target_role,
+                _child_selector(selector, index),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         ]
     if not isinstance(value, dict):
@@ -168,7 +207,10 @@ def _message_matches(
         for key in ("content", "text", "parts", "kwargs", "data"):
             if key in value and (
                 match := _content_match(
-                    value[key], _child_selector(selector, key), depth + 1
+                    value[key],
+                    _child_selector(selector, key),
+                    depth + 1,
+                    visible_output_only=visible_output_only,
                 )
             ):
                 return [match]
@@ -176,7 +218,11 @@ def _message_matches(
     for key, child in value.items():
         matches.extend(
             _message_matches(
-                child, target_role, _child_selector(selector, key), depth + 1
+                child,
+                target_role,
+                _child_selector(selector, key),
+                depth + 1,
+                visible_output_only=visible_output_only,
             )
         )
     return matches
@@ -200,7 +246,7 @@ def _input_text_selector(value: Any) -> str | None:
 
 def _output_text_selector(value: Any) -> str | None:
     """Return the primary assistant output selector."""
-    messages = _message_matches(value, "assistant")
+    messages = _message_matches(value, "assistant", visible_output_only=True)
     if messages:
         return messages[-1].selector
     if isinstance(value, str):
@@ -208,7 +254,11 @@ def _output_text_selector(value: Any) -> str | None:
     if isinstance(value, dict):
         for key in ("answer", "result", "response", "output", "text", "content"):
             if key in value and (
-                match := _content_match(value[key], _child_selector("", key))
+                match := _content_match(
+                    value[key],
+                    _child_selector("", key),
+                    visible_output_only=True,
+                )
             ):
                 return match.selector
     return None
@@ -435,6 +485,9 @@ def _path_value(value: Any, path: str) -> Any:
     if not path.strip():
         raise InvalidImport("join_on must be a non-empty path")
     if path.startswith("/"):
+        for token in path[1:].split("/"):
+            if re.search(r"~(?:[^01]|$)", token):
+                raise InvalidImport("join_on contains an invalid JSON Pointer escape")
         parts = [
             part.replace("~1", "/").replace("~0", "~") for part in path[1:].split("/")
         ]
@@ -447,6 +500,8 @@ def _path_value(value: Any, path: str) -> Any:
             current = current[part]
             continue
         if isinstance(current, list):
+            if re.fullmatch(r"0|[1-9][0-9]*", part) is None:
+                return None
             try:
                 current = current[int(part)]
             except (IndexError, ValueError):
@@ -504,6 +559,11 @@ def _join_value(
         if value in (None, ""):
             raise InvalidImport(
                 f"Trace '{trace_id}' has no value at join_on path '{selected}'"
+            )
+        if isinstance(value, dict | list):
+            raise InvalidImport(
+                f"Trace '{trace_id}' has a non-scalar value at join_on path "
+                f"'{selected}'"
             )
         return str(value), selected, False
     for path in _DEFAULT_JOIN_PATHS:
@@ -875,7 +935,7 @@ class LangSmithRunImporter:
                             outputs=_decode_json(record.get("outputs")),
                             requested_model=requested_model,
                             model=model,
-                            provider=provider,
+                            model_provider=provider,
                             tokens=_tokens(record),
                             cost=_decimal(record.get("total_cost")),
                             model_params=_invocation(record) or None,
