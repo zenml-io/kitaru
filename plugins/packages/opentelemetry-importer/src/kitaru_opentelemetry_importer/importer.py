@@ -1180,7 +1180,7 @@ def _parse_session(
                             )
                             else None
                         ),
-                        provider=(
+                        model_provider=(
                             str(value)
                             if (
                                 value := _attribute(
