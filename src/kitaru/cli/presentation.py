@@ -47,7 +47,7 @@ class HumanView:
     fields: tuple[HumanField, ...]
     sections: tuple[HumanSection, ...] = ()
     empty_message: str = "No results found."
-    renderer: Literal["default", "doctor"] = "default"
+    renderer: Literal["default", "doctor", "root"] = "default"
 
 
 def _format_count(value: Any) -> str:
@@ -220,6 +220,11 @@ def _build_view(
 
 
 _VIEWS: dict[str, HumanView] = {
+    "kitaru": HumanView(
+        title="Kitaru",
+        fields=(),
+        renderer="root",
+    ),
     "status": HumanView(
         title="Status",
         fields=(),
