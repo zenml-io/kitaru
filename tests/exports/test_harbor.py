@@ -160,6 +160,7 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
     assert "docker build" in readme
     assert "harbor run -p dataset" in readme
     assert "--agent agent.kitaru_agent:KitaruAgent" in readme
+    assert "not the user's agent name or class" in readme
 
     validate_harbor(output)
 

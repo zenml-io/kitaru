@@ -110,6 +110,10 @@ def test_render_writes_installable_v1_environment(tmp_path: Path) -> None:
     assert '"verifiers==0.3.0"' in pyproject
     assert '"kitaru==0.21.0"' in pyproject
     assert (root / "agent_source" / "agent.py").read_text() == "print('agent')\n"
+    readme = (root / "README.md").read_text()
+    assert "`eval` is the Verifiers CLI" in readme
+    assert "--env.taskset.id kitaru-verifiers-v1" in readme
+    assert "not the user's agent name" in readme
     task = json.loads((root / "data" / "tasks.jsonl").read_text())
     assert task["inputs"] == {"question": "6 * 7"}
     assert task["context"]["session"]["id"] == str(uuid.UUID(int=20))

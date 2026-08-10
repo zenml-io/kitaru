@@ -425,6 +425,10 @@ docker build -t {image} agent_image
 {run_command}
 ```
 
+`harbor` is the Harbor CLI. `dataset` is the generated task dataset, and
+`agent.kitaru_agent:KitaruAgent` is the generated adapter that starts the
+registered agent source and command. It is not the user's agent name or class.
+
 The agent must write its {trace_format} trace to `{trace_path}`. Missing or
 malformed traces and evaluator failures fail the task. There is no fallback reward.
 """
