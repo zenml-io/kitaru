@@ -875,7 +875,7 @@ class LangSmithRunImporter:
                             outputs=_decode_json(record.get("outputs")),
                             requested_model=requested_model,
                             model=model,
-                            provider=provider,
+                            model_provider=provider,
                             tokens=_tokens(record),
                             cost=_decimal(record.get("total_cost")),
                             model_params=_invocation(record) or None,

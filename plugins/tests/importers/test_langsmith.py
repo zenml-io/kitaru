@@ -167,7 +167,7 @@ def test_groups_thread_traces_into_ordered_turns_and_nodes() -> None:
     assert session.metadata["langsmith.join_paths"] == ["extra.metadata.thread_id"]
     nodes = {node.external_id: node for node in flatten(session.nodes)}
     assert nodes["trace-2:llm-2"].node_type is NodeType.LLM_CALL
-    assert nodes["trace-2:llm-2"].provider == "openai"
+    assert nodes["trace-2:llm-2"].model_provider == "openai"
     assert nodes["trace-2:llm-2"].model == "gpt-5-mini"
     assert nodes["trace-2:llm-2"].tokens is not None
     assert nodes["trace-2:llm-2"].tokens.input_tokens == 12
