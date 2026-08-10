@@ -8,16 +8,16 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from examples.canonical_example.agent import (
+from examples.pydantic_ai_ticket_resolver.agent import (
     _build_ci_model,
     build_agent,
     build_prompt,
     get_instructions,
     get_ticket_input,
 )
-from examples.canonical_example.fixtures import CASES
-from examples.canonical_example.models import ResolutionAction
-from examples.canonical_example.store import MockCommerceStore
+from examples.pydantic_ai_ticket_resolver.fixtures import CASES
+from examples.pydantic_ai_ticket_resolver.models import ResolutionAction
+from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
 
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
@@ -25,7 +25,7 @@ from kitaru.task.evaluator import SessionView
 from kitaru.task.importer import ImportedSession, flatten_nodes
 
 REPOSITORY_ROOT = Path(__file__).parents[1]
-EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "canonical_example"
+EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "pydantic_ai_ticket_resolver"
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
 IMPORTER_PATH = (
     REPOSITORY_ROOT
@@ -331,7 +331,7 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
         "kitaru evaluator register",
         "--evaluator returns-policy@1",
         "kitaru agent version register",
-        '--command "python -m examples.canonical_example.agent"',
+        '--command "python -m examples.pydantic_ai_ticket_resolver.agent"',
         "RETURNS_POLICY_MODE=strict",
         "kitaru experiment create",
         "--agent returns-resolver",

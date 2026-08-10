@@ -11,7 +11,7 @@ from typing import Any
 import pytest
 
 REPOSITORY_ROOT = Path(__file__).parents[2]
-EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "canonical_example"
+EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "pydantic_ai_ticket_resolver"
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
 CLI = Path(sys.executable).with_name("kitaru")
 
@@ -116,7 +116,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
         "register",
         "returns-resolver",
         "--command",
-        "python -m examples.canonical_example.agent",
+        "python -m examples.pydantic_ai_ticket_resolver.agent",
         "--description",
         "Resolve one synthetic returns or delivery ticket.",
         "--display-version",
@@ -434,7 +434,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "register",
                 "returns-resolver",
                 "--command",
-                "python -m examples.canonical_example.agent",
+                "python -m examples.pydantic_ai_ticket_resolver.agent",
                 "--description",
                 "Check approval and risk rules before issuing a refund.",
                 "--display-version",

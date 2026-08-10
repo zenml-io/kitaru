@@ -17,7 +17,7 @@ explicit_exclusions:
   - examples/v2/mcp/.mcp.json.example
 examples:
   - id: canonical-returns
-    path: examples/canonical_example
+    path: examples/pydantic_ai_ticket_resolver
     public_docs: [examples/README.md, docs/book/getting-started/examples.md]
     owner_area: trace import, evaluation, investigation, cohorts, and experiment replay
     coverage:
@@ -42,7 +42,7 @@ examples:
           - LANGFUSE_HOST
         timeout_seconds: 900
         cost_class: low
-        command: cd examples/canonical_example && ./generate.sh
+        command: cd examples/pydantic_ai_ticket_resolver && ./generate.sh
         waiver:
           reason: Trace generation makes paid model calls and writes to a user-selected Langfuse project.
           reviewer_action: Regenerate the traces manually when the agent or trace export changes.

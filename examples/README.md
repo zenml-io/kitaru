@@ -2,15 +2,15 @@
 
 ## Canonical returns example
 
-[`canonical_example/`](canonical_example/) is the main product walkthrough. It generates real PydanticAI and Langfuse traces for a synthetic returns agent, imports them into Kitaru, evaluates the baseline, creates cohorts, and replays an improved agent version.
+[`pydantic_ai_ticket_resolver/`](pydantic_ai_ticket_resolver/) is the main product walkthrough. It generates real PydanticAI and Langfuse traces for a synthetic returns agent, imports them into Kitaru, evaluates the baseline, creates cohorts, and replays an improved agent version.
 
-Run every command from `examples/canonical_example` and follow its [README](canonical_example/README.md).
+Run every command from `examples/pydantic_ai_ticket_resolver` and follow its [README](pydantic_ai_ticket_resolver/README.md).
 
 ## Standalone adapter examples
 
 The adapter examples use packages from the independent plugin workspace:
 
-- [`canonical_example/`](canonical_example/) uses `kitaru-pydantic-ai`.
+- [`pydantic_ai_ticket_resolver/`](pydantic_ai_ticket_resolver/) uses `kitaru-pydantic-ai`.
 - [`integrations/openai_agents_v2/`](integrations/openai_agents_v2/) uses `kitaru-openai-agents`.
 - [`integrations/langgraph_v2/`](integrations/langgraph_v2/) uses `kitaru-langgraph`.
 

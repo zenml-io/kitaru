@@ -2,7 +2,7 @@
 
 from decimal import Decimal
 
-from examples.canonical_example.models import (
+from examples.pydantic_ai_ticket_resolver.models import (
     Order,
     ResolutionAction,
     ReturnPolicy,

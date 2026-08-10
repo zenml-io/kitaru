@@ -10,9 +10,9 @@ from typing import Any
 
 from pydantic_ai import Agent
 
-from examples.canonical_example.agent import MODEL, build_agent, build_prompt
-from examples.canonical_example.fixtures import CASES
-from examples.canonical_example.store import MockCommerceStore
+from examples.pydantic_ai_ticket_resolver.agent import MODEL, build_agent, build_prompt
+from examples.pydantic_ai_ticket_resolver.fixtures import CASES
+from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
 
 REQUEST_OPTIONS = {"timeout_in_seconds": 30, "max_retries": 3}
 REDACTED_EXPORT_FIELDS = {"public_key"}

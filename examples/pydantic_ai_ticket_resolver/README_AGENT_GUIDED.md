@@ -19,7 +19,7 @@ All customers, orders, shipments, and actions are synthetic. Refund and replacem
 
 ## Step 1: Prepare Kitaru
 
-Run every command from `examples/canonical_example`.
+Run every command from `examples/pydantic_ai_ticket_resolver`.
 
 Create and load the environment file in each terminal:
 
@@ -103,8 +103,8 @@ Help me improve the returns agent in this repository using the connected Kitaru
 MCP server and the Kitaru CLI. Assume I do not know Kitaru and explain each
 concept when it first becomes useful.
 
-The agent is examples/canonical_example/agent.py. The trace export is
-examples/canonical_example/traces/langfuse-traces.jsonl. Register the baseline
+The agent is examples/pydantic_ai_ticket_resolver/agent.py. The trace export is
+examples/pydantic_ai_ticket_resolver/traces/langfuse-traces.jsonl. Register the baseline
 as returns-resolver and import the traces with the tag returns-baseline.
 
 Use the bundled cost, latency, and tool-call-pattern evaluators as broad signals.
@@ -168,7 +168,7 @@ These are expected results for this trace set. The coding agent must establish t
 
 ## Step 7: Generate the evaluator
 
-The approved brief becomes one observable binary rubric. The coding agent creates `examples/canonical_example/evaluator.py`, tests it against imported and replay-shaped evidence, and registers an immutable `returns-policy` version.
+The approved brief becomes one observable binary rubric. The coding agent creates `examples/pydantic_ai_ticket_resolver/evaluator.py`, tests it against imported and replay-shaped evidence, and registers an immutable `returns-policy` version.
 
 The generated evaluator checks the final action, accepted terminal tool calls, and refund amount. It rejects a reported escalation if a refund was already accepted earlier. The baseline should produce eight passes and failures on tickets 004 and 007. If it does not, the coding agent revisits the brief or implementation before continuing.
 

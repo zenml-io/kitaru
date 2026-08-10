@@ -4,7 +4,7 @@ This example runs an autonomous returns agent against ten synthetic customer ema
 
 All customers, orders, shipments, and actions are synthetic. Refund and replacement tools only modify an in-memory store.
 
-Run every command from `examples/canonical_example`.
+Run every command from `examples/pydantic_ai_ticket_resolver`.
 
 Copy the local environment template before choosing either path:
 
@@ -77,7 +77,7 @@ Register the baseline:
 ```bash
 uv run kitaru agent register \
   returns-resolver \
-  --command "python -m examples.canonical_example.agent" \
+  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
   --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
   --display-version baseline-v1 \
   --working-dir ../.. \
@@ -488,7 +488,7 @@ Register the same entrypoint with strict policy instructions enabled:
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
-  --command "python -m examples.canonical_example.agent" \
+  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
   --description "Check approval and risk rules before issuing a refund." \
   --display-version strict-policy-v2 \
   --working-dir ../.. \

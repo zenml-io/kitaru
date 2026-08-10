@@ -8,8 +8,8 @@ from typing import Any, cast
 from pydantic_ai import Agent
 from pydantic_ai.models import KnownModelName, Model
 
-from examples.canonical_example.models import Resolution, TicketInput
-from examples.canonical_example.store import MockCommerceStore
+from examples.pydantic_ai_ticket_resolver.models import Resolution, TicketInput
+from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
 from kitaru.task import get_task_inputs
 from kitaru_pydantic_ai import KitaruAgent
 

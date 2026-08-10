@@ -22,7 +22,7 @@ The orders, customers, shipments, and actions are synthetic. The agent makes rea
 Start in the example directory:
 
 ```bash
-cd examples/canonical_example
+cd examples/pydantic_ai_ticket_resolver
 cp .env.example .env
 set -a; source .env; set +a
 docker compose -f ../../docker-compose.yml up -d --build
@@ -33,7 +33,7 @@ uv run --no-sync python ../../scripts/smoke_plugin_artifacts.py \
 export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 ```
 
-Continue with [`examples/canonical_example/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/canonical_example) for the complete CLI walkthrough.
+Continue with [`examples/pydantic_ai_ticket_resolver/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) for the complete CLI walkthrough.
 
 ## Standalone adapter examples
 
