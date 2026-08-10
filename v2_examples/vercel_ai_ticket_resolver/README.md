@@ -24,6 +24,12 @@ pnpm typecheck
 pnpm lint
 ```
 
+With PostgreSQL reachable on the configured Kitaru test database port, run the provider-free live API, evaluator, cohort, and replay proof:
+
+```bash
+pnpm test:e2e
+```
+
 Start PostgreSQL, the API, and dashboard, then install and connect the Python CLI and worker:
 
 ```bash

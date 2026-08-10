@@ -13,6 +13,7 @@
     "lint": "biome check .",
     "smoke": "KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 KITARU_VERCEL_AI_SMOKE=1 node dist/main.js",
     "test": "vitest run test",
+    "test:e2e": "uv run pytest test/test_e2e.py -q",
     "test:evaluator": "uv run pytest test/test_documented_evaluator.py -q",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
