@@ -116,14 +116,12 @@ class AuthService:
         self,
         credential: str,
         csrf_token: str | None = None,
-        from_cookie: bool = False,
     ) -> AuthContext:
         """Authenticate a bearer credential for API route handling.
 
         Args:
             credential: Bearer token supplied by the caller.
             csrf_token: CSRF token supplied alongside the bearer token.
-            from_cookie: Whether the credential arrived in the auth cookie.
 
         Raises:
             AuthenticationError: The credential cannot be validated.
@@ -137,11 +135,10 @@ class AuthService:
             context = await self._authenticate_api_key(credential)
         else:
             context = await self._resolve_session_token(credential)
-        # Only a cookie rides along on a cross-site request, so only a cookie
-        # needs the caller to prove it can read the login response.
-        if from_cookie and (
-            context.csrf_token is None
-            or not secrets.compare_digest(csrf_token or "", context.csrf_token)
+        # A token issued to a cookie session carries a CSRF token, so the
+        # caller must echo it to prove it can read the login response.
+        if context.csrf_token is not None and not secrets.compare_digest(
+            csrf_token or "", context.csrf_token
         ):
             raise AuthenticationError("Missing or invalid CSRF token.")
         return context
