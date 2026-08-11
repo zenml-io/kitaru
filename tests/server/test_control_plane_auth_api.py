@@ -289,12 +289,50 @@ async def test_create_account_forbidden(
     control_plane_client: FakeControlPlaneClient,
     settings: APISettings,
 ) -> None:
-    """Observe HTTP 403 when creating an account under the control plane scheme."""
+    """Observe HTTP 403 when creating a user under the control plane scheme."""
     authenticate(control_plane_client, settings)
 
     response = await client.post(
-        "/v1/accounts",
+        "/v1/users",
         json={"name": "alice"},
+        headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "This server does not manage its own accounts."
+    }
+
+
+async def test_create_service_account_forbidden(
+    client: httpx.AsyncClient,
+    control_plane_client: FakeControlPlaneClient,
+    settings: APISettings,
+) -> None:
+    """Observe HTTP 403 when creating a service account under control plane."""
+    authenticate(control_plane_client, settings)
+
+    response = await client.post(
+        "/v1/service-accounts",
+        json={"name": "svc"},
+        headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
+    )
+    assert response.status_code == 403
+    assert response.json() == {
+        "detail": "This server does not manage its own accounts."
+    }
+
+
+async def test_update_service_account_forbidden(
+    client: httpx.AsyncClient,
+    control_plane_client: FakeControlPlaneClient,
+    settings: APISettings,
+) -> None:
+    """Observe HTTP 403 when updating a service account under control plane."""
+    authenticate(control_plane_client, settings)
+
+    response = await client.patch(
+        f"/v1/service-accounts/{uuid.uuid4()}",
+        json={"metadata": {"theme": "dark"}},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
     assert response.status_code == 403
@@ -308,11 +346,11 @@ async def test_update_account_forbidden(
     control_plane_client: FakeControlPlaneClient,
     settings: APISettings,
 ) -> None:
-    """Observe HTTP 403 when updating an account under the control plane scheme."""
+    """Observe HTTP 403 when updating a user under the control plane scheme."""
     authenticate(control_plane_client, settings)
 
     response = await client.patch(
-        f"/v1/accounts/{uuid.uuid4()}",
+        f"/v1/users/{uuid.uuid4()}",
         json={"password": "new", "old_password": "old"},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -328,7 +366,7 @@ async def test_update_account_is_admin_forbidden(
     authenticate(control_plane_client, settings)
 
     response = await client.patch(
-        f"/v1/accounts/{uuid.uuid4()}",
+        f"/v1/users/{uuid.uuid4()}",
         json={"is_admin": True},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -382,7 +420,7 @@ async def test_update_own_account_metadata_allowed(
     account_id = listed.json()["items"][0]["id"]
 
     response = await client.patch(
-        f"/v1/accounts/{account_id}",
+        f"/v1/users/{account_id}",
         json={"metadata": {"theme": "dark"}},
         headers=headers,
     )

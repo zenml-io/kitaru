@@ -72,7 +72,7 @@ class AccountService:
             return
         self._analytics.identify(account.id, build_account_traits(account, origin))
 
-    async def create_account(
+    async def create_user(
         self,
         name: str,
         email: str | None,
@@ -80,7 +80,7 @@ class AccountService:
         is_admin: bool,
         actor: AuthContext,
     ) -> tuple[Account, str | None]:
-        """Create an account, active with a password or pending activation.
+        """Create a user, active with a password or pending activation.
 
         Args:
             name: Account name.
@@ -117,6 +117,30 @@ class AccountService:
         account = await self._repository.create(account)
         self._identify(account, AccountOrigin.API)
         return account, activation_token
+
+    async def create_service_account(
+        self, name: str, email: str | None, actor: AuthContext
+    ) -> Account:
+        """Create a service account, active without credentials.
+
+        Args:
+            name: Account name.
+            email: Contact email.
+            actor: Caller context.
+
+        Raises:
+            ForbiddenError: The caller may not create accounts.
+            DuplicateAccountName: The account name is already registered.
+
+        Returns:
+            Created account.
+        """
+        await self._permission_service.check(actor, ResourceType.ACCOUNT, Action.CREATE)
+        account = await self._repository.create(
+            Account(name=name, email=email, is_service_account=True)
+        )
+        self._identify(account, AccountOrigin.API)
+        return account
 
     async def ensure_account(self, name: str, password: str | None) -> Account:
         """Create an account at startup when it does not exist.
@@ -182,7 +206,7 @@ class AccountService:
         _ = actor
         return await self._repository.query(account_filter)
 
-    async def update_account(
+    async def update_user(
         self,
         account_id: uuid.UUID,
         password: str | None,
@@ -191,7 +215,7 @@ class AccountService:
         is_admin: bool | None,
         actor: AuthContext,
     ) -> Account:
-        """Partially update an account.
+        """Partially update a user.
 
         Args:
             account_id: Id of the account.
@@ -202,16 +226,15 @@ class AccountService:
             actor: Caller context.
 
         Raises:
-            AccountNotFound: No account has this id.
+            AccountNotFound: No user has this id.
             ForbiddenError: The caller may not set admin rights, writes its
                 own admin flag or another account's password or metadata,
-                the current password is missing or does not match, or the
-                target account is a service account.
+                or the current password is missing or does not match.
 
         Returns:
             Updated account.
         """
-        account = await self._repository.get(account_id)
+        account = await self._repository.get(account_id, is_service_account=False)
         if account_id != actor.account.id:
             if password is not None:
                 raise ForbiddenError(
@@ -227,8 +250,6 @@ class AccountService:
             )
             if account_id == actor.account.id:
                 raise ForbiddenError("Accounts cannot change their own admin flag")
-            if account.is_service_account:
-                raise ForbiddenError("Service accounts cannot be admins")
             account.update_is_admin(is_admin)
         if password is not None:
             if old_password is None:
@@ -247,17 +268,49 @@ class AccountService:
             account.update_password_hash(password_hash)
         return await self._repository.update(account)
 
-    async def deactivate_account(
+    async def update_service_account(
+        self,
+        account_id: uuid.UUID,
+        metadata: dict[str, Any] | None,
+        active: bool | None,
+        actor: AuthContext,
+    ) -> Account:
+        """Partially update a service account.
+
+        Args:
+            account_id: Id of the account.
+            metadata: New metadata, unchanged when ``None``.
+            active: New active state, unchanged when ``None``.
+            actor: Caller context.
+
+        Raises:
+            AccountNotFound: No service account has this id.
+            ForbiddenError: The caller may not update service accounts.
+
+        Returns:
+            Updated account.
+        """
+        await self._permission_service.check(
+            actor, ResourceType.ACCOUNT, Action.UPDATE, resource_id=account_id
+        )
+        account = await self._repository.get(account_id, is_service_account=True)
+        if metadata is not None:
+            account.update_metadata(metadata)
+        if active is not None:
+            account.update_active(active)
+        return await self._repository.update(account)
+
+    async def deactivate_user(
         self, account_id: uuid.UUID, actor: AuthContext
     ) -> tuple[Account, str]:
-        """Deactivate an account and mint a fresh activation token for it.
+        """Deactivate a user and mint a fresh activation token for it.
 
         Args:
             account_id: Id of the account.
             actor: Caller context.
 
         Raises:
-            AccountNotFound: No account has this id.
+            AccountNotFound: No user has this id.
             ForbiddenError: The caller may not deactivate this account or is
                 deactivating itself.
 
@@ -269,16 +322,16 @@ class AccountService:
         )
         if account_id == actor.account.id:
             raise ForbiddenError("Accounts cannot deactivate themselves")
-        account = await self._repository.get(account_id)
+        account = await self._repository.get(account_id, is_service_account=False)
         activation_token = generate_secret()
         account.update_active(False)
         account.update_activation_token_hash(hash_secret(activation_token))
         return await self._repository.update(account), activation_token
 
-    async def activate_account(
+    async def activate_user(
         self, account_id: uuid.UUID, activation_token: str, password: str
     ) -> Account:
-        """Activate an account with its activation token and a new password.
+        """Activate a user with its activation token and a new password.
 
         Args:
             account_id: Id of the account.
@@ -286,13 +339,13 @@ class AccountService:
             password: Login password to set.
 
         Raises:
-            AccountNotFound: No account has this id.
+            AccountNotFound: No user has this id.
             ForbiddenError: The account has no pending token or it does not match.
 
         Returns:
             Activated account.
         """
-        account = await self._repository.get(account_id)
+        account = await self._repository.get(account_id, is_service_account=False)
         if account.activation_token_hash is None or not verify_secret(
             activation_token, account.activation_token_hash
         ):

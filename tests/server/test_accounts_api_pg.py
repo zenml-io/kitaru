@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end account tests against PostgreSQL."""
 
+import json
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -37,7 +38,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_accounts_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/accounts",
+        "/v1/users",
         json={"name": "alice", "email": "alice@example.com", "password": "secret"},
     )
     assert response.status_code == 201
@@ -59,17 +60,17 @@ async def test_accounts_persist_across_requests(client: httpx.AsyncClient) -> No
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/accounts", json={"name": "alice"})
+    response = await client.post("/v1/users", json={"name": "alice"})
     assert response.status_code == 201
-    response = await client.post("/v1/accounts", json={"name": "alice"})
+    response = await client.post("/v1/users", json={"name": "alice"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Account name 'alice' is already registered"}
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a partial update across requests."""
-    created = (await client.post("/v1/accounts", json={"name": "alice"})).json()
-    response = await client.post(f"/v1/accounts/{created['id']}/deactivate")
+    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    response = await client.post(f"/v1/users/{created['id']}/deactivate")
     assert response.status_code == 200
 
     response = await client.get(f"/v1/accounts/{created['id']}")
@@ -77,3 +78,26 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
     body = response.json()
     assert body["active"] is False
     assert body["updated"] > created["updated"]
+
+
+async def test_service_account_lifecycle(client: httpx.AsyncClient) -> None:
+    """Create, filter, and update a service account against Postgres."""
+    response = await client.post("/v1/service-accounts", json={"name": "svc"})
+    assert response.status_code == 201
+    created = response.json()
+    assert created["is_service_account"] is True
+    assert created["active"] is True
+
+    filter_expression = {"field": "is_service_account", "op": "eq", "value": True}
+    response = await client.get(
+        "/v1/accounts", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert [item["name"] for item in body["items"]] == ["svc"]
+
+    response = await client.patch(
+        f"/v1/service-accounts/{created['id']}", json={"active": False}
+    )
+    assert response.status_code == 200
+    assert response.json()["active"] is False
