@@ -26,8 +26,9 @@ from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationListParams,
     InvestigationSessionsListParams,
-    InvestigationSessionStatus,
     InvestigationSessionUpdateRequest,
+    InvestigationSessionVerdict,
+    InvestigationStatus,
     InvestigationUpdateRequest,
 )
 from kitaru.cli import app as app_module
@@ -289,11 +290,25 @@ async def test_crud_and_session_status_commands_map_to_sdk() -> None:
         name="renamed",
         description=None,
         clear_description=True,
+        status=None,
     )
     _, request = client.update_calls[-1]
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "name": "renamed",
         "description": None,
+    }
+
+    await investigations.update_investigation(
+        client,
+        investigation_id,
+        name=None,
+        description=None,
+        clear_description=False,
+        status=InvestigationStatus.COMPLETED,
+    )
+    _, request = client.update_calls[-1]
+    assert request.model_dump(mode="json", exclude_unset=True) == {
+        "status": "completed",
     }
 
     sessions = await investigations.list_investigation_sessions(
@@ -308,17 +323,17 @@ async def test_crud_and_session_status_commands_map_to_sdk() -> None:
     assert sessions.page["next_cursor"] == "next-session"
 
     for target in (
-        InvestigationSessionStatus.COMPLETED,
-        InvestigationSessionStatus.SKIPPED,
+        InvestigationSessionVerdict.ACCEPTABLE,
+        InvestigationSessionVerdict.PROBLEMATIC,
     ):
-        await investigations.update_investigation_session_status(
+        await investigations.update_investigation_session_verdict(
             client,
             investigation_id,
             client.session_ids[0],
-            status=target,
+            verdict=target,
         )
         _, _, request = client.session_update_calls[-1]
-        assert request.status is target
+        assert request.verdict is target
 
     with pytest.raises(CLIError, match="requires --force"):
         await investigations.delete_investigation(client, investigation_id, force=False)
@@ -340,6 +355,7 @@ async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
             name=None,
             description="set",
             clear_description=True,
+            status=None,
         )
     with pytest.raises(CLIError, match="Select at least one"):
         await investigations.update_investigation(
@@ -348,6 +364,7 @@ async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
             name=None,
             description=None,
             clear_description=False,
+            status=None,
         )
     assert client.update_calls == []
 
@@ -386,12 +403,15 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
             "session.list",
         ),
         (
-            ["investigation", "session", "complete", investigation_id, session_id],
-            "session.complete",
-        ),
-        (
-            ["investigation", "session", "skip", investigation_id, session_id],
-            "session.skip",
+            [
+                "investigation",
+                "session",
+                "verdict",
+                investigation_id,
+                session_id,
+                "acceptable",
+            ],
+            "session.verdict",
         ),
         (["investigation", "delete", investigation_id, "--force"], "delete"),
     ]
@@ -406,10 +426,9 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
         "investigation.delete",
         "investigation.get",
         "investigation.list",
-        "investigation.session.complete",
         "investigation.session.list",
-        "investigation.session.skip",
+        "investigation.session.verdict",
         "investigation.update",
     }
     assert specs["investigation.delete"]["side_effects"]["deletes_remote_state"]
-    assert specs["investigation.session.complete"]["mutating"] is True
+    assert specs["investigation.session.verdict"]["mutating"] is True

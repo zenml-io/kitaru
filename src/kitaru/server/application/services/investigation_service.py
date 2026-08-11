@@ -18,8 +18,7 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 
 from kitaru.analytics.events import AnalyticsEvent
-from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.investigation import InvestigationSessionStatus
+from kitaru.api_models.v1.investigation import InvestigationSessionVerdict
 from kitaru.server.application.interfaces.agent_repository import AgentRepository
 from kitaru.server.application.interfaces.investigation_repository import (
     InvestigationRepository,
@@ -38,7 +37,6 @@ from kitaru.server.application.services.analytics_events import (
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.investigation import Investigation, InvestigationSession
-from kitaru.server.filtering import FilterCondition
 
 
 class InvestigationService:
@@ -180,7 +178,7 @@ class InvestigationService:
         command: InvestigationUpdate,
         actor: AuthContext,
     ) -> Investigation:
-        """Partially update an investigation's name and description.
+        """Partially update an investigation's name, description, and status.
 
         Args:
             investigation_id: Id of the investigation.
@@ -189,7 +187,10 @@ class InvestigationService:
 
         Raises:
             InvestigationNotFound: No investigation has this id.
-            ValidationError: The command clears the investigation name.
+            IllegalInvestigationStatusTransition: The command moves the
+                status backwards.
+            ValidationError: The command clears the investigation name or
+                status.
 
         Returns:
             Updated investigation.
@@ -203,6 +204,10 @@ class InvestigationService:
             investigation.update_name(command.name)
         if "description" in fields:
             investigation.update_description(command.description)
+        if "status" in fields:
+            if command.status is None:
+                raise ValidationError("Investigation status cannot be cleared")
+            investigation.update_status(command.status, datetime.now(UTC))
         return await self._repository.update(investigation)
 
     async def delete_investigation(
@@ -242,62 +247,33 @@ class InvestigationService:
         await self._repository.get(session_filter.investigation_id)
         return await self._repository.query_sessions(session_filter)
 
-    async def update_investigation_session_status(
+    async def update_investigation_session_verdict(
         self,
         investigation_id: uuid.UUID,
         session_id: uuid.UUID,
-        status: InvestigationSessionStatus,
+        verdict: InvestigationSessionVerdict | None,
         actor: AuthContext,
     ) -> InvestigationSession:
-        """Mark a linked session completed or skipped.
-
-        Completes the investigation once no linked session is left pending.
+        """Set or clear a linked session's verdict.
 
         Args:
             investigation_id: Id of the investigation.
             session_id: Id of the linked session.
-            status: Target status, completed or skipped.
+            verdict: New verdict, None clears it.
             actor: Caller context.
 
         Raises:
             InvestigationNotFound: No investigation has this id.
             InvestigationSessionNotFound: No investigation session links this
                 investigation and session.
-            IllegalInvestigationSessionStatusTransition: The linked session
-                is not pending.
-            ValidationError: The target status is neither completed nor
-                skipped.
 
         Returns:
             Updated investigation session.
         """
         _ = actor
-        # The investigation row is locked before the session transition, so a
-        # racing status update on another linked session cannot also observe
-        # zero sessions left pending and complete the investigation twice.
-        investigation = await self._repository.get(investigation_id, exclusive=True)
+        await self._repository.get(investigation_id)
         session = await self._repository.get_session_by_session_id(
-            investigation_id, session_id, exclusive=True
+            investigation_id, session_id
         )
-        if status is InvestigationSessionStatus.COMPLETED:
-            session.complete()
-        elif status is InvestigationSessionStatus.SKIPPED:
-            session.skip()
-        else:
-            raise ValidationError(
-                f"Investigation session status cannot be set to '{status}'"
-            )
-        session = await self._repository.update_session(session)
-
-        pending = FilterCondition(
-            field="status", op=FilterOp.EQ, value=InvestigationSessionStatus.PENDING
-        )
-        remaining, _ = await self._repository.query_sessions(
-            InvestigationSessionFilter(
-                investigation_id=investigation_id, expression=pending, size=1
-            )
-        )
-        if not remaining:
-            investigation.complete(datetime.now(UTC))
-            await self._repository.update(investigation)
-        return session
+        session.update_verdict(verdict)
+        return await self._repository.update_session(session)

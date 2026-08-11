@@ -38,12 +38,12 @@ class InvestigationStatus(StrEnum):
     COMPLETED = "completed"
 
 
-class InvestigationSessionStatus(StrEnum):
-    """Investigation session status."""
+class InvestigationSessionVerdict(StrEnum):
+    """Investigation session verdict."""
 
-    PENDING = "pending"
-    COMPLETED = "completed"
-    SKIPPED = "skipped"
+    ACCEPTABLE = "acceptable"
+    PROBLEMATIC = "problematic"
+    UNCERTAIN = "uncertain"
 
 
 class QuestionItem(RequestModel):
@@ -122,6 +122,9 @@ class InvestigationUpdateRequest(RequestModel):
 
     name: str | None = Field(default=None, description="New investigation name.")
     description: str | None = Field(default=None, description="New curator rationale.")
+    status: InvestigationStatus | None = Field(
+        default=None, description="New investigation status."
+    )
 
 
 class InvestigationListParams(FilterableListParams):
@@ -150,7 +153,7 @@ class InvestigationResponse(OwnedResponseModel):
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     total_sessions: int = Field(description="Number of linked sessions.")
     completed_sessions: int = Field(
-        description="Number of linked sessions marked completed or skipped."
+        description="Number of linked sessions with a verdict."
     )
 
 
@@ -161,8 +164,8 @@ class InvestigationSessionsListParams(CursorParams):
 class InvestigationSessionUpdateRequest(RequestModel):
     """Investigation session update request."""
 
-    status: InvestigationSessionStatus = Field(
-        description="New investigation session status."
+    verdict: InvestigationSessionVerdict | None = Field(
+        description="New investigation session verdict, None clears it."
     )
 
 
@@ -175,7 +178,7 @@ class InvestigationSessionResponse(TimestampedResponseModel):
     )
     session_id: uuid.UUID = Field(description="Session being investigated.")
     position: int = Field(description="Presentation order within the investigation.")
-    status: InvestigationSessionStatus = Field(
-        description="Investigation session status."
+    verdict: InvestigationSessionVerdict | None = Field(
+        description="Investigation session verdict."
     )
     view: InvestigationSessionView | None = Field(description="Curated session view.")

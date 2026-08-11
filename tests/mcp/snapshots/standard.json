@@ -4884,7 +4884,7 @@
               "type": "string"
             },
             "completed_sessions": {
-              "description": "Number of linked sessions marked completed or skipped.",
+              "description": "Number of linked sessions with a verdict.",
               "title": "Completed Sessions",
               "type": "integer"
             },
@@ -5029,14 +5029,22 @@
               "title": "Session Id",
               "type": "string"
             },
-            "status": {
-              "$ref": "#/$defs/InvestigationSessionStatus"
-            },
             "updated": {
               "description": "Last modification time.",
               "format": "date-time",
               "title": "Updated",
               "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Investigation session verdict."
             },
             "view": {
               "anyOf": [
@@ -5057,20 +5065,20 @@
             "investigation_id",
             "session_id",
             "position",
-            "status",
+            "verdict",
             "view"
           ],
           "title": "InvestigationSessionResponse",
           "type": "object"
         },
-        "InvestigationSessionStatus": {
-          "description": "Investigation session status.",
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
           "enum": [
-            "pending",
-            "completed",
-            "skipped"
+            "acceptable",
+            "problematic",
+            "uncertain"
           ],
-          "title": "InvestigationSessionStatus",
+          "title": "InvestigationSessionVerdict",
           "type": "string"
         },
         "InvestigationSessionView": {
@@ -7479,6 +7487,16 @@
           "title": "InvestigationSessionInput",
           "type": "object"
         },
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
+          "enum": [
+            "acceptable",
+            "problematic",
+            "uncertain"
+          ],
+          "title": "InvestigationSessionVerdict",
+          "type": "string"
+        },
         "InvestigationSessionView": {
           "additionalProperties": false,
           "description": "Investigation session view.",
@@ -7581,6 +7599,22 @@
               "const": "update_investigation",
               "title": "Operation",
               "type": "string"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "in_progress",
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status"
             }
           },
           "required": [
@@ -7649,9 +7683,9 @@
           "title": "QuestionItem",
           "type": "object"
         },
-        "SetInvestigationSessionStatus": {
+        "SetInvestigationSessionVerdict": {
           "additionalProperties": false,
-          "description": "Set one linked session to a terminal status.",
+          "description": "Set or clear one linked session's verdict.",
           "properties": {
             "investigation_id": {
               "format": "uuid",
@@ -7659,7 +7693,7 @@
               "type": "string"
             },
             "operation": {
-              "const": "set_session_status",
+              "const": "set_session_verdict",
               "title": "Operation",
               "type": "string"
             },
@@ -7668,22 +7702,24 @@
               "title": "Session Id",
               "type": "string"
             },
-            "status": {
-              "enum": [
-                "completed",
-                "skipped"
-              ],
-              "title": "Status",
-              "type": "string"
+            "verdict": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
             "operation",
             "investigation_id",
             "session_id",
-            "status"
+            "verdict"
           ],
-          "title": "SetInvestigationSessionStatus",
+          "title": "SetInvestigationSessionVerdict",
           "type": "object"
         }
       },
@@ -7694,7 +7730,7 @@
               "answer_question": "#/$defs/InvestigationAnswerCreate",
               "create_annotation": "#/$defs/ManualAnnotationCreate",
               "create_investigation": "#/$defs/InvestigationCreate",
-              "set_session_status": "#/$defs/SetInvestigationSessionStatus",
+              "set_session_verdict": "#/$defs/SetInvestigationSessionVerdict",
               "update_annotation": "#/$defs/AnnotationUpdate",
               "update_investigation": "#/$defs/InvestigationUpdate"
             },
@@ -7708,7 +7744,7 @@
               "$ref": "#/$defs/InvestigationUpdate"
             },
             {
-              "$ref": "#/$defs/SetInvestigationSessionStatus"
+              "$ref": "#/$defs/SetInvestigationSessionVerdict"
             },
             {
               "$ref": "#/$defs/ManualAnnotationCreate"
@@ -7899,7 +7935,7 @@
               "type": "string"
             },
             "completed_sessions": {
-              "description": "Number of linked sessions marked completed or skipped.",
+              "description": "Number of linked sessions with a verdict.",
               "title": "Completed Sessions",
               "type": "integer"
             },
@@ -8044,14 +8080,22 @@
               "title": "Session Id",
               "type": "string"
             },
-            "status": {
-              "$ref": "#/$defs/InvestigationSessionStatus"
-            },
             "updated": {
               "description": "Last modification time.",
               "format": "date-time",
               "title": "Updated",
               "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Investigation session verdict."
             },
             "view": {
               "anyOf": [
@@ -8072,20 +8116,20 @@
             "investigation_id",
             "session_id",
             "position",
-            "status",
+            "verdict",
             "view"
           ],
           "title": "InvestigationSessionResponse",
           "type": "object"
         },
-        "InvestigationSessionStatus": {
-          "description": "Investigation session status.",
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
           "enum": [
-            "pending",
-            "completed",
-            "skipped"
+            "acceptable",
+            "problematic",
+            "uncertain"
           ],
-          "title": "InvestigationSessionStatus",
+          "title": "InvestigationSessionVerdict",
           "type": "string"
         },
         "InvestigationSessionView": {

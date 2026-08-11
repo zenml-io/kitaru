@@ -18,7 +18,6 @@ from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, select
 
-from kitaru.api_models.v1.investigation import InvestigationSessionStatus
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.investigation import InvestigationORM
 from kitaru.server.adapters.db.orm.investigation_session import InvestigationSessionORM
@@ -42,7 +41,7 @@ INVESTIGATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
 }
 
 INVESTIGATION_SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
-    "status": InvestigationSessionORM.status,
+    "verdict": InvestigationSessionORM.verdict,
 }
 
 SessionCounts = tuple[int, int]
@@ -67,39 +66,30 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
     async def _load_session_counts(
         self, investigation_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, SessionCounts]:
-        """Bulk-count linked and completed or skipped sessions per investigation.
+        """Bulk-count linked sessions and non-null verdicts per investigation.
 
         Args:
             investigation_ids: Ids of the investigations.
 
         Returns:
-            Total and completed or skipped session counts keyed by
-            investigation id, missing ids omitted.
+            Session and verdict counts keyed by investigation id, missing
+            ids omitted.
         """
         if not investigation_ids:
             return {}
         statement = (
             select(
                 InvestigationSessionORM.investigation_id,
-                InvestigationSessionORM.status,
                 func.count(InvestigationSessionORM.id),
+                func.count(InvestigationSessionORM.verdict),
             )
             .where(InvestigationSessionORM.investigation_id.in_(investigation_ids))
-            .group_by(
-                InvestigationSessionORM.investigation_id, InvestigationSessionORM.status
-            )
+            .group_by(InvestigationSessionORM.investigation_id)
         )
         rows = (await self._session.execute(statement)).all()
-        tallies: dict[uuid.UUID, dict[str, int]] = {}
-        for investigation_id, status, count in rows:
-            tallies.setdefault(investigation_id, {})[status] = count
         return {
-            investigation_id: (
-                sum(tally.values()),
-                sum(tally.values())
-                - tally.get(InvestigationSessionStatus.PENDING.value, 0),
-            )
-            for investigation_id, tally in tallies.items()
+            investigation_id: (total, completed)
+            for investigation_id, total, completed in rows
         }
 
     async def _to_domain(self, row: InvestigationORM) -> Investigation:
@@ -156,11 +146,7 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             [InvestigationSessionORM.from_domain(session) for session in sessions]
         )
         await self._flush()
-        completed = sum(
-            1
-            for session in sessions
-            if session.status is not InvestigationSessionStatus.PENDING
-        )
+        completed = sum(1 for session in sessions if session.verdict is not None)
         return row.to_domain(len(sessions), completed)
 
     async def get(
@@ -337,6 +323,6 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             Stored investigation session with the updated timestamp renewed.
         """
         row = await self._get_session_row(session.id)
-        row.status = session.status.value
+        row.verdict = session.verdict.value if session.verdict is not None else None
         await self._flush()
         return row.to_domain()

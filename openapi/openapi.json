@@ -3370,7 +3370,7 @@
             "type": "string"
           },
           "completed_sessions": {
-            "description": "Number of linked sessions marked completed or skipped.",
+            "description": "Number of linked sessions with a verdict.",
             "title": "Completed Sessions",
             "type": "integer"
           },
@@ -3541,14 +3541,22 @@
             "title": "Session Id",
             "type": "string"
           },
-          "status": {
-            "$ref": "#/components/schemas/InvestigationSessionStatus"
-          },
           "updated": {
             "description": "Last modification time.",
             "format": "date-time",
             "title": "Updated",
             "type": "string"
+          },
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationSessionVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Investigation session verdict."
           },
           "view": {
             "anyOf": [
@@ -3569,36 +3577,43 @@
           "investigation_id",
           "session_id",
           "position",
-          "status",
+          "verdict",
           "view"
         ],
         "title": "InvestigationSessionResponse",
         "type": "object"
       },
-      "InvestigationSessionStatus": {
-        "description": "Investigation session status.",
-        "enum": [
-          "pending",
-          "completed",
-          "skipped"
-        ],
-        "title": "InvestigationSessionStatus",
-        "type": "string"
-      },
       "InvestigationSessionUpdateRequest": {
         "additionalProperties": false,
         "description": "Investigation session update request.",
         "properties": {
-          "status": {
-            "$ref": "#/components/schemas/InvestigationSessionStatus",
-            "description": "New investigation session status."
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationSessionVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New investigation session verdict, None clears it."
           }
         },
         "required": [
-          "status"
+          "verdict"
         ],
         "title": "InvestigationSessionUpdateRequest",
         "type": "object"
+      },
+      "InvestigationSessionVerdict": {
+        "description": "Investigation session verdict.",
+        "enum": [
+          "acceptable",
+          "problematic",
+          "uncertain"
+        ],
+        "title": "InvestigationSessionVerdict",
+        "type": "string"
       },
       "InvestigationSessionView": {
         "additionalProperties": false,
@@ -3697,6 +3712,17 @@
             ],
             "description": "New investigation name.",
             "title": "Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New investigation status."
           }
         },
         "title": "InvestigationUpdateRequest",
@@ -7770,7 +7796,7 @@
         "type": "object"
       },
       "UserActivationTokenResponse": {
-        "description": "Account response carrying a newly minted activation token.",
+        "description": "User response carrying a newly minted activation token.",
         "properties": {
           "activation_token": {
             "description": "Plaintext token, shown once.",
@@ -13034,7 +13060,7 @@
         ]
       },
       "patch": {
-        "description": "Update an investigation's name and description.\n\nClients observe HTTP 200 on success, 404 when no investigation has this\nid, and 422 when the update clears the investigation name.\n\nArgs:\n    investigation_id: Id of the investigation.\n    body: Investigation update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation.",
+        "description": "Update an investigation's name, description, and status.\n\nClients observe HTTP 200 on success, 404 when no investigation has this\nid, 409 when the update moves the status backwards, and 422 when the\nupdate clears the investigation name or status.\n\nArgs:\n    investigation_id: Id of the investigation.\n    body: Investigation update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation.",
         "operationId": "update_investigation_v1_investigations__investigation_id__patch",
         "parameters": [
           {
@@ -13164,8 +13190,8 @@
     },
     "/v1/investigations/{investigation_id}/sessions/{session_id}": {
       "patch": {
-        "description": "Mark a linked session completed or skipped.\n\nCompletes the investigation once no linked session is left pending.\nClients observe HTTP 200 on success, 404 when no investigation has this\nid or no investigation session links this investigation and session, and\n409 when the linked session is not pending.\n\nArgs:\n    investigation_id: Id of the investigation.\n    session_id: Id of the linked session.\n    body: Investigation session update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation session.",
-        "operationId": "update_investigation_session_status_v1_investigations__investigation_id__sessions__session_id__patch",
+        "description": "Set or clear a linked session's verdict.\n\nClients observe HTTP 200 on success and 404 when no investigation has\nthis id or no investigation session links this investigation and\nsession.\n\nArgs:\n    investigation_id: Id of the investigation.\n    session_id: Id of the linked session.\n    body: Investigation session update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation session.",
+        "operationId": "update_investigation_session_verdict_v1_investigations__investigation_id__sessions__session_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -13220,7 +13246,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Investigation Session Status",
+        "summary": "Update Investigation Session Verdict",
         "tags": [
           "investigations"
         ]

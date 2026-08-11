@@ -921,7 +921,7 @@ def upgrade() -> None:
         sa.Column("investigation_id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
-        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("verdict", sa.String(length=32), nullable=True),
         sa.Column(
             "view",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),

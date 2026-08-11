@@ -128,7 +128,7 @@ class InvestigationsResource:
     async def update(
         self, investigation_id: uuid.UUID, request: InvestigationUpdateRequest
     ) -> InvestigationResponse:
-        """Update an investigation's name and description.
+        """Update an investigation's name, description, and status.
 
         Args:
             investigation_id: Id of the investigation.
@@ -218,7 +218,7 @@ class InvestigationsResource:
         session_id: uuid.UUID,
         request: InvestigationSessionUpdateRequest,
     ) -> InvestigationSessionResponse:
-        """Mark an investigation session completed or skipped.
+        """Set or clear an investigation session's verdict.
 
         Args:
             investigation_id: Id of the investigation.

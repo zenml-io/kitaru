@@ -29,7 +29,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
+    InvestigationSessionVerdict,
     InvestigationStatus,
     QuestionItem,
 )
@@ -201,7 +201,7 @@ async def test_create_sets_timestamps_and_counts(setup: Setup) -> None:
 
 
 async def test_create_with_linked_sessions_counts_total(setup: Setup) -> None:
-    """Count every linked session as total_sessions regardless of status."""
+    """Count every linked session as total_sessions regardless of verdict."""
     repository, owner_id, agent_id, make_session_id, _ = setup
     session_ids = [await make_session_id(), await make_session_id()]
     investigation = Investigation(
@@ -407,8 +407,8 @@ async def test_delete_cascades_sessions(setup: Setup) -> None:
         await repository.get_session(linked.id)
 
 
-async def test_progress_counts_track_completed_or_skipped_links(setup: Setup) -> None:
-    """Count completed and skipped links together, apart from pending ones."""
+async def test_progress_counts_track_links_with_verdicts(setup: Setup) -> None:
+    """Count links with a verdict, apart from links without one."""
     repository, owner_id, agent_id, make_session_id, _ = setup
     session_ids = [
         await make_session_id(),
@@ -432,10 +432,10 @@ async def test_progress_counts_track_completed_or_skipped_links(setup: Setup) ->
         ],
     )
     first = await repository.get_session_by_session_id(created.id, session_ids[0])
-    first.complete()
+    first.update_verdict(InvestigationSessionVerdict.ACCEPTABLE)
     await repository.update_session(first)
     second = await repository.get_session_by_session_id(created.id, session_ids[1])
-    second.skip()
+    second.update_verdict(InvestigationSessionVerdict.PROBLEMATIC)
     await repository.update_session(second)
 
     loaded = await repository.get(created.id)
@@ -509,8 +509,8 @@ async def test_query_sessions_scoped_to_investigation(setup: Setup) -> None:
     assert [session.session_id for session in sessions] == [session_id]
 
 
-async def test_query_sessions_filters_by_status(setup: Setup) -> None:
-    """Filter an investigation's sessions by status."""
+async def test_query_sessions_filters_by_verdict(setup: Setup) -> None:
+    """Filter an investigation's sessions by verdict."""
     repository, owner_id, agent_id, make_session_id, _ = setup
     session_ids = [await make_session_id(), await make_session_id()]
     investigation = Investigation(
@@ -529,20 +529,28 @@ async def test_query_sessions_filters_by_status(setup: Setup) -> None:
         ],
     )
     target = await repository.get_session_by_session_id(created.id, session_ids[0])
-    target.complete()
+    target.update_verdict(InvestigationSessionVerdict.ACCEPTABLE)
     await repository.update_session(target)
 
     sessions, _ = await repository.query_sessions(
         InvestigationSessionFilter(
             investigation_id=created.id,
             expression=FilterCondition(
-                field="status",
+                field="verdict",
                 op=FilterOp.EQ,
-                value=InvestigationSessionStatus.COMPLETED,
+                value=InvestigationSessionVerdict.ACCEPTABLE,
             ),
         )
     )
     assert [session.session_id for session in sessions] == [session_ids[0]]
+
+    sessions, _ = await repository.query_sessions(
+        InvestigationSessionFilter(
+            investigation_id=created.id,
+            expression=FilterCondition(field="verdict", op=FilterOp.IS_NULL),
+        )
+    )
+    assert [session.session_id for session in sessions] == [session_ids[1]]
 
 
 async def test_query_sessions_walks_pages(setup: Setup) -> None:
@@ -623,7 +631,7 @@ async def test_get_session_by_session_id_not_found(setup: Setup) -> None:
 
 
 async def test_update_session(setup: Setup) -> None:
-    """Persist a status transition and renew the updated timestamp."""
+    """Persist a verdict change and renew the updated timestamp."""
     repository, owner_id, agent_id, make_session_id, _ = setup
     session_id = await make_session_id()
     investigation = Investigation(
@@ -638,9 +646,9 @@ async def test_update_session(setup: Setup) -> None:
         investigation, [_link(investigation.id, session_id, 0)]
     )
     linked = await repository.get_session_by_session_id(created.id, session_id)
-    linked.complete()
+    linked.update_verdict(InvestigationSessionVerdict.UNCERTAIN)
     updated = await repository.update_session(linked)
-    assert updated.status is InvestigationSessionStatus.COMPLETED
+    assert updated.verdict is InvestigationSessionVerdict.UNCERTAIN
     assert updated.created == linked.created
     assert updated.updated is not None
     loaded = await repository.get_session(linked.id)
