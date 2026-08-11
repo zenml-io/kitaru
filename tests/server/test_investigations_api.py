@@ -110,16 +110,25 @@ async def session_ids(
 async def test_create_investigation(
     client: httpx.AsyncClient, agent_id: str, session_ids: list[str]
 ) -> None:
-    """Create an investigation with its questions and sessions and observe HTTP 201."""
+    """Create an investigation with its sessions and observe HTTP 201."""
+    highlights = [
+        {
+            "selector": {"node_id": None, "path": None, "span": None},
+            "description": "Retried without backoff.",
+        }
+    ]
     response = await client.post(
         "/v1/investigations",
         json={
             "agent_id": agent_id,
             "name": "payment-failures",
             "description": "curator rationale",
-            "questions": [{"key": "root_cause", "question": "What caused it?"}],
             "sessions": [
-                {"session_id": session_ids[0]},
+                {
+                    "session_id": session_ids[0],
+                    "question": "What caused it?",
+                    "highlights": highlights,
+                },
                 {
                     "session_id": session_ids[1],
                     "view": {"summary": "Retry loop without backoff."},
@@ -134,11 +143,18 @@ async def test_create_investigation(
     assert body["owner_id"] == str(ACCOUNT.id)
     assert body["agent_id"] == agent_id
     assert body["status"] == "pending"
-    assert body["questions"] == [{"key": "root_cause", "question": "What caused it?"}]
     assert body["total_sessions"] == 2
     assert body["completed_sessions"] == 0
     assert body["started_at"] is None
     assert uuid.UUID(body["id"])
+
+    sessions = (await client.get(f"/v1/investigations/{body['id']}/sessions")).json()[
+        "items"
+    ]
+    assert sessions[0]["question"] == "What caused it?"
+    assert sessions[0]["highlights"] == highlights
+    assert sessions[1]["question"] is None
+    assert sessions[1]["highlights"] == []
 
 
 async def test_create_investigation_missing_agent(client: httpx.AsyncClient) -> None:
@@ -148,30 +164,10 @@ async def test_create_investigation_missing_agent(client: httpx.AsyncClient) -> 
         json={
             "agent_id": str(uuid.uuid4()),
             "name": "investigation",
-            "questions": [],
             "sessions": [],
         },
     )
     assert response.status_code == 404
-
-
-async def test_create_investigation_duplicate_question_key(
-    client: httpx.AsyncClient, agent_id: str
-) -> None:
-    """Observe HTTP 422 for a duplicate question key."""
-    response = await client.post(
-        "/v1/investigations",
-        json={
-            "agent_id": agent_id,
-            "name": "investigation",
-            "questions": [
-                {"key": "root_cause", "question": "What caused it?"},
-                {"key": "root_cause", "question": "Again?"},
-            ],
-            "sessions": [],
-        },
-    )
-    assert response.status_code == 422
 
 
 async def test_create_investigation_missing_session(
@@ -183,7 +179,6 @@ async def test_create_investigation_missing_session(
         json={
             "agent_id": agent_id,
             "name": "investigation",
-            "questions": [],
             "sessions": [{"session_id": str(uuid.uuid4())}],
         },
     )
@@ -199,7 +194,6 @@ async def test_create_investigation_duplicate_session_ids(
         json={
             "agent_id": agent_id,
             "name": "investigation",
-            "questions": [],
             "sessions": [
                 {"session_id": session_ids[0]},
                 {"session_id": session_ids[0]},
@@ -217,7 +211,6 @@ async def test_get_investigation(client: httpx.AsyncClient, agent_id: str) -> No
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -241,7 +234,6 @@ async def test_list_investigations(client: httpx.AsyncClient, agent_id: str) -> 
             json={
                 "agent_id": agent_id,
                 "name": name,
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -268,7 +260,6 @@ async def test_list_investigations_filters_by_agent_id(
         json={
             "agent_id": agent_id,
             "name": "investigation",
-            "questions": [],
             "sessions": [],
         },
     )
@@ -278,7 +269,6 @@ async def test_list_investigations_filters_by_agent_id(
         json={
             "agent_id": str(other_agent.id),
             "name": "other",
-            "questions": [],
             "sessions": [],
         },
     )
@@ -301,7 +291,6 @@ async def test_update_investigation(client: httpx.AsyncClient, agent_id: str) ->
                 "agent_id": agent_id,
                 "name": "investigation",
                 "description": "old",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -326,7 +315,6 @@ async def test_update_investigation_status(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -350,7 +338,6 @@ async def test_update_investigation_status_illegal_transition(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -374,7 +361,6 @@ async def test_update_investigation_cannot_clear_status(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -395,7 +381,6 @@ async def test_update_investigation_cannot_clear_name(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -422,7 +407,6 @@ async def test_delete_investigation(client: httpx.AsyncClient, agent_id: str) ->
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )
@@ -449,7 +433,6 @@ async def test_list_investigation_sessions_ordered_by_position(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [
                     {"session_id": session_ids[1]},
                     {"session_id": session_ids[0]},
@@ -486,7 +469,6 @@ async def test_list_investigation_sessions_walks_pages(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [{"session_id": session_id} for session_id in session_ids],
             },
         )
@@ -526,7 +508,6 @@ async def test_update_investigation_session_verdict(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [{"session_id": session_ids[0]}],
             },
         )
@@ -554,7 +535,6 @@ async def test_update_investigation_session_verdict_clear(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [{"session_id": session_ids[0]}],
             },
         )
@@ -572,6 +552,36 @@ async def test_update_investigation_session_verdict_clear(
 
     investigation = (await client.get(f"/v1/investigations/{created['id']}")).json()
     assert investigation["completed_sessions"] == 0
+
+
+async def test_update_investigation_session_verdict_leaves_highlights_untouched(
+    client: httpx.AsyncClient, agent_id: str, session_ids: list[str]
+) -> None:
+    """Leave a linked session's highlights, set at create, untouched by the PATCH."""
+    highlights = [
+        {
+            "selector": {"node_id": None, "path": None, "span": None},
+            "description": "Retried without backoff.",
+        }
+    ]
+    created = (
+        await client.post(
+            "/v1/investigations",
+            json={
+                "agent_id": agent_id,
+                "name": "investigation",
+                "sessions": [{"session_id": session_ids[0], "highlights": highlights}],
+            },
+        )
+    ).json()
+    response = await client.patch(
+        f"/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
+        json={"verdict": "acceptable"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "acceptable"
+    assert body["highlights"] == highlights
 
 
 async def test_update_investigation_session_verdict_investigation_not_found(
@@ -595,7 +605,6 @@ async def test_update_investigation_session_verdict_session_not_found(
             json={
                 "agent_id": agent_id,
                 "name": "investigation",
-                "questions": [],
                 "sessions": [],
             },
         )

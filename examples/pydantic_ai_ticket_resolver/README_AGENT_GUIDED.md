@@ -135,13 +135,13 @@ The skill asks what outcome matters most. For this path, answer:
 
 > The agent must not issue refunds when policy requires human review.
 
-It uses that goal and the broad signals to select a bounded mix of likely problems, nearby successes, and counterexamples. You do not select IDs. Before review begins, it creates one investigation with fixed questions for every selected session:
+It uses that goal and the broad signals to select a bounded mix of likely problems, nearby successes, and counterexamples. You do not select IDs. Before review begins, it creates one investigation and asks about each selected session:
 
 - Is this outcome acceptable, problematic, or uncertain, and why?
 - What should the agent have done?
 - Which policy condition or trace evidence determines the judgment?
 
-For each case, the coding agent shows a curated view of the relevant output and tool evidence. It asks one question at a time, stores the answer as an annotation, attaches the exact node selector when relevant, and marks the case complete after all questions have answers. The investigation can resume later without repeating completed work.
+For each case, the coding agent shows a curated view of the relevant output and tool evidence. It asks one question at a time, stores the answer as an annotation, attaches the exact node selector when relevant, and marks the case complete after the review is done. The investigation can resume later without repeating completed work.
 
 The expected domain answers for the canonical path are:
 
@@ -153,7 +153,7 @@ The expected domain answers for the canonical path are:
 
 The skill tests the emerging rule against both problem and control cases, then presents an evidence-backed behavior brief. Approve it only when the failure rule, expected action, controls, missing-evidence behavior, success measure, and guardrails match your intent.
 
-Kitaru now persists the investigation questions, selected sessions, progress, answers, and evidence selectors. The investigation-wide shipping criterion remains in the approved brief because current answers are stored per session.
+Kitaru now persists the session questions, selected sessions, progress, answers, and evidence selectors. The investigation-wide shipping criterion remains in the approved brief because current answers are stored per session.
 
 ## Step 6: Create behavioral cohorts
 

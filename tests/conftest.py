@@ -6062,41 +6062,8 @@ class FakeAnnotationRepository:
         if investigations is not None:
             investigations._annotations = self
 
-    def _find_upsert_target(self, annotation: Annotation) -> uuid.UUID | None:
-        """Resolve the id of the row an insert would upsert onto.
-
-        Manual annotations, and any insert missing either half of the
-        (investigation_session_id, question_key) pair, never conflict,
-        mirroring Postgres treating null as distinct within a unique index.
-
-        Args:
-            annotation: Annotation about to be inserted.
-
-        Returns:
-            Id of the conflicting row, or None when the insert is a plain
-            create.
-        """
-        if (
-            annotation.investigation_session_id is None
-            or annotation.question_key is None
-        ):
-            return None
-        for stored in self._annotations.values():
-            if (
-                stored.investigation_session_id == annotation.investigation_session_id
-                and stored.question_key == annotation.question_key
-            ):
-                return stored.id
-        return None
-
     async def create(self, annotation: Annotation) -> Annotation:
-        """Persist a new annotation, upserting an investigation answer.
-
-        An investigation answer upserts on (investigation_session_id,
-        question_key), renewing the selector, value, and updated timestamp
-        of the existing row. A manual annotation always inserts, since
-        Postgres treats its null investigation_session_id as distinct from
-        every other row.
+        """Persist a new annotation.
 
         Args:
             annotation: Annotation to store.
@@ -6104,18 +6071,6 @@ class FakeAnnotationRepository:
         Returns:
             Stored annotation with timestamps set.
         """
-        target_id = self._find_upsert_target(annotation)
-        if target_id is not None:
-            stored = self._annotations[target_id]
-            updated = stored.model_copy(
-                update={
-                    "selector": annotation.selector,
-                    "value": annotation.value,
-                    "updated": _renewed_timestamp(stored.updated),
-                }
-            )
-            self._annotations[target_id] = updated
-            return updated.model_copy()
         now = datetime.now(UTC)
         stored = annotation.model_copy(update={"created": now, "updated": now})
         self._annotations[stored.id] = stored

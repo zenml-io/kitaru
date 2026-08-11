@@ -242,10 +242,7 @@ def build_investigation_created_properties(
     Returns:
         Event properties.
     """
-    return {
-        "question_count": len(investigation.questions),
-        "session_count": investigation.total_sessions,
-    }
+    return {"session_count": investigation.total_sessions}
 
 
 def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any]:

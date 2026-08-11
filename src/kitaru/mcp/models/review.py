@@ -14,7 +14,6 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
     InvestigationSessionVerdict,
-    QuestionItem,
 )
 from kitaru.mcp.models.common import MCPModel, PageOptions
 
@@ -59,14 +58,10 @@ class InvestigationCreate(MCPModel):
     agent_id: uuid.UUID
     name: str = Field(min_length=1)
     description: str | None = None
-    questions: list[QuestionItem] = Field(max_length=100)
     sessions: list[InvestigationSessionInput] = Field(max_length=100)
 
     @model_validator(mode="after")
     def _validate_contents(self) -> "InvestigationCreate":
-        question_keys = [item.key for item in self.questions]
-        if len(set(question_keys)) != len(question_keys):
-            raise ValueError("question keys must be unique")
         session_ids = [item.session_id for item in self.sessions]
         if len(set(session_ids)) != len(session_ids):
             raise ValueError("session ids must be unique")
@@ -127,7 +122,6 @@ class InvestigationAnswerCreate(MCPModel):
 
     operation: Literal["answer_question"]
     investigation_session_id: uuid.UUID
-    question_key: str = Field(min_length=1)
     selector: AnnotationSelector | None = None
     value: JsonValue = Field()
 

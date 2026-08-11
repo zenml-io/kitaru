@@ -224,15 +224,13 @@ def test_review_management_rejects_noop_and_unknown_verdict() -> None:
         )
 
 
-def test_investigation_create_preserves_empty_sdk_lists() -> None:
+def test_investigation_create_preserves_empty_session_list() -> None:
     request = InvestigationCreate(
         operation="create_investigation",
         agent_id=uuid.uuid4(),
         name="empty review",
-        questions=[],
         sessions=[],
     )
-    assert request.questions == []
     assert request.sessions == []
 
 
@@ -310,14 +308,15 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
         annotations=SimpleNamespace(create=create_annotation, update=update_annotation),
     )
     state = _get_state(client)
+    session_id = uuid.uuid4()
+    investigation_session_id = uuid.uuid4()
     await handle_review_manage(
         state,
         InvestigationCreate(
             operation="create_investigation",
             agent_id=uuid.uuid4(),
             name="failure review",
-            questions=[{"key": "correct", "question": "Was it correct?"}],
-            sessions=[{"session_id": uuid.uuid4()}],
+            sessions=[{"session_id": session_id, "question": "Was it correct?"}],
         ),
     )
     await handle_review_manage(
@@ -332,8 +331,7 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
         state,
         InvestigationAnswerCreate(
             operation="answer_question",
-            investigation_session_id=uuid.uuid4(),
-            question_key="correct",
+            investigation_session_id=investigation_session_id,
             value=False,
         ),
     )
@@ -345,14 +343,18 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
             value=True,
         ),
     )
-    assert cast(Any, investigation_requests[0]).model_dump(mode="json")[
-        "questions"
-    ] == [{"key": "correct", "question": "Was it correct?"}]
+    assert cast(Any, investigation_requests[0]).model_dump(mode="json")["sessions"] == [
+        {
+            "session_id": str(session_id),
+            "question": "Was it correct?",
+            "view": None,
+            "highlights": [],
+        }
+    ]
     assert cast(Any, annotation_creates[0]).model_dump(mode="json")["session_id"]
-    assert (
-        cast(Any, annotation_creates[1]).model_dump(mode="json")["question_key"]
-        == "correct"
-    )
+    assert cast(Any, annotation_creates[1]).model_dump(mode="json")[
+        "investigation_session_id"
+    ] == str(investigation_session_id)
     assert cast(Any, annotation_updates[0]).model_dump(mode="json") == {"value": True}
 
 

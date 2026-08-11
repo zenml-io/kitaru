@@ -97,12 +97,11 @@ class InvestigationService:
         Session position follows the command's session order.
 
         Args:
-            command: Agent, questions, and sessions for the new investigation.
+            command: Agent and sessions for the new investigation.
             actor: Caller context.
 
         Raises:
             AgentNotFound: No agent has the command's agent id.
-            DuplicateQuestionKey: The questions contain a key more than once.
             ValidationError: A linked session id repeats, is missing, or
                 belongs to a different agent.
 
@@ -117,7 +116,6 @@ class InvestigationService:
             agent_id=command.agent_id,
             name=command.name,
             description=command.description,
-            questions=command.questions,
             total_sessions=len(command.sessions),
             completed_sessions=0,
         )
@@ -126,7 +124,9 @@ class InvestigationService:
                 investigation_id=investigation.id,
                 session_id=item.session_id,
                 position=position,
+                question=item.question,
                 view=item.view,
+                highlights=item.highlights,
             )
             for position, item in enumerate(command.sessions)
         ]

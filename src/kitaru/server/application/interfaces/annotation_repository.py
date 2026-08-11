@@ -26,10 +26,6 @@ class AnnotationRepository(Protocol):
     async def create(self, annotation: Annotation) -> Annotation:
         """Persist a new annotation.
 
-        An investigation answer upserts on (investigation_session_id,
-        question_key), so answering the same question twice replaces the
-        value instead of conflicting.
-
         Args:
             annotation: Annotation to store.
 

@@ -239,13 +239,6 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "returns-resolver",
                 "--description",
                 "Review risky refunds and nearby valid refund behavior.",
-                "--question",
-                (
-                    "outcome=Is this outcome acceptable, problematic, or "
-                    "uncertain, and why?"
-                ),
-                "--question",
-                "expected=What should the agent have done in this case?",
             ]
             for ticket_id in reviewed_tickets:
                 session_id = sessions_by_ticket[ticket_id]
@@ -267,18 +260,22 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                         {
                             "label": "Terminal action",
                             "description": "The accepted action used for the review.",
-                            "selectors": [
-                                {"node_id": evidence["id"], "part": "output"}
-                            ],
+                            "selectors": [{"node_id": evidence["id"]}],
                         }
                     ],
                 }
+                question = (
+                    "Is this outcome acceptable, problematic, or uncertain, and "
+                    "what should the agent have done in this case?"
+                )
                 investigation_arguments.extend(
                     [
                         "--session",
                         session_id,
                         "--session-view",
                         f"{session_id}={json.dumps(view, separators=(',', ':'))}",
+                        "--session-question",
+                        f"{session_id}={question}",
                     ]
                 )
 
@@ -300,16 +297,13 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 session_id = sessions_by_ticket[ticket_id]
                 investigation_session_id = links_by_session[session_id]
                 selector = json.dumps(
-                    {"node_id": evidence_nodes[ticket_id], "part": "output"},
-                    separators=(",", ":"),
+                    {"node_id": evidence_nodes[ticket_id]}, separators=(",", ":")
                 )
                 _cli(
                     "annotation",
                     "create",
                     "--investigation-session",
                     investigation_session_id,
-                    "--question-key",
-                    "outcome",
                     "--selector",
                     selector,
                     "--value",
@@ -326,19 +320,20 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     "create",
                     "--investigation-session",
                     investigation_session_id,
-                    "--question-key",
-                    "expected",
                     "--value",
                     json.dumps({"action": expected_action}, separators=(",", ":")),
                 )
                 _cli(
                     "investigation",
                     "session",
-                    "complete",
+                    "update",
                     investigation_id,
                     session_id,
+                    "--verdict",
+                    judgment,
                 )
 
+            _cli("investigation", "update", investigation_id, "--status", "completed")
             completed_investigation = _cli("investigation", "get", investigation_id)[
                 "item"
             ]

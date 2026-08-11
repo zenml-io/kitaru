@@ -14,7 +14,6 @@
 """Tests for annotation use cases."""
 
 import uuid
-from collections.abc import Sequence
 from typing import Any
 
 import pytest
@@ -31,7 +30,7 @@ from conftest import (
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.investigation import InvestigationStatus, QuestionItem
+from kitaru.api_models.v1.investigation import InvestigationStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.application.models.annotation import (
     AnnotationFilter,
@@ -48,7 +47,6 @@ from kitaru.server.domain.investigation import (
     Investigation,
     InvestigationSession,
     InvestigationSessionNotFound,
-    UnknownQuestionKey,
 )
 from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.session_node import SessionNode
@@ -152,7 +150,6 @@ async def _link_investigation_session(
     investigation_repository: FakeInvestigationRepository,
     agent_id: uuid.UUID,
     session_id: uuid.UUID,
-    questions: Sequence[QuestionItem] = (),
 ) -> tuple[uuid.UUID, uuid.UUID]:
     """Create a one-session investigation and link the session to it.
 
@@ -160,7 +157,6 @@ async def _link_investigation_session(
         investigation_repository: Fake investigation repository to store into.
         agent_id: Id of the agent the session belongs to.
         session_id: Id of the session to link.
-        questions: Questions asked about the session.
 
     Returns:
         Id of the created investigation and id of its session link.
@@ -169,7 +165,6 @@ async def _link_investigation_session(
         owner_id=ACTOR.account.id,
         agent_id=agent_id,
         name="investigation",
-        questions=list(questions),
         total_sessions=0,
         completed_sessions=0,
     )
@@ -198,7 +193,6 @@ async def test_create_manual_annotation(
     assert annotation.owner_id == ACTOR.account.id
     assert annotation.session_id == session_id
     assert annotation.investigation_session_id is None
-    assert annotation.question_key is None
     assert annotation.selector is None
     assert annotation.value == "note"
     assert annotation.created is not None
@@ -354,24 +348,19 @@ async def test_create_investigation_answer(
     agent_id: uuid.UUID,
     session_id: uuid.UUID,
 ) -> None:
-    """Answer a linked session's question, deriving session_id from the link."""
+    """Answer a linked session, deriving session_id from the link."""
     investigation_id, investigation_session_id = await _link_investigation_session(
-        investigation_repository,
-        agent_id,
-        session_id,
-        questions=[QuestionItem(key="root_cause", question="What caused it?")],
+        investigation_repository, agent_id, session_id
     )
     annotation = await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
-            question_key="root_cause",
             value="a retry loop",
         ),
         actor=ACTOR,
     )
     assert annotation.session_id == session_id
     assert annotation.investigation_session_id == investigation_session_id
-    assert annotation.question_key == "root_cause"
 
     investigation = await investigation_repository.get(investigation_id)
     assert investigation.status is InvestigationStatus.IN_PROGRESS
@@ -386,31 +375,6 @@ async def test_create_investigation_answer_missing_link(
         await service.create_investigation_answer(
             InvestigationAnswerCreate(
                 investigation_session_id=uuid.uuid4(),
-                question_key="root_cause",
-                value="x",
-            ),
-            actor=ACTOR,
-        )
-
-
-async def test_create_investigation_answer_unknown_question_key(
-    service: AnnotationService,
-    investigation_repository: FakeInvestigationRepository,
-    agent_id: uuid.UUID,
-    session_id: uuid.UUID,
-) -> None:
-    """Reject a question key that does not name one of the investigation's questions."""
-    _, investigation_session_id = await _link_investigation_session(
-        investigation_repository,
-        agent_id,
-        session_id,
-        questions=[QuestionItem(key="root_cause", question="What caused it?")],
-    )
-    with pytest.raises(UnknownQuestionKey):
-        await service.create_investigation_answer(
-            InvestigationAnswerCreate(
-                investigation_session_id=investigation_session_id,
-                question_key="unknown",
                 value="x",
             ),
             actor=ACTOR,
@@ -425,10 +389,7 @@ async def test_create_investigation_answer_invalid_selector_node(
 ) -> None:
     """Reject a selector naming a node outside the linked session."""
     _, investigation_session_id = await _link_investigation_session(
-        investigation_repository,
-        agent_id,
-        session_id,
-        questions=[QuestionItem(key="root_cause", question="What caused it?")],
+        investigation_repository, agent_id, session_id
     )
     node_id = uuid.uuid4()
     with pytest.raises(
@@ -437,7 +398,6 @@ async def test_create_investigation_answer_invalid_selector_node(
         await service.create_investigation_answer(
             InvestigationAnswerCreate(
                 investigation_session_id=investigation_session_id,
-                question_key="root_cause",
                 selector=AnnotationSelector(node_id=node_id),
                 value="x",
             ),
@@ -445,23 +405,19 @@ async def test_create_investigation_answer_invalid_selector_node(
         )
 
 
-async def test_create_investigation_answer_upsert(
+async def test_create_investigation_answer_never_conflicts(
     service: AnnotationService,
     investigation_repository: FakeInvestigationRepository,
     agent_id: uuid.UUID,
     session_id: uuid.UUID,
 ) -> None:
-    """Replace the value and keep the id when answering the same question twice."""
+    """Create a separate annotation for each answer to the same session."""
     _, investigation_session_id = await _link_investigation_session(
-        investigation_repository,
-        agent_id,
-        session_id,
-        questions=[QuestionItem(key="root_cause", question="What caused it?")],
+        investigation_repository, agent_id, session_id
     )
     first = await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
-            question_key="root_cause",
             value="first answer",
         ),
         actor=ACTOR,
@@ -469,13 +425,22 @@ async def test_create_investigation_answer_upsert(
     second = await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
-            question_key="root_cause",
             value="second answer",
         ),
         actor=ACTOR,
     )
-    assert second.id == first.id
-    assert second.value == "second answer"
+    assert second.id != first.id
+    annotations, _ = await service.list_annotations(
+        AnnotationFilter(
+            expression=FilterCondition(
+                field="investigation_session_id",
+                op=FilterOp.EQ,
+                value=investigation_session_id,
+            )
+        ),
+        actor=ACTOR,
+    )
+    assert {annotation.id for annotation in annotations} == {first.id, second.id}
 
 
 async def test_create_investigation_answer_second_answer_leaves_started_at(
@@ -484,20 +449,13 @@ async def test_create_investigation_answer_second_answer_leaves_started_at(
     agent_id: uuid.UUID,
     session_id: uuid.UUID,
 ) -> None:
-    """Leave the investigation in progress on a second, different answer."""
+    """Leave the investigation in progress on a second answer."""
     investigation_id, investigation_session_id = await _link_investigation_session(
-        investigation_repository,
-        agent_id,
-        session_id,
-        questions=[
-            QuestionItem(key="root_cause", question="What caused it?"),
-            QuestionItem(key="retry_ok", question="Was retrying the right call?"),
-        ],
+        investigation_repository, agent_id, session_id
     )
     await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
-            question_key="root_cause",
             value="a retry loop",
         ),
         actor=ACTOR,
@@ -506,7 +464,6 @@ async def test_create_investigation_answer_second_answer_leaves_started_at(
     await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
-            question_key="retry_ok",
             value=False,
         ),
         actor=ACTOR,
@@ -562,16 +519,12 @@ async def test_create_investigation_answer_tracks_annotation_created(
         analytics=analytics,
     )
     _, investigation_session_id = await _link_investigation_session(
-        investigation_repository,
-        agent_id,
-        session_id,
-        questions=[QuestionItem(key="root_cause", question="What caused it?")],
+        investigation_repository, agent_id, session_id
     )
 
     await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
-            question_key="root_cause",
             value="a retry loop",
         ),
         actor=ACTOR,

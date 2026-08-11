@@ -4752,19 +4752,6 @@
               "title": "Owner Id",
               "type": "string"
             },
-            "question_key": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Key of the question being answered.",
-              "title": "Question Key"
-            },
             "selector": {
               "anyOf": [
                 {
@@ -4943,14 +4930,6 @@
               "title": "Owner Id",
               "type": "string"
             },
-            "questions": {
-              "description": "Questions asked about each session.",
-              "items": {
-                "$ref": "#/$defs/QuestionItem"
-              },
-              "title": "Questions",
-              "type": "array"
-            },
             "started_at": {
               "anyOf": [
                 {
@@ -4989,12 +4968,32 @@
             "name",
             "description",
             "status",
-            "questions",
             "metadata",
             "total_sessions",
             "completed_sessions"
           ],
           "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
           "type": "object"
         },
         "InvestigationSessionResponse": {
@@ -5005,6 +5004,14 @@
               "format": "date-time",
               "title": "Created",
               "type": "string"
+            },
+            "highlights": {
+              "description": "Curated highlights for the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionHighlight"
+              },
+              "title": "Highlights",
+              "type": "array"
             },
             "id": {
               "description": "Investigation session id.",
@@ -5022,6 +5029,18 @@
               "description": "Presentation order within the investigation.",
               "title": "Position",
               "type": "integer"
+            },
+            "question": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Question to answer about the session.",
+              "title": "Question"
             },
             "session_id": {
               "description": "Session being investigated.",
@@ -5065,8 +5084,10 @@
             "investigation_id",
             "session_id",
             "position",
+            "question",
             "verdict",
-            "view"
+            "view",
+            "highlights"
           ],
           "title": "InvestigationSessionResponse",
           "type": "object"
@@ -5212,28 +5233,6 @@
             "has_more"
           ],
           "title": "PageMetadata",
-          "type": "object"
-        },
-        "QuestionItem": {
-          "additionalProperties": false,
-          "description": "Question item.",
-          "properties": {
-            "key": {
-              "description": "Key identifying the question within the array.",
-              "title": "Key",
-              "type": "string"
-            },
-            "question": {
-              "description": "Question display text.",
-              "title": "Question",
-              "type": "string"
-            }
-          },
-          "required": [
-            "key",
-            "question"
-          ],
-          "title": "QuestionItem",
           "type": "object"
         },
         "ToolError": {
@@ -7371,11 +7370,6 @@
               "title": "Operation",
               "type": "string"
             },
-            "question_key": {
-              "minLength": 1,
-              "title": "Question Key",
-              "type": "string"
-            },
             "selector": {
               "anyOf": [
                 {
@@ -7394,7 +7388,6 @@
           "required": [
             "operation",
             "investigation_session_id",
-            "question_key",
             "value"
           ],
           "title": "InvestigationAnswerCreate",
@@ -7431,14 +7424,6 @@
               "title": "Operation",
               "type": "string"
             },
-            "questions": {
-              "items": {
-                "$ref": "#/$defs/QuestionItem"
-              },
-              "maxItems": 100,
-              "title": "Questions",
-              "type": "array"
-            },
             "sessions": {
               "items": {
                 "$ref": "#/$defs/InvestigationSessionInput"
@@ -7452,16 +7437,57 @@
             "operation",
             "agent_id",
             "name",
-            "questions",
             "sessions"
           ],
           "title": "InvestigationCreate",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
           "type": "object"
         },
         "InvestigationSessionInput": {
           "additionalProperties": false,
           "description": "Investigation session input.",
           "properties": {
+            "highlights": {
+              "description": "Curated highlights for the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionHighlight"
+              },
+              "title": "Highlights",
+              "type": "array"
+            },
+            "question": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Question to answer about the session.",
+              "title": "Question"
+            },
             "session_id": {
               "description": "Session to link.",
               "format": "uuid",
@@ -7661,28 +7687,6 @@
           "title": "ManualAnnotationCreate",
           "type": "object"
         },
-        "QuestionItem": {
-          "additionalProperties": false,
-          "description": "Question item.",
-          "properties": {
-            "key": {
-              "description": "Key identifying the question within the array.",
-              "title": "Key",
-              "type": "string"
-            },
-            "question": {
-              "description": "Question display text.",
-              "title": "Question",
-              "type": "string"
-            }
-          },
-          "required": [
-            "key",
-            "question"
-          ],
-          "title": "QuestionItem",
-          "type": "object"
-        },
         "SetInvestigationSessionVerdict": {
           "additionalProperties": false,
           "description": "Set or clear one linked session's verdict.",
@@ -7802,19 +7806,6 @@
               "format": "uuid",
               "title": "Owner Id",
               "type": "string"
-            },
-            "question_key": {
-              "anyOf": [
-                {
-                  "type": "string"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Key of the question being answered.",
-              "title": "Question Key"
             },
             "selector": {
               "anyOf": [
@@ -7994,14 +7985,6 @@
               "title": "Owner Id",
               "type": "string"
             },
-            "questions": {
-              "description": "Questions asked about each session.",
-              "items": {
-                "$ref": "#/$defs/QuestionItem"
-              },
-              "title": "Questions",
-              "type": "array"
-            },
             "started_at": {
               "anyOf": [
                 {
@@ -8040,12 +8023,32 @@
             "name",
             "description",
             "status",
-            "questions",
             "metadata",
             "total_sessions",
             "completed_sessions"
           ],
           "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
           "type": "object"
         },
         "InvestigationSessionResponse": {
@@ -8056,6 +8059,14 @@
               "format": "date-time",
               "title": "Created",
               "type": "string"
+            },
+            "highlights": {
+              "description": "Curated highlights for the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionHighlight"
+              },
+              "title": "Highlights",
+              "type": "array"
             },
             "id": {
               "description": "Investigation session id.",
@@ -8073,6 +8084,18 @@
               "description": "Presentation order within the investigation.",
               "title": "Position",
               "type": "integer"
+            },
+            "question": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Question to answer about the session.",
+              "title": "Question"
             },
             "session_id": {
               "description": "Session being investigated.",
@@ -8116,8 +8139,10 @@
             "investigation_id",
             "session_id",
             "position",
+            "question",
             "verdict",
-            "view"
+            "view",
+            "highlights"
           ],
           "title": "InvestigationSessionResponse",
           "type": "object"
@@ -8201,28 +8226,6 @@
           ],
           "title": "InvestigationStatus",
           "type": "string"
-        },
-        "QuestionItem": {
-          "additionalProperties": false,
-          "description": "Question item.",
-          "properties": {
-            "key": {
-              "description": "Key identifying the question within the array.",
-              "title": "Key",
-              "type": "string"
-            },
-            "question": {
-              "description": "Question display text.",
-              "title": "Question",
-              "type": "string"
-            }
-          },
-          "required": [
-            "key",
-            "question"
-          ],
-          "title": "QuestionItem",
-          "type": "object"
         },
         "ToolError": {
           "additionalProperties": false,

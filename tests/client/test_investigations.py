@@ -28,10 +28,12 @@ from conftest import (
     asgi_api_client,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest
+from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationListParams,
     InvestigationResponse,
+    InvestigationSessionHighlight,
     InvestigationSessionInput,
     InvestigationSessionResponse,
     InvestigationSessionsListParams,
@@ -39,7 +41,6 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionVerdict,
     InvestigationStatus,
     InvestigationUpdateRequest,
-    QuestionItem,
 )
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.client.api_client import KitaruAPIClient
@@ -127,7 +128,6 @@ async def test_create(api_client: KitaruAPIClient) -> None:
             agent_id=agent_id,
             name="investigation",
             description="curator rationale",
-            questions=[QuestionItem(key="root_cause", question="What caused it?")],
             sessions=[
                 InvestigationSessionInput(session_id=session_id)
                 for session_id in session_ids
@@ -148,7 +148,7 @@ async def test_create_missing_agent(api_client: KitaruAPIClient) -> None:
     with pytest.raises(NotFoundError):
         await api_client.investigations.create(
             InvestigationCreateRequest(
-                agent_id=uuid.uuid4(), name="investigation", questions=[], sessions=[]
+                agent_id=uuid.uuid4(), name="investigation", sessions=[]
             )
         )
 
@@ -157,9 +157,7 @@ async def test_get(api_client: KitaruAPIClient) -> None:
     """Get an investigation by id through the SDK."""
     agent_id = await _make_agent(api_client)
     created = await api_client.investigations.create(
-        InvestigationCreateRequest(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        )
+        InvestigationCreateRequest(agent_id=agent_id, name="investigation", sessions=[])
     )
     loaded = await api_client.investigations.get(created.id)
     assert loaded == created
@@ -176,9 +174,7 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
     agent_id = await _make_agent(api_client)
     for name in ["alpha", "beta", "gamma"]:
         await api_client.investigations.create(
-            InvestigationCreateRequest(
-                agent_id=agent_id, name=name, questions=[], sessions=[]
-            )
+            InvestigationCreateRequest(agent_id=agent_id, name=name, sessions=[])
         )
 
     page = await api_client.investigations.list(InvestigationListParams(size=2))
@@ -196,7 +192,6 @@ async def test_update(api_client: KitaruAPIClient) -> None:
             agent_id=agent_id,
             name="investigation",
             description="old",
-            questions=[],
             sessions=[],
         )
     )
@@ -216,9 +211,7 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
     """Delete an investigation through the SDK."""
     agent_id = await _make_agent(api_client)
     created = await api_client.investigations.create(
-        InvestigationCreateRequest(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        )
+        InvestigationCreateRequest(agent_id=agent_id, name="investigation", sessions=[])
     )
     await api_client.investigations.delete(created.id)
     with pytest.raises(NotFoundError):
@@ -233,7 +226,6 @@ async def test_list_sessions_and_iter_sessions(api_client: KitaruAPIClient) -> N
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[
                 InvestigationSessionInput(session_id=session_id)
                 for session_id in session_ids
@@ -262,7 +254,6 @@ async def test_update_session(api_client: KitaruAPIClient) -> None:
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[InvestigationSessionInput(session_id=session_id)],
         )
     )
@@ -288,7 +279,6 @@ async def test_update_session_clears_verdict(api_client: KitaruAPIClient) -> Non
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[InvestigationSessionInput(session_id=session_id)],
         )
     )
@@ -308,3 +298,46 @@ async def test_update_session_clears_verdict(api_client: KitaruAPIClient) -> Non
 
     reloaded = await api_client.investigations.get(created.id)
     assert reloaded.completed_sessions == 0
+
+
+async def test_create_session_with_question(api_client: KitaruAPIClient) -> None:
+    """Set a question on a session input and read it back."""
+    agent_id = await _make_agent(api_client)
+    session_id = await _make_session(api_client, agent_id)
+    created = await api_client.investigations.create(
+        InvestigationCreateRequest(
+            agent_id=agent_id,
+            name="investigation",
+            sessions=[
+                InvestigationSessionInput(
+                    session_id=session_id, question="What caused it?"
+                )
+            ],
+        )
+    )
+
+    page = await api_client.investigations.list_sessions(created.id)
+    assert page.items[0].question == "What caused it?"
+
+
+async def test_create_session_with_highlights(api_client: KitaruAPIClient) -> None:
+    """Set highlights on a session input and read them back."""
+    agent_id = await _make_agent(api_client)
+    session_id = await _make_session(api_client, agent_id)
+    highlights = [
+        InvestigationSessionHighlight(
+            selector=AnnotationSelector(path="/output"), description="Root cause"
+        )
+    ]
+    created = await api_client.investigations.create(
+        InvestigationCreateRequest(
+            agent_id=agent_id,
+            name="investigation",
+            sessions=[
+                InvestigationSessionInput(session_id=session_id, highlights=highlights)
+            ],
+        )
+    )
+
+    page = await api_client.investigations.list_sessions(created.id)
+    assert page.items[0].highlights == highlights
