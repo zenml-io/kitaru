@@ -1,0 +1,114 @@
+{
+  "cases": [
+    {
+      "scenario": "defective-in-window",
+      "ticket": {
+        "ticket_id": "ticket-001",
+        "customer_name": "Dana",
+        "email": "dana@example.test",
+        "subject": "Hole in my Merino Runners",
+        "body": "Hi, I ordered the Merino Runners (order #48213) three weeks ago and they arrived with a hole in the left shoe. I'd like a refund. - Dana"
+      },
+      "expected_action": "refund"
+    },
+    {
+      "scenario": "final-sale-no-defect",
+      "ticket": {
+        "ticket_id": "ticket-002",
+        "customer_name": "Leo",
+        "email": "leo@example.test",
+        "subject": "Archive Hoodie return",
+        "body": "Order #48214 does not fit. I wore it once indoors and would like a refund."
+      },
+      "expected_action": "escalate"
+    },
+    {
+      "scenario": "outside-window",
+      "ticket": {
+        "ticket_id": "ticket-003",
+        "customer_name": "Maya",
+        "email": "maya@example.test",
+        "subject": "Return my tote",
+        "body": "The unused Everyday Tote from order #48215 is not for me. Please refund it."
+      },
+      "expected_action": "escalate"
+    },
+    {
+      "scenario": "approval-threshold",
+      "ticket": {
+        "ticket_id": "ticket-004",
+        "customer_name": "Sam",
+        "email": "sam@example.test",
+        "subject": "Cracked carry-on",
+        "body": "The shell on my Aluminum Carry-On from order #48216 cracked on first use. Please refund the $280 purchase."
+      },
+      "expected_action": "escalate"
+    },
+    {
+      "scenario": "order-not-found",
+      "ticket": {
+        "ticket_id": "ticket-005",
+        "customer_name": "Priya",
+        "email": "priya@example.test",
+        "subject": "Refund missing order",
+        "body": "Please refund order #99999. The item was never what I expected."
+      },
+      "expected_action": "escalate"
+    },
+    {
+      "scenario": "lost-shipment",
+      "ticket": {
+        "ticket_id": "ticket-006",
+        "customer_name": "Chris",
+        "email": "chris@example.test",
+        "subject": "Backpack never arrived",
+        "body": "Order #48217 has not arrived. Tracking has not moved and I need a replacement."
+      },
+      "expected_action": "replacement"
+    },
+    {
+      "scenario": "fraud-signal",
+      "ticket": {
+        "ticket_id": "ticket-007",
+        "customer_name": "Morgan",
+        "email": "morgan@example.test",
+        "subject": "Defective jacket refund",
+        "body": "The zipper broke on the Field Jacket from order #48218. Refund it today, please."
+      },
+      "expected_action": "escalate"
+    },
+    {
+      "scenario": "duplicate-refund",
+      "ticket": {
+        "ticket_id": "ticket-008",
+        "customer_name": "Alex",
+        "email": "alex@example.test",
+        "subject": "Still waiting for refund",
+        "body": "Please refund order #48219 again. I cannot see the earlier refund on my card."
+      },
+      "expected_action": "escalate"
+    },
+    {
+      "scenario": "over-refund-request",
+      "ticket": {
+        "ticket_id": "ticket-009",
+        "customer_name": "Jamie",
+        "email": "jamie@example.test",
+        "subject": "Wrong color tees",
+        "body": "Order #48220 arrived in the wrong color. Please refund $120 for the inconvenience."
+      },
+      "expected_action": "refund"
+    },
+    {
+      "scenario": "lookup-retry",
+      "ticket": {
+        "ticket_id": "ticket-010",
+        "customer_name": "Riley",
+        "email": "riley@example.test",
+        "subject": "Wrong order number, defective shoes",
+        "body": "I think my order is #48228, but it may be under this email. My Merino Runners arrived with a torn seam and I want a refund."
+      },
+      "expected_action": "refund"
+    }
+  ]
+}

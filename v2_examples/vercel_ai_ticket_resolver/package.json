@@ -1,0 +1,30 @@
+{
+  "name": "@zenml-io/kitaru-example-vercel-ai-ticket-resolver",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.22.0 <23"
+  },
+  "scripts": {
+    "baseline": "node dist/baseline.js",
+    "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "smoke": "KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 KITARU_VERCEL_AI_SMOKE=1 node dist/main.js",
+    "test": "vitest run test",
+    "test:e2e": "KITARU_REQUIRE_POSTGRES=1 uv run pytest test/test_e2e.py -q",
+    "test:evaluator": "uv run pytest test/test_documented_evaluator.py -q",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@ai-sdk/openai": "4.0.20",
+    "ai": "7.0.55"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.11",
+    "@types/node": "22.20.1",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}
