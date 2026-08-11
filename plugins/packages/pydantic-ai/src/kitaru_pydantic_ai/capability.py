@@ -21,9 +21,11 @@ from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from importlib.metadata import version
 from typing import Any, cast
 
+from genai_prices import Usage, calc_price
 from pydantic import TypeAdapter
 from pydantic_ai import UserPromptNode
 from pydantic_ai.capabilities import (
@@ -89,6 +91,8 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
+
+from .pricing import CostCalculator, PydanticAIUsageSummary, normalize_cost
 
 ADAPTER_VERSION = version("kitaru-pydantic-ai")
 FRAMEWORK = "pydantic_ai"
@@ -367,6 +371,56 @@ def _token_usage(response: ModelResponse) -> TokenUsage:
     )
 
 
+def _calculate_cost(
+    response: ModelResponse,
+    model: str,
+    started_at: datetime,
+    calculator: CostCalculator | None,
+    estimate_costs: bool,
+) -> tuple[Decimal | None, dict[str, Any]]:
+    """Calculate model cost without interrupting the wrapped model request."""
+    tokens = _token_usage(response)
+    summary = PydanticAIUsageSummary(
+        model=model,
+        provider=response.provider_name,
+        input_tokens=tokens.input_tokens or 0,
+        output_tokens=tokens.output_tokens or 0,
+        cached_input_tokens=tokens.cached_input_tokens or 0,
+        reasoning_tokens=tokens.reasoning_tokens,
+    )
+    source = "user" if calculator is not None else "genai-prices"
+    if calculator is None and not estimate_costs:
+        return None, {"cost": {"status": "disabled"}}
+    try:
+        if calculator is not None:
+            cost = normalize_cost(calculator(summary))
+        else:
+            usage = Usage(
+                input_tokens=summary.input_tokens,
+                output_tokens=summary.output_tokens,
+                cache_read_tokens=summary.cached_input_tokens,
+            )
+            cost = normalize_cost(
+                calc_price(
+                    usage,
+                    summary.model,
+                    provider_id=summary.provider,
+                    genai_request_timestamp=started_at,
+                ).total_price
+            )
+    except Exception as error:
+        return None, {
+            "cost": {
+                "status": "unavailable",
+                "source": source,
+                "error_type": type(error).__name__,
+            }
+        }
+    if cost is None:
+        return None, {"cost": {"status": "unavailable", "source": source}}
+    return cost, {"cost": {"status": "estimated", "source": source}}
+
+
 def _unpaired_native_calls(response: ModelResponse) -> list[dict[str, Any]]:
     """Serialize native calls whose provider result is not publicly exposed."""
     returned_ids = {
@@ -417,6 +471,8 @@ class _KitaruCapability(AbstractCapability[Any]):
     agent_version_id: uuid.UUID | None
     session_name: str | None
     batch_size: int
+    cost_calculator: CostCalculator | None
+    estimate_costs: bool
     _state: _RunState | None = field(default=None, repr=False)
 
     @classmethod
@@ -639,6 +695,17 @@ class _KitaruCapability(AbstractCapability[Any]):
             raise
 
         unpaired_native_calls = _unpaired_native_calls(response)
+        model_name = response.model_name or _model_identifier(effective)
+        cost, cost_attributes = _calculate_cost(
+            response,
+            model_name,
+            started_at,
+            self.cost_calculator,
+            self.estimate_costs,
+        )
+        attributes: dict[str, Any] = dict(cost_attributes)
+        if unpaired_native_calls:
+            attributes["provider_native_calls"] = unpaired_native_calls
         output_payload = _jsonable(response)
         llm_node = SessionNodeCreateRequest(
             index=node_index,
@@ -655,16 +722,12 @@ class _KitaruCapability(AbstractCapability[Any]):
             inputs=input_payload,
             outputs=output_payload,
             requested_model=requested_model,
-            model=response.model_name or _model_identifier(effective),
+            model=model_name,
             model_provider=response.provider_name,
             tokens=_token_usage(response),
-            cost=None,
+            cost=cost,
             model_params=_jsonable(effective.model_settings),
-            attributes=(
-                {"provider_native_calls": unpaired_native_calls}
-                if unpaired_native_calls
-                else {}
-            ),
+            attributes=attributes,
         )
         await self._buffer_node(llm_node)
         state.latest_llm_index = node_index
