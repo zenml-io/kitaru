@@ -49,7 +49,7 @@ mcp = [
     "mcp>=2.0,<3",
 ]
 cli = [
-    "cyclopts>=4.22",
+    "cyclopts>=4.22.5",
     "packaging>=24.0",
     "pyyaml>=6.0",
     "rich>=13.0",
@@ -58,10 +58,10 @@ examples = [
     "langfuse>=4.14,<5",
 ]
 server = [
-    "fastapi>=0.139",
+    "fastapi>=0.141.1",
     "sqlalchemy[asyncio]>=2.0.51",
     "alembic>=1.18",
-    "uvicorn>=0.51",
+    "uvicorn>=0.52.1",
     "pydantic-settings>=2.14",
     "asyncpg>=0.31",
     "bcrypt>=4.1",
