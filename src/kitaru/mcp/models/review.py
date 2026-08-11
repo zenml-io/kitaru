@@ -13,6 +13,7 @@ from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
+    InvestigationSessionVerdict,
     QuestionItem,
 )
 from kitaru.mcp.models.common import MCPModel, PageOptions
@@ -80,6 +81,7 @@ class InvestigationUpdate(MCPModel):
     name: str | None = None
     description: str | None = None
     clear_description: bool = False
+    status: Literal["in_progress", "completed"] | None = None
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InvestigationUpdate":
@@ -93,20 +95,22 @@ class InvestigationUpdate(MCPModel):
             raise ValueError("description cannot be null without clear_description")
         if self.description is not None and self.clear_description:
             raise ValueError("description and clear_description conflict")
-        if not ({"name", "description"} & self.model_fields_set) and not (
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status cannot be null")
+        if not ({"name", "description", "status"} & self.model_fields_set) and not (
             self.clear_description
         ):
             raise ValueError("investigation update must change at least one field")
         return self
 
 
-class SetInvestigationSessionStatus(MCPModel):
-    """Set one linked session to a terminal status."""
+class SetInvestigationSessionVerdict(MCPModel):
+    """Set or clear one linked session's verdict."""
 
-    operation: Literal["set_session_status"]
+    operation: Literal["set_session_verdict"]
     investigation_id: uuid.UUID
     session_id: uuid.UUID
-    status: Literal["completed", "skipped"]
+    verdict: InvestigationSessionVerdict | None
 
 
 class ManualAnnotationCreate(MCPModel):
@@ -139,7 +143,7 @@ class AnnotationUpdate(MCPModel):
 ReviewManageRequest = Annotated[
     InvestigationCreate
     | InvestigationUpdate
-    | SetInvestigationSessionStatus
+    | SetInvestigationSessionVerdict
     | ManualAnnotationCreate
     | InvestigationAnswerCreate
     | AnnotationUpdate,

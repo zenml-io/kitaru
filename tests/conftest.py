@@ -48,7 +48,6 @@ from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
-from kitaru.api_models.v1.investigation import InvestigationSessionStatus
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
@@ -5897,24 +5896,20 @@ class FakeInvestigationRepository:
         self._annotations: FakeAnnotationRepository | None = None
 
     def _counts(self, investigation_id: uuid.UUID) -> tuple[int, int]:
-        """Count an investigation's linked and completed or skipped sessions.
+        """Count an investigation's linked sessions and non-null verdicts.
 
         Args:
             investigation_id: Id of the investigation.
 
         Returns:
-            Total and completed or skipped linked session counts.
+            Total and verdict-set linked session counts.
         """
         links = [
             session
             for session in self._sessions.values()
             if session.investigation_id == investigation_id
         ]
-        completed = sum(
-            1
-            for session in links
-            if session.status is not InvestigationSessionStatus.PENDING
-        )
+        completed = sum(1 for session in links if session.verdict is not None)
         return len(links), completed
 
     def _with_counts(self, investigation: Investigation) -> Investigation:

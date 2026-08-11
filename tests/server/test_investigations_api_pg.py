@@ -147,35 +147,41 @@ async def test_list_sessions_ordered_by_position(
     items = body["items"]
     assert [item["session_id"] for item in items] == session_ids
     assert [item["position"] for item in items] == [0, 1]
-    assert [item["status"] for item in items] == ["pending", "pending"]
+    assert [item["verdict"] for item in items] == [None, None]
     assert items[0]["view"]["summary"] == "Retry loop without backoff"
     assert items[1]["view"] is None
 
 
-async def test_investigation_completes_once_no_session_pending(
+async def test_manual_completion_after_verdicts(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Flip the investigation to completed once every linked session settles."""
+    """Complete the investigation manually after every session got a verdict."""
     session_ids = [await _create_session(client, agent_id) for _ in range(2)]
     created = await _create_investigation(client, agent_id, session_ids)
 
     response = await client.patch(
         f"/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
-        json={"status": "completed"},
+        json={"verdict": "acceptable"},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "completed"
-
-    # The investigation stays open while a linked session is still pending.
-    response = await client.get(f"/v1/investigations/{created['id']}")
-    assert response.json()["status"] == "pending"
+    assert response.json()["verdict"] == "acceptable"
 
     response = await client.patch(
         f"/v1/investigations/{created['id']}/sessions/{session_ids[1]}",
-        json={"status": "skipped"},
+        json={"verdict": "problematic"},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "skipped"
+    assert response.json()["verdict"] == "problematic"
+
+    # Verdicts alone never complete the investigation.
+    response = await client.get(f"/v1/investigations/{created['id']}")
+    assert response.json()["status"] == "pending"
+    assert response.json()["completed_sessions"] == 2
+
+    response = await client.patch(
+        f"/v1/investigations/{created['id']}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
 
     response = await client.get(f"/v1/investigations/{created['id']}")
     assert response.status_code == 200
