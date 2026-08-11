@@ -18,14 +18,14 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
+    InvestigationSessionVerdict,
     InvestigationSessionView,
     InvestigationStatus,
     QuestionItem,
 )
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
 
 
 class InvestigationFilter(ListFilter):
@@ -46,7 +46,9 @@ class InvestigationSessionFilter(ListFilter):
 
     sortable_fields: ClassVar[frozenset[str]] = frozenset({"position"})
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
-        "status": FilterField(value_type=InvestigationSessionStatus, ops=EQUALITY_OPS),
+        "verdict": FilterField(
+            value_type=InvestigationSessionVerdict, ops=EQUALITY_OPS | NULLABLE_OPS
+        ),
     }
 
     investigation_id: uuid.UUID
@@ -75,3 +77,4 @@ class InvestigationUpdate(FrozenModel):
 
     name: str | None = None
     description: str | None = None
+    status: InvestigationStatus | None = None

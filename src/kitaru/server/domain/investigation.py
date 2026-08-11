@@ -20,7 +20,7 @@ from typing import Any
 from pydantic import Field, field_validator
 
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
+    InvestigationSessionVerdict,
     InvestigationSessionView,
     InvestigationStatus,
     QuestionItem,
@@ -110,28 +110,6 @@ class InvestigationSessionNotFound(NotFoundError):
         )
 
 
-class IllegalInvestigationSessionStatusTransition(ConflictError):
-    """Raised when an investigation session status transition is not allowed."""
-
-    def __init__(
-        self,
-        investigation_session_id: uuid.UUID,
-        current: InvestigationSessionStatus,
-        target: InvestigationSessionStatus,
-    ) -> None:
-        """Initialize the error.
-
-        Args:
-            investigation_session_id: Id of the investigation session.
-            current: Current investigation session status.
-            target: Target investigation session status.
-        """
-        super().__init__(
-            f"Investigation session {investigation_session_id} cannot "
-            f"transition from {current} to {target}"
-        )
-
-
 class Investigation(DomainModel):
     """Investigation."""
 
@@ -199,6 +177,25 @@ class Investigation(DomainModel):
         """
         self.description = description
 
+    def update_status(self, status: InvestigationStatus, now: datetime) -> None:
+        """Set a new investigation status.
+
+        Args:
+            status: New status.
+            now: Current time.
+
+        Raises:
+            IllegalInvestigationStatusTransition: The status moves backwards.
+        """
+        if status is self.status:
+            return
+        if status is InvestigationStatus.IN_PROGRESS:
+            self.start(now)
+        elif status is InvestigationStatus.COMPLETED:
+            self.complete(now)
+        else:
+            raise IllegalInvestigationStatusTransition(self.id, self.status, status)
+
     def start(self, now: datetime) -> None:
         """Move a pending investigation to in_progress on its first answer.
 
@@ -241,33 +238,15 @@ class InvestigationSession(DomainModel):
     investigation_id: uuid.UUID
     session_id: uuid.UUID
     position: int
-    status: InvestigationSessionStatus = InvestigationSessionStatus.PENDING
+    verdict: InvestigationSessionVerdict | None = None
     view: InvestigationSessionView | None = None
     created: datetime | None = None
     updated: datetime | None = None
 
-    def complete(self) -> None:
-        """Mark the session completed once its questions are answered.
+    def update_verdict(self, verdict: InvestigationSessionVerdict | None) -> None:
+        """Set a new session verdict.
 
-        Raises:
-            IllegalInvestigationSessionStatusTransition: The session is not
-                pending.
+        Args:
+            verdict: New verdict, None clears it.
         """
-        if self.status is not InvestigationSessionStatus.PENDING:
-            raise IllegalInvestigationSessionStatusTransition(
-                self.id, self.status, InvestigationSessionStatus.COMPLETED
-            )
-        self.status = InvestigationSessionStatus.COMPLETED
-
-    def skip(self) -> None:
-        """Mark the session skipped, abandoning its remaining questions.
-
-        Raises:
-            IllegalInvestigationSessionStatusTransition: The session is not
-                pending.
-        """
-        if self.status is not InvestigationSessionStatus.PENDING:
-            raise IllegalInvestigationSessionStatusTransition(
-                self.id, self.status, InvestigationSessionStatus.SKIPPED
-            )
-        self.status = InvestigationSessionStatus.SKIPPED
+        self.verdict = verdict

@@ -28,7 +28,7 @@ from conftest import (
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
+    InvestigationSessionVerdict,
     InvestigationStatus,
     QuestionItem,
 )
@@ -49,7 +49,7 @@ from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.investigation import (
     DuplicateQuestionKey,
-    IllegalInvestigationSessionStatusTransition,
+    IllegalInvestigationStatusTransition,
     InvestigationNotFound,
     InvestigationSessionNotFound,
 )
@@ -411,6 +411,72 @@ async def test_update_investigation_omitted_fields_unchanged(
     assert updated.description == "old"
 
 
+async def test_update_investigation_status(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Move an investigation through in_progress to completed."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    updated = await service.update_investigation(
+        created.id,
+        InvestigationUpdate(status=InvestigationStatus.IN_PROGRESS),
+        actor=ACTOR,
+    )
+    assert updated.status is InvestigationStatus.IN_PROGRESS
+    assert updated.started_at is not None
+    assert updated.ended_at is None
+    updated = await service.update_investigation(
+        created.id,
+        InvestigationUpdate(status=InvestigationStatus.COMPLETED),
+        actor=ACTOR,
+    )
+    assert updated.status is InvestigationStatus.COMPLETED
+    assert updated.ended_at is not None
+
+
+async def test_update_investigation_status_illegal_transition(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Reject moving a completed investigation backwards."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    await service.update_investigation(
+        created.id,
+        InvestigationUpdate(status=InvestigationStatus.COMPLETED),
+        actor=ACTOR,
+    )
+    with pytest.raises(IllegalInvestigationStatusTransition):
+        await service.update_investigation(
+            created.id,
+            InvestigationUpdate(status=InvestigationStatus.IN_PROGRESS),
+            actor=ACTOR,
+        )
+
+
+async def test_update_investigation_cannot_clear_status(
+    service: InvestigationService, agent_id: uuid.UUID
+) -> None:
+    """Reject clearing the investigation status with an explicit null."""
+    created = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id, name="investigation", questions=[], sessions=[]
+        ),
+        actor=ACTOR,
+    )
+    with pytest.raises(ValidationError, match="Investigation status cannot be cleared"):
+        await service.update_investigation(
+            created.id, InvestigationUpdate(status=None), actor=ACTOR
+        )
+
+
 async def test_update_investigation_cannot_clear_name(
     service: InvestigationService, agent_id: uuid.UUID
 ) -> None:
@@ -470,10 +536,10 @@ async def test_list_investigation_sessions_not_found(
         )
 
 
-async def test_update_investigation_session_status_completed(
+async def test_update_investigation_session_verdict(
     service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
 ) -> None:
-    """Mark a linked session completed without completing the investigation."""
+    """Set a linked session's verdict without completing the investigation."""
     investigation = await service.create_investigation(
         InvestigationCreate(
             agent_id=agent_id,
@@ -486,23 +552,23 @@ async def test_update_investigation_session_status_completed(
         ),
         actor=ACTOR,
     )
-    session = await service.update_investigation_session_status(
+    session = await service.update_investigation_session_verdict(
         investigation.id,
         session_ids[0],
-        InvestigationSessionStatus.COMPLETED,
+        InvestigationSessionVerdict.ACCEPTABLE,
         actor=ACTOR,
     )
-    assert session.status is InvestigationSessionStatus.COMPLETED
+    assert session.verdict is InvestigationSessionVerdict.ACCEPTABLE
     reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
     assert reloaded.status is InvestigationStatus.PENDING
     assert reloaded.completed_sessions == 1
     assert reloaded.ended_at is None
 
 
-async def test_update_investigation_session_status_skipped(
+async def test_update_investigation_session_verdict_replaces_earlier_verdict(
     service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
 ) -> None:
-    """Mark a linked session skipped and count it toward completed_sessions."""
+    """Replace a linked session's earlier verdict."""
     investigation = await service.create_investigation(
         InvestigationCreate(
             agent_id=agent_id,
@@ -515,21 +581,27 @@ async def test_update_investigation_session_status_skipped(
         ),
         actor=ACTOR,
     )
-    session = await service.update_investigation_session_status(
+    await service.update_investigation_session_verdict(
         investigation.id,
         session_ids[0],
-        InvestigationSessionStatus.SKIPPED,
+        InvestigationSessionVerdict.UNCERTAIN,
         actor=ACTOR,
     )
-    assert session.status is InvestigationSessionStatus.SKIPPED
+    session = await service.update_investigation_session_verdict(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionVerdict.PROBLEMATIC,
+        actor=ACTOR,
+    )
+    assert session.verdict is InvestigationSessionVerdict.PROBLEMATIC
     reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
     assert reloaded.completed_sessions == 1
 
 
-async def test_update_investigation_session_status_completes_investigation(
+async def test_update_investigation_session_verdict_clear(
     service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
 ) -> None:
-    """Flip the investigation to completed once the last pending link settles."""
+    """Clear a linked session's verdict."""
     investigation = await service.create_investigation(
         InvestigationCreate(
             agent_id=agent_id,
@@ -542,91 +614,68 @@ async def test_update_investigation_session_status_completes_investigation(
         ),
         actor=ACTOR,
     )
-    await service.update_investigation_session_status(
+    await service.update_investigation_session_verdict(
         investigation.id,
         session_ids[0],
-        InvestigationSessionStatus.COMPLETED,
+        InvestigationSessionVerdict.ACCEPTABLE,
         actor=ACTOR,
     )
-    await service.update_investigation_session_status(
+    session = await service.update_investigation_session_verdict(
+        investigation.id, session_ids[0], None, actor=ACTOR
+    )
+    assert session.verdict is None
+    reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
+    assert reloaded.completed_sessions == 0
+
+
+async def test_update_investigation_session_verdict_does_not_complete_investigation(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Leave the investigation status untouched once every link has a verdict."""
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            questions=[],
+            sessions=[
+                InvestigationSessionInput(session_id=session_ids[0]),
+                InvestigationSessionInput(session_id=session_ids[1]),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    await service.update_investigation_session_verdict(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionVerdict.ACCEPTABLE,
+        actor=ACTOR,
+    )
+    await service.update_investigation_session_verdict(
         investigation.id,
         session_ids[1],
-        InvestigationSessionStatus.SKIPPED,
+        InvestigationSessionVerdict.PROBLEMATIC,
         actor=ACTOR,
     )
     reloaded = await service.get_investigation(investigation.id, actor=ACTOR)
-    assert reloaded.status is InvestigationStatus.COMPLETED
+    assert reloaded.status is InvestigationStatus.PENDING
     assert reloaded.completed_sessions == 2
-    assert reloaded.ended_at is not None
+    assert reloaded.ended_at is None
 
 
-async def test_update_investigation_session_status_illegal_transition(
-    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
-) -> None:
-    """Reject settling a session that already settled."""
-    investigation = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id,
-            name="investigation",
-            questions=[],
-            sessions=[InvestigationSessionInput(session_id=session_ids[0])],
-        ),
-        actor=ACTOR,
-    )
-    await service.update_investigation_session_status(
-        investigation.id,
-        session_ids[0],
-        InvestigationSessionStatus.COMPLETED,
-        actor=ACTOR,
-    )
-    with pytest.raises(IllegalInvestigationSessionStatusTransition):
-        await service.update_investigation_session_status(
-            investigation.id,
-            session_ids[0],
-            InvestigationSessionStatus.SKIPPED,
-            actor=ACTOR,
-        )
-
-
-async def test_update_investigation_session_status_invalid_target(
-    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
-) -> None:
-    """Reject setting a linked session's status back to pending."""
-    investigation = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id,
-            name="investigation",
-            questions=[],
-            sessions=[InvestigationSessionInput(session_id=session_ids[0])],
-        ),
-        actor=ACTOR,
-    )
-    with pytest.raises(
-        ValidationError,
-        match="Investigation session status cannot be set to 'pending'",
-    ):
-        await service.update_investigation_session_status(
-            investigation.id,
-            session_ids[0],
-            InvestigationSessionStatus.PENDING,
-            actor=ACTOR,
-        )
-
-
-async def test_update_investigation_session_status_investigation_not_found(
+async def test_update_investigation_session_verdict_investigation_not_found(
     service: InvestigationService,
 ) -> None:
     """Raise for an unknown investigation id."""
     with pytest.raises(InvestigationNotFound):
-        await service.update_investigation_session_status(
+        await service.update_investigation_session_verdict(
             uuid.uuid4(),
             uuid.uuid4(),
-            InvestigationSessionStatus.COMPLETED,
+            InvestigationSessionVerdict.ACCEPTABLE,
             actor=ACTOR,
         )
 
 
-async def test_update_investigation_session_status_session_not_found(
+async def test_update_investigation_session_verdict_session_not_found(
     service: InvestigationService, agent_id: uuid.UUID
 ) -> None:
     """Raise when no linked session matches the investigation and session pair."""
@@ -637,10 +686,10 @@ async def test_update_investigation_session_status_session_not_found(
         actor=ACTOR,
     )
     with pytest.raises(InvestigationSessionNotFound):
-        await service.update_investigation_session_status(
+        await service.update_investigation_session_verdict(
             investigation.id,
             uuid.uuid4(),
-            InvestigationSessionStatus.COMPLETED,
+            InvestigationSessionVerdict.ACCEPTABLE,
             actor=ACTOR,
         )
 
