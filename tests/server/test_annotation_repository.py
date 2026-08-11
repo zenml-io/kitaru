@@ -30,7 +30,6 @@ from conftest import (
 )
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.investigation import QuestionItem
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -76,7 +75,7 @@ async def _link_investigation_session(
     agent_id: uuid.UUID,
     session_id: uuid.UUID,
 ) -> tuple[uuid.UUID, uuid.UUID]:
-    """Create a one-question, one-session investigation and link the session.
+    """Create a one-session investigation and link the session.
 
     Args:
         investigations: Investigation repository to store the investigation in.
@@ -91,7 +90,6 @@ async def _link_investigation_session(
         owner_id=owner_id,
         agent_id=agent_id,
         name="investigation",
-        questions=[QuestionItem(key="root_cause", question="root_cause")],
         total_sessions=0,
         completed_sessions=0,
     )
@@ -181,7 +179,6 @@ def _answer(
     owner_id: uuid.UUID,
     session_id: uuid.UUID,
     investigation_session_id: uuid.UUID,
-    question_key: str = "root_cause",
     **overrides: Any,
 ) -> Annotation:
     """Build an investigation answer annotation.
@@ -190,7 +187,6 @@ def _answer(
         owner_id: Id of the owning account.
         session_id: Id of the linked session.
         investigation_session_id: Id of the investigation session being answered.
-        question_key: Key of the question being answered.
         **overrides: Additional annotation fields.
 
     Returns:
@@ -200,7 +196,6 @@ def _answer(
         "owner_id": owner_id,
         "session_id": session_id,
         "investigation_session_id": investigation_session_id,
-        "question_key": question_key,
         "value": "answer",
     }
     values.update(overrides)
@@ -241,7 +236,6 @@ async def test_create_manual_sets_timestamps(setup: Setup) -> None:
     assert created.owner_id == owner_id
     assert created.session_id == session_id
     assert created.investigation_session_id is None
-    assert created.question_key is None
     assert created.created is not None
     assert created.updated is not None
 
@@ -256,21 +250,15 @@ async def test_create_investigation_answer(setup: Setup) -> None:
     )
     assert created.session_id == session_id
     assert created.investigation_session_id == investigation_session_id
-    assert created.question_key == "root_cause"
 
 
-async def test_create_upserts_same_question(setup: Setup) -> None:
-    """Replace the value and selector of an existing answer instead of conflicting."""
+async def test_create_investigation_answer_never_conflicts(setup: Setup) -> None:
+    """Insert repeated answers to the same investigation session as separate rows."""
     annotations, _, owner_id, make_session_id, make_investigation_session = setup
     session_id = await make_session_id()
     _, investigation_session_id = await make_investigation_session(session_id)
     first = await annotations.create(
-        _answer(
-            owner_id,
-            session_id,
-            investigation_session_id,
-            value="first answer",
-        )
+        _answer(owner_id, session_id, investigation_session_id, value="first answer")
     )
     second = await annotations.create(
         _answer(
@@ -281,14 +269,11 @@ async def test_create_upserts_same_question(setup: Setup) -> None:
             value="second answer",
         )
     )
-    assert second.id == first.id
-    assert second.value == "second answer"
-    assert second.selector == AnnotationSelector(path="/output")
-    assert first.updated is not None
-    assert second.updated is not None
-    assert second.updated >= first.updated
-    loaded = await annotations.get(first.id)
-    assert loaded == second
+    assert second.id != first.id
+    loaded_first = await annotations.get(first.id)
+    loaded_second = await annotations.get(second.id)
+    assert loaded_first.value == "first answer"
+    assert loaded_second.value == "second answer"
 
 
 async def test_create_manual_never_conflicts(setup: Setup) -> None:

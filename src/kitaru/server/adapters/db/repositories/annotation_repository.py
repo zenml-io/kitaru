@@ -15,10 +15,8 @@
 
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, select
-from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
@@ -83,13 +81,7 @@ class SQLAnnotationRepository(BaseSQLRepository[AnnotationORM]):
         return AnnotationNotFound(entity_id)
 
     async def create(self, annotation: Annotation) -> Annotation:
-        """Persist a new annotation, upserting an investigation answer.
-
-        An investigation answer upserts on (investigation_session_id,
-        question_key), renewing the selector, value, and updated timestamp
-        of the existing row. A manual annotation always inserts, since
-        Postgres treats its null investigation_session_id as distinct from
-        every other row.
+        """Persist a new annotation.
 
         Args:
             annotation: Annotation to store.
@@ -97,25 +89,9 @@ class SQLAnnotationRepository(BaseSQLRepository[AnnotationORM]):
         Returns:
             Stored annotation with timestamps set.
         """
-        statement = insert(AnnotationORM).values(
-            **AnnotationORM.column_values(annotation)
-        )
-        statement = statement.on_conflict_do_update(
-            index_elements=[
-                AnnotationORM.investigation_session_id,
-                AnnotationORM.question_key,
-            ],
-            set_={
-                "selector": statement.excluded.selector,
-                "value": statement.excluded.value,
-                "updated": datetime.now(UTC),
-            },
-        ).returning(AnnotationORM)
-        row = (
-            await self._session.scalars(
-                statement, execution_options={"populate_existing": True}
-            )
-        ).one()
+        row = AnnotationORM.from_domain(annotation)
+        self._session.add(row)
+        await self._flush()
         return row.to_domain()
 
     async def get(self, annotation_id: uuid.UUID) -> Annotation:

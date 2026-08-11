@@ -68,7 +68,6 @@ class StubInvestigationClient:
                 "name": "failure-review",
                 "description": "Review failures",
                 "status": "pending",
-                "questions": [{"key": "cause", "question": "What caused the failure?"}],
                 "total_sessions": 2,
                 "completed_sessions": 0,
             },
@@ -79,8 +78,10 @@ class StubInvestigationClient:
                 "investigation_id": str(self.investigation.id),
                 "session_id": str(self.session_ids[0]),
                 "position": 0,
-                "status": "pending",
+                "question": "What caused the failure?",
+                "verdict": None,
                 "view": None,
+                "highlights": [],
             },
         )
         self.agent_lookups = 0
@@ -166,10 +167,11 @@ class StubInvestigationClient:
             return self.owner.investigation_session
 
 
-async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
-    """Create preserves question/session order and validates curated views."""
+async def test_create_maps_sessions_views_questions_and_highlights_to_sdk() -> None:
+    """Create preserves session order and validates curated per-session fields."""
     client = StubInvestigationClient()
     node_id = uuid.uuid4()
+    highlight_node_id = uuid.uuid4()
     view = json.dumps(
         {
             "summary": "The failed tool call",
@@ -182,15 +184,19 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
             ],
         }
     )
+    highlights = json.dumps(
+        [{"selector": {"node_id": str(highlight_node_id)}, "description": "Odd retry."}]
+    )
 
     result = await investigations.create_investigation(
         client,
         "triage",
         agent="assistant",
         description="Review selected failures",
-        questions=["cause=What caused it?", "fix=How should it be fixed?"],
         session_ids=client.session_ids,
         session_views=[f"{client.session_ids[1]}={view}"],
+        session_questions=[f"{client.session_ids[0]}=What caused it?"],
+        session_highlights=[f"{client.session_ids[1]}={highlights}"],
     )
 
     [request] = client.create_calls
@@ -198,12 +204,11 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
         "agent_id": str(client.agent.id),
         "name": "triage",
         "description": "Review selected failures",
-        "questions": [
-            {"key": "cause", "question": "What caused it?"},
-            {"key": "fix", "question": "How should it be fixed?"},
-        ],
         "sessions": [
-            {"session_id": str(client.session_ids[0])},
+            {
+                "session_id": str(client.session_ids[0]),
+                "question": "What caused it?",
+            },
             {
                 "session_id": str(client.session_ids[1]),
                 "view": {
@@ -220,6 +225,12 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
                         }
                     ],
                 },
+                "highlights": [
+                    {
+                        "selector": {"node_id": str(highlight_node_id)},
+                        "description": "Odd retry.",
+                    }
+                ],
             },
         ],
     }
@@ -227,23 +238,72 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
 
 
 @pytest.mark.parametrize(
-    ("questions", "sessions", "views", "message"),
+    ("sessions", "views", "questions", "highlights", "message"),
     [
-        (["missing-separator"], [], [], "KEY=QUESTION"),
-        (["cause=one", "cause=two"], [], [], "question key must be unique"),
         (
-            [],
             [uuid.UUID(int=1), uuid.UUID(int=1)],
+            [],
+            [],
             [],
             "--session value must be unique",
         ),
-        ([], [], [f"{uuid.UUID(int=2)}={{}}"], "also be selected with --session"),
+        ([], [f"{uuid.UUID(int=2)}={{}}"], [], [], "also be selected with --session"),
+        (
+            [],
+            [],
+            ["missing-separator"],
+            [],
+            "--session-question must be SESSION=QUESTION",
+        ),
+        (
+            [],
+            [],
+            [f"{uuid.UUID(int=2)}=why?"],
+            [],
+            "also be selected with --session",
+        ),
+        (
+            [uuid.UUID(int=3)],
+            [],
+            [f"{uuid.UUID(int=3)}=why?", f"{uuid.UUID(int=3)}=why not?"],
+            [],
+            "session must be unique",
+        ),
+        (
+            [],
+            [],
+            [],
+            ["missing-separator"],
+            "--session-highlights must be SESSION=JSON_ARRAY",
+        ),
+        (
+            [],
+            [],
+            [],
+            [f"{uuid.UUID(int=2)}=why?"],
+            "also be selected with --session",
+        ),
+        (
+            [uuid.UUID(int=4)],
+            [],
+            [],
+            [f"{uuid.UUID(int=4)}=not-json"],
+            "--session-highlights is not valid JSON",
+        ),
+        (
+            [uuid.UUID(int=4)],
+            [],
+            [],
+            [f"{uuid.UUID(int=4)}={{}}"],
+            "--session-highlights must contain a JSON array",
+        ),
     ],
 )
 async def test_create_validation_precedes_agent_lookup(
-    questions: list[str],
     sessions: list[uuid.UUID],
     views: list[str],
+    questions: list[str],
+    highlights: list[str],
     message: str,
 ) -> None:
     """Malformed local inputs fail before resolving remote state."""
@@ -255,9 +315,10 @@ async def test_create_validation_precedes_agent_lookup(
             "triage",
             agent="assistant",
             description=None,
-            questions=questions,
             session_ids=sessions,
             session_views=views,
+            session_questions=questions,
+            session_highlights=highlights,
         )
 
     assert client.agent_lookups == 0

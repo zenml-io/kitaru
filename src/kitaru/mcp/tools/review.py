@@ -73,7 +73,6 @@ async def handle_review_manage(
             agent_id=request.agent_id,
             name=request.name,
             description=request.description,
-            questions=request.questions,
             sessions=request.sessions,
         )
         return await state.client.investigations.create(dto)
@@ -105,7 +104,6 @@ async def handle_review_manage(
         return await state.client.annotations.create(
             InvestigationAnswerCreateRequest(
                 investigation_session_id=request.investigation_session_id,
-                question_key=request.question_key,
                 selector=request.selector,
                 value=request.value,
             )

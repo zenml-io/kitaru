@@ -529,18 +529,6 @@
             "title": "Owner Id",
             "type": "string"
           },
-          "question_key": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Key of the question being answered.",
-            "title": "Question Key"
-          },
           "selector": {
             "anyOf": [
               {
@@ -3278,11 +3266,6 @@
             "title": "Investigation Session Id",
             "type": "string"
           },
-          "question_key": {
-            "description": "Key of the question being answered.",
-            "title": "Question Key",
-            "type": "string"
-          },
           "selector": {
             "anyOf": [
               {
@@ -3301,7 +3284,6 @@
         },
         "required": [
           "investigation_session_id",
-          "question_key",
           "value"
         ],
         "title": "InvestigationAnswerCreateRequest",
@@ -3334,14 +3316,6 @@
             "title": "Name",
             "type": "string"
           },
-          "questions": {
-            "description": "Questions asked about each session.",
-            "items": {
-              "$ref": "#/components/schemas/QuestionItem"
-            },
-            "title": "Questions",
-            "type": "array"
-          },
           "sessions": {
             "description": "Sessions to investigate, in presentation order.",
             "items": {
@@ -3354,7 +3328,6 @@
         "required": [
           "agent_id",
           "name",
-          "questions",
           "sessions"
         ],
         "title": "InvestigationCreateRequest",
@@ -3428,14 +3401,6 @@
             "title": "Owner Id",
             "type": "string"
           },
-          "questions": {
-            "description": "Questions asked about each session.",
-            "items": {
-              "$ref": "#/components/schemas/QuestionItem"
-            },
-            "title": "Questions",
-            "type": "array"
-          },
           "started_at": {
             "anyOf": [
               {
@@ -3473,7 +3438,6 @@
           "name",
           "description",
           "status",
-          "questions",
           "metadata",
           "total_sessions",
           "completed_sessions"
@@ -3481,10 +3445,51 @@
         "title": "InvestigationResponse",
         "type": "object"
       },
+      "InvestigationSessionHighlight": {
+        "additionalProperties": false,
+        "description": "Investigation session highlight.",
+        "properties": {
+          "description": {
+            "description": "Prose explaining what the highlight shows.",
+            "title": "Description",
+            "type": "string"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/AnnotationSelector",
+            "description": "Part of the session highlighted."
+          }
+        },
+        "required": [
+          "selector",
+          "description"
+        ],
+        "title": "InvestigationSessionHighlight",
+        "type": "object"
+      },
       "InvestigationSessionInput": {
         "additionalProperties": false,
         "description": "Investigation session input.",
         "properties": {
+          "highlights": {
+            "description": "Curated highlights for the session.",
+            "items": {
+              "$ref": "#/components/schemas/InvestigationSessionHighlight"
+            },
+            "title": "Highlights",
+            "type": "array"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Question to answer about the session.",
+            "title": "Question"
+          },
           "session_id": {
             "description": "Session to link.",
             "format": "uuid",
@@ -3518,6 +3523,14 @@
             "title": "Created",
             "type": "string"
           },
+          "highlights": {
+            "description": "Curated highlights for the session.",
+            "items": {
+              "$ref": "#/components/schemas/InvestigationSessionHighlight"
+            },
+            "title": "Highlights",
+            "type": "array"
+          },
           "id": {
             "description": "Investigation session id.",
             "format": "uuid",
@@ -3534,6 +3547,18 @@
             "description": "Presentation order within the investigation.",
             "title": "Position",
             "type": "integer"
+          },
+          "question": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Question to answer about the session.",
+            "title": "Question"
           },
           "session_id": {
             "description": "Session being investigated.",
@@ -3577,8 +3602,10 @@
           "investigation_id",
           "session_id",
           "position",
+          "question",
           "verdict",
-          "view"
+          "view",
+          "highlights"
         ],
         "title": "InvestigationSessionResponse",
         "type": "object"
@@ -4869,28 +4896,6 @@
           "sha256"
         ],
         "title": "PayloadSpec",
-        "type": "object"
-      },
-      "QuestionItem": {
-        "additionalProperties": false,
-        "description": "Question item.",
-        "properties": {
-          "key": {
-            "description": "Key identifying the question within the array.",
-            "title": "Key",
-            "type": "string"
-          },
-          "question": {
-            "description": "Question display text.",
-            "title": "Question",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "question"
-        ],
-        "title": "QuestionItem",
         "type": "object"
       },
       "ReplayCreateRequest": {
@@ -9260,7 +9265,7 @@
         ]
       },
       "post": {
-        "description": "Create a manual annotation, or answer an investigation question.\n\nA body carrying session_id creates a manual annotation. A body carrying\ninvestigation_session_id and question_key answers an investigation\nquestion, moving a pending investigation to in_progress on its first\nanswer.\n\nClients observe HTTP 201 on success, 404 when the session or the\ninvestigation session does not exist, and 422 when the question key is\nunknown or the selector names a node outside the session.\n\nArgs:\n    body: Manual annotation or investigation answer create request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Created annotation.",
+        "description": "Create a manual annotation, or answer an investigation session.\n\nA body carrying session_id creates a manual annotation. A body carrying\ninvestigation_session_id answers an investigation session, moving a\npending investigation to in_progress on its first answer.\n\nClients observe HTTP 201 on success, 404 when the session or the\ninvestigation session does not exist, and 422 when the selector names a\nnode outside the session.\n\nArgs:\n    body: Manual annotation or investigation answer create request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Created annotation.",
         "operationId": "create_annotation_v1_annotations_post",
         "requestBody": {
           "content": {
@@ -12941,7 +12946,7 @@
         ]
       },
       "post": {
-        "description": "Create an investigation with its questions and linked sessions in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 when a linked session id repeats, is missing, or belongs to a\ndifferent agent, or the questions contain a duplicate key.\n\nArgs:\n    body: Investigation create request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Created investigation.",
+        "description": "Create an investigation with its linked sessions in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 when a linked session id repeats, is missing, or belongs to a\ndifferent agent.\n\nArgs:\n    body: Investigation create request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Created investigation.",
         "operationId": "create_investigation_v1_investigations_post",
         "requestBody": {
           "content": {

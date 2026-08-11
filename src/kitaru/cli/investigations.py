@@ -13,11 +13,13 @@
 #  permissions and limitations under the License.
 """Investigation and linked-session CLI commands."""
 
+import json
 import uuid
 from typing import Any
 
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
+    InvestigationSessionHighlight,
     InvestigationSessionInput,
     InvestigationSessionsListParams,
     InvestigationSessionUpdateRequest,
@@ -25,7 +27,6 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionView,
     InvestigationStatus,
     InvestigationUpdateRequest,
-    QuestionItem,
 )
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import (
@@ -36,24 +37,39 @@ from kitaru.cli.registration import (
 )
 
 
-def _parse_questions(entries: list[str]) -> list[QuestionItem]:
-    """Parse repeatable ``KEY=QUESTION`` inputs in their supplied order."""
-    questions: list[QuestionItem] = []
-    keys: set[str] = set()
+def _parse_session_questions(
+    entries: list[str], selected_session_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, str]:
+    """Parse ``SESSION=QUESTION`` questions for selected sessions."""
+    selected = set(selected_session_ids)
+    questions: dict[uuid.UUID, str] = {}
     for entry in entries:
-        key, separator, question = entry.partition("=")
-        if not separator or not key:
+        session_token, separator, question = entry.partition("=")
+        if not separator or not session_token:
             raise CLIError(
                 "invalid_arguments",
-                "--question must be KEY=QUESTION.",
+                "--session-question must be SESSION=QUESTION.",
             )
-        if key in keys:
+        try:
+            session_id = uuid.UUID(session_token)
+        except ValueError as error:
             raise CLIError(
                 "invalid_arguments",
-                f"Each --question key must be unique; repeated {key!r}.",
+                "--session-question must start with a valid session UUID.",
+            ) from error
+        if session_id not in selected:
+            raise CLIError(
+                "invalid_arguments",
+                f"Session {session_id} from --session-question must also be "
+                "selected with --session.",
             )
-        keys.add(key)
-        questions.append(QuestionItem(key=key, question=question))
+        if session_id in questions:
+            raise CLIError(
+                "invalid_arguments",
+                f"Each --session-question session must be unique; repeated "
+                f"{session_id}.",
+            )
+        questions[session_id] = question
     return questions
 
 
@@ -94,34 +110,92 @@ def _parse_session_views(
     return views
 
 
+def _parse_highlights(
+    value: str, *, option: str
+) -> list[InvestigationSessionHighlight]:
+    """Parse a JSON array of highlight objects."""
+    try:
+        parsed = json.loads(value)
+    except json.JSONDecodeError as error:
+        raise CLIError(
+            "invalid_arguments", f"{option} is not valid JSON: {error}"
+        ) from error
+    if not isinstance(parsed, list):
+        raise CLIError("invalid_arguments", f"{option} must contain a JSON array.")
+    return [InvestigationSessionHighlight.model_validate(item) for item in parsed]
+
+
+def _parse_session_highlights(
+    entries: list[str], selected_session_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, list[InvestigationSessionHighlight]]:
+    """Parse ``SESSION=JSON_ARRAY`` highlights for selected sessions."""
+    selected = set(selected_session_ids)
+    highlights: dict[uuid.UUID, list[InvestigationSessionHighlight]] = {}
+    for entry in entries:
+        session_token, separator, payload = entry.partition("=")
+        if not separator or not session_token:
+            raise CLIError(
+                "invalid_arguments",
+                "--session-highlights must be SESSION=JSON_ARRAY.",
+            )
+        try:
+            session_id = uuid.UUID(session_token)
+        except ValueError as error:
+            raise CLIError(
+                "invalid_arguments",
+                "--session-highlights must start with a valid session UUID.",
+            ) from error
+        if session_id not in selected:
+            raise CLIError(
+                "invalid_arguments",
+                f"Session {session_id} from --session-highlights must also be "
+                "selected with --session.",
+            )
+        if session_id in highlights:
+            raise CLIError(
+                "invalid_arguments",
+                f"Each --session-highlights session must be unique; repeated "
+                f"{session_id}.",
+            )
+        highlights[session_id] = _parse_highlights(
+            payload, option="--session-highlights"
+        )
+    return highlights
+
+
 async def create_investigation(
     client: Any,
     name: str,
     *,
     agent: str,
     description: str | None,
-    questions: list[str],
     session_ids: list[uuid.UUID],
     session_views: list[str],
+    session_questions: list[str],
+    session_highlights: list[str],
 ) -> CommandResult:
-    """Create an investigation with ordered questions and linked sessions."""
+    """Create an investigation with linked sessions."""
     if len(set(session_ids)) != len(session_ids):
         raise CLIError("invalid_arguments", "Each --session value must be unique.")
-    parsed_questions = _parse_questions(questions)
     parsed_views = _parse_session_views(session_views, session_ids)
+    parsed_questions = _parse_session_questions(session_questions, session_ids)
+    parsed_highlights = _parse_session_highlights(session_highlights, session_ids)
     resolved_agent = await resolve_asset(client.agents, agent, "Agent")
-    sessions = [
-        InvestigationSessionInput(session_id=session_id, view=parsed_views[session_id])
-        if session_id in parsed_views
-        else InvestigationSessionInput(session_id=session_id)
-        for session_id in session_ids
-    ]
+    sessions = []
+    for session_id in session_ids:
+        session_fields: dict[str, Any] = {"session_id": session_id}
+        if session_id in parsed_questions:
+            session_fields["question"] = parsed_questions[session_id]
+        if session_id in parsed_views:
+            session_fields["view"] = parsed_views[session_id]
+        if session_id in parsed_highlights:
+            session_fields["highlights"] = parsed_highlights[session_id]
+        sessions.append(InvestigationSessionInput(**session_fields))
     investigation = await client.investigations.create(
         InvestigationCreateRequest(
             agent_id=resolved_agent.id,
             name=name,
             description=description,
-            questions=parsed_questions,
             sessions=sessions,
         )
     )

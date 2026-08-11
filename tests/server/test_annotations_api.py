@@ -29,7 +29,6 @@ from conftest import (
     create_agent,
     create_session,
 )
-from kitaru.api_models.v1.investigation import QuestionItem
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_annotation_service,
@@ -144,7 +143,6 @@ async def investigation_session_ids(
         owner_id=ACCOUNT.id,
         agent_id=agent_id,
         name="investigation",
-        questions=[QuestionItem(key="root_cause", question="What caused it?")],
         total_sessions=0,
         completed_sessions=0,
     )
@@ -180,7 +178,6 @@ async def test_create_manual_annotation(
     assert body["owner_id"] == str(ACCOUNT.id)
     assert body["session_id"] == session_id
     assert body["investigation_session_id"] is None
-    assert body["question_key"] is None
     assert body["value"] == "note"
     assert uuid.UUID(body["id"])
 
@@ -217,21 +214,45 @@ async def test_create_manual_annotation_invalid_selector_node(
 async def test_create_investigation_answer(
     client: httpx.AsyncClient, investigation_session_ids: tuple[str, str]
 ) -> None:
-    """Answer an investigation's question and observe HTTP 201."""
+    """Answer an investigation's linked session and observe HTTP 201."""
     _, investigation_session_id = investigation_session_ids
     response = await client.post(
         "/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
-            "question_key": "root_cause",
             "value": "a retry loop",
         },
     )
     assert response.status_code == 201
     body = response.json()
     assert body["investigation_session_id"] == investigation_session_id
-    assert body["question_key"] == "root_cause"
     assert body["value"] == "a retry loop"
+
+
+async def test_create_investigation_answer_never_conflicts(
+    client: httpx.AsyncClient, investigation_session_ids: tuple[str, str]
+) -> None:
+    """Create a separate annotation for each answer to the same session."""
+    _, investigation_session_id = investigation_session_ids
+    first = (
+        await client.post(
+            "/v1/annotations",
+            json={
+                "investigation_session_id": investigation_session_id,
+                "value": "first answer",
+            },
+        )
+    ).json()
+    second = (
+        await client.post(
+            "/v1/annotations",
+            json={
+                "investigation_session_id": investigation_session_id,
+                "value": "second answer",
+            },
+        )
+    ).json()
+    assert second["id"] != first["id"]
 
 
 async def test_create_investigation_answer_moves_investigation_in_progress(
@@ -243,7 +264,6 @@ async def test_create_investigation_answer_moves_investigation_in_progress(
         "/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
-            "question_key": "root_cause",
             "value": "a retry loop",
         },
     )
@@ -260,27 +280,10 @@ async def test_create_investigation_answer_missing_link(
         "/v1/annotations",
         json={
             "investigation_session_id": str(uuid.uuid4()),
-            "question_key": "root_cause",
             "value": "x",
         },
     )
     assert response.status_code == 404
-
-
-async def test_create_investigation_answer_unknown_question_key(
-    client: httpx.AsyncClient, investigation_session_ids: tuple[str, str]
-) -> None:
-    """Observe HTTP 422 when the question key is unknown."""
-    _, investigation_session_id = investigation_session_ids
-    response = await client.post(
-        "/v1/annotations",
-        json={
-            "investigation_session_id": investigation_session_id,
-            "question_key": "unknown",
-            "value": "x",
-        },
-    )
-    assert response.status_code == 422
 
 
 async def test_create_annotation_malformed_body(
@@ -292,7 +295,6 @@ async def test_create_annotation_malformed_body(
         json={
             "session_id": session_id,
             "investigation_session_id": str(uuid.uuid4()),
-            "question_key": "root_cause",
             "value": "x",
         },
     )
@@ -367,7 +369,6 @@ async def test_list_annotations_filters_by_investigation_id(
             "/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
-                "question_key": "root_cause",
                 "value": "a retry loop",
             },
         )

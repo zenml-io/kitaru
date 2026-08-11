@@ -17,20 +17,15 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from kitaru.api_models.v1.investigation import (
+    InvestigationSessionHighlight,
     InvestigationSessionVerdict,
     InvestigationSessionView,
     InvestigationStatus,
-    QuestionItem,
 )
-from kitaru.server.domain.base import (
-    ConflictError,
-    DomainModel,
-    NotFoundError,
-    ValidationError,
-)
+from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -69,33 +64,6 @@ class IllegalInvestigationStatusTransition(ConflictError):
         )
 
 
-class DuplicateQuestionKey(ValidationError):
-    """Raised when an investigation's questions contain a key more than once."""
-
-    def __init__(self, key: str) -> None:
-        """Initialize the error.
-
-        Args:
-            key: Key that appears more than once.
-        """
-        super().__init__(f"Question key '{key}' appears more than once")
-
-
-class UnknownQuestionKey(ValidationError):
-    """Raised when a key does not name one of an investigation's questions."""
-
-    def __init__(self, investigation_id: uuid.UUID, key: str) -> None:
-        """Initialize the error.
-
-        Args:
-            investigation_id: Id of the investigation.
-            key: Key that does not match a question.
-        """
-        super().__init__(
-            f"Investigation {investigation_id} has no question with key '{key}'"
-        )
-
-
 class InvestigationSessionNotFound(NotFoundError):
     """Raised when an investigation session lookup does not resolve."""
 
@@ -119,7 +87,6 @@ class Investigation(DomainModel):
     name: Name
     description: str | None = None
     status: InvestigationStatus = InvestigationStatus.PENDING
-    questions: list[QuestionItem]
     started_at: datetime | None = None
     ended_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -127,39 +94,6 @@ class Investigation(DomainModel):
     completed_sessions: int
     created: datetime | None = None
     updated: datetime | None = None
-
-    @field_validator("questions")
-    @classmethod
-    def _check_unique_keys(cls, value: list[QuestionItem]) -> list[QuestionItem]:
-        """Reject duplicate question keys.
-
-        Args:
-            value: Questions to check.
-
-        Raises:
-            DuplicateQuestionKey: A key appears more than once.
-
-        Returns:
-            Validated questions.
-        """
-        seen: set[str] = set()
-        for item in value:
-            if item.key in seen:
-                raise DuplicateQuestionKey(item.key)
-            seen.add(item.key)
-        return value
-
-    def check_question_key(self, question_key: str) -> None:
-        """Require a key to name one of the investigation's questions.
-
-        Args:
-            question_key: Key to check.
-
-        Raises:
-            UnknownQuestionKey: No question has this key.
-        """
-        if question_key not in {item.key for item in self.questions}:
-            raise UnknownQuestionKey(self.id, question_key)
 
     def update_name(self, name: str) -> None:
         """Set a new investigation name.
@@ -238,8 +172,10 @@ class InvestigationSession(DomainModel):
     investigation_id: uuid.UUID
     session_id: uuid.UUID
     position: int
+    question: str | None = None
     verdict: InvestigationSessionVerdict | None = None
     view: InvestigationSessionView | None = None
+    highlights: list[InvestigationSessionHighlight] = Field(default_factory=list)
     created: datetime | None = None
     updated: datetime | None = None
 

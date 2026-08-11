@@ -897,7 +897,6 @@ def upgrade() -> None:
         sa.Column("name", sa.String(length=255), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("status", sa.String(length=32), nullable=False),
-        sa.Column("questions", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
@@ -921,11 +920,15 @@ def upgrade() -> None:
         sa.Column("investigation_id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
+        sa.Column("question", sa.Text(), nullable=True),
         sa.Column("verdict", sa.String(length=32), nullable=True),
         sa.Column(
             "view",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
             nullable=True,
+        ),
+        sa.Column(
+            "highlights", postgresql.JSONB(astext_type=sa.Text()), nullable=False
         ),
         sa.ForeignKeyConstraint(
             ["investigation_id"],
@@ -959,7 +962,6 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("investigation_session_id", sa.Uuid(), nullable=True),
-        sa.Column("question_key", sa.String(length=255), nullable=True),
         sa.Column(
             "selector",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
@@ -982,11 +984,6 @@ def upgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint(
-            "investigation_session_id",
-            "question_key",
-            name="uq_annotation_investigation_session_id_question_key",
-        ),
     )
     with op.batch_alter_table("annotation", schema=None) as batch_op:
         batch_op.create_index("ix_annotation_owner_id", ["owner_id"], unique=False)
