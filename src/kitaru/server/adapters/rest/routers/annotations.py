@@ -47,16 +47,15 @@ async def create_annotation(
     service: Annotated[AnnotationService, Depends(get_annotation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> AnnotationResponse:
-    """Create a manual annotation, or answer an investigation question.
+    """Create a manual annotation, or answer an investigation session.
 
     A body carrying session_id creates a manual annotation. A body carrying
-    investigation_session_id and question_key answers an investigation
-    question, moving a pending investigation to in_progress on its first
-    answer.
+    investigation_session_id answers an investigation session, moving a
+    pending investigation to in_progress on its first answer.
 
     Clients observe HTTP 201 on success, 404 when the session or the
-    investigation session does not exist, and 422 when the question key is
-    unknown or the selector names a node outside the session.
+    investigation session does not exist, and 422 when the selector names a
+    node outside the session.
 
     Args:
         body: Manual annotation or investigation answer create request.

@@ -21,7 +21,7 @@ from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from kitaru.api_models.v1.investigation import InvestigationStatus, QuestionItem
+from kitaru.api_models.v1.investigation import InvestigationStatus
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -59,7 +59,6 @@ class InvestigationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     name: Mapped[str] = mapped_column(String(MAX_NAME_LENGTH))
     description: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
-    questions: Mapped[list[Any]] = mapped_column(JSONB)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
@@ -81,9 +80,6 @@ class InvestigationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=investigation.name,
             description=investigation.description,
             status=investigation.status.value,
-            questions=[
-                question.model_dump(mode="json") for question in investigation.questions
-            ],
             started_at=investigation.started_at,
             ended_at=investigation.ended_at,
             metadata_=investigation.metadata,
@@ -106,9 +102,6 @@ class InvestigationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             description=self.description,
             status=InvestigationStatus(self.status),
-            questions=[
-                QuestionItem.model_validate(question) for question in self.questions
-            ],
             started_at=self.started_at,
             ended_at=self.ended_at,
             metadata=self.metadata_,

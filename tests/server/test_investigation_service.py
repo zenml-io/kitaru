@@ -26,11 +26,12 @@ from conftest import (
     create_session,
 )
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
+    InvestigationSessionHighlight,
     InvestigationSessionVerdict,
     InvestigationStatus,
-    QuestionItem,
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.investigation import (
@@ -48,7 +49,6 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.investigation import (
-    DuplicateQuestionKey,
     IllegalInvestigationStatusTransition,
     InvestigationNotFound,
     InvestigationSessionNotFound,
@@ -136,14 +136,22 @@ async def test_create_investigation(
     service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
 ) -> None:
     """Assign session position from list order and initialize progress counts."""
+    highlights = [
+        InvestigationSessionHighlight(
+            selector=AnnotationSelector(), description="Retried without backoff."
+        )
+    ]
     investigation = await service.create_investigation(
         InvestigationCreate(
             agent_id=agent_id,
             name="investigation",
             description="curator rationale",
-            questions=[QuestionItem(key="root_cause", question="What caused it?")],
             sessions=[
-                InvestigationSessionInput(session_id=session_ids[0]),
+                InvestigationSessionInput(
+                    session_id=session_ids[0],
+                    question="What caused it?",
+                    highlights=highlights,
+                ),
                 InvestigationSessionInput(session_id=session_ids[1]),
             ],
         ),
@@ -154,9 +162,6 @@ async def test_create_investigation(
     assert investigation.name == "investigation"
     assert investigation.description == "curator rationale"
     assert investigation.status is InvestigationStatus.PENDING
-    assert investigation.questions == [
-        QuestionItem(key="root_cause", question="What caused it?")
-    ]
     assert investigation.total_sessions == 2
     assert investigation.completed_sessions == 0
     assert investigation.created is not None
@@ -166,6 +171,10 @@ async def test_create_investigation(
     )
     assert [session.session_id for session in sessions] == session_ids
     assert [session.position for session in sessions] == [0, 1]
+    assert sessions[0].question == "What caused it?"
+    assert sessions[1].question is None
+    assert sessions[0].highlights == highlights
+    assert sessions[1].highlights == []
 
 
 async def test_create_investigation_missing_agent(
@@ -175,26 +184,7 @@ async def test_create_investigation_missing_agent(
     with pytest.raises(AgentNotFound):
         await service.create_investigation(
             InvestigationCreate(
-                agent_id=uuid.uuid4(), name="investigation", questions=[], sessions=[]
-            ),
-            actor=ACTOR,
-        )
-
-
-async def test_create_investigation_duplicate_question_key(
-    service: InvestigationService, agent_id: uuid.UUID
-) -> None:
-    """Reject questions containing a repeated key."""
-    with pytest.raises(DuplicateQuestionKey):
-        await service.create_investigation(
-            InvestigationCreate(
-                agent_id=agent_id,
-                name="investigation",
-                questions=[
-                    QuestionItem(key="root_cause", question="What caused it?"),
-                    QuestionItem(key="root_cause", question="Again?"),
-                ],
-                sessions=[],
+                agent_id=uuid.uuid4(), name="investigation", sessions=[]
             ),
             actor=ACTOR,
         )
@@ -212,7 +202,6 @@ async def test_create_investigation_missing_session(
             InvestigationCreate(
                 agent_id=agent_id,
                 name="investigation",
-                questions=[],
                 sessions=[InvestigationSessionInput(session_id=missing_session_id)],
             ),
             actor=ACTOR,
@@ -238,7 +227,6 @@ async def test_create_investigation_session_wrong_agent(
             InvestigationCreate(
                 agent_id=agent_id,
                 name="investigation",
-                questions=[],
                 sessions=[InvestigationSessionInput(session_id=other_session.id)],
             ),
             actor=ACTOR,
@@ -256,7 +244,6 @@ async def test_create_investigation_duplicate_session_ids(
             InvestigationCreate(
                 agent_id=agent_id,
                 name="investigation",
-                questions=[],
                 sessions=[
                     InvestigationSessionInput(session_id=session_ids[0]),
                     InvestigationSessionInput(session_id=session_ids[0]),
@@ -271,9 +258,7 @@ async def test_get_investigation(
 ) -> None:
     """Load a stored investigation by id."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     loaded = await service.get_investigation(created.id, actor=ACTOR)
@@ -295,9 +280,7 @@ async def test_list_investigations(
     """List investigations and filter by status."""
     for name in ["alpha", "beta"]:
         await service.create_investigation(
-            InvestigationCreate(
-                agent_id=agent_id, name=name, questions=[], sessions=[]
-            ),
+            InvestigationCreate(agent_id=agent_id, name=name, sessions=[]),
             actor=ACTOR,
         )
 
@@ -328,16 +311,12 @@ async def test_list_investigations_filters_by_agent_id(
 ) -> None:
     """Filter investigations scoped to one agent."""
     matching = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     other_agent = await create_agent(agent_repository, ACTOR.account.id, name="other")
     await service.create_investigation(
-        InvestigationCreate(
-            agent_id=other_agent.id, name="other", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=other_agent.id, name="other", sessions=[]),
         actor=ACTOR,
     )
 
@@ -355,9 +334,7 @@ async def test_update_investigation_name(
 ) -> None:
     """Update an investigation's name."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     updated = await service.update_investigation(
@@ -378,7 +355,6 @@ async def test_update_investigation_description(
             agent_id=agent_id,
             name="investigation",
             description="old",
-            questions=[],
             sessions=[],
         ),
         actor=ACTOR,
@@ -399,7 +375,6 @@ async def test_update_investigation_omitted_fields_unchanged(
             agent_id=agent_id,
             name="investigation",
             description="old",
-            questions=[],
             sessions=[],
         ),
         actor=ACTOR,
@@ -416,9 +391,7 @@ async def test_update_investigation_status(
 ) -> None:
     """Move an investigation through in_progress to completed."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     updated = await service.update_investigation(
@@ -443,9 +416,7 @@ async def test_update_investigation_status_illegal_transition(
 ) -> None:
     """Reject moving a completed investigation backwards."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     await service.update_investigation(
@@ -466,9 +437,7 @@ async def test_update_investigation_cannot_clear_status(
 ) -> None:
     """Reject clearing the investigation status with an explicit null."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     with pytest.raises(ValidationError, match="Investigation status cannot be cleared"):
@@ -482,9 +451,7 @@ async def test_update_investigation_cannot_clear_name(
 ) -> None:
     """Reject clearing the investigation name with an explicit null."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     with pytest.raises(ValidationError, match="Investigation name cannot be cleared"):
@@ -508,9 +475,7 @@ async def test_delete_investigation(
 ) -> None:
     """Delete a stored investigation."""
     created = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     await service.delete_investigation(created.id, actor=ACTOR)
@@ -544,7 +509,6 @@ async def test_update_investigation_session_verdict(
         InvestigationCreate(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[
                 InvestigationSessionInput(session_id=session_ids[0]),
                 InvestigationSessionInput(session_id=session_ids[1]),
@@ -573,7 +537,6 @@ async def test_update_investigation_session_verdict_replaces_earlier_verdict(
         InvestigationCreate(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[
                 InvestigationSessionInput(session_id=session_ids[0]),
                 InvestigationSessionInput(session_id=session_ids[1]),
@@ -606,7 +569,6 @@ async def test_update_investigation_session_verdict_clear(
         InvestigationCreate(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[
                 InvestigationSessionInput(session_id=session_ids[0]),
                 InvestigationSessionInput(session_id=session_ids[1]),
@@ -636,7 +598,6 @@ async def test_update_investigation_session_verdict_does_not_complete_investigat
         InvestigationCreate(
             agent_id=agent_id,
             name="investigation",
-            questions=[],
             sessions=[
                 InvestigationSessionInput(session_id=session_ids[0]),
                 InvestigationSessionInput(session_id=session_ids[1]),
@@ -680,9 +641,7 @@ async def test_update_investigation_session_verdict_session_not_found(
 ) -> None:
     """Raise when no linked session matches the investigation and session pair."""
     investigation = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     with pytest.raises(InvestigationSessionNotFound):
@@ -694,6 +653,37 @@ async def test_update_investigation_session_verdict_session_not_found(
         )
 
 
+async def test_update_investigation_session_verdict_leaves_highlights_untouched(
+    service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
+) -> None:
+    """Leave a linked session's highlights, set at create, untouched by the verdict."""
+    highlights = [
+        InvestigationSessionHighlight(
+            selector=AnnotationSelector(), description="Retried without backoff."
+        )
+    ]
+    investigation = await service.create_investigation(
+        InvestigationCreate(
+            agent_id=agent_id,
+            name="investigation",
+            sessions=[
+                InvestigationSessionInput(
+                    session_id=session_ids[0], highlights=highlights
+                )
+            ],
+        ),
+        actor=ACTOR,
+    )
+    session = await service.update_investigation_session_verdict(
+        investigation.id,
+        session_ids[0],
+        InvestigationSessionVerdict.ACCEPTABLE,
+        actor=ACTOR,
+    )
+    assert session.verdict is InvestigationSessionVerdict.ACCEPTABLE
+    assert session.highlights == highlights
+
+
 async def test_create_investigation_tracks_investigation_created(
     investigation_repository: FakeInvestigationRepository,
     agent_repository: FakeAgentRepository,
@@ -701,7 +691,7 @@ async def test_create_investigation_tracks_investigation_created(
     agent_id: uuid.UUID,
     session_ids: list[uuid.UUID],
 ) -> None:
-    """Fire INVESTIGATION_CREATED with the question and session counts."""
+    """Fire INVESTIGATION_CREATED with the session count."""
     analytics = _RecordingAnalytics()
     service = InvestigationService(
         repository=investigation_repository,
@@ -714,7 +704,6 @@ async def test_create_investigation_tracks_investigation_created(
         InvestigationCreate(
             agent_id=agent_id,
             name="investigation",
-            questions=[QuestionItem(key="root_cause", question="What caused it?")],
             sessions=[
                 InvestigationSessionInput(session_id=session_id)
                 for session_id in session_ids
@@ -727,7 +716,7 @@ async def test_create_investigation_tracks_investigation_created(
     user_id, event, properties = analytics.tracked[0]
     assert user_id == ACTOR.account.id
     assert event == AnalyticsEvent.INVESTIGATION_CREATED
-    assert properties == {"question_count": 1, "session_count": 2}
+    assert properties == {"session_count": 2}
 
 
 async def test_create_investigation_without_analytics_tracker(
@@ -735,9 +724,7 @@ async def test_create_investigation_without_analytics_tracker(
 ) -> None:
     """Create an investigation normally when no analytics tracker is configured."""
     investigation = await service.create_investigation(
-        InvestigationCreate(
-            agent_id=agent_id, name="investigation", questions=[], sessions=[]
-        ),
+        InvestigationCreate(agent_id=agent_id, name="investigation", sessions=[]),
         actor=ACTOR,
     )
     assert investigation.owner_id == ACTOR.account.id

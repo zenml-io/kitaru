@@ -43,7 +43,6 @@ async def create_annotation(
     value: str,
     session_id: uuid.UUID | None,
     investigation_session_id: uuid.UUID | None,
-    question_key: str | None,
     selector: str | None,
 ) -> CommandResult:
     """Create either a manual annotation or an investigation answer."""
@@ -52,16 +51,6 @@ async def create_annotation(
             "invalid_arguments",
             "Select exactly one annotation target: --session or "
             "--investigation-session.",
-        )
-    if investigation_session_id is not None and question_key is None:
-        raise CLIError(
-            "invalid_arguments",
-            "--question-key is required with --investigation-session.",
-        )
-    if session_id is not None and question_key is not None:
-        raise CLIError(
-            "invalid_arguments",
-            "--question-key is only valid with --investigation-session.",
         )
     parsed_value = _parse_json_value(value, option="--value")
     parsed_selector = (
@@ -81,10 +70,8 @@ async def create_annotation(
         request = ManualAnnotationCreateRequest(**manual_fields)
     else:
         assert investigation_session_id is not None
-        assert question_key is not None
         answer_fields: dict[str, Any] = {
             "investigation_session_id": investigation_session_id,
-            "question_key": question_key,
             "value": parsed_value,
         }
         if parsed_selector is not None:

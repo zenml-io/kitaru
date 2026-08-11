@@ -1799,7 +1799,7 @@ async def cohort_version_delete(
     investigation_app,
     _spec(
         ("investigation", "create"),
-        "Create an investigation with ordered questions and linked sessions.",
+        "Create an investigation with linked sessions.",
         parameters=(
             ParameterSpec(
                 "NAME", "string", "argument", True, "New investigation name."
@@ -1815,13 +1815,6 @@ async def cohort_version_delete(
                 "--description", "string", "option", False, "Curator rationale."
             ),
             ParameterSpec(
-                "--question",
-                "KEY=QUESTION[]",
-                "option",
-                False,
-                "Ordered investigation question; repeat for each question.",
-            ),
-            ParameterSpec(
                 "--session",
                 "UUID[]",
                 "option",
@@ -1834,6 +1827,20 @@ async def cohort_version_delete(
                 "option",
                 False,
                 "Curated view for a session selected with --session.",
+            ),
+            ParameterSpec(
+                "--session-question",
+                "SESSION=QUESTION[]",
+                "option",
+                False,
+                "Question for a session selected with --session.",
+            ),
+            ParameterSpec(
+                "--session-highlights",
+                "SESSION=JSON_ARRAY[]",
+                "option",
+                False,
+                "Curated highlights for a session selected with --session.",
             ),
         ),
         read_only=False,
@@ -1848,20 +1855,22 @@ async def investigation_create(
     *,
     agent: str,
     description: str | None = None,
-    question: list[str] | None = None,
     session: list[uuid.UUID] | None = None,
     session_view: list[str] | None = None,
+    session_question: list[str] | None = None,
+    session_highlights: list[str] | None = None,
 ) -> CommandResult:
-    """Create an investigation with its questions and linked sessions."""
+    """Create an investigation with its linked sessions."""
     async with _open_asset_client() as client:
         return await investigations.create_investigation(
             client,
             name,
             agent=agent,
             description=description,
-            questions=question or [],
             session_ids=session or [],
             session_views=session_view or [],
+            session_questions=session_question or [],
+            session_highlights=session_highlights or [],
         )
 
 
@@ -2072,13 +2081,6 @@ async def investigation_session_verdict(
                 "Investigation-session ID for an answer.",
             ),
             ParameterSpec(
-                "--question-key",
-                "string",
-                "option",
-                False,
-                "Question key for an investigation answer.",
-            ),
-            ParameterSpec(
                 "--selector",
                 "JSON object",
                 "option",
@@ -2098,7 +2100,6 @@ async def annotation_create(
     value: str,
     session: uuid.UUID | None = None,
     investigation_session: uuid.UUID | None = None,
-    question_key: str | None = None,
     selector: str | None = None,
 ) -> CommandResult:
     """Create one manual annotation or investigation answer."""
@@ -2108,7 +2109,6 @@ async def annotation_create(
             value=value,
             session_id=session,
             investigation_session_id=investigation_session,
-            question_key=question_key,
             selector=selector,
         )
 

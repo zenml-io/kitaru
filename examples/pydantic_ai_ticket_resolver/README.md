@@ -182,16 +182,15 @@ Choose the node that contains the accepted `issue_refund` result and store its I
 TICKET_004_REFUND_NODE_ID="YOUR_REFUND_NODE_UUID"
 ```
 
-Create a one-session investigation with fixed questions and a curated evidence view:
+Create a one-session investigation with a session question and a curated evidence view:
 
 ```bash
 INVESTIGATION_ID="$(
   uv run kitaru --output json investigation create refund-policy-review \
     --agent returns-resolver \
     --description "Review whether risky refunds require human approval." \
-    --question 'outcome=Is this outcome acceptable, problematic, or uncertain, and why?' \
-    --question 'expected=What should the agent have done in this case?' \
     --session "$TICKET_004_SESSION_ID" \
+    --session-question "$TICKET_004_SESSION_ID=Is this outcome acceptable, problematic, or uncertain, and what should the agent have done instead?" \
     --session-view "$TICKET_004_SESSION_ID={\"summary\":\"A \$280 refund exceeded the automatic approval threshold.\",\"items\":[{\"label\":\"Accepted refund\",\"description\":\"The terminal action that needs review.\",\"selectors\":[{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}]}]}" \
   | jq -r '.item.id'
 )"
@@ -209,13 +208,11 @@ Store the support lead's answers and anchor the outcome judgment to the refund n
 ```bash
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key outcome \
   --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}" \
   --value '{"judgment":"problematic","reason":"The amount exceeds the automatic approval threshold."}'
 
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key expected \
   --value '{"action":"escalate","reason":"Human approval is required before a refund."}'
 
 uv run kitaru investigation session complete \
@@ -223,7 +220,7 @@ uv run kitaru investigation session complete \
   "$TICKET_004_SESSION_ID"
 ```
 
-Kitaru now stores the question set, review progress, answers, and exact trace evidence. The guided path repeats this review over a diverse set that it selects from the sessions.
+Kitaru now stores the session question, review progress, answers, and exact trace evidence. The guided path repeats this review over a diverse set that it selects from the sessions.
 
 ## Step 7: Decide what to improve
 

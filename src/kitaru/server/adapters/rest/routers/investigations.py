@@ -55,11 +55,11 @@ async def create_investigation(
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> InvestigationResponse:
-    """Create an investigation with its questions and linked sessions in one shot.
+    """Create an investigation with its linked sessions in one shot.
 
     Clients observe HTTP 201 on success, 404 when the agent does not exist,
     and 422 when a linked session id repeats, is missing, or belongs to a
-    different agent, or the questions contain a duplicate key.
+    different agent.
 
     Args:
         body: Investigation create request.

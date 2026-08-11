@@ -16,11 +16,12 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKeyConstraint, Index, String, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.investigation import (
+    InvestigationSessionHighlight,
     InvestigationSessionVerdict,
     InvestigationSessionView,
 )
@@ -80,8 +81,10 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     investigation_id: Mapped[uuid.UUID]
     session_id: Mapped[uuid.UUID]
     position: Mapped[int]
+    question: Mapped[str | None] = mapped_column(Text)
     verdict: Mapped[str | None] = mapped_column(String(VERDICT_LENGTH))
     view: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    highlights: Mapped[list[Any]] = mapped_column(JSONB)
 
     @classmethod
     def from_domain(cls, session: InvestigationSession) -> "InvestigationSessionORM":
@@ -98,12 +101,16 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             investigation_id=session.investigation_id,
             session_id=session.session_id,
             position=session.position,
+            question=session.question,
             verdict=session.verdict.value if session.verdict is not None else None,
             view=(
                 session.view.model_dump(mode="json")
                 if session.view is not None
                 else None
             ),
+            highlights=[
+                highlight.model_dump(mode="json") for highlight in session.highlights
+            ],
         )
 
     def to_domain(self) -> InvestigationSession:
@@ -117,6 +124,7 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             investigation_id=self.investigation_id,
             session_id=self.session_id,
             position=self.position,
+            question=self.question,
             verdict=(
                 InvestigationSessionVerdict(self.verdict)
                 if self.verdict is not None
@@ -127,6 +135,10 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 if self.view is not None
                 else None
             ),
+            highlights=[
+                InvestigationSessionHighlight.model_validate(highlight)
+                for highlight in self.highlights
+            ],
             created=self.created,
             updated=self.updated,
         )
