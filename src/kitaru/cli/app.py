@@ -31,7 +31,10 @@ from cyclopts import App, Parameter
 from cyclopts.exceptions import CycloptsError
 from pydantic import ValidationError as PydanticValidationError
 
-from kitaru.api_models.v1.investigation import InvestigationSessionStatus
+from kitaru.api_models.v1.investigation import (
+    InvestigationSessionVerdict,
+    InvestigationStatus,
+)
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.cli import (
@@ -1031,7 +1034,7 @@ _LIST_PARAMETERS = (
 )
 _CURSOR_PARAMETERS = _LIST_PARAMETERS[:2]
 _VERSION_LIST_PARAMETERS = _LIST_PARAMETERS[:-1]
-_INVESTIGATION_SESSION_STATUS_PARAMETERS = (
+_INVESTIGATION_SESSION_VERDICT_PARAMETERS = (
     ParameterSpec("INVESTIGATION", "UUID", "argument", True, "Investigation ID."),
     ParameterSpec(
         "SESSION",
@@ -1039,6 +1042,13 @@ _INVESTIGATION_SESSION_STATUS_PARAMETERS = (
         "argument",
         True,
         "Session ID linked to the investigation.",
+    ),
+    ParameterSpec(
+        "VERDICT",
+        "acceptable|problematic|uncertain",
+        "argument",
+        True,
+        "Verdict for the investigation session.",
     ),
 )
 _WAIT_PARAMETERS = (
@@ -1917,6 +1927,13 @@ async def investigation_get(investigation: uuid.UUID, /) -> CommandResult:
                 False,
                 "Clear the curator rationale.",
             ),
+            ParameterSpec(
+                "--status",
+                "in_progress|completed",
+                "option",
+                False,
+                "New investigation status.",
+            ),
         ),
         read_only=False,
         side_effects=("mutates_remote_state",),
@@ -1931,6 +1948,7 @@ async def investigation_update(
     name: str | None = None,
     description: str | None = None,
     clear_description: bool = False,
+    status: InvestigationStatus | None = None,
 ) -> CommandResult:
     """Update selected fields on one investigation."""
     async with _open_asset_client() as client:
@@ -1940,6 +1958,7 @@ async def investigation_update(
             name=name,
             description=description,
             clear_description=clear_description,
+            status=status,
         )
 
 
@@ -2007,50 +2026,28 @@ async def investigation_session_list(
 @_register(
     investigation_session_app,
     _spec(
-        ("investigation", "session", "complete"),
-        "Mark a pending investigation session completed.",
-        parameters=_INVESTIGATION_SESSION_STATUS_PARAMETERS,
+        ("investigation", "session", "verdict"),
+        "Set an investigation session verdict.",
+        parameters=_INVESTIGATION_SESSION_VERDICT_PARAMETERS,
         read_only=False,
         side_effects=("mutates_remote_state",),
-        idempotency="server_rejects_settled_sessions",
+        idempotency="idempotent",
         errors=_ASSET_WRITE_ERRORS,
     ),
 )
-async def investigation_session_complete(
-    investigation: uuid.UUID, session: uuid.UUID, /
+async def investigation_session_verdict(
+    investigation: uuid.UUID,
+    session: uuid.UUID,
+    verdict: InvestigationSessionVerdict,
+    /,
 ) -> CommandResult:
-    """Mark one pending investigation session completed."""
+    """Set one investigation session's verdict."""
     async with _open_asset_client() as client:
-        return await investigations.update_investigation_session_status(
+        return await investigations.update_investigation_session_verdict(
             client,
             investigation,
             session,
-            status=InvestigationSessionStatus.COMPLETED,
-        )
-
-
-@_register(
-    investigation_session_app,
-    _spec(
-        ("investigation", "session", "skip"),
-        "Mark a pending investigation session skipped.",
-        parameters=_INVESTIGATION_SESSION_STATUS_PARAMETERS,
-        read_only=False,
-        side_effects=("mutates_remote_state",),
-        idempotency="server_rejects_settled_sessions",
-        errors=_ASSET_WRITE_ERRORS,
-    ),
-)
-async def investigation_session_skip(
-    investigation: uuid.UUID, session: uuid.UUID, /
-) -> CommandResult:
-    """Mark one pending investigation session skipped."""
-    async with _open_asset_client() as client:
-        return await investigations.update_investigation_session_status(
-            client,
-            investigation,
-            session,
-            status=InvestigationSessionStatus.SKIPPED,
+            verdict=verdict,
         )
 
 

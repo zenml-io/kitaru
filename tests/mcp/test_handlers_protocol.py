@@ -145,7 +145,7 @@ def _get_investigation_session() -> InvestigationSessionResponse:
         investigation_id=uuid.uuid4(),
         session_id=uuid.uuid4(),
         position=0,
-        status="pending",
+        verdict=None,
         view=None,
         created=now,
         updated=now,

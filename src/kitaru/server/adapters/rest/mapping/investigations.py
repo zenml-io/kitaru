@@ -158,7 +158,7 @@ def investigation_session_to_response(
         investigation_id=session.investigation_id,
         session_id=session.session_id,
         position=session.position,
-        status=session.status,
+        verdict=session.verdict,
         view=session.view,
         created=session.created,
         updated=session.updated,

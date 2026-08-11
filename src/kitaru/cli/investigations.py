@@ -20,9 +20,10 @@ from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationSessionInput,
     InvestigationSessionsListParams,
-    InvestigationSessionStatus,
     InvestigationSessionUpdateRequest,
+    InvestigationSessionVerdict,
     InvestigationSessionView,
+    InvestigationStatus,
     InvestigationUpdateRequest,
     QuestionItem,
 )
@@ -161,6 +162,7 @@ async def update_investigation(
     name: str | None,
     description: str | None,
     clear_description: bool,
+    status: InvestigationStatus | None,
 ) -> CommandResult:
     """Update only explicitly selected investigation fields."""
     if description is not None and clear_description:
@@ -175,6 +177,8 @@ async def update_investigation(
         fields["description"] = description
     elif clear_description:
         fields["description"] = None
+    if status is not None:
+        fields["status"] = status
     if not fields:
         raise CLIError("invalid_arguments", "Select at least one investigation update.")
     investigation = await client.investigations.update(
@@ -210,18 +214,18 @@ async def list_investigation_sessions(
     return page_result(page, size=size)
 
 
-async def update_investigation_session_status(
+async def update_investigation_session_verdict(
     client: Any,
     investigation_id: uuid.UUID,
     session_id: uuid.UUID,
     *,
-    status: InvestigationSessionStatus,
+    verdict: InvestigationSessionVerdict,
 ) -> CommandResult:
-    """Set one pending investigation session to a terminal status."""
+    """Set one investigation session's verdict."""
     session = await client.investigations.update_session(
         investigation_id,
         session_id,
-        InvestigationSessionUpdateRequest(status=status),
+        InvestigationSessionUpdateRequest(verdict=verdict),
     )
     return CommandResult(
         item=session.model_dump(mode="json"),

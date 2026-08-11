@@ -19,6 +19,7 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorResponse,
     EvaluatorVersionResponse,
 )
+from kitaru.api_models.v1.investigation import InvestigationSessionVerdict
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource
 from kitaru.mcp.errors import MCPToolError
@@ -41,7 +42,7 @@ from kitaru.mcp.models.review import (
     ReviewList,
     ReviewListSessions,
     ReviewManageRequest,
-    SetInvestigationSessionStatus,
+    SetInvestigationSessionVerdict,
 )
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
@@ -97,7 +98,7 @@ async def test_review_read_protocol_has_typed_structured_text_parity() -> None:
     }
 
 
-async def test_review_manage_protocol_rejects_pending_before_handler() -> None:
+async def test_review_manage_protocol_rejects_unknown_verdict_before_handler() -> None:
     calls: list[object] = []
 
     async def update_session(*args: object) -> object:
@@ -113,10 +114,10 @@ async def test_review_manage_protocol_rejects_pending_before_handler() -> None:
             "kitaru_review_manage",
             {
                 "request": {
-                    "operation": "set_session_status",
+                    "operation": "set_session_verdict",
                     "investigation_id": str(uuid.uuid4()),
                     "session_id": str(uuid.uuid4()),
-                    "status": "pending",
+                    "verdict": "pending",
                 }
             },
             context,
@@ -206,7 +207,7 @@ async def test_review_annotation_list_routes_to_annotations() -> None:
     assert result.page.size == 3
 
 
-def test_review_management_rejects_noop_and_pending_status() -> None:
+def test_review_management_rejects_noop_and_unknown_verdict() -> None:
     with pytest.raises(ValidationError, match="change at least one"):
         InvestigationUpdate(
             operation="update_investigation", investigation_id=uuid.uuid4()
@@ -215,10 +216,10 @@ def test_review_management_rejects_noop_and_pending_status() -> None:
     with pytest.raises(ValidationError):
         adapter.validate_python(
             {
-                "operation": "set_session_status",
+                "operation": "set_session_verdict",
                 "investigation_id": uuid.uuid4(),
                 "session_id": uuid.uuid4(),
-                "status": "pending",
+                "verdict": "pending",
             }
         )
 
@@ -235,7 +236,7 @@ def test_investigation_create_preserves_empty_sdk_lists() -> None:
     assert request.sessions == []
 
 
-async def test_review_clear_and_status_forward_typed_sparse_dtos() -> None:
+async def test_review_clear_and_verdict_forward_typed_sparse_dtos() -> None:
     updates: list[object] = []
     session_updates: list[object] = []
 
@@ -263,16 +264,27 @@ async def test_review_clear_and_status_forward_typed_sparse_dtos() -> None:
     )
     await handle_review_manage(
         _get_state(client),
-        SetInvestigationSessionStatus(
-            operation="set_session_status",
+        InvestigationUpdate(
+            operation="update_investigation",
             investigation_id=uuid.uuid4(),
-            session_id=uuid.uuid4(),
             status="completed",
         ),
     )
+    await handle_review_manage(
+        _get_state(client),
+        SetInvestigationSessionVerdict(
+            operation="set_session_verdict",
+            investigation_id=uuid.uuid4(),
+            session_id=uuid.uuid4(),
+            verdict=InvestigationSessionVerdict.ACCEPTABLE,
+        ),
+    )
     assert cast(Any, updates[0]).model_dump(exclude_unset=True) == {"description": None}
-    assert cast(Any, session_updates[0]).model_dump(mode="json") == {
+    assert cast(Any, updates[1]).model_dump(exclude_unset=True) == {
         "status": "completed"
+    }
+    assert cast(Any, session_updates[0]).model_dump(mode="json") == {
+        "verdict": "acceptable"
     }
 
 

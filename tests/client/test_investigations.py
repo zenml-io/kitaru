@@ -35,15 +35,15 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
     InvestigationSessionResponse,
     InvestigationSessionsListParams,
-    InvestigationSessionStatus,
     InvestigationSessionUpdateRequest,
+    InvestigationSessionVerdict,
     InvestigationStatus,
     InvestigationUpdateRequest,
     QuestionItem,
 )
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -205,6 +205,12 @@ async def test_update(api_client: KitaruAPIClient) -> None:
     )
     assert updated.description == "new"
 
+    updated = await api_client.investigations.update(
+        created.id, InvestigationUpdateRequest(status=InvestigationStatus.COMPLETED)
+    )
+    assert updated.status is InvestigationStatus.COMPLETED
+    assert updated.ended_at is not None
+
 
 async def test_delete(api_client: KitaruAPIClient) -> None:
     """Delete an investigation through the SDK."""
@@ -249,7 +255,7 @@ async def test_list_sessions_and_iter_sessions(api_client: KitaruAPIClient) -> N
 
 
 async def test_update_session(api_client: KitaruAPIClient) -> None:
-    """Mark an investigation session completed through the SDK."""
+    """Set an investigation session verdict through the SDK."""
     agent_id = await _make_agent(api_client)
     session_id = await _make_session(api_client, agent_id)
     created = await api_client.investigations.create(
@@ -263,17 +269,19 @@ async def test_update_session(api_client: KitaruAPIClient) -> None:
     updated = await api_client.investigations.update_session(
         created.id,
         session_id,
-        InvestigationSessionUpdateRequest(status=InvestigationSessionStatus.COMPLETED),
+        InvestigationSessionUpdateRequest(
+            verdict=InvestigationSessionVerdict.ACCEPTABLE
+        ),
     )
-    assert updated.status is InvestigationSessionStatus.COMPLETED
+    assert updated.verdict is InvestigationSessionVerdict.ACCEPTABLE
 
     reloaded = await api_client.investigations.get(created.id)
-    assert reloaded.status is InvestigationStatus.COMPLETED
+    assert reloaded.status is InvestigationStatus.PENDING
     assert reloaded.completed_sessions == 1
 
 
-async def test_update_session_illegal_transition(api_client: KitaruAPIClient) -> None:
-    """Surface HTTP 409 as a typed error for a settled session."""
+async def test_update_session_clears_verdict(api_client: KitaruAPIClient) -> None:
+    """Clear an investigation session verdict through the SDK."""
     agent_id = await _make_agent(api_client)
     session_id = await _make_session(api_client, agent_id)
     created = await api_client.investigations.create(
@@ -287,14 +295,16 @@ async def test_update_session_illegal_transition(api_client: KitaruAPIClient) ->
     await api_client.investigations.update_session(
         created.id,
         session_id,
-        InvestigationSessionUpdateRequest(status=InvestigationSessionStatus.COMPLETED),
+        InvestigationSessionUpdateRequest(
+            verdict=InvestigationSessionVerdict.PROBLEMATIC
+        ),
     )
-    with pytest.raises(APIError) as exc_info:
-        await api_client.investigations.update_session(
-            created.id,
-            session_id,
-            InvestigationSessionUpdateRequest(
-                status=InvestigationSessionStatus.SKIPPED
-            ),
-        )
-    assert exc_info.value.status_code == 409
+    updated = await api_client.investigations.update_session(
+        created.id,
+        session_id,
+        InvestigationSessionUpdateRequest(verdict=None),
+    )
+    assert updated.verdict is None
+
+    reloaded = await api_client.investigations.get(created.id)
+    assert reloaded.completed_sessions == 0
