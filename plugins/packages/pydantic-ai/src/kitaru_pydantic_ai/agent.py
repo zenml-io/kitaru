@@ -23,6 +23,7 @@ from pydantic_ai import AgentRun
 from pydantic_ai.agent import AbstractAgent, WrapperAgent
 
 from .capability import _KitaruCapability
+from .pricing import CostCalculator
 
 AgentDepsT = TypeVar("AgentDepsT")
 OutputDataT = TypeVar("OutputDataT")
@@ -41,6 +42,8 @@ class KitaruAgent(
         agent_version_id: uuid.UUID | None = None,
         session_name: str | None = None,
         batch_size: int = 20,
+        cost_calculator: CostCalculator | None = None,
+        estimate_costs: bool = True,
     ) -> None:
         """Initialize a transparent wrapper around an existing agent.
 
@@ -52,6 +55,10 @@ class KitaruAgent(
             session_name: Recorded name, falling back to
                 ``KITARU_SESSION_NAME``.
             batch_size: Number of child nodes sent per upsert batch.
+            cost_calculator: Optional function that returns the USD cost for a
+                completed model request. This takes priority over automatic pricing.
+            estimate_costs: Use the bundled pricing catalog when no cost calculator
+                is supplied.
 
         Raises:
             ValueError: If batch size is invalid.
@@ -64,6 +71,8 @@ class KitaruAgent(
             agent_version_id=agent_version_id,
             session_name=session_name or os.environ.get("KITARU_SESSION_NAME"),
             batch_size=batch_size,
+            cost_calculator=cost_calculator,
+            estimate_costs=estimate_costs,
         )
 
     @asynccontextmanager
