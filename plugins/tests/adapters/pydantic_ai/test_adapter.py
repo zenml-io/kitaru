@@ -19,6 +19,7 @@ import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from datetime import date
+from decimal import Decimal
 from importlib.metadata import version
 from types import SimpleNamespace
 from typing import Any, ClassVar, cast
@@ -32,6 +33,7 @@ from pydantic_ai.messages import (
     ModelResponse,
     NativeToolCallPart,
     NativeToolReturnPart,
+    RequestUsage,
     SystemPromptPart,
     TextPart,
     ThinkingPart,
@@ -66,6 +68,7 @@ from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru_pydantic_ai import (
     KitaruAgent,
+    PydanticAIUsageSummary,
     ToolPolicyError,
     ToolPolicyMissError,
 )
@@ -352,6 +355,160 @@ def test_run_sync_preserves_result_and_records_lifecycle() -> None:
 
     original.run_sync("not recorded")
     assert len(_FakeClient.instances) == 1
+
+
+def test_calculates_cost_from_the_bundled_pricing_catalog() -> None:
+    response = ModelResponse(
+        parts=[TextPart("resolved")],
+        usage=RequestUsage(
+            input_tokens=650,
+            output_tokens=1241,
+            cache_read_tokens=0,
+            details={"reasoning_tokens": 1000},
+        ),
+        model_name="gpt-5-nano-2025-08-07",
+        provider_name="openai",
+    )
+
+    cost, attributes = capability_module._calculate_cost(
+        response,
+        "gpt-5-nano-2025-08-07",
+        response.timestamp,
+        None,
+        True,
+    )
+
+    assert cost == Decimal("0.0005289")
+    assert attributes == {"cost": {"status": "estimated", "source": "genai-prices"}}
+
+
+async def test_replay_records_cost_from_bundled_pricing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[TextPart("resolved")],
+            usage=RequestUsage(input_tokens=650, output_tokens=1241),
+            provider_name="openai",
+        )
+
+    model_name = "gpt-5-nano-2025-08-07"
+    _set_replay(monkeypatch, _replay_spec(PassthroughConfig()))
+    agent = KitaruAgent(
+        Agent(FunctionModel(model, model_name=model_name)),
+        agent_id=uuid.uuid4(),
+    )
+
+    await agent.run("ignored prompt")
+
+    llm = next(
+        node
+        for node in _nodes(_FakeClient.instances[0])
+        if node.node_type is NodeType.LLM_CALL
+    )
+    assert llm.model == model_name
+    assert llm.cost == Decimal("0.0005289")
+    assert llm.attributes["cost"] == {
+        "status": "estimated",
+        "source": "genai-prices",
+    }
+
+
+async def test_replay_records_cost_from_user_calculator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    observed: list[PydanticAIUsageSummary] = []
+
+    def model(_: list[ModelMessage], __: AgentInfo) -> ModelResponse:
+        return ModelResponse(
+            parts=[TextPart("resolved")],
+            usage=RequestUsage(
+                input_tokens=20,
+                output_tokens=5,
+                cache_read_tokens=3,
+                details={"reasoning_tokens": 2},
+            ),
+            model_name="customer-model",
+            provider_name="customer-provider",
+        )
+
+    def calculate_cost(usage: PydanticAIUsageSummary) -> Decimal:
+        observed.append(usage)
+        return Decimal("0.0042")
+
+    _set_replay(monkeypatch, _replay_spec(PassthroughConfig()))
+    agent = KitaruAgent(
+        Agent(FunctionModel(model, model_name="customer-model")),
+        agent_id=uuid.uuid4(),
+        cost_calculator=calculate_cost,
+    )
+
+    await agent.run("ignored prompt")
+
+    llm = next(
+        node
+        for node in _nodes(_FakeClient.instances[0])
+        if node.node_type is NodeType.LLM_CALL
+    )
+    assert llm.cost == Decimal("0.0042")
+    assert llm.attributes["cost"] == {
+        "status": "estimated",
+        "source": "user",
+    }
+    assert observed == [
+        PydanticAIUsageSummary(
+            model="customer-model",
+            provider="customer-provider",
+            input_tokens=20,
+            output_tokens=5,
+            cached_input_tokens=3,
+            reasoning_tokens=2,
+        )
+    ]
+
+
+async def test_cost_calculation_failure_does_not_fail_model_request() -> None:
+    def fail(_: PydanticAIUsageSummary) -> Decimal:
+        raise LookupError("pricing unavailable")
+
+    agent = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+        agent_id=uuid.uuid4(),
+        cost_calculator=fail,
+    )
+
+    result = await agent.run("prompt")
+
+    assert result.output == "success (no tool calls)"
+    llm = next(
+        node
+        for node in _nodes(_FakeClient.instances[0])
+        if node.node_type is NodeType.LLM_CALL
+    )
+    assert llm.cost is None
+    assert llm.attributes["cost"] == {
+        "status": "unavailable",
+        "source": "user",
+        "error_type": "LookupError",
+    }
+
+
+async def test_automatic_cost_estimation_can_be_disabled() -> None:
+    agent = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+        agent_id=uuid.uuid4(),
+        estimate_costs=False,
+    )
+
+    await agent.run("prompt")
+
+    llm = next(
+        node
+        for node in _nodes(_FakeClient.instances[0])
+        if node.node_type is NodeType.LLM_CALL
+    )
+    assert llm.cost is None
+    assert llm.attributes["cost"] == {"status": "disabled"}
 
 
 async def test_setup_error_fails_created_session() -> None:

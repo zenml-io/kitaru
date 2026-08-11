@@ -18,5 +18,12 @@ from .capability import (
     ToolPolicyError,
     ToolPolicyMissError,
 )
+from .pricing import CostCalculator, PydanticAIUsageSummary
 
-__all__ = ["KitaruAgent", "ToolPolicyError", "ToolPolicyMissError"]
+__all__ = [
+    "CostCalculator",
+    "KitaruAgent",
+    "PydanticAIUsageSummary",
+    "ToolPolicyError",
+    "ToolPolicyMissError",
+]
