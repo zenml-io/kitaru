@@ -445,11 +445,7 @@ A few gotchas matter:
   session; it is not the Kitaru checkpoint output and it is not a workspace
   snapshot.
 
-The runnable version lives at
-[`examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py`](https://github.com/zenml-io/kitaru/blob/develop/examples/integrations/claude_agent_sdk_agent/claude_agent_sdk_streaming.py).
-It uses `allowed_tools=[]`, `max_turns=1`, disables checkpoint caching for the
-demo, watches `CLAUDE_STREAM_EVENT_KINDS`, and then prints the final durable
-`ClaudeRunResult`.
+The streaming pattern uses `allowed_tools=[]`, `max_turns=1`, disables checkpoint caching for the demo, watches `CLAUDE_STREAM_EVENT_KINDS`, and then prints the final durable `ClaudeRunResult`.
 
 ## Capture policy
 

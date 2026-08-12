@@ -22,20 +22,32 @@ from mcp.client.stdio import StdioServerParameters, stdio_client
 from mcp.types import TextContent
 
 EXPECTED_TOOLS = {
-    "read-only": ["kitaru_registry_read", "kitaru_activity_read"],
+    "read-only": [
+        "kitaru_registry_read",
+        "kitaru_activity_read",
+        "kitaru_review_read",
+    ],
     "standard": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_review_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
+        "kitaru_review_manage",
+        "kitaru_workflow_start",
+        "kitaru_evaluators_manage",
     ],
     "destructive": [
         "kitaru_registry_read",
         "kitaru_activity_read",
+        "kitaru_review_read",
         "kitaru_cohorts_manage",
         "kitaru_experiments_manage",
         "kitaru_session_import",
+        "kitaru_review_manage",
+        "kitaru_workflow_start",
+        "kitaru_evaluators_manage",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],
@@ -56,6 +68,7 @@ class _StubHandler(BaseHTTPRequestHandler):
                 "id": str(SESSION_ID),
                 "owner_id": str(OWNER_ID),
                 "agent_id": str(AGENT_ID),
+                "number": 1,
                 "origin": "recorded",
                 "status": "completed",
                 "inputs": {},
@@ -106,32 +119,42 @@ async def _probe_mode(
             parameters = StdioServerParameters(
                 command=str(console), args=["--server", server_url, "--mode", mode]
             )
-            async with (
-                stdio_client(parameters, errlog=stderr) as (reader, writer),
-                ClientSession(reader, writer) as session,
-            ):
-                initialized = await session.initialize()
-                if protocol_version is not None:
-                    assert initialized.protocol_version == protocol_version
-                tools = await session.list_tools()
-                assert [tool.name for tool in tools.tools] == EXPECTED_TOOLS[mode]
-                if mode == "read-only":
-                    result = await session.call_tool(
-                        "kitaru_activity_read",
-                        {
-                            "request": {
-                                "operation": "get",
-                                "kind": "session",
-                                "id": str(SESSION_ID),
-                            }
-                        },
-                    )
-                    assert not result.is_error
-                    assert result.structured_content is not None
-                    assert isinstance(result.content[0], TextContent)
-                    text = result.content[0].text
-                    assert json.loads(text) == result.structured_content
-                    assert result.structured_content["data"]["id"] == str(SESSION_ID)
+            try:
+                async with (
+                    stdio_client(parameters, errlog=stderr) as (reader, writer),
+                    ClientSession(reader, writer) as session,
+                ):
+                    initialized = await session.initialize()
+                    if protocol_version is not None:
+                        assert initialized.protocol_version == protocol_version
+                    tools = await session.list_tools()
+                    tool_names = [tool.name for tool in tools.tools]
+                    assert tool_names == EXPECTED_TOOLS[mode], tool_names
+                    if mode == "read-only":
+                        result = await session.call_tool(
+                            "kitaru_activity_read",
+                            {
+                                "request": {
+                                    "operation": "get",
+                                    "kind": "session",
+                                    "id": str(SESSION_ID),
+                                }
+                            },
+                        )
+                        assert not result.is_error, result
+                        assert result.structured_content is not None
+                        assert isinstance(result.content[0], TextContent)
+                        text = result.content[0].text
+                        assert json.loads(text) == result.structured_content
+                        assert result.structured_content["data"]["id"] == str(
+                            SESSION_ID
+                        )
+            except BaseException as error:
+                stderr.seek(0)
+                diagnostics = stderr.read()
+                raise RuntimeError(
+                    f"MCP server failed in {mode} mode:\n{diagnostics}"
+                ) from error
             stderr.seek(0)
             diagnostics = stderr.read()
             assert str(SESSION_ID) not in diagnostics

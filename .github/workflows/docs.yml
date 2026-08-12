@@ -51,11 +51,23 @@ jobs:
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: docs
+      - name: Check SDK reference generator availability
+        id: sdk_generator
+        run: |
+          if test -f scripts/generate_sdk_docs.py; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::SDK reference generation is disabled until the v2 generator is restored."
+          fi
       - name: Install SDK docs generator bridge
+        if: steps.sdk_generator.outputs.available == 'true'
         run: uv pip install ./docs/node_modules/fumadocs-python
       - name: Generate SDK reference data
+        if: steps.sdk_generator.outputs.available == 'true'
         run: uv run python scripts/generate_sdk_docs.py
       - name: Convert SDK reference to MDX
+        if: steps.sdk_generator.outputs.available == 'true'
         run: node scripts/convert-sdk-docs.mjs
         working-directory: docs
       - name: Build docs static export
@@ -66,8 +78,10 @@ jobs:
       - name: Deploy production docs
         # Push deploys only from main; a manual workflow_dispatch deploys whichever
         # branch it runs against, so docs can be shipped to production from develop.
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
-          == 'workflow_dispatch'
+        if: >-
+          steps.sdk_generator.outputs.available == 'true' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch')
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -78,8 +92,10 @@ jobs:
         # The kitaru-site worker redirects kitaru.ai/docs/* to their new homes
         # (docs.zenml.io/kitaru, sdkdocs.kitaru.ai). It has no build output, so
         # redeploy it alongside the SDK site to keep the cutover in sync.
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name
-          == 'workflow_dispatch'
+        if: >-
+          steps.sdk_generator.outputs.available == 'true' &&
+          ((github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+          github.event_name == 'workflow_dispatch')
         uses: cloudflare/wrangler-action@ebbaa1584979971c8614a24965b4405ff95890e0  # v4.0.0
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
