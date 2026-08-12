@@ -19,6 +19,7 @@ from typing import Any
 import pytest
 
 from conftest import FakeAccountRepository, FakePasswordHasher
+from kitaru.analytics.events import FINISHED_ONBOARDING_SURVEY_KEY, AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.application.models.account import AccountFilter
@@ -47,6 +48,7 @@ class _RecordingAnalytics(ServerAnalytics):
     def __init__(self) -> None:
         """Initialize the tracker."""
         self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
+        self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
 
     def identify(
         self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
@@ -58,6 +60,21 @@ class _RecordingAnalytics(ServerAnalytics):
             traits: User traits.
         """
         self.identified.append((user_id, traits or {}))
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -801,3 +818,100 @@ async def test_create_user_without_analytics_tracker(
         actor=ACTOR,
     )
     assert account.name == "alice"
+
+
+async def test_update_user_tracks_the_finished_survey() -> None:
+    """Track the user enriched event when the survey is first finished."""
+    analytics = _RecordingAnalytics()
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+    created, _ = await service.create_user(
+        name="alice",
+        email="alice@example.com",
+        password=None,
+        is_admin=False,
+        actor=ACTOR,
+    )
+
+    await service.update_user(
+        created.id,
+        password=None,
+        old_password=None,
+        metadata={FINISHED_ONBOARDING_SURVEY_KEY: True, "usage_reason": "work"},
+        is_admin=None,
+        actor=AuthContext(account=created),
+    )
+
+    assert len(analytics.tracked) == 1
+    user_id, event, properties = analytics.tracked[0]
+    assert user_id == created.id
+    assert event == AnalyticsEvent.USER_ENRICHED
+    assert properties == {
+        FINISHED_ONBOARDING_SURVEY_KEY: True,
+        "usage_reason": "work",
+        "name": "alice",
+        "email": "alice@example.com",
+    }
+
+
+async def test_update_user_tracks_the_finished_survey_once() -> None:
+    """Skip the user enriched event when the survey was already finished."""
+    analytics = _RecordingAnalytics()
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+    created, _ = await service.create_user(
+        name="alice",
+        email=None,
+        password=None,
+        is_admin=False,
+        actor=ACTOR,
+    )
+
+    for _ in range(2):
+        await service.update_user(
+            created.id,
+            password=None,
+            old_password=None,
+            metadata={FINISHED_ONBOARDING_SURVEY_KEY: True},
+            is_admin=None,
+            actor=AuthContext(account=created),
+        )
+
+    assert len(analytics.tracked) == 1
+
+
+async def test_update_user_without_finished_survey_skips_the_event() -> None:
+    """Skip the user enriched event when the survey key is not set."""
+    analytics = _RecordingAnalytics()
+    service = AccountService(
+        repository=FakeAccountRepository(),
+        password_hasher=FakePasswordHasher(),
+        permission_service=PermissionService(AdminFlagPermissionProvider()),
+        analytics=analytics,
+    )
+    created, _ = await service.create_user(
+        name="alice",
+        email=None,
+        password=None,
+        is_admin=False,
+        actor=ACTOR,
+    )
+
+    await service.update_user(
+        created.id,
+        password=None,
+        old_password=None,
+        metadata={"theme": "dark"},
+        is_admin=None,
+        actor=AuthContext(account=created),
+    )
+
+    assert analytics.tracked == []
