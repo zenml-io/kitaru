@@ -18,7 +18,7 @@ on:
           - opentelemetry-importer
           - pydantic-ai
       version:
-        description: Package version already committed in its pyproject.toml.
+        description: Package version to test (e.g. 0.2.0 or 0.2.0rc1).
         required: true
         type: string
   push:
@@ -117,16 +117,19 @@ jobs:
             PACKAGE_TAG="$REQUESTED_PACKAGE-v$REQUESTED_VERSION"
           fi
           PROJECT_DIR="plugins/packages/$REQUESTED_PACKAGE"
-          PACKAGE_VERSION=$(uv version --project "$PROJECT_DIR" --short)
           PACKAGE_NAME=$(sed -n 's/^name = "\(.*\)"/\1/p' "$PROJECT_DIR/pyproject.toml")
           test -n "$PACKAGE_NAME"
-          test "$PACKAGE_VERSION" = "$REQUESTED_VERSION"
-          test "$PACKAGE_TAG" = "$REQUESTED_PACKAGE-v$PACKAGE_VERSION"
-          if printf '%s' "$PACKAGE_VERSION" | grep -Eq '(a|b|rc|dev)[0-9]+$'; then
+          if printf '%s' "$REQUESTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            IS_PRERELEASE=false
+          elif printf '%s' "$REQUESTED_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+rc[0-9]+$'; then
             IS_PRERELEASE=true
           else
-            IS_PRERELEASE=false
+            echo "::error::Invalid version: $REQUESTED_VERSION (expected 1.2.3 or 1.2.3rc1)"
+            exit 1
           fi
+          PACKAGE_VERSION="$REQUESTED_VERSION"
+          test "$PACKAGE_TAG" = "$REQUESTED_PACKAGE-v$PACKAGE_VERSION"
+          uv version --project plugins --package "$PACKAGE_NAME" "$PACKAGE_VERSION" --no-sync
           {
             printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR"
             printf 'PACKAGE_NAME=%s\n' "$PACKAGE_NAME"

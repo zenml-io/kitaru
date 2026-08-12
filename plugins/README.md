@@ -22,7 +22,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 
 Read [DEVELOPMENT.md](DEVELOPMENT.md) before you change, test, or publish a plugin package. It contains the local artifact test, candidate-image Compose rehearsal, manual registration example, clean worker setup, version bump procedure, dry-run workflow, and PyPI publishing procedure.
 
-Manual workflow dispatches build and test without publishing. A package-scoped release label on a PR to `main` selects the version bump. Merging the PR creates the package tag, and the tag publishes only when its commit is contained in `main`.
+Manual workflow dispatches build and test without publishing. A package tag selects the package and version. The workflow publishes only when the tagged commit is contained in `main`.
 
 `candidate.Dockerfile` and `docker-compose.candidate.yml` are tracked development infrastructure. Files generated under `candidate-wheels/` are local artifacts and must not be committed. Production release Dockerfiles install Kitaru from PyPI and do not install plugin distributions.
 

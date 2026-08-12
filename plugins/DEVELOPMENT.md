@@ -268,22 +268,15 @@ Release only the distribution that contains the change. A change to any built-in
 
 The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
 
-1. Update the selected workspace package version and lockfile.
-
-```bash
-uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
-```
-
-2. Add or update focused tests.
-3. Verify that no unrelated plugin package version changed.
+1. Add or update focused tests.
+2. Verify that no plugin package version changed.
 
 ```bash
 git diff -- \
-  plugins/packages/langfuse-importer/pyproject.toml \
-  plugins/uv.lock
+  plugins/packages/langfuse-importer
 ```
 
-4. Run the release gates.
+3. Run the release gates.
 
 ```bash
 uv sync --project plugins --frozen --all-packages
@@ -296,12 +289,12 @@ uv run --no-sync python scripts/smoke_plugin_artifacts.py \
   --allow-default-pin-mismatch
 ```
 
-5. Run the candidate server procedure when the change affects package installation, registration, or task execution.
-6. Commit the selected package version, plugin lockfile, implementation, and tests in the same pull request.
+4. Run the candidate server procedure when the change affects package installation, registration, or task execution.
+5. Commit the implementation and tests in the same pull request.
 
-For a plugin-only release, leave `plugins/default-requirements.txt` and `DEFAULT_PLUGIN_DEFINITIONS` on their published versions. Update both exact pins in the next core release PR after the plugin is available on PyPI. A coordinated plugin and core release may update the package version and both pins in one PR because the merge workflow publishes plugins before it creates the core tag.
+For a plugin-only release, leave `plugins/default-requirements.txt` and `DEFAULT_PLUGIN_DEFINITIONS` on their published versions. Update both exact pins in the next core release PR after the plugin is available on PyPI.
 
-For a coordinated plugin and core release, update both exact catalog pins and run `just plugin-artifact-smoke` before merge.
+For a coordinated plugin and core release, update both exact catalog pins and run `just plugin-artifact-smoke` before merge. Publish the plugin tag first. Create the core tag after the plugin appears on PyPI.
 
 ## Configure the first PyPI release
 
@@ -351,11 +344,7 @@ Every manual dispatch is a dry-run. It checks out the selected branch SHA, valid
 
 ## Publish a plugin
 
-Target the release PR at `main` and add exactly one package label, such as `release:langfuse-importer:minor`. Add `release:channel:rc` for a release candidate. The `Release plan` check verifies that the package version matches the selected bump.
-
-Merging the labeled PR to `main` creates the package tag at the merge commit. The tag starts the `Release plugin` workflow, which validates that the commit is contained in `main`, publishes through PyPI Trusted Publishing, and creates a GitHub Release. Plugin RCs use canonical PEP 440 versions such as `0.2.0rc1` and are marked as GitHub prereleases.
-
-Create a tag manually only during automation bootstrap or recovery:
+Merge the selected plugin changes into `main`. Create a package tag on that commit. Use a stable PEP 440 version such as `0.2.0` or an RC version such as `0.2.0rc1`.
 
 ```bash
 git fetch origin main --tags
@@ -369,7 +358,7 @@ git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
 git push origin "$TAG"
 ```
 
-The workflow derives the package and version from the tag. It rejects a tag whose commit is not contained in `origin/main` and rejects a version already present on PyPI.
+The workflow writes the tag version into the build workspace. It does not commit this version. It rejects a tag whose commit is not contained in `origin/main` and rejects a version already present on PyPI. RC tags create GitHub prereleases.
 
 Watch the run and require a successful conclusion:
 

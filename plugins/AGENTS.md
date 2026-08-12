@@ -13,12 +13,12 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 
 ## Required updates
 
-- Update the selected package version with `uv version --project plugins --package DISTRIBUTION VERSION --no-sync`.
+- Do not commit a package version bump for a tag-driven release. The package tag supplies the build version.
 - For a plugin-only release of a default importer or evaluator, publish the distribution first and update `plugins/default-requirements.txt` plus `DEFAULT_PLUGIN_DEFINITIONS` in the next core release PR.
-- When a coordinated plugin and core release is intentional, update the selected plugin version, exact default pins, and core version in the same PR.
+- When a coordinated plugin and core release is intentional, update the exact default pins in the core source after selecting the plugin tag version.
 - Do not add adapter distributions to the default requirements or server catalog.
 - Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
-- Commit the resulting `plugins/uv.lock` change.
+- Commit `plugins/uv.lock` when a source dependency changes. Tag-driven version injection updates the lockfile only in the release workspace.
 - Keep `.github/workflows/ci.yml`, `.github/workflows/release-plugins.yml`, and `plugins/packages/` aligned when you add or remove a distribution.
 
 ## Required tests
@@ -44,7 +44,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 - Use the `Release plugin` workflow. Do not publish plugin distributions from a developer machine.
 - Run a dry-run from the feature branch before merge.
 - Publish only from a package tag whose commit is contained in `main`.
-- A correctly labeled PR merged to `main` creates the package tag automatically. Create a tag manually only for recovery or while bootstrapping the automation.
+- Create the package tag on the selected commit after that commit is contained in `main`.
 - Use the tag format documented in `plugins/DEVELOPMENT.md`.
 - Never reuse a PyPI version or package tag.
 - Confirm the package name, package version, Git commit, PyPI project, and tag before approval.
