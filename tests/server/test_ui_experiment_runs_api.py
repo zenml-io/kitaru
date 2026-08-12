@@ -92,8 +92,8 @@ async def _add_replay_with_result_session(
     run_id: uuid.UUID,
     baseline_session_id: uuid.UUID,
     result_session_id: uuid.UUID,
-) -> None:
-    """Attach a replay with a linked baseline and result session to a run."""
+) -> uuid.UUID:
+    """Attach a replay with baseline and result sessions to a run and return its id."""
     job = await create_job(services.jobs, ACCOUNT.id)
     config = await services.experiments.create_replay_config(
         ReplayConfig(
@@ -114,6 +114,17 @@ async def _add_replay_with_result_session(
             agent_version_id=uuid.uuid4(),
             result_session_id=result_session_id,
         )
+    )
+    return replay.id
+
+
+async def _reassign_baseline_session(
+    services: ReplayServices, replay_id: uuid.UUID, baseline_session_id: uuid.UUID
+) -> None:
+    """Move a stored replay onto another baseline session."""
+    replay = await services.replays.get(replay_id)
+    await services.replays.update(
+        replay.model_copy(update={"baseline_session_id": baseline_session_id})
     )
 
 
@@ -142,14 +153,14 @@ async def _store_evaluation(
 async def test_aggregates_float_evaluations(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
-    """Aggregate float evaluations of result sessions, excluding baselines."""
+    """Aggregate float evaluations of baseline and result sessions separately."""
     run_id = await _create_run(services)
     first_baseline, first_result = uuid.uuid4(), uuid.uuid4()
     second_baseline, second_result = uuid.uuid4(), uuid.uuid4()
-    await _add_replay_with_result_session(
+    first_replay_id = await _add_replay_with_result_session(
         services, run_id, first_baseline, first_result
     )
-    await _add_replay_with_result_session(
+    second_replay_id = await _add_replay_with_result_session(
         services, run_id, second_baseline, second_result
     )
     await _store_evaluation(
@@ -171,10 +182,30 @@ async def test_aggregates_float_evaluations(
         {
             "name": "accuracy",
             "data_type": "float",
-            "count": 2,
-            "average": 0.75,
-            "pass_rate": None,
-            "value_counts": None,
+            "baseline": {
+                "count": 1,
+                "average": 0.1,
+                "pass_rate": None,
+                "value_counts": None,
+            },
+            "result": {
+                "count": 2,
+                "average": 0.75,
+                "pass_rate": None,
+                "value_counts": None,
+            },
+            "replays": [
+                {
+                    "replay_id": str(first_replay_id),
+                    "baseline": {"score": 0.1, "value": None, "passed": None},
+                    "result": {"score": 0.5, "value": None, "passed": None},
+                },
+                {
+                    "replay_id": str(second_replay_id),
+                    "baseline": None,
+                    "result": {"score": 1.0, "value": None, "passed": None},
+                },
+            ],
         }
     ]
 
@@ -182,7 +213,7 @@ async def test_aggregates_float_evaluations(
 async def test_aggregates_bool_and_pass_rate(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
-    """Aggregate bool evaluations into a true share and a pass rate."""
+    """Aggregate bool evaluations of result sessions into a share and pass rate."""
     run_id = await _create_run(services)
     results = [uuid.uuid4() for _ in range(3)]
     for result_session_id in results:
@@ -213,22 +244,30 @@ async def test_aggregates_bool_and_pass_rate(
     aggregate = body[0]
     assert aggregate["name"] == "ok"
     assert aggregate["data_type"] == "bool"
-    assert aggregate["count"] == 3
-    assert aggregate["average"] == pytest.approx(2 / 3)
-    assert aggregate["pass_rate"] == pytest.approx(2 / 3)
-    assert aggregate["value_counts"] is None
+    assert aggregate["baseline"] == {
+        "count": 0,
+        "average": None,
+        "pass_rate": None,
+        "value_counts": None,
+    }
+    assert aggregate["result"]["count"] == 3
+    assert aggregate["result"]["average"] == pytest.approx(2 / 3)
+    assert aggregate["result"]["pass_rate"] == pytest.approx(2 / 3)
+    assert aggregate["result"]["value_counts"] is None
 
 
 async def test_aggregates_categorical_value_counts(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
-    """Aggregate categorical evaluations into per-value occurrence counts."""
+    """Aggregate categorical evaluations of result sessions into per-value counts."""
     run_id = await _create_run(services)
     results = [uuid.uuid4() for _ in range(3)]
-    for result_session_id in results:
+    replay_ids = [
         await _add_replay_with_result_session(
             services, run_id, uuid.uuid4(), result_session_id
         )
+        for result_session_id in results
+    ]
     values = ["good", "good", "bad"]
     for result_session_id, value in zip(results, values, strict=True):
         await _store_evaluation(
@@ -245,16 +284,131 @@ async def test_aggregates_categorical_value_counts(
     )
 
     assert response.status_code == 200
-    assert response.json() == [
-        {
-            "name": "label",
-            "data_type": "categorical",
-            "count": 3,
-            "average": None,
-            "pass_rate": None,
-            "value_counts": {"good": 2, "bad": 1},
-        }
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["name"] == "label"
+    assert aggregate["data_type"] == "categorical"
+    assert aggregate["baseline"] == {
+        "count": 0,
+        "average": None,
+        "pass_rate": None,
+        "value_counts": {},
+    }
+    assert aggregate["result"] == {
+        "count": 3,
+        "average": None,
+        "pass_rate": None,
+        "value_counts": {"good": 2, "bad": 1},
+    }
+    assert [entry["replay_id"] for entry in aggregate["replays"]] == [
+        str(replay_id) for replay_id in replay_ids
     ]
+
+
+async def test_aggregates_dedupes_shared_baseline_session(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Aggregate baseline stats once for a session shared by two replays."""
+    run_id = await _create_run(services)
+    baseline = uuid.uuid4()
+    first_result, second_result = uuid.uuid4(), uuid.uuid4()
+    first_replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, first_result
+    )
+    second_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), second_result
+    )
+    await _reassign_baseline_session(services, second_replay_id, baseline)
+    await _store_evaluation(
+        services, baseline, "accuracy", EvaluationDataType.FLOAT, score=0.42
+    )
+
+    response = await client.get(
+        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["baseline"] == {
+        "count": 1,
+        "average": 0.42,
+        "pass_rate": None,
+        "value_counts": None,
+    }
+    replays_by_id = {entry["replay_id"]: entry for entry in aggregate["replays"]}
+    expected_baseline_value = {"score": 0.42, "value": None, "passed": None}
+    assert replays_by_id[str(first_replay_id)]["baseline"] == expected_baseline_value
+    assert replays_by_id[str(second_replay_id)]["baseline"] == expected_baseline_value
+
+
+async def test_aggregates_caps_replays_to_most_recent(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Cap the replays array at the 50 most recent replays, oldest first."""
+    run_id = await _create_run(services)
+    replay_ids = []
+    for index in range(55):
+        result_session_id = uuid.uuid4()
+        replay_id = await _add_replay_with_result_session(
+            services, run_id, uuid.uuid4(), result_session_id
+        )
+        replay_ids.append(replay_id)
+        await _store_evaluation(
+            services,
+            result_session_id,
+            "m",
+            EvaluationDataType.FLOAT,
+            score=index / 100,
+        )
+
+    response = await client.get(
+        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["result"]["count"] == 55
+    assert len(aggregate["replays"]) == 50
+    assert aggregate["replays"][0]["replay_id"] == str(replay_ids[5])
+
+
+async def test_aggregates_include_baseline_only_names(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Include an evaluation name that only exists on a baseline session."""
+    run_id = await _create_run(services)
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    await _add_replay_with_result_session(services, run_id, baseline, result)
+    await _store_evaluation(
+        services, baseline, "baseline_only", EvaluationDataType.FLOAT, score=0.3
+    )
+
+    response = await client.get(
+        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["name"] == "baseline_only"
+    assert aggregate["baseline"] == {
+        "count": 1,
+        "average": 0.3,
+        "pass_rate": None,
+        "value_counts": None,
+    }
+    assert aggregate["result"] == {
+        "count": 0,
+        "average": None,
+        "pass_rate": None,
+        "value_counts": None,
+    }
 
 
 async def test_aggregates_empty_run(

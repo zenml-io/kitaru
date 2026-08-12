@@ -13,18 +13,40 @@
 #  permissions and limitations under the License.
 """UI API models."""
 
+import uuid
+
 from pydantic import Field
 
-from kitaru.api_models.v1.base import ResponseModel
+from kitaru.api_models.v1.base import FiniteFloat, ResponseModel
 from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResponse
 from kitaru.api_models.v1.session import SessionResponse
 
 
-class EvaluationAggregateResponse(ResponseModel):
-    """Evaluation aggregate response."""
+class EvaluationValue(ResponseModel):
+    """Evaluation value."""
 
-    name: str = Field(description="Evaluation name.")
-    data_type: EvaluationDataType = Field(description="Evaluation data type.")
+    score: FiniteFloat | bool | None = Field(
+        default=None, description="Numeric or boolean score."
+    )
+    value: str | None = Field(default=None, description="Label or string value.")
+    passed: bool | None = Field(default=None, description="Pass or fail verdict.")
+
+
+class ReplayEvaluationValues(ResponseModel):
+    """Replay evaluation values."""
+
+    replay_id: uuid.UUID = Field(description="Replay id.")
+    baseline: EvaluationValue | None = Field(
+        default=None, description="Value from the baseline session."
+    )
+    result: EvaluationValue | None = Field(
+        default=None, description="Value from the result session."
+    )
+
+
+class EvaluationStats(ResponseModel):
+    """Evaluation stats."""
+
     count: int = Field(description="Number of aggregated evaluations.")
     average: float | None = Field(
         default=None,
@@ -39,6 +61,18 @@ class EvaluationAggregateResponse(ResponseModel):
     value_counts: dict[str, int] | None = Field(
         default=None,
         description="Occurrences per value, only for categorical evaluations.",
+    )
+
+
+class EvaluationAggregateResponse(ResponseModel):
+    """Evaluation aggregate response."""
+
+    name: str = Field(description="Evaluation name.")
+    data_type: EvaluationDataType = Field(description="Evaluation data type.")
+    baseline: EvaluationStats = Field(description="Stats over the baseline sessions.")
+    result: EvaluationStats = Field(description="Stats over the result sessions.")
+    replays: list[ReplayEvaluationValues] = Field(
+        description="Evaluation values of the 50 most recent replays, oldest first."
     )
 
 

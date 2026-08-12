@@ -1594,22 +1594,9 @@
       "EvaluationAggregateResponse": {
         "description": "Evaluation aggregate response.",
         "properties": {
-          "average": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
-            "title": "Average"
-          },
-          "count": {
-            "description": "Number of aggregated evaluations.",
-            "title": "Count",
-            "type": "integer"
+          "baseline": {
+            "$ref": "#/components/schemas/EvaluationStats",
+            "description": "Stats over the baseline sessions."
           },
           "data_type": {
             "$ref": "#/components/schemas/EvaluationDataType",
@@ -1620,38 +1607,25 @@
             "title": "Name",
             "type": "string"
           },
-          "pass_rate": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Share of passed evaluations among those carrying a passed flag, null when none do.",
-            "title": "Pass Rate"
+          "replays": {
+            "description": "Evaluation values of the 50 most recent replays, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ReplayEvaluationValues"
+            },
+            "title": "Replays",
+            "type": "array"
           },
-          "value_counts": {
-            "anyOf": [
-              {
-                "additionalProperties": {
-                  "type": "integer"
-                },
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Occurrences per value, only for categorical evaluations.",
-            "title": "Value Counts"
+          "result": {
+            "$ref": "#/components/schemas/EvaluationStats",
+            "description": "Stats over the result sessions."
           }
         },
         "required": [
           "name",
           "data_type",
-          "count"
+          "baseline",
+          "result",
+          "replays"
         ],
         "title": "EvaluationAggregateResponse",
         "type": "object"
@@ -1921,6 +1895,60 @@
         "title": "EvaluationResult",
         "type": "object"
       },
+      "EvaluationStats": {
+        "description": "Evaluation stats.",
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
+            "title": "Average"
+          },
+          "count": {
+            "description": "Number of aggregated evaluations.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of passed evaluations among those carrying a passed flag, null when none do.",
+            "title": "Pass Rate"
+          },
+          "value_counts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Occurrences per value, only for categorical evaluations.",
+            "title": "Value Counts"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "EvaluationStats",
+        "type": "object"
+      },
       "EvaluationTaskDetails": {
         "description": "Evaluation task details.",
         "properties": {
@@ -1974,6 +2002,52 @@
           "input_session_id"
         ],
         "title": "EvaluationTaskDetails",
+        "type": "object"
+      },
+      "EvaluationValue": {
+        "description": "Evaluation value.",
+        "properties": {
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass or fail verdict.",
+            "title": "Passed"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Numeric or boolean score.",
+            "title": "Score"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Label or string value.",
+            "title": "Value"
+          }
+        },
+        "title": "EvaluationValue",
         "type": "object"
       },
       "EvaluatorConfig": {
@@ -5059,6 +5133,44 @@
           "evaluators"
         ],
         "title": "ReplayCreateRequest",
+        "type": "object"
+      },
+      "ReplayEvaluationValues": {
+        "description": "Replay evaluation values.",
+        "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value from the baseline session."
+          },
+          "replay_id": {
+            "description": "Replay id.",
+            "format": "uuid",
+            "title": "Replay Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value from the result session."
+          }
+        },
+        "required": [
+          "replay_id"
+        ],
+        "title": "ReplayEvaluationValues",
         "type": "object"
       },
       "ReplayOverride": {
@@ -15620,7 +15732,7 @@
     },
     "/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
       "get": {
-        "description": "Aggregate the evaluations of an experiment run's result sessions.\n\nEvaluations of the baseline sessions are excluded. Clients observe\nHTTP 200 on success and 404 when no experiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair.",
+        "description": "Aggregate the evaluations of an experiment run's replays.\n\nBaseline and result sessions are aggregated separately, and each\naggregate carries the per-replay evaluation values of the 50 most\nrecent replays. Clients observe HTTP 200 on success and 404 when no\nexperiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair, sorted by\n    name.",
         "operationId": "list_experiment_run_evaluation_aggregates_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
         "parameters": [
           {

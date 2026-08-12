@@ -25,6 +25,9 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.ui import (
     EvaluationAggregateResponse,
+    EvaluationStats,
+    EvaluationValue,
+    ReplayEvaluationValues,
     SessionWithEvaluationsResponse,
 )
 from kitaru.server.adapters.rest.commit_route import CommitRoute
@@ -57,6 +60,8 @@ from kitaru.server.filtering import MAX_FILTER_IN_VALUES, FilterCondition
 from kitaru.server.utils import paginate_all
 
 router = APIRouter(route_class=CommitRoute)
+
+MAX_VALUE_REPLAYS = 50
 
 
 async def _load_session_evaluations(
@@ -94,52 +99,54 @@ async def _load_session_evaluations(
     return grouped
 
 
-def _aggregate_evaluations(
-    items: list[EvaluationWithEvaluator],
-) -> list[EvaluationAggregateResponse]:
-    """Aggregate evaluations by name and data type, sorted by name.
+def _evaluation_stats(
+    data_type: EvaluationDataType, evaluations: list[Evaluation]
+) -> EvaluationStats:
+    """Compute the stats of evaluations sharing a name and data type.
 
     Args:
-        items: Evaluations to aggregate.
+        data_type: Data type of the evaluations.
+        evaluations: Evaluations to aggregate.
 
     Returns:
-        One aggregate per name and data type pair.
+        Stats of the evaluations.
     """
-    groups: dict[tuple[str, EvaluationDataType], list[Evaluation]] = defaultdict(list)
-    for item in items:
-        evaluation = item.evaluation
-        groups[(evaluation.name, evaluation.data_type)].append(evaluation)
-    aggregates: list[EvaluationAggregateResponse] = []
-    for (name, data_type), evaluations in sorted(groups.items()):
-        scores = [
-            float(evaluation.score)
-            for evaluation in evaluations
-            if evaluation.score is not None
-        ]
-        flags = [
-            evaluation.passed
-            for evaluation in evaluations
-            if evaluation.passed is not None
-        ]
-        values = [
-            evaluation.value
-            for evaluation in evaluations
-            if evaluation.value is not None
-        ]
-        scorable = data_type in (EvaluationDataType.FLOAT, EvaluationDataType.BOOL)
-        aggregates.append(
-            EvaluationAggregateResponse(
-                name=name,
-                data_type=data_type,
-                count=len(evaluations),
-                average=sum(scores) / len(scores) if scorable and scores else None,
-                pass_rate=sum(flags) / len(flags) if flags else None,
-                value_counts=dict(Counter(values))
-                if data_type is EvaluationDataType.CATEGORICAL
-                else None,
-            )
-        )
-    return aggregates
+    scores = [
+        float(evaluation.score)
+        for evaluation in evaluations
+        if evaluation.score is not None
+    ]
+    flags = [
+        evaluation.passed for evaluation in evaluations if evaluation.passed is not None
+    ]
+    values = [
+        evaluation.value for evaluation in evaluations if evaluation.value is not None
+    ]
+    scorable = data_type in (EvaluationDataType.FLOAT, EvaluationDataType.BOOL)
+    return EvaluationStats(
+        count=len(evaluations),
+        average=sum(scores) / len(scores) if scorable and scores else None,
+        pass_rate=sum(flags) / len(flags) if flags else None,
+        value_counts=dict(Counter(values))
+        if data_type is EvaluationDataType.CATEGORICAL
+        else None,
+    )
+
+
+def _evaluation_value(evaluation: Evaluation | None) -> EvaluationValue | None:
+    """Map an evaluation to its value, None for a missing evaluation.
+
+    Args:
+        evaluation: Evaluation to map.
+
+    Returns:
+        Value of the evaluation.
+    """
+    if evaluation is None:
+        return None
+    return EvaluationValue(
+        score=evaluation.score, value=evaluation.value, passed=evaluation.passed
+    )
 
 
 @router.get("/sessions")
@@ -223,10 +230,12 @@ async def list_experiment_run_evaluation_aggregates(
     evaluation_service: Annotated[EvaluationService, Depends(get_evaluation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> list[EvaluationAggregateResponse]:
-    """Aggregate the evaluations of an experiment run's result sessions.
+    """Aggregate the evaluations of an experiment run's replays.
 
-    Evaluations of the baseline sessions are excluded. Clients observe
-    HTTP 200 on success and 404 when no experiment run has this id.
+    Baseline and result sessions are aggregated separately, and each
+    aggregate carries the per-replay evaluation values of the 50 most
+    recent replays. Clients observe HTTP 200 on success and 404 when no
+    experiment run has this id.
 
     Args:
         experiment_run_id: Id of the experiment run.
@@ -236,7 +245,8 @@ async def list_experiment_run_evaluation_aggregates(
         actor: Caller context.
 
     Returns:
-        One aggregate per evaluation name and data type pair.
+        One aggregate per evaluation name and data type pair, sorted by
+        name.
     """
     await run_service.get_run(experiment_run_id, actor=actor)
     membership = FilterCondition(
@@ -248,14 +258,67 @@ async def list_experiment_run_evaluation_aggregates(
             actor=actor,
         )
     )
-    session_ids = [
+    replays.sort(key=lambda details: details.replay.id)
+    baseline_session_ids = list(
+        dict.fromkeys(details.replay.baseline_session_id for details in replays)
+    )
+    result_session_ids = [
         details.result_session_id
         for details in replays
         if details.result_session_id is not None
     ]
     evaluations = await _load_session_evaluations(
-        evaluation_service, session_ids, actor
+        evaluation_service, baseline_session_ids + result_session_ids, actor
     )
-    return _aggregate_evaluations(
-        [item for items in evaluations.values() for item in items]
+    session_evaluations: dict[
+        uuid.UUID, dict[tuple[str, EvaluationDataType], Evaluation]
+    ] = {
+        session_id: {
+            (item.evaluation.name, item.evaluation.data_type): item.evaluation
+            for item in reversed(items)
+        }
+        for session_id, items in evaluations.items()
+    }
+    baseline_groups: dict[tuple[str, EvaluationDataType], list[Evaluation]] = (
+        defaultdict(list)
     )
+    for session_id in baseline_session_ids:
+        for key, evaluation in session_evaluations.get(session_id, {}).items():
+            baseline_groups[key].append(evaluation)
+    result_groups: dict[tuple[str, EvaluationDataType], list[Evaluation]] = defaultdict(
+        list
+    )
+    for session_id in result_session_ids:
+        for key, evaluation in session_evaluations.get(session_id, {}).items():
+            result_groups[key].append(evaluation)
+    recent = replays[-MAX_VALUE_REPLAYS:]
+    aggregates: list[EvaluationAggregateResponse] = []
+    for key in sorted(set(baseline_groups) | set(result_groups)):
+        name, data_type = key
+        aggregates.append(
+            EvaluationAggregateResponse(
+                name=name,
+                data_type=data_type,
+                baseline=_evaluation_stats(data_type, baseline_groups.get(key, [])),
+                result=_evaluation_stats(data_type, result_groups.get(key, [])),
+                replays=[
+                    ReplayEvaluationValues(
+                        replay_id=details.replay.id,
+                        baseline=_evaluation_value(
+                            session_evaluations.get(
+                                details.replay.baseline_session_id, {}
+                            ).get(key)
+                        ),
+                        result=_evaluation_value(
+                            session_evaluations.get(details.result_session_id, {}).get(
+                                key
+                            )
+                            if details.result_session_id is not None
+                            else None
+                        ),
+                    )
+                    for details in recent
+                ],
+            )
+        )
+    return aggregates
