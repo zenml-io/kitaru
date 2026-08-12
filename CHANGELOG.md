@@ -74,6 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- Server images now serve the UI bundled in the installed Kitaru package at the root URL, including client-side routes such as device verification, while preserving API 404 responses.
 - Default importers, the PydanticAI adapter, and deterministic evaluators now use the `model_provider` session-node field introduced by the consolidated v2 specification.
 - Importer output selectors now ignore reasoning, thinking, Gemini thought, Anthropic redacted-thinking, and tool-call parts, leaving the selector unset when a model response has no visible text.
 - Importer JSON Pointer grouping now rejects invalid array indices instead of accepting Python-specific negative, signed, whitespace-padded, leading-zero, or underscored forms.
