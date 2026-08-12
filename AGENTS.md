@@ -97,6 +97,7 @@ Only document shipped features.
 
 - Default branch is `develop`; PRs normally target `develop`. During the v2 migration, v2 feature work may target its explicitly named integration branch.
 - `main` tracks the latest released version only; do not push directly.
+- Package release PRs are the exception: branch from `main`, include the selected version bump, target `main`, and add one `release:<unit>:<bump>` label for every affected release unit.
 - Use short, imperative commit subjects such as `Add ...` or `Update ...`.
 - Keep commit titles concise, around 50 characters when practical.
 - Never include a `[Codex] ` prefix in PR titles.

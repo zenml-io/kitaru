@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to release (e.g. 0.2.0)
+        description: Python version to release (e.g. 0.2.0 or 0.2.0rc1)
         required: true
         type: string
       kitaru-ui-tag:
@@ -54,11 +54,23 @@ jobs:
           else
             VERSION_CANDIDATE="${GITHUB_REF_NAME#v}"
           fi
-          if ! printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "::error::Invalid version format: $VERSION_CANDIDATE (expected semver like 1.2.3 or 1.2.3-rc.1)"
+          if printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            VERSION="$VERSION_CANDIDATE"
+            HELM_VERSION="$VERSION_CANDIDATE"
+            IS_PRERELEASE=false
+          elif printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+rc[0-9]+$'; then
+            VERSION="$VERSION_CANDIDATE"
+            HELM_VERSION=$(printf '%s' "$VERSION" | sed -E 's/rc([0-9]+)$/-rc.\1/')
+            IS_PRERELEASE=true
+          else
+            echo "::error::Invalid version format: $VERSION_CANDIDATE (expected 1.2.3 or canonical PEP 440 form 1.2.3rc1)"
             exit 1
           fi
-          printf 'VERSION=%s\n' "$VERSION_CANDIDATE" >> "$GITHUB_ENV"
+          {
+            printf 'VERSION=%s\n' "$VERSION"
+            printf 'HELM_VERSION=%s\n' "$HELM_VERSION"
+            printf 'IS_PRERELEASE=%s\n' "$IS_PRERELEASE"
+          } >> "$GITHUB_ENV"
       # --- Determine checkout ref (dispatch only) ---
       # Normally checks out `develop`. If v$VERSION already exists on origin,
       # this is a partial-recovery dispatch and we must check out that tag so
@@ -485,9 +497,13 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          release_json=$(gh release view "v$VERSION" --json tagName,assets 2>/dev/null) || release_json=""
+          release_json=$(gh release view "v$VERSION" --json tagName,isPrerelease,assets 2>/dev/null) || release_json=""
           if [ -z "$release_json" ]; then
-            gh release create "v$VERSION" dist/* \
+            prerelease_args=()
+            if [ "$IS_PRERELEASE" = true ]; then
+              prerelease_args+=(--prerelease)
+            fi
+            gh release create "v$VERSION" dist/* "${prerelease_args[@]}" \
               --title "v$VERSION" \
               --generate-notes
             exit 0
@@ -495,6 +511,11 @@ jobs:
           existing_tag=$(echo "$release_json" | jq -r '.tagName')
           if [ "$existing_tag" != "v$VERSION" ]; then
             echo "::error::Release v$VERSION is attached to tag $existing_tag, expected v$VERSION"
+            exit 1
+          fi
+          existing_prerelease=$(echo "$release_json" | jq -r '.isPrerelease')
+          if [ "$existing_prerelease" != "$IS_PRERELEASE" ]; then
+            echo "::error::Release v$VERSION prerelease state is $existing_prerelease, expected $IS_PRERELEASE"
             exit 1
           fi
           echo "Release v$VERSION exists — reconciling dist/* assets by SHA256"
@@ -582,7 +603,7 @@ jobs:
             KITARU_VERSION=${{ env.VERSION }}
           tags: |
             zenmldocker/kitaru:${{ env.VERSION }}
-            zenmldocker/kitaru:latest
+            ${{ env.IS_PRERELEASE == 'false' && 'zenmldocker/kitaru:latest' || '' }}
           labels: |
             org.opencontainers.image.title=kitaru
             org.opencontainers.image.description=Kitaru client
@@ -601,7 +622,7 @@ jobs:
             KITARU_VERSION=${{ env.VERSION }}
           tags: |
             zenmldocker/kitaru-worker:${{ env.VERSION }}
-            zenmldocker/kitaru-worker:latest
+            ${{ env.IS_PRERELEASE == 'false' && 'zenmldocker/kitaru-worker:latest' || '' }}
           labels: |
             org.opencontainers.image.title=kitaru-worker
             org.opencontainers.image.description=Kitaru worker
@@ -620,7 +641,7 @@ jobs:
             KITARU_VERSION=${{ env.VERSION }}
           tags: |
             zenmldocker/kitaru-server:${{ env.VERSION }}
-            zenmldocker/kitaru-server:latest
+            ${{ env.IS_PRERELEASE == 'false' && 'zenmldocker/kitaru-server:latest' || '' }}
           labels: |
             org.opencontainers.image.title=kitaru-server
             org.opencontainers.image.description=Kitaru server
@@ -641,7 +662,7 @@ jobs:
           version: v3.9.2
       - name: Set Chart.yaml version
         run: |
-          sed -i "s/^version: .*/version: \"$VERSION\"/" helm/Chart.yaml
+          sed -i "s/^version: .*/version: \"$HELM_VERSION\"/" helm/Chart.yaml
           grep -E '^version:' helm/Chart.yaml
       - name: Helm lint
         run: helm lint ./helm
@@ -667,7 +688,7 @@ jobs:
           REGISTRY_ALIAS: zenml
           REPOSITORY: kitaru
         run: |-
-          helm push "${REPOSITORY}-${VERSION}.tgz" \
+          helm push "${REPOSITORY}-${HELM_VERSION}.tgz" \
             "oci://${REGISTRY}/${REGISTRY_ALIAS}"
 
       # --- Dry-run summary ---
@@ -677,6 +698,8 @@ jobs:
           {
             echo "## Dry-run complete"
             echo "Version: $VERSION"
+            echo "Helm version: $HELM_VERSION"
+            echo "Prerelease: $IS_PRERELEASE"
             echo ""
             echo "### Python package"
             ls dist/
@@ -689,7 +712,7 @@ jobs:
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""
             echo "### Helm chart"
-            echo "Built (not pushed): kitaru-${VERSION}.tgz"
+            echo "Built (not pushed): kitaru-${HELM_VERSION}.tgz"
             echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"

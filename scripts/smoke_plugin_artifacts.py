@@ -335,6 +335,14 @@ def main() -> int:
         type=Path,
         help="Existing Kitaru wheel or directory containing one candidate wheel.",
     )
+    parser.add_argument(
+        "--allow-default-pin-mismatch",
+        action="store_true",
+        help=(
+            "Allow a selected default plugin candidate to be newer than the "
+            "catalog pin during a plugin-only release."
+        ),
+    )
     arguments = parser.parse_args()
 
     uv = shutil.which("uv")
@@ -376,7 +384,11 @@ def main() -> int:
                     raise SmokeFailure(
                         f"{name} has neither a default pin nor an artifact import"
                     )
-                if requirement is not None and requirement != f"{name}=={version}":
+                if (
+                    requirement is not None
+                    and requirement != f"{name}=={version}"
+                    and not arguments.allow_default_pin_mismatch
+                ):
                     raise SmokeFailure(
                         f"{name}=={version} is not pinned in default-requirements.txt"
                     )

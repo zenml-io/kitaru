@@ -1,0 +1,31 @@
+---
+name: Release plan
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Validate package release intent
+        env:
+          BASE_REF: origin/${{ github.base_ref }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: |-
+          uv run --no-sync python scripts/release_plan.py \
+            --base "$BASE_REF" \
+            --head HEAD \
+            --labels "$PR_LABELS" \
+            --require-version-bumps \
+            | tee -a "$GITHUB_STEP_SUMMARY"

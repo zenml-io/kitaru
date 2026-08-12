@@ -48,6 +48,7 @@ jobs:
       package_name: ${{ steps.metadata.outputs.package_name }}
       package_tag: ${{ steps.metadata.outputs.package_tag }}
       package_version: ${{ steps.metadata.outputs.package_version }}
+      is_prerelease: ${{ steps.metadata.outputs.is_prerelease }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
@@ -121,16 +122,23 @@ jobs:
           test -n "$PACKAGE_NAME"
           test "$PACKAGE_VERSION" = "$REQUESTED_VERSION"
           test "$PACKAGE_TAG" = "$REQUESTED_PACKAGE-v$PACKAGE_VERSION"
+          if printf '%s' "$PACKAGE_VERSION" | grep -Eq '(a|b|rc|dev)[0-9]+$'; then
+            IS_PRERELEASE=true
+          else
+            IS_PRERELEASE=false
+          fi
           {
             printf 'PROJECT_DIR=%s\n' "$PROJECT_DIR"
             printf 'PACKAGE_NAME=%s\n' "$PACKAGE_NAME"
             printf 'PACKAGE_VERSION=%s\n' "$PACKAGE_VERSION"
             printf 'PACKAGE_TAG=%s\n' "$PACKAGE_TAG"
+            printf 'IS_PRERELEASE=%s\n' "$IS_PRERELEASE"
           } >> "$GITHUB_ENV"
           {
             printf 'package_name=%s\n' "$PACKAGE_NAME"
             printf 'package_version=%s\n' "$PACKAGE_VERSION"
             printf 'package_tag=%s\n' "$PACKAGE_TAG"
+            printf 'is_prerelease=%s\n' "$IS_PRERELEASE"
           } >> "$GITHUB_OUTPUT"
       - name: Validate tagged commit is on main
         if: github.event_name == 'push'
@@ -165,8 +173,15 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --package "$PROJECT_DIR"
+          --allow-default-pin-mismatch
       - name: Build package
         run: uv build --project "$PROJECT_DIR" --out-dir "plugins/dist/$PACKAGE_NAME"
+      - name: Test wheel against published Kitaru
+        run: |
+          wheel=$(find "plugins/dist/$PACKAGE_NAME" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          uv run --no-project --with "$wheel" python -c \
+            'import importlib.metadata as m, os; assert m.version(os.environ["PACKAGE_NAME"]) == os.environ["PACKAGE_VERSION"]'
       - name: Upload package artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
         with:
@@ -198,8 +213,14 @@ jobs:
           PACKAGE_NAME: ${{ needs.build.outputs.package_name }}
           PACKAGE_TAG: ${{ needs.build.outputs.package_tag }}
           PACKAGE_VERSION: ${{ needs.build.outputs.package_version }}
-        run: >-
-          gh release create "$PACKAGE_TAG" plugins/dist/*
-          --verify-tag
-          --title "$PACKAGE_NAME $PACKAGE_VERSION"
-          --generate-notes
+          IS_PRERELEASE: ${{ needs.build.outputs.is_prerelease }}
+        run: |-
+          prerelease_args=()
+          if [ "$IS_PRERELEASE" = true ]; then
+            prerelease_args+=(--prerelease)
+          fi
+          gh release create "$PACKAGE_TAG" plugins/dist/* \
+            "${prerelease_args[@]}" \
+            --verify-tag \
+            --title "$PACKAGE_NAME $PACKAGE_VERSION" \
+            --generate-notes

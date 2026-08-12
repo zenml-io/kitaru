@@ -274,20 +274,16 @@ The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
 uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
 ```
 
-2. For an importer or evaluator in the default catalog, change the matching line in `plugins/default-requirements.txt` to the new exact version.
-3. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. Skip both catalog steps for an adapter distribution.
-4. Add or update focused tests.
-5. Verify that no unrelated plugin package version changed.
+2. Add or update focused tests.
+3. Verify that no unrelated plugin package version changed.
 
 ```bash
 git diff -- \
   plugins/packages/langfuse-importer/pyproject.toml \
-  plugins/default-requirements.txt \
-  plugins/uv.lock \
-  src/kitaru/server/api/bootstrap.py
+  plugins/uv.lock
 ```
 
-6. Run the release gates.
+4. Run the release gates.
 
 ```bash
 uv sync --project plugins --frozen --all-packages
@@ -296,12 +292,16 @@ uv run --project plugins ruff check --config plugins/pyproject.toml plugins
 uv run --project plugins ty check --project plugins
 uv run --project plugins pytest -q -c plugins/pyproject.toml plugins/tests tests/server/test_default_plugins.py
 uv run --no-sync python scripts/smoke_plugin_artifacts.py \
-  --package plugins/packages/langfuse-importer
-just plugin-artifact-smoke
+  --package plugins/packages/langfuse-importer \
+  --allow-default-pin-mismatch
 ```
 
-7. Run the candidate server procedure when the change affects default definitions, package installation, registration, or task execution.
-8. Commit the version, pins, plugin lockfile, implementation, and tests in the same pull request.
+5. Run the candidate server procedure when the change affects package installation, registration, or task execution.
+6. Commit the selected package version, plugin lockfile, implementation, and tests in the same pull request.
+
+For a plugin-only release, leave `plugins/default-requirements.txt` and `DEFAULT_PLUGIN_DEFINITIONS` on their published versions. Update both exact pins in the next core release PR after the plugin is available on PyPI. A coordinated plugin and core release may update the package version and both pins in one PR because the merge workflow publishes plugins before it creates the core tag.
+
+For a coordinated plugin and core release, update both exact catalog pins and run `just plugin-artifact-smoke` before merge.
 
 ## Configure the first PyPI release
 
@@ -351,7 +351,11 @@ Every manual dispatch is a dry-run. It checks out the selected branch SHA, valid
 
 ## Publish a plugin
 
-Publish only after the release commit is contained in `main`. This requirement couples plugin publishing to the repository's `main` promotion cadence.
+Target the release PR at `main` and add exactly one package label, such as `release:langfuse-importer:minor`. Add `release:channel:rc` for a release candidate. The `Release plan` check verifies that the package version matches the selected bump.
+
+Merging the labeled PR to `main` creates the package tag at the merge commit. The tag starts the `Release plugin` workflow, which validates that the commit is contained in `main`, publishes through PyPI Trusted Publishing, and creates a GitHub Release. Plugin RCs use canonical PEP 440 versions such as `0.2.0rc1` and are marked as GitHub prereleases.
+
+Create a tag manually only during automation bootstrap or recovery:
 
 ```bash
 git fetch origin main --tags
@@ -365,7 +369,7 @@ git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
 git push origin "$TAG"
 ```
 
-The tag push starts the `Release plugin` workflow. The workflow derives the package and version from the tag. It rejects a tag whose commit is not contained in `origin/main`. It also rejects an existing PyPI version. It then runs the tests, builds the selected distribution, publishes through PyPI Trusted Publishing, and creates a GitHub Release with the wheel and source distribution.
+The workflow derives the package and version from the tag. It rejects a tag whose commit is not contained in `origin/main` and rejects a version already present on PyPI.
 
 Watch the run and require a successful conclusion:
 
