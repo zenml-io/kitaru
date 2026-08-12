@@ -1591,6 +1591,45 @@
         "title": "DeviceVerifyRequest",
         "type": "object"
       },
+      "EvaluationAggregateResponse": {
+        "description": "Evaluation aggregate response.",
+        "properties": {
+          "baseline": {
+            "$ref": "#/components/schemas/EvaluationStats",
+            "description": "Stats over the baseline sessions."
+          },
+          "data_type": {
+            "$ref": "#/components/schemas/EvaluationDataType",
+            "description": "Evaluation data type."
+          },
+          "name": {
+            "description": "Evaluation name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "replays": {
+            "description": "Evaluation values of the 50 most recent replays, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ReplayEvaluationValues"
+            },
+            "title": "Replays",
+            "type": "array"
+          },
+          "result": {
+            "$ref": "#/components/schemas/EvaluationStats",
+            "description": "Stats over the result sessions."
+          }
+        },
+        "required": [
+          "name",
+          "data_type",
+          "baseline",
+          "result",
+          "replays"
+        ],
+        "title": "EvaluationAggregateResponse",
+        "type": "object"
+      },
       "EvaluationBatchCreateRequest": {
         "additionalProperties": false,
         "description": "Evaluation batch create request.",
@@ -1856,6 +1895,60 @@
         "title": "EvaluationResult",
         "type": "object"
       },
+      "EvaluationStats": {
+        "description": "Evaluation stats.",
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
+            "title": "Average"
+          },
+          "count": {
+            "description": "Number of aggregated evaluations.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of passed evaluations among those carrying a passed flag, null when none do.",
+            "title": "Pass Rate"
+          },
+          "value_counts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Occurrences per value, only for categorical evaluations.",
+            "title": "Value Counts"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "EvaluationStats",
+        "type": "object"
+      },
       "EvaluationTaskDetails": {
         "description": "Evaluation task details.",
         "properties": {
@@ -1909,6 +2002,52 @@
           "input_session_id"
         ],
         "title": "EvaluationTaskDetails",
+        "type": "object"
+      },
+      "EvaluationValue": {
+        "description": "Evaluation value.",
+        "properties": {
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass or fail verdict.",
+            "title": "Passed"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Numeric or boolean score.",
+            "title": "Score"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Label or string value.",
+            "title": "Value"
+          }
+        },
+        "title": "EvaluationValue",
         "type": "object"
       },
       "EvaluatorConfig": {
@@ -4772,6 +4911,36 @@
         "title": "Page[SessionResponse]",
         "type": "object"
       },
+      "Page_SessionWithEvaluationsResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[SessionWithEvaluationsResponse]",
+        "type": "object"
+      },
       "Page_TagResponse_": {
         "properties": {
           "items": {
@@ -4964,6 +5133,44 @@
           "evaluators"
         ],
         "title": "ReplayCreateRequest",
+        "type": "object"
+      },
+      "ReplayEvaluationValues": {
+        "description": "Replay evaluation values.",
+        "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value from the baseline session."
+          },
+          "replay_id": {
+            "description": "Replay id.",
+            "format": "uuid",
+            "title": "Replay Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value from the result session."
+          }
+        },
+        "required": [
+          "replay_id"
+        ],
+        "title": "ReplayEvaluationValues",
         "type": "object"
       },
       "ReplayOverride": {
@@ -6780,6 +6987,29 @@
           }
         },
         "title": "SessionUpdateRequest",
+        "type": "object"
+      },
+      "SessionWithEvaluationsResponse": {
+        "description": "Session with evaluations response.",
+        "properties": {
+          "evaluations": {
+            "description": "Every evaluation of the session, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationResponse"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "evaluations"
+        ],
+        "title": "SessionWithEvaluationsResponse",
         "type": "object"
       },
       "SessionWithNodesResponse": {
@@ -15497,6 +15727,204 @@
         "summary": "Get Task Spec",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
+      "get": {
+        "description": "Aggregate the evaluations of an experiment run's replays.\n\nBaseline and result sessions are aggregated separately, and each\naggregate carries the per-replay evaluation values of the 50 most\nrecent replays. Clients observe HTTP 200 on success and 404 when no\nexperiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair, sorted by\n    name.",
+        "operationId": "list_experiment_run_evaluation_aggregates_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvaluationAggregateResponse"
+                  },
+                  "title": "Response List Experiment Run Evaluation Aggregates V1 Ui Experiment Runs  Experiment Run Id  Evaluation Aggregates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiment Run Evaluation Aggregates",
+        "tags": [
+          "ui"
+        ]
+      }
+    },
+    "/v1/ui/sessions": {
+      "get": {
+        "description": "List sessions, each with every evaluation of the session.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    session_service: Session service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions with their evaluations.",
+        "operationId": "list_sessions_with_evaluations_v1_ui_sessions_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SessionWithEvaluationsResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions With Evaluations",
+        "tags": [
+          "ui"
+        ]
+      }
+    },
+    "/v1/ui/sessions/{session_id}": {
+      "get": {
+        "description": "Get a session by id, with every evaluation of the session.\n\nClients observe HTTP 200 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    session_service: Session service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored session with its evaluations.",
+        "operationId": "get_session_with_evaluations_v1_ui_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session With Evaluations",
+        "tags": [
+          "ui"
         ]
       }
     },
