@@ -215,7 +215,15 @@ jobs:
 
       # --- Run CI checks ---
       - name: Install dependencies
-        run: uv sync --frozen --extra cli --extra mcp --extra worker
+        run: >-
+          uv sync --frozen
+          --extra server
+          --extra otel
+          --extra cli
+          --extra mcp
+          --extra worker
+      - name: Install canonical example adapter
+        run: uv pip install --no-deps --editable plugins/packages/pydantic-ai
       - name: Check typos
         uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14  # v1.48.0
       - name: Lint

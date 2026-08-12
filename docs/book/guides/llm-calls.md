@@ -238,9 +238,6 @@ def agent_step(messages: list[dict]) -> str:
     return resp.choices[0].message.content
 ```
 
-For a full example of a tool-calling agent built this way, see
-[`examples/end_to_end/coding_agent/`](https://github.com/zenml-io/kitaru/tree/develop/examples/end_to_end/coding_agent).
-
 {% hint style="info" %}
 Tool calling and structured output support for `kitaru.llm()` is on the
 roadmap. For now, use your provider SDK directly inside checkpoints for

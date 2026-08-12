@@ -951,7 +951,7 @@ requires-dist = [
     { name = "alembic", marker = "extra == 'server'", specifier = ">=1.18" },
     { name = "asyncpg", marker = "extra == 'server'", specifier = ">=0.31" },
     { name = "bcrypt", marker = "extra == 'server'", specifier = ">=4.1" },
-    { name = "cryptography", marker = "extra == 'server'", specifier = ">=49.0.0" },
+    { name = "cryptography", marker = "extra == 'server'", specifier = ">=50.0.0" },
     { name = "cyclopts", marker = "extra == 'cli'", specifier = ">=4.22" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.139" },
     { name = "httpx", specifier = ">=0.27,<1" },
@@ -964,6 +964,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
+    { name = "packaging", marker = "extra == 'mcp'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
     { name = "pydantic", specifier = ">=2,<3" },
     { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.14" },
@@ -981,6 +982,7 @@ provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel"]
 [package.metadata.requires-dev]
 dev = [
     { name = "import-linter", specifier = ">=2.0" },
+    { name = "pip-audit", specifier = ">=2.10,<3" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.14.1,<2.23" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },

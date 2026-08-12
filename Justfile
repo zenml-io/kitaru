@@ -146,25 +146,6 @@ ui-login:
     test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
     KITARU_UI_DIST_PATH="$dist" uv run kitaru login
 
-# Run smoke tests against a prepared UI bundle and keep the server for inspection.
-ui-smoke:
-    @set -e; \
-    if [ "{{ UI_TAG }}" = "latest" ]; then \
-        dist="{{ UI_BUNDLE_ROOT }}/current/dist"; \
-    else \
-        dist="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}/dist"; \
-    fi; \
-    test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
-    KITARU_UI_DIST_PATH="$dist" ./scripts/smoke-test.sh --keep-server
-
-# Run release-grade smoke with structured results.
-# Example: just release-smoke --required-provider-area openai --required-provider-area anthropic
-# Remote stack smoke stays opt-in; build/push a flow image with
-# `just dev-image REPO=<operator-image-repo>`, then pass operator-provided
-# remote config via KITARU_REMOTE_SMOKE_* env vars or ./scripts/smoke-test.sh flags.
-release-smoke *ARGS:
-    ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
-
 # Audit the public example coverage manifest without running examples or providers.
 example-coverage-audit:
     uv run --with pyyaml python scripts/audit-example-coverage.py
