@@ -254,16 +254,6 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     node for node in nodes if node.get("tool_name") in terminal_tools
                 )
                 evidence_nodes[ticket_id] = evidence["id"]
-                view = {
-                    "summary": f"Review the terminal action for {ticket_id}.",
-                    "items": [
-                        {
-                            "label": "Terminal action",
-                            "description": "The accepted action used for the review.",
-                            "selectors": [{"node_id": evidence["id"]}],
-                        }
-                    ],
-                }
                 question = (
                     "Is this outcome acceptable, problematic, or uncertain, and "
                     "what should the agent have done in this case?"
@@ -272,10 +262,8 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     [
                         "--session",
                         session_id,
-                        "--session-view",
-                        f"{session_id}={json.dumps(view, separators=(',', ':'))}",
                         "--session-question",
-                        f"{session_id}={question}",
+                        f"{session_id}:outcome={question}",
                     ]
                 )
 
@@ -304,6 +292,8 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     "create",
                     "--investigation-session",
                     investigation_session_id,
+                    "--question-key",
+                    "outcome",
                     "--selector",
                     selector,
                     "--value",
@@ -320,6 +310,8 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     "create",
                     "--investigation-session",
                     investigation_session_id,
+                    "--question-key",
+                    "outcome",
                     "--value",
                     json.dumps({"action": expected_action}, separators=(",", ":")),
                 )

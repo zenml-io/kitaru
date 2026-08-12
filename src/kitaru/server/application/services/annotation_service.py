@@ -153,12 +153,20 @@ class AnnotationService:
             InvestigationSessionNotFound: No investigation session has the
                 command's investigation session id.
             InvestigationNotFound: No investigation links the session.
-            ValidationError: The selector names a node outside the session.
+            ValidationError: The question key does not exist on the linked
+                investigation session, or the selector names a node outside
+                the session.
 
         Returns:
             Stored annotation.
         """
         link = await self._investigations.get_session(command.investigation_session_id)
+        question_keys = {question.key for question in link.questions}
+        if command.question_key not in question_keys:
+            raise ValidationError(
+                f"Question {command.question_key} does not exist on "
+                f"investigation session {link.id}"
+            )
         # Locked because a racing first answer on the same investigation
         # could otherwise both observe pending and both flip the status.
         investigation = await self._investigations.get(
@@ -172,6 +180,7 @@ class AnnotationService:
             owner_id=actor.account.id,
             session_id=link.session_id,
             investigation_session_id=link.id,
+            question_key=command.question_key,
             selector=command.selector,
             value=command.value,
         )

@@ -182,7 +182,7 @@ Choose the node that contains the accepted `issue_refund` result and store its I
 TICKET_004_REFUND_NODE_ID="YOUR_REFUND_NODE_UUID"
 ```
 
-Create a one-session investigation with a session question and a curated evidence view:
+Create a one-session investigation with a keyed session question:
 
 ```bash
 INVESTIGATION_ID="$(
@@ -190,8 +190,7 @@ INVESTIGATION_ID="$(
     --agent returns-resolver \
     --description "Review whether risky refunds require human approval." \
     --session "$TICKET_004_SESSION_ID" \
-    --session-question "$TICKET_004_SESSION_ID=Is this outcome acceptable, problematic, or uncertain, and what should the agent have done instead?" \
-    --session-view "$TICKET_004_SESSION_ID={\"summary\":\"A \$280 refund exceeded the automatic approval threshold.\",\"items\":[{\"label\":\"Accepted refund\",\"description\":\"The terminal action that needs review.\",\"selectors\":[{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}]}]}" \
+    --session-question "$TICKET_004_SESSION_ID:outcome=Is this outcome acceptable, problematic, or uncertain, and what should the agent have done instead?" \
   | jq -r '.item.id'
 )"
 
@@ -208,11 +207,13 @@ Store the support lead's answers and anchor the outcome judgment to the refund n
 ```bash
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key outcome \
   --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}" \
   --value '{"judgment":"problematic","reason":"The amount exceeds the automatic approval threshold."}'
 
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key outcome \
   --value '{"action":"escalate","reason":"Human approval is required before a refund."}'
 
 uv run kitaru investigation session complete \

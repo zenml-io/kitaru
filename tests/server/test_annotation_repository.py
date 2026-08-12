@@ -30,6 +30,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.investigation import InvestigationSessionQuestion
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -57,6 +58,8 @@ from kitaru.server.domain.annotation import Annotation, AnnotationNotFound
 from kitaru.server.domain.investigation import Investigation, InvestigationSession
 from kitaru.server.domain.session import Session
 from kitaru.server.filtering import FilterCondition
+
+QUESTION_KEY = "cause"
 
 MakeInvestigationSession = Callable[[uuid.UUID], Awaitable[tuple[uuid.UUID, uuid.UUID]]]
 
@@ -97,7 +100,14 @@ async def _link_investigation_session(
         investigation,
         [
             InvestigationSession(
-                investigation_id=investigation.id, session_id=session_id, position=0
+                investigation_id=investigation.id,
+                session_id=session_id,
+                position=0,
+                questions=[
+                    InvestigationSessionQuestion(
+                        key=QUESTION_KEY, question="What caused it?"
+                    )
+                ],
             )
         ],
     )
@@ -196,6 +206,7 @@ def _answer(
         "owner_id": owner_id,
         "session_id": session_id,
         "investigation_session_id": investigation_session_id,
+        "question_key": QUESTION_KEY,
         "value": "answer",
     }
     values.update(overrides)
@@ -250,6 +261,7 @@ async def test_create_investigation_answer(setup: Setup) -> None:
     )
     assert created.session_id == session_id
     assert created.investigation_session_id == investigation_session_id
+    assert created.question_key == QUESTION_KEY
 
 
 async def test_create_investigation_answer_never_conflicts(setup: Setup) -> None:

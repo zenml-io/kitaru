@@ -124,9 +124,7 @@ class InvestigationService:
                 investigation_id=investigation.id,
                 session_id=item.session_id,
                 position=position,
-                question=item.question,
-                view=item.view,
-                highlights=item.highlights,
+                questions=item.questions,
             )
             for position, item in enumerate(command.sessions)
         ]

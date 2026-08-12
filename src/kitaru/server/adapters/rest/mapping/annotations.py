@@ -62,6 +62,7 @@ def investigation_answer_create_to_command(
     """
     return InvestigationAnswerCreate(
         investigation_session_id=body.investigation_session_id,
+        question_key=body.question_key,
         selector=body.selector,
         value=body.value,
     )
@@ -83,6 +84,7 @@ def annotation_to_response(annotation: Annotation) -> AnnotationResponse:
         owner_id=annotation.owner_id,
         session_id=annotation.session_id,
         investigation_session_id=annotation.investigation_session_id,
+        question_key=annotation.question_key,
         selector=annotation.selector,
         value=annotation.value,
         created=annotation.created,

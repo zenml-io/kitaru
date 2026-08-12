@@ -20,9 +20,8 @@ from typing import Any
 from pydantic import Field
 
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionHighlight,
+    InvestigationSessionQuestion,
     InvestigationSessionVerdict,
-    InvestigationSessionView,
     InvestigationStatus,
 )
 from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
@@ -172,10 +171,8 @@ class InvestigationSession(DomainModel):
     investigation_id: uuid.UUID
     session_id: uuid.UUID
     position: int
-    question: str | None = None
+    questions: list[InvestigationSessionQuestion]
     verdict: InvestigationSessionVerdict | None = None
-    view: InvestigationSessionView | None = None
-    highlights: list[InvestigationSessionHighlight] = Field(default_factory=list)
     created: datetime | None = None
     updated: datetime | None = None
 

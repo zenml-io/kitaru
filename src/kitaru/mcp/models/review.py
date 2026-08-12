@@ -122,6 +122,7 @@ class InvestigationAnswerCreate(MCPModel):
 
     operation: Literal["answer_question"]
     investigation_session_id: uuid.UUID
+    question_key: str
     selector: AnnotationSelector | None = None
     value: JsonValue = Field()
 
