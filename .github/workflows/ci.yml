@@ -192,6 +192,23 @@ jobs:
           jobSummary: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  release-units:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    outputs:
+      plugin-matrix: ${{ steps.inventory.outputs.plugin-matrix }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - name: Validate release units and build plugin matrix
+        id: inventory
+        run: |
+          plugin_matrix=$(uv run --no-project --with packaging==26.2 python scripts/release_units.py matrix)
+          printf 'plugin-matrix=%s\n' "$plugin_matrix" >> "$GITHUB_OUTPUT"
   docker-smoke:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -280,20 +297,11 @@ jobs:
           assert DEFAULT_PLUGIN_DEFINITIONS"
   plugin-package:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    needs: release-units
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        package:
-          - braintrust-importer
-          - evaluator
-          - jsonl-importer
-          - langfuse-importer
-          - langgraph
-          - langsmith-importer
-          - openai-agents
-          - opentelemetry-importer
-          - pydantic-ai
+      matrix: ${{ fromJSON(needs.release-units.outputs.plugin-matrix).matrix }}
     name: plugin package (${{ matrix.package }})
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -305,7 +313,7 @@ jobs:
       - name: Test installed package artifact
         run: >-
           uv run --no-project python scripts/smoke_plugin_artifacts.py
-          --package "plugins/packages/${{ matrix.package }}"
+          --package "${{ matrix.path }}"
   mcp-wheel-contract:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

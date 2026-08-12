@@ -1,0 +1,129 @@
+schema-version = 1
+
+[release-checks]
+common = [
+    "release-units",
+    "lint",
+    "client-import",
+    "typos",
+    "typecheck",
+    "audit",
+    "Canonical example end to end",
+    "docker-smoke",
+    "plugin-tests",
+    "test (py311-base)",
+    "test (py312-base)",
+    "test (py313-base)",
+    "test (py314-base)",
+]
+
+[[units]]
+slug = "kitaru"
+path = "."
+distribution = "kitaru"
+registry = "pypi"
+version-source = "pyproject.toml"
+default-catalog = false
+tag-prefix = "python/kitaru/v"
+checks = [
+    "cli-artifact-contract",
+    "mcp-wheel-contract",
+    "test (py311-cli)",
+    "test (py312-cli)",
+    "test (py313-cli)",
+    "test (py314-cli)",
+    "test (py311-mcp)",
+    "test (py312-mcp)",
+    "test (py313-mcp)",
+    "test (py314-mcp)",
+]
+
+[[units]]
+slug = "braintrust-importer"
+path = "plugins/packages/braintrust-importer"
+distribution = "kitaru-braintrust-importer"
+registry = "pypi"
+version-source = "plugins/packages/braintrust-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-braintrust-importer/v"
+checks = ["plugin package (braintrust-importer)"]
+
+[[units]]
+slug = "evaluator"
+path = "plugins/packages/evaluator"
+distribution = "kitaru-evaluator"
+registry = "pypi"
+version-source = "plugins/packages/evaluator/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-evaluator/v"
+checks = ["plugin package (evaluator)"]
+
+[[units]]
+slug = "jsonl-importer"
+path = "plugins/packages/jsonl-importer"
+distribution = "kitaru-jsonl-importer"
+registry = "pypi"
+version-source = "plugins/packages/jsonl-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-jsonl-importer/v"
+checks = ["plugin package (jsonl-importer)"]
+
+[[units]]
+slug = "langfuse-importer"
+path = "plugins/packages/langfuse-importer"
+distribution = "kitaru-langfuse-importer"
+registry = "pypi"
+version-source = "plugins/packages/langfuse-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-langfuse-importer/v"
+checks = ["plugin package (langfuse-importer)"]
+
+[[units]]
+slug = "langgraph"
+path = "plugins/packages/langgraph"
+distribution = "kitaru-langgraph"
+registry = "pypi"
+version-source = "plugins/packages/langgraph/pyproject.toml"
+default-catalog = false
+tag-prefix = "python/kitaru-langgraph/v"
+checks = ["plugin package (langgraph)"]
+
+[[units]]
+slug = "langsmith-importer"
+path = "plugins/packages/langsmith-importer"
+distribution = "kitaru-langsmith-importer"
+registry = "pypi"
+version-source = "plugins/packages/langsmith-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-langsmith-importer/v"
+checks = ["plugin package (langsmith-importer)"]
+
+[[units]]
+slug = "openai-agents"
+path = "plugins/packages/openai-agents"
+distribution = "kitaru-openai-agents"
+registry = "pypi"
+version-source = "plugins/packages/openai-agents/pyproject.toml"
+default-catalog = false
+tag-prefix = "python/kitaru-openai-agents/v"
+checks = ["plugin package (openai-agents)"]
+
+[[units]]
+slug = "opentelemetry-importer"
+path = "plugins/packages/opentelemetry-importer"
+distribution = "kitaru-opentelemetry-importer"
+registry = "pypi"
+version-source = "plugins/packages/opentelemetry-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-opentelemetry-importer/v"
+checks = ["plugin package (opentelemetry-importer)"]
+
+[[units]]
+slug = "pydantic-ai"
+path = "plugins/packages/pydantic-ai"
+distribution = "kitaru-pydantic-ai"
+registry = "pypi"
+version-source = "plugins/packages/pydantic-ai/pyproject.toml"
+default-catalog = false
+tag-prefix = "python/kitaru-pydantic-ai/v"
+checks = ["plugin package (pydantic-ai)"]

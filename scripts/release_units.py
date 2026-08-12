@@ -1,0 +1,544 @@
+"""Validate and query Kitaru's Python release-unit inventory."""
+
+import argparse
+import ast
+import json
+import re
+import sys
+import tomllib
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+from packaging.version import InvalidVersion, Version
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+PACKAGE_TAG_PATTERN = re.compile(
+    r"python/(?P<distribution>[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)/v(?P<version>[^/]+)"
+)
+SLUG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+
+
+class ReleaseInventoryError(ValueError):
+    """Raised when release-unit metadata is invalid or inconsistent."""
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseUnit:
+    """One independently versioned Python distribution."""
+
+    slug: str
+    path: str
+    distribution: str
+    registry: str
+    version_source: str
+    version: str
+    default_catalog: bool
+    tag_prefix: str
+    required_checks: frozenset[str]
+
+    @property
+    def tag(self) -> str:
+        """Build the immutable package tag for the current manifest version."""
+        return f"{self.tag_prefix}{self.version}"
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the unit using the stable public field names."""
+        return {
+            "slug": self.slug,
+            "path": self.path,
+            "distribution": self.distribution,
+            "registry": self.registry,
+            "version_source": self.version_source,
+            "version": self.version,
+            "default_catalog": self.default_catalog,
+            "tag_prefix": self.tag_prefix,
+            "tag": self.tag,
+            "required_checks": sorted(self.required_checks),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ReleaseInventory:
+    """Validated release-unit metadata for the repository."""
+
+    schema_version: int
+    common_checks: frozenset[str]
+    units: tuple[ReleaseUnit, ...]
+
+    @property
+    def plugin_units(self) -> tuple[ReleaseUnit, ...]:
+        """Return the independently packaged plugin units."""
+        return tuple(unit for unit in self.units if unit.slug != "kitaru")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize the inventory as a versioned automation contract."""
+        return {
+            "schema_version": self.schema_version,
+            "common_checks": sorted(self.common_checks),
+            "units": [unit.to_dict() for unit in self.units],
+        }
+
+    def to_json(self) -> str:
+        """Serialize the inventory as deterministic compact JSON."""
+        return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
+
+
+def validate_version(value: str) -> str:
+    """Validate and return a canonical PEP 440 public version."""
+    try:
+        version = Version(value)
+    except InvalidVersion as error:
+        raise ReleaseInventoryError(
+            f"version must be canonical PEP 440: {value}"
+        ) from error
+    canonical = str(version)
+    if canonical != value:
+        raise ReleaseInventoryError(
+            f"version must be canonical PEP 440: {value} normalizes to {canonical}"
+        )
+    return canonical
+
+
+def _read_toml(path: Path) -> dict[str, Any]:
+    try:
+        return tomllib.loads(path.read_text())
+    except FileNotFoundError as error:
+        raise ReleaseInventoryError(f"missing TOML file: {path}") from error
+    except tomllib.TOMLDecodeError as error:
+        raise ReleaseInventoryError(f"invalid TOML file {path}: {error}") from error
+
+
+def _get_string(document: dict[str, Any], key: str, context: str) -> str:
+    value = document.get(key)
+    if not isinstance(value, str) or not value:
+        raise ReleaseInventoryError(f"{context}: {key} must be a non-empty string")
+    return value
+
+
+def _get_string_list(document: dict[str, Any], key: str, context: str) -> list[str]:
+    value = document.get(key)
+    if not isinstance(value, list) or not all(
+        isinstance(item, str) and item for item in value
+    ):
+        raise ReleaseInventoryError(f"{context}: {key} must be a list of strings")
+    if len(value) != len(set(value)):
+        raise ReleaseInventoryError(f"{context}: {key} contains duplicates")
+    return value
+
+
+def _resolve_repo_path(repo_root: Path, value: str, context: str) -> Path:
+    relative_path = Path(value)
+    if relative_path.is_absolute():
+        raise ReleaseInventoryError(f"{context}: path must be repository-relative")
+    root = repo_root.resolve()
+    resolved = (root / relative_path).resolve()
+    if not resolved.is_relative_to(root):
+        raise ReleaseInventoryError(f"{context}: path escapes the repository")
+    return resolved
+
+
+def _parse_manifest(
+    repo_root: Path, project_path: Path, version_source: str, context: str
+) -> tuple[str, str]:
+    manifest_path = _resolve_repo_path(repo_root, version_source, context)
+    if not manifest_path.is_relative_to(project_path):
+        raise ReleaseInventoryError(f"{context}: version source is outside the project")
+    manifest = _read_toml(manifest_path)
+    project = manifest.get("project")
+    if not isinstance(project, dict):
+        raise ReleaseInventoryError(f"{context}: version source has no [project] table")
+    name = _get_string(project, "name", context)
+    version = validate_version(_get_string(project, "version", context))
+    return name, version
+
+
+def _parse_requirement(value: str, context: str) -> Requirement:
+    try:
+        return Requirement(value)
+    except InvalidRequirement as error:
+        raise ReleaseInventoryError(
+            f"{context}: invalid requirement {value}"
+        ) from error
+
+
+def _load_default_requirements(repo_root: Path) -> dict[str, str]:
+    requirements_path = repo_root / "plugins" / "default-requirements.txt"
+    requirements: dict[str, str] = {}
+    try:
+        lines = requirements_path.read_text().splitlines()
+    except FileNotFoundError as error:
+        raise ReleaseInventoryError(
+            "missing plugins/default-requirements.txt"
+        ) from error
+    for line in lines:
+        value = line.strip()
+        if not value or value.startswith("#"):
+            continue
+        requirement = _parse_requirement(value, "plugins/default-requirements.txt")
+        name = canonicalize_name(requirement.name)
+        if name in requirements:
+            raise ReleaseInventoryError(f"duplicate default requirement: {name}")
+        requirements[name] = str(requirement.specifier)
+    return requirements
+
+
+def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
+    bootstrap_path = repo_root / "src" / "kitaru" / "server" / "api" / "bootstrap.py"
+    try:
+        module = ast.parse(bootstrap_path.read_text(), filename=str(bootstrap_path))
+    except FileNotFoundError as error:
+        raise ReleaseInventoryError("missing server plugin catalog") from error
+    except SyntaxError as error:
+        raise ReleaseInventoryError(
+            f"invalid server plugin catalog: {error}"
+        ) from error
+
+    requirements: set[str] = set()
+    for node in ast.walk(module):
+        if not (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "DefaultPluginDefinition"
+        ):
+            continue
+        requirement_keywords = [
+            keyword for keyword in node.keywords if keyword.arg == "requirement"
+        ]
+        if len(requirement_keywords) != 1:
+            raise ReleaseInventoryError(
+                "server plugin catalog entries must declare one requirement"
+            )
+        requirement_value = requirement_keywords[0].value
+        if not isinstance(requirement_value, ast.Constant) or not isinstance(
+            requirement_value.value, str
+        ):
+            raise ReleaseInventoryError(
+                "server plugin catalog requirements must be string literals"
+            )
+        requirement = _parse_requirement(
+            requirement_value.value, "server plugin catalog"
+        )
+        requirements.add(canonicalize_name(requirement.name))
+    return requirements
+
+
+def _validate_plugin_coverage(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
+    packages_root = repo_root / "plugins" / "packages"
+    actual = {
+        manifest.parent.name for manifest in packages_root.glob("*/pyproject.toml")
+    }
+    expected = {unit.slug for unit in units if unit.slug != "kitaru"}
+    unlisted = sorted(actual - expected)
+    missing = sorted(expected - actual)
+    if unlisted:
+        raise ReleaseInventoryError(f"unlisted plugin project: {unlisted[0]}")
+    if missing:
+        raise ReleaseInventoryError(
+            f"inventory plugin project is missing: {missing[0]}"
+        )
+
+
+def _validate_default_catalog(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
+    inventory_defaults = {
+        canonicalize_name(unit.distribution) for unit in units if unit.default_catalog
+    }
+    requirement_specs = _load_default_requirements(repo_root)
+    requirement_defaults = set(requirement_specs)
+    bootstrap_defaults = _load_bootstrap_requirements(repo_root)
+    if requirement_defaults != bootstrap_defaults:
+        raise ReleaseInventoryError(
+            "server default catalog does not match plugins/default-requirements.txt"
+        )
+    if inventory_defaults != requirement_defaults:
+        raise ReleaseInventoryError("default catalog does not match inventory")
+
+    units_by_name: dict[str, ReleaseUnit] = {
+        str(canonicalize_name(unit.distribution)): unit for unit in units
+    }
+    for name, specifier in requirement_specs.items():
+        expected = f"=={units_by_name[name].version}"
+        if specifier != expected:
+            raise ReleaseInventoryError(
+                f"{name}: default requirement {specifier} does not match {expected}"
+            )
+
+
+def load_inventory(
+    repo_root: Path = REPO_ROOT, inventory_path: Path | None = None
+) -> ReleaseInventory:
+    """Load and validate the repository's release-unit inventory."""
+    root = repo_root.resolve()
+    path = inventory_path or root / "release" / "release-units.toml"
+    document = _read_toml(path)
+    schema_version = document.get("schema-version")
+    if schema_version != 1:
+        raise ReleaseInventoryError(
+            f"unsupported release inventory schema version: {schema_version}"
+        )
+    checks_document = document.get("release-checks")
+    if not isinstance(checks_document, dict):
+        raise ReleaseInventoryError("release-checks must be a table")
+    common_checks = frozenset(
+        _get_string_list(checks_document, "common", "release-checks")
+    )
+
+    raw_units = document.get("units")
+    if not isinstance(raw_units, list) or not raw_units:
+        raise ReleaseInventoryError("units must be a non-empty array of tables")
+
+    units: list[ReleaseUnit] = []
+    seen_slugs: set[str] = set()
+    seen_distributions: set[str] = set()
+    seen_tag_prefixes: set[str] = set()
+    for raw_unit in raw_units:
+        if not isinstance(raw_unit, dict):
+            raise ReleaseInventoryError("each release unit must be a table")
+        slug = _get_string(raw_unit, "slug", "release unit")
+        if slug in seen_slugs:
+            raise ReleaseInventoryError(f"duplicate slug: {slug}")
+        seen_slugs.add(slug)
+        context = slug
+        if SLUG_PATTERN.fullmatch(slug) is None:
+            raise ReleaseInventoryError(f"{context}: invalid slug")
+
+        project_path = _get_string(raw_unit, "path", context)
+        expected_project_path = "." if slug == "kitaru" else f"plugins/packages/{slug}"
+        if project_path != expected_project_path:
+            raise ReleaseInventoryError(
+                f"{context}: project path must be {expected_project_path}"
+            )
+        resolved_project = _resolve_repo_path(root, project_path, context)
+        if not resolved_project.is_dir():
+            raise ReleaseInventoryError(f"{context}: project path does not exist")
+
+        distribution = _get_string(raw_unit, "distribution", context)
+        normalized_distribution = canonicalize_name(distribution)
+        if normalized_distribution in seen_distributions:
+            raise ReleaseInventoryError(f"duplicate distribution: {distribution}")
+        seen_distributions.add(normalized_distribution)
+
+        registry = _get_string(raw_unit, "registry", context)
+        if registry != "pypi":
+            raise ReleaseInventoryError(f"{context}: unsupported registry {registry}")
+        version_source = _get_string(raw_unit, "version-source", context)
+        manifest_name, version = _parse_manifest(
+            root, resolved_project, version_source, context
+        )
+        if manifest_name != distribution:
+            raise ReleaseInventoryError(
+                f"{context}: manifest name {manifest_name} does not match "
+                f"{distribution}"
+            )
+
+        default_catalog = raw_unit.get("default-catalog")
+        if not isinstance(default_catalog, bool):
+            raise ReleaseInventoryError(
+                f"{context}: default-catalog must be true or false"
+            )
+        tag_prefix = _get_string(raw_unit, "tag-prefix", context)
+        expected_tag_prefix = f"python/{distribution}/v"
+        if tag_prefix != expected_tag_prefix:
+            raise ReleaseInventoryError(
+                f"{context}: tag prefix must be {expected_tag_prefix}"
+            )
+        if tag_prefix in seen_tag_prefixes:
+            raise ReleaseInventoryError(f"duplicate tag prefix: {tag_prefix}")
+        seen_tag_prefixes.add(tag_prefix)
+
+        unit_checks = frozenset(_get_string_list(raw_unit, "checks", context))
+        units.append(
+            ReleaseUnit(
+                slug=slug,
+                path=project_path,
+                distribution=distribution,
+                registry=registry,
+                version_source=version_source,
+                version=version,
+                default_catalog=default_catalog,
+                tag_prefix=tag_prefix,
+                required_checks=common_checks | unit_checks,
+            )
+        )
+
+    resolved_units = tuple(units)
+    root_units = [unit for unit in resolved_units if unit.path == "."]
+    if len(root_units) != 1 or root_units[0].slug != "kitaru":
+        raise ReleaseInventoryError("inventory must contain one root kitaru unit")
+    _validate_plugin_coverage(root, resolved_units)
+    _validate_default_catalog(root, resolved_units)
+    return ReleaseInventory(
+        schema_version=schema_version,
+        common_checks=common_checks,
+        units=resolved_units,
+    )
+
+
+def _resolve_unit(selector: str, inventory: ReleaseInventory) -> ReleaseUnit:
+    for unit in inventory.units:
+        if unit.slug == selector:
+            return unit
+    raise ReleaseInventoryError(f"unknown release unit: {selector}")
+
+
+def parse_package_tag(tag: str, inventory: ReleaseInventory) -> ReleaseUnit:
+    """Resolve a namespaced package tag and verify its manifest version."""
+    match = PACKAGE_TAG_PATTERN.fullmatch(tag)
+    if match is None:
+        raise ReleaseInventoryError(f"invalid package tag: {tag}")
+    distribution = match.group("distribution")
+    version = validate_version(match.group("version"))
+    unit = next(
+        (unit for unit in inventory.units if unit.distribution == distribution), None
+    )
+    if unit is None:
+        raise ReleaseInventoryError(
+            f"unknown distribution in package tag: {distribution}"
+        )
+    if version != unit.version:
+        raise ReleaseInventoryError(
+            f"{tag}: version does not match manifest version {unit.version}"
+        )
+    return unit
+
+
+def build_plugin_matrix(
+    inventory: ReleaseInventory,
+) -> dict[str, list[dict[str, str]]]:
+    """Build the GitHub Actions matrix for independently packaged plugins."""
+    return {
+        "include": [
+            {
+                "package": unit.slug,
+                "path": unit.path,
+            }
+            for unit in inventory.plugin_units
+        ]
+    }
+
+
+def format_units(units: tuple[ReleaseUnit, ...]) -> str:
+    """Render concise deterministic release-unit rows for human operators."""
+    lines = ["SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"]
+    lines.extend(
+        "\t".join(
+            (
+                unit.slug,
+                unit.distribution,
+                unit.version,
+                "yes" if unit.default_catalog else "no",
+                unit.tag,
+            )
+        )
+        for unit in units
+    )
+    return "\n".join(lines)
+
+
+def format_inventory(inventory: ReleaseInventory) -> str:
+    """Render a concise deterministic inventory for human operators."""
+    return format_units(inventory.units)
+
+
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate and query Kitaru Python release units."
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    list_parser = subparsers.add_parser("list", help="List all release units.")
+    list_parser.add_argument("--format", choices=("text", "json"), default="text")
+
+    subparsers.add_parser("matrix", help="Print the plugin CI matrix as JSON.")
+
+    resolve_parser = subparsers.add_parser(
+        "resolve", help="Resolve one unit or package tag."
+    )
+    selector = resolve_parser.add_mutually_exclusive_group(required=True)
+    selector.add_argument("--unit")
+    selector.add_argument("--tag")
+    resolve_parser.add_argument("--format", choices=("text", "json"), default="text")
+
+    validate_parser = subparsers.add_parser(
+        "validate", help="Validate the inventory and repository manifests."
+    )
+    validate_parser.add_argument("--format", choices=("text", "json"), default="text")
+    return parser.parse_args()
+
+
+def main() -> int:
+    """Run the release-unit query CLI."""
+    args = _parse_args()
+    try:
+        inventory = load_inventory()
+        if args.command == "list":
+            output = (
+                inventory.to_json()
+                if args.format == "json"
+                else format_inventory(inventory)
+            )
+        elif args.command == "matrix":
+            output = json.dumps(
+                {
+                    "schema_version": inventory.schema_version,
+                    "matrix": build_plugin_matrix(inventory),
+                },
+                separators=(",", ":"),
+            )
+        elif args.command == "resolve":
+            unit = (
+                parse_package_tag(args.tag, inventory)
+                if args.tag
+                else _resolve_unit(args.unit, inventory)
+            )
+            output = (
+                json.dumps(
+                    {
+                        "schema_version": inventory.schema_version,
+                        "unit": unit.to_dict(),
+                    },
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                if args.format == "json"
+                else format_units((unit,))
+            )
+        else:
+            output = (
+                json.dumps(
+                    {
+                        "schema_version": inventory.schema_version,
+                        "status": "valid",
+                        "unit_count": len(inventory.units),
+                    },
+                    separators=(",", ":"),
+                )
+                if args.format == "json"
+                else f"Validated {len(inventory.units)} release units."
+            )
+    except ReleaseInventoryError as error:
+        if getattr(args, "format", "text") == "json":
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "error": {
+                            "kind": "release_inventory_error",
+                            "message": str(error),
+                        },
+                    },
+                    separators=(",", ":"),
+                ),
+                file=sys.stderr,
+            )
+        else:
+            print(f"error: {error}", file=sys.stderr)
+        return 2
+    print(output)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
