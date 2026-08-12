@@ -29,6 +29,7 @@ from conftest import (
     create_agent,
     create_session,
 )
+from kitaru.api_models.v1.investigation import InvestigationSessionQuestion
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_annotation_service,
@@ -45,6 +46,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.investigation import Investigation, InvestigationSession
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
+QUESTION_KEY = "cause"
 
 
 @pytest.fixture
@@ -153,6 +155,11 @@ async def investigation_session_ids(
                 investigation_id=investigation.id,
                 session_id=uuid.UUID(session_id),
                 position=0,
+                questions=[
+                    InvestigationSessionQuestion(
+                        key=QUESTION_KEY, question="What caused it?"
+                    )
+                ],
             )
         ],
     )
@@ -220,12 +227,14 @@ async def test_create_investigation_answer(
         "/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
+            "question_key": QUESTION_KEY,
             "value": "a retry loop",
         },
     )
     assert response.status_code == 201
     body = response.json()
     assert body["investigation_session_id"] == investigation_session_id
+    assert body["question_key"] == QUESTION_KEY
     assert body["value"] == "a retry loop"
 
 
@@ -239,6 +248,7 @@ async def test_create_investigation_answer_never_conflicts(
             "/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
+                "question_key": QUESTION_KEY,
                 "value": "first answer",
             },
         )
@@ -248,6 +258,7 @@ async def test_create_investigation_answer_never_conflicts(
             "/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
+                "question_key": QUESTION_KEY,
                 "value": "second answer",
             },
         )
@@ -264,6 +275,7 @@ async def test_create_investigation_answer_moves_investigation_in_progress(
         "/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
+            "question_key": QUESTION_KEY,
             "value": "a retry loop",
         },
     )
@@ -280,10 +292,27 @@ async def test_create_investigation_answer_missing_link(
         "/v1/annotations",
         json={
             "investigation_session_id": str(uuid.uuid4()),
+            "question_key": QUESTION_KEY,
             "value": "x",
         },
     )
     assert response.status_code == 404
+
+
+async def test_create_investigation_answer_unknown_question_key(
+    client: httpx.AsyncClient, investigation_session_ids: tuple[str, str]
+) -> None:
+    """Observe HTTP 422 when the question key does not belong to the session."""
+    _, investigation_session_id = investigation_session_ids
+    response = await client.post(
+        "/v1/annotations",
+        json={
+            "investigation_session_id": investigation_session_id,
+            "question_key": "unknown",
+            "value": "x",
+        },
+    )
+    assert response.status_code == 422
 
 
 async def test_create_annotation_malformed_body(
@@ -295,6 +324,7 @@ async def test_create_annotation_malformed_body(
         json={
             "session_id": session_id,
             "investigation_session_id": str(uuid.uuid4()),
+            "question_key": QUESTION_KEY,
             "value": "x",
         },
     )
@@ -369,6 +399,7 @@ async def test_list_annotations_filters_by_investigation_id(
             "/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
+                "question_key": QUESTION_KEY,
                 "value": "a retry loop",
             },
         )

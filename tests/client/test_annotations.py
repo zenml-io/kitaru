@@ -40,6 +40,7 @@ from kitaru.api_models.v1.annotation import (
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationSessionInput,
+    InvestigationSessionQuestion,
 )
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.client.api_client import KitaruAPIClient
@@ -64,6 +65,7 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
+QUESTION_KEY = "cause"
 
 
 @pytest.fixture
@@ -138,7 +140,16 @@ async def _make_investigation_session(
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            sessions=[InvestigationSessionInput(session_id=session_id)],
+            sessions=[
+                InvestigationSessionInput(
+                    session_id=session_id,
+                    questions=[
+                        InvestigationSessionQuestion(
+                            key=QUESTION_KEY, question="What caused it?"
+                        )
+                    ],
+                )
+            ],
         )
     )
     page = await api_client.investigations.list_sessions(investigation.id)
@@ -180,11 +191,13 @@ async def test_create_investigation_answer(api_client: KitaruAPIClient) -> None:
     annotation = await api_client.annotations.create(
         InvestigationAnswerCreateRequest(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value="a retry loop",
         )
     )
     assert annotation.session_id == session_id
     assert annotation.investigation_session_id == investigation_session_id
+    assert annotation.question_key == QUESTION_KEY
 
 
 async def test_get(api_client: KitaruAPIClient) -> None:

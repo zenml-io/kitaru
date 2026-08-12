@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import pytest
 
@@ -35,6 +36,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationResponse,
     InvestigationSessionHighlight,
     InvestigationSessionInput,
+    InvestigationSessionQuestion,
     InvestigationSessionResponse,
     InvestigationSessionsListParams,
     InvestigationSessionUpdateRequest,
@@ -63,6 +65,20 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
+
+
+def _question(**overrides: Any) -> InvestigationSessionQuestion:
+    """Build a minimal investigation session question.
+
+    Args:
+        **overrides: Additional question fields.
+
+    Returns:
+        Question ready to pass to InvestigationSessionInput.
+    """
+    values: dict[str, Any] = {"key": "cause", "question": "What caused it?"}
+    values.update(overrides)
+    return InvestigationSessionQuestion(**values)
 
 
 @pytest.fixture
@@ -129,7 +145,9 @@ async def test_create(api_client: KitaruAPIClient) -> None:
             name="investigation",
             description="curator rationale",
             sessions=[
-                InvestigationSessionInput(session_id=session_id)
+                InvestigationSessionInput(
+                    session_id=session_id, questions=[_question()]
+                )
                 for session_id in session_ids
             ],
         )
@@ -227,7 +245,9 @@ async def test_list_sessions_and_iter_sessions(api_client: KitaruAPIClient) -> N
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_id)
+                InvestigationSessionInput(
+                    session_id=session_id, questions=[_question()]
+                )
                 for session_id in session_ids
             ],
         )
@@ -254,7 +274,11 @@ async def test_update_session(api_client: KitaruAPIClient) -> None:
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            sessions=[InvestigationSessionInput(session_id=session_id)],
+            sessions=[
+                InvestigationSessionInput(
+                    session_id=session_id, questions=[_question()]
+                )
+            ],
         )
     )
     updated = await api_client.investigations.update_session(
@@ -279,7 +303,11 @@ async def test_update_session_clears_verdict(api_client: KitaruAPIClient) -> Non
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            sessions=[InvestigationSessionInput(session_id=session_id)],
+            sessions=[
+                InvestigationSessionInput(
+                    session_id=session_id, questions=[_question()]
+                )
+            ],
         )
     )
     await api_client.investigations.update_session(
@@ -310,18 +338,19 @@ async def test_create_session_with_question(api_client: KitaruAPIClient) -> None
             name="investigation",
             sessions=[
                 InvestigationSessionInput(
-                    session_id=session_id, question="What caused it?"
+                    session_id=session_id, questions=[_question()]
                 )
             ],
         )
     )
 
     page = await api_client.investigations.list_sessions(created.id)
-    assert page.items[0].question == "What caused it?"
+    assert page.items[0].questions[0].key == "cause"
+    assert page.items[0].questions[0].question == "What caused it?"
 
 
 async def test_create_session_with_highlights(api_client: KitaruAPIClient) -> None:
-    """Set highlights on a session input and read them back."""
+    """Set highlights on a session question and read them back."""
     agent_id = await _make_agent(api_client)
     session_id = await _make_session(api_client, agent_id)
     highlights = [
@@ -334,10 +363,12 @@ async def test_create_session_with_highlights(api_client: KitaruAPIClient) -> No
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_id, highlights=highlights)
+                InvestigationSessionInput(
+                    session_id=session_id, questions=[_question(highlights=highlights)]
+                )
             ],
         )
     )
 
     page = await api_client.investigations.list_sessions(created.id)
-    assert page.items[0].highlights == highlights
+    assert page.items[0].questions[0].highlights == highlights

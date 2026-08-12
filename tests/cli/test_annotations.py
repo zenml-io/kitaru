@@ -111,6 +111,7 @@ async def test_create_supports_manual_annotations_and_investigation_answers() ->
         value='{"label":"failure","confidence":0.8}',
         session_id=session_id,
         investigation_session_id=None,
+        question_key=None,
         selector=json.dumps({"node_id": str(node_id), "path": "/message"}),
     )
     request = client.create_calls[-1]
@@ -131,26 +132,46 @@ async def test_create_supports_manual_annotations_and_investigation_answers() ->
         value='"yes"',
         session_id=None,
         investigation_session_id=investigation_session_id,
+        question_key="root-cause",
         selector=None,
     )
     request = client.create_calls[-1]
     assert isinstance(request, InvestigationAnswerCreateRequest)
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "investigation_session_id": str(investigation_session_id),
+        "question_key": "root-cause",
         "value": "yes",
     }
 
 
 @pytest.mark.parametrize(
-    ("session_id", "investigation_session_id", "message"),
+    ("session_id", "investigation_session_id", "question_key", "message"),
     [
-        (None, None, "exactly one annotation target"),
-        (uuid.UUID(int=1), uuid.UUID(int=2), "exactly one annotation target"),
+        (None, None, None, "exactly one annotation target"),
+        (
+            uuid.UUID(int=1),
+            uuid.UUID(int=2),
+            "root-cause",
+            "exactly one annotation target",
+        ),
+        (
+            None,
+            uuid.UUID(int=2),
+            None,
+            "--investigation-session requires --question-key",
+        ),
+        (
+            uuid.UUID(int=1),
+            None,
+            "root-cause",
+            "--question-key requires --investigation-session",
+        ),
     ],
 )
 async def test_create_rejects_ambiguous_or_incomplete_targets(
     session_id: uuid.UUID | None,
     investigation_session_id: uuid.UUID | None,
+    question_key: str | None,
     message: str,
 ) -> None:
     """Target validation fails before any remote create request."""
@@ -162,6 +183,7 @@ async def test_create_rejects_ambiguous_or_incomplete_targets(
             value="true",
             session_id=session_id,
             investigation_session_id=investigation_session_id,
+            question_key=question_key,
             selector=None,
         )
 
@@ -178,6 +200,7 @@ async def test_value_and_selector_require_valid_json() -> None:
             value="not-json",
             session_id=uuid.uuid4(),
             investigation_session_id=None,
+            question_key=None,
             selector=None,
         )
     with pytest.raises(CLIError, match="--selector must contain a JSON object"):
@@ -186,6 +209,7 @@ async def test_value_and_selector_require_valid_json() -> None:
             value="null",
             session_id=uuid.uuid4(),
             investigation_session_id=None,
+            question_key=None,
             selector="[]",
         )
     assert client.create_calls == []
@@ -280,4 +304,5 @@ def test_public_argv_and_schema_cover_annotation_crud(
     }
     assert create_parameters["--session"]["required"] is False
     assert create_parameters["--investigation-session"]["required"] is False
+    assert create_parameters["--question-key"]["required"] is False
     assert specs["annotation.delete"]["side_effects"]["deletes_remote_state"]

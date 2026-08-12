@@ -52,9 +52,7 @@ def investigation_create_to_command(
         sessions=[
             InvestigationSessionInput(
                 session_id=item.session_id,
-                question=item.question,
-                view=item.view,
-                highlights=item.highlights,
+                questions=item.questions,
             )
             for item in body.sessions
         ],
@@ -161,10 +159,8 @@ def investigation_session_to_response(
         investigation_id=session.investigation_id,
         session_id=session.session_id,
         position=session.position,
-        question=session.question,
+        questions=session.questions,
         verdict=session.verdict,
-        view=session.view,
-        highlights=session.highlights,
         created=session.created,
         updated=session.updated,
     )

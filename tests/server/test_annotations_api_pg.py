@@ -74,6 +74,9 @@ async def _create_session_with_node(
     return session["id"], nodes[0]["id"]
 
 
+QUESTION_KEY = "cause"
+
+
 async def _create_investigation_with_link(
     client: httpx.AsyncClient, agent_id: str, session_id: str
 ) -> tuple[dict[str, object], dict[str, object]]:
@@ -84,7 +87,14 @@ async def _create_investigation_with_link(
             json={
                 "agent_id": agent_id,
                 "name": "payment-failures",
-                "sessions": [{"session_id": session_id}],
+                "sessions": [
+                    {
+                        "session_id": session_id,
+                        "questions": [
+                            {"key": QUESTION_KEY, "question": "What caused it?"}
+                        ],
+                    }
+                ],
             },
         )
     ).json()
@@ -190,6 +200,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
         "/v1/annotations",
         json={
             "investigation_session_id": link["id"],
+            "question_key": QUESTION_KEY,
             "value": "Retry loop swallowed the error",
         },
     )
@@ -197,6 +208,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
     answer = response.json()
     assert answer["session_id"] == session_id
     assert answer["investigation_session_id"] == link["id"]
+    assert answer["question_key"] == QUESTION_KEY
 
     response = await client.get(f"/v1/investigations/{investigation['id']}")
     assert response.status_code == 200
@@ -209,6 +221,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
         "/v1/annotations",
         json={
             "investigation_session_id": link["id"],
+            "question_key": QUESTION_KEY,
             "value": "Actually a timeout, not a retry loop",
         },
     )
@@ -249,6 +262,7 @@ async def test_list_annotations_filtered_by_investigation_id(
             "/v1/annotations",
             json={
                 "investigation_session_id": link["id"],
+                "question_key": QUESTION_KEY,
                 "value": "answer",
             },
         )
@@ -289,6 +303,7 @@ async def test_delete_investigation_cascades_answers_but_keeps_manual(
             "/v1/annotations",
             json={
                 "investigation_session_id": link["id"],
+                "question_key": QUESTION_KEY,
                 "value": "answer",
             },
         )

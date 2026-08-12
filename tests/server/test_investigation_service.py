@@ -30,6 +30,7 @@ from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionHighlight,
+    InvestigationSessionQuestion,
     InvestigationSessionVerdict,
     InvestigationStatus,
 )
@@ -149,10 +150,22 @@ async def test_create_investigation(
             sessions=[
                 InvestigationSessionInput(
                     session_id=session_ids[0],
-                    question="What caused it?",
-                    highlights=highlights,
+                    questions=[
+                        InvestigationSessionQuestion(
+                            key="cause",
+                            question="What caused it?",
+                            highlights=highlights,
+                        )
+                    ],
                 ),
-                InvestigationSessionInput(session_id=session_ids[1]),
+                InvestigationSessionInput(
+                    session_id=session_ids[1],
+                    questions=[
+                        InvestigationSessionQuestion(
+                            key="cause", question="What caused it?"
+                        )
+                    ],
+                ),
             ],
         ),
         actor=ACTOR,
@@ -171,10 +184,8 @@ async def test_create_investigation(
     )
     assert [session.session_id for session in sessions] == session_ids
     assert [session.position for session in sessions] == [0, 1]
-    assert sessions[0].question == "What caused it?"
-    assert sessions[1].question is None
-    assert sessions[0].highlights == highlights
-    assert sessions[1].highlights == []
+    assert sessions[0].questions[0].highlights == highlights
+    assert sessions[1].questions[0].highlights == []
 
 
 async def test_create_investigation_missing_agent(
@@ -202,7 +213,11 @@ async def test_create_investigation_missing_session(
             InvestigationCreate(
                 agent_id=agent_id,
                 name="investigation",
-                sessions=[InvestigationSessionInput(session_id=missing_session_id)],
+                sessions=[
+                    InvestigationSessionInput(
+                        session_id=missing_session_id, questions=[]
+                    )
+                ],
             ),
             actor=ACTOR,
         )
@@ -227,7 +242,9 @@ async def test_create_investigation_session_wrong_agent(
             InvestigationCreate(
                 agent_id=agent_id,
                 name="investigation",
-                sessions=[InvestigationSessionInput(session_id=other_session.id)],
+                sessions=[
+                    InvestigationSessionInput(session_id=other_session.id, questions=[])
+                ],
             ),
             actor=ACTOR,
         )
@@ -245,8 +262,8 @@ async def test_create_investigation_duplicate_session_ids(
                 agent_id=agent_id,
                 name="investigation",
                 sessions=[
-                    InvestigationSessionInput(session_id=session_ids[0]),
-                    InvestigationSessionInput(session_id=session_ids[0]),
+                    InvestigationSessionInput(session_id=session_ids[0], questions=[]),
+                    InvestigationSessionInput(session_id=session_ids[0], questions=[]),
                 ],
             ),
             actor=ACTOR,
@@ -510,8 +527,8 @@ async def test_update_investigation_session_verdict(
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_ids[0]),
-                InvestigationSessionInput(session_id=session_ids[1]),
+                InvestigationSessionInput(session_id=session_ids[0], questions=[]),
+                InvestigationSessionInput(session_id=session_ids[1], questions=[]),
             ],
         ),
         actor=ACTOR,
@@ -538,8 +555,8 @@ async def test_update_investigation_session_verdict_replaces_earlier_verdict(
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_ids[0]),
-                InvestigationSessionInput(session_id=session_ids[1]),
+                InvestigationSessionInput(session_id=session_ids[0], questions=[]),
+                InvestigationSessionInput(session_id=session_ids[1], questions=[]),
             ],
         ),
         actor=ACTOR,
@@ -570,8 +587,8 @@ async def test_update_investigation_session_verdict_clear(
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_ids[0]),
-                InvestigationSessionInput(session_id=session_ids[1]),
+                InvestigationSessionInput(session_id=session_ids[0], questions=[]),
+                InvestigationSessionInput(session_id=session_ids[1], questions=[]),
             ],
         ),
         actor=ACTOR,
@@ -599,8 +616,8 @@ async def test_update_investigation_session_verdict_does_not_complete_investigat
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_ids[0]),
-                InvestigationSessionInput(session_id=session_ids[1]),
+                InvestigationSessionInput(session_id=session_ids[0], questions=[]),
+                InvestigationSessionInput(session_id=session_ids[1], questions=[]),
             ],
         ),
         actor=ACTOR,
@@ -653,13 +670,18 @@ async def test_update_investigation_session_verdict_session_not_found(
         )
 
 
-async def test_update_investigation_session_verdict_leaves_highlights_untouched(
+async def test_update_investigation_session_verdict_leaves_questions_untouched(
     service: InvestigationService, agent_id: uuid.UUID, session_ids: list[uuid.UUID]
 ) -> None:
-    """Leave a linked session's highlights, set at create, untouched by the verdict."""
+    """Leave a linked session's questions, set at create, untouched by the verdict."""
     highlights = [
         InvestigationSessionHighlight(
             selector=AnnotationSelector(), description="Retried without backoff."
+        )
+    ]
+    questions = [
+        InvestigationSessionQuestion(
+            key="cause", question="What caused it?", highlights=highlights
         )
     ]
     investigation = await service.create_investigation(
@@ -668,7 +690,7 @@ async def test_update_investigation_session_verdict_leaves_highlights_untouched(
             name="investigation",
             sessions=[
                 InvestigationSessionInput(
-                    session_id=session_ids[0], highlights=highlights
+                    session_id=session_ids[0], questions=questions
                 )
             ],
         ),
@@ -681,7 +703,7 @@ async def test_update_investigation_session_verdict_leaves_highlights_untouched(
         actor=ACTOR,
     )
     assert session.verdict is InvestigationSessionVerdict.ACCEPTABLE
-    assert session.highlights == highlights
+    assert session.questions == questions
 
 
 async def test_create_investigation_tracks_investigation_created(
@@ -705,7 +727,7 @@ async def test_create_investigation_tracks_investigation_created(
             agent_id=agent_id,
             name="investigation",
             sessions=[
-                InvestigationSessionInput(session_id=session_id)
+                InvestigationSessionInput(session_id=session_id, questions=[])
                 for session_id in session_ids
             ],
         ),

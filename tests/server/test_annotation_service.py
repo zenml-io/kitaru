@@ -30,7 +30,10 @@ from conftest import (
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.investigation import InvestigationStatus
+from kitaru.api_models.v1.investigation import (
+    InvestigationSessionQuestion,
+    InvestigationStatus,
+)
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.application.models.annotation import (
     AnnotationFilter,
@@ -53,6 +56,7 @@ from kitaru.server.domain.session_node import SessionNode
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+QUESTION_KEY = "cause"
 
 
 class _RecordingAnalytics(ServerAnalytics):
@@ -172,7 +176,14 @@ async def _link_investigation_session(
         investigation,
         [
             InvestigationSession(
-                investigation_id=investigation.id, session_id=session_id, position=0
+                investigation_id=investigation.id,
+                session_id=session_id,
+                position=0,
+                questions=[
+                    InvestigationSessionQuestion(
+                        key=QUESTION_KEY, question="What caused it?"
+                    )
+                ],
             )
         ],
     )
@@ -355,12 +366,14 @@ async def test_create_investigation_answer(
     annotation = await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value="a retry loop",
         ),
         actor=ACTOR,
     )
     assert annotation.session_id == session_id
     assert annotation.investigation_session_id == investigation_session_id
+    assert annotation.question_key == QUESTION_KEY
 
     investigation = await investigation_repository.get(investigation_id)
     assert investigation.status is InvestigationStatus.IN_PROGRESS
@@ -375,6 +388,7 @@ async def test_create_investigation_answer_missing_link(
         await service.create_investigation_answer(
             InvestigationAnswerCreate(
                 investigation_session_id=uuid.uuid4(),
+                question_key=QUESTION_KEY,
                 value="x",
             ),
             actor=ACTOR,
@@ -398,7 +412,29 @@ async def test_create_investigation_answer_invalid_selector_node(
         await service.create_investigation_answer(
             InvestigationAnswerCreate(
                 investigation_session_id=investigation_session_id,
+                question_key=QUESTION_KEY,
                 selector=AnnotationSelector(node_id=node_id),
+                value="x",
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_investigation_answer_unknown_question_key(
+    service: AnnotationService,
+    investigation_repository: FakeInvestigationRepository,
+    agent_id: uuid.UUID,
+    session_id: uuid.UUID,
+) -> None:
+    """Reject a question key the linked investigation session does not have."""
+    _, investigation_session_id = await _link_investigation_session(
+        investigation_repository, agent_id, session_id
+    )
+    with pytest.raises(ValidationError):
+        await service.create_investigation_answer(
+            InvestigationAnswerCreate(
+                investigation_session_id=investigation_session_id,
+                question_key="unknown",
                 value="x",
             ),
             actor=ACTOR,
@@ -418,6 +454,7 @@ async def test_create_investigation_answer_never_conflicts(
     first = await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value="first answer",
         ),
         actor=ACTOR,
@@ -425,6 +462,7 @@ async def test_create_investigation_answer_never_conflicts(
     second = await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value="second answer",
         ),
         actor=ACTOR,
@@ -456,6 +494,7 @@ async def test_create_investigation_answer_second_answer_leaves_started_at(
     await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value="a retry loop",
         ),
         actor=ACTOR,
@@ -464,6 +503,7 @@ async def test_create_investigation_answer_second_answer_leaves_started_at(
     await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value=False,
         ),
         actor=ACTOR,
@@ -525,6 +565,7 @@ async def test_create_investigation_answer_tracks_annotation_created(
     await service.create_investigation_answer(
         InvestigationAnswerCreate(
             investigation_session_id=investigation_session_id,
+            question_key=QUESTION_KEY,
             value="a retry loop",
         ),
         actor=ACTOR,

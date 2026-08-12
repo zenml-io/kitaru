@@ -316,7 +316,12 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
             operation="create_investigation",
             agent_id=uuid.uuid4(),
             name="failure review",
-            sessions=[{"session_id": session_id, "question": "Was it correct?"}],
+            sessions=[
+                {
+                    "session_id": session_id,
+                    "questions": [{"key": "root-cause", "question": "Was it correct?"}],
+                }
+            ],
         ),
     )
     await handle_review_manage(
@@ -332,6 +337,7 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
         InvestigationAnswerCreate(
             operation="answer_question",
             investigation_session_id=investigation_session_id,
+            question_key="root-cause",
             value=False,
         ),
     )
@@ -346,15 +352,19 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
     assert cast(Any, investigation_requests[0]).model_dump(mode="json")["sessions"] == [
         {
             "session_id": str(session_id),
-            "question": "Was it correct?",
-            "view": None,
-            "highlights": [],
+            "questions": [
+                {"key": "root-cause", "question": "Was it correct?", "highlights": []}
+            ],
         }
     ]
     assert cast(Any, annotation_creates[0]).model_dump(mode="json")["session_id"]
     assert cast(Any, annotation_creates[1]).model_dump(mode="json")[
         "investigation_session_id"
     ] == str(investigation_session_id)
+    assert (
+        cast(Any, annotation_creates[1]).model_dump(mode="json")["question_key"]
+        == "root-cause"
+    )
     assert cast(Any, annotation_updates[0]).model_dump(mode="json") == {"value": True}
 
 

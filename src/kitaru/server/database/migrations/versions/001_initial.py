@@ -920,16 +920,8 @@ def upgrade() -> None:
         sa.Column("investigation_id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("position", sa.Integer(), nullable=False),
-        sa.Column("question", sa.Text(), nullable=True),
         sa.Column("verdict", sa.String(length=32), nullable=True),
-        sa.Column(
-            "view",
-            postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
-            nullable=True,
-        ),
-        sa.Column(
-            "highlights", postgresql.JSONB(astext_type=sa.Text()), nullable=False
-        ),
+        sa.Column("questions", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(
             ["investigation_id"],
             ["investigation.id"],
@@ -962,6 +954,7 @@ def upgrade() -> None:
         sa.Column("owner_id", sa.Uuid(), nullable=False),
         sa.Column("session_id", sa.Uuid(), nullable=False),
         sa.Column("investigation_session_id", sa.Uuid(), nullable=True),
+        sa.Column("question_key", sa.String(length=64), nullable=True),
         sa.Column(
             "selector",
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),

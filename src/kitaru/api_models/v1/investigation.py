@@ -16,8 +16,9 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.base import (
@@ -46,26 +47,6 @@ class InvestigationSessionVerdict(StrEnum):
     UNCERTAIN = "uncertain"
 
 
-class InvestigationSessionViewItem(RequestModel):
-    """Investigation session view item."""
-
-    label: str = Field(description="Short title for the item.")
-    description: str = Field(description="Prose explaining what the curator saw.")
-    selectors: list[AnnotationSelector] = Field(
-        default_factory=list, description="References the item covers."
-    )
-
-
-class InvestigationSessionView(RequestModel):
-    """Investigation session view."""
-
-    version: int = Field(default=1, description="Format version.")
-    summary: str = Field(description="Summary shown above the trace.")
-    items: list[InvestigationSessionViewItem] = Field(
-        default_factory=list, description="Curated findings for the session."
-    )
-
-
 class InvestigationSessionHighlight(RequestModel):
     """Investigation session highlight."""
 
@@ -73,19 +54,38 @@ class InvestigationSessionHighlight(RequestModel):
     description: str = Field(description="Prose explaining what the highlight shows.")
 
 
+class InvestigationSessionQuestion(RequestModel):
+    """Investigation session question."""
+
+    key: str = Field(description="Question key, unique within the session.")
+    question: str = Field(description="Question to answer about the session.")
+    highlights: list[InvestigationSessionHighlight] = Field(
+        default_factory=list, description="Curated highlights for the question."
+    )
+
+
 class InvestigationSessionInput(RequestModel):
     """Investigation session input."""
 
     session_id: uuid.UUID = Field(description="Session to link.")
-    question: str | None = Field(
-        default=None, description="Question to answer about the session."
+    questions: list[InvestigationSessionQuestion] = Field(
+        min_length=1, description="Questions to answer about the session."
     )
-    view: InvestigationSessionView | None = Field(
-        default=None, description="Curated session view."
-    )
-    highlights: list[InvestigationSessionHighlight] = Field(
-        default_factory=list, description="Curated highlights for the session."
-    )
+
+    @model_validator(mode="after")
+    def _unique_question_keys(self) -> Self:
+        """Reject duplicate question keys.
+
+        Raises:
+            ValueError: A question key repeats.
+
+        Returns:
+            The validated input.
+        """
+        keys = [question.key for question in self.questions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("question keys must be unique")
+        return self
 
 
 class InvestigationCreateRequest(RequestModel):
@@ -159,11 +159,9 @@ class InvestigationSessionResponse(TimestampedResponseModel):
     )
     session_id: uuid.UUID = Field(description="Session being investigated.")
     position: int = Field(description="Presentation order within the investigation.")
-    question: str | None = Field(description="Question to answer about the session.")
+    questions: list[InvestigationSessionQuestion] = Field(
+        description="Questions to answer about the session."
+    )
     verdict: InvestigationSessionVerdict | None = Field(
         description="Investigation session verdict."
-    )
-    view: InvestigationSessionView | None = Field(description="Curated session view.")
-    highlights: list[InvestigationSessionHighlight] = Field(
-        description="Curated highlights for the session."
     )
