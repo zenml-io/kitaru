@@ -366,3 +366,31 @@ async def test_cookie_login_and_logout(
         response = await client.post("/v1/logout")
         assert response.status_code == 204
         assert COOKIE_NAME not in client.cookies
+
+
+async def test_header_credential_skips_csrf_check(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+    account: Account,
+) -> None:
+    """Accept a CSRF-carrying token from the authorization header without one."""
+    _ = account
+    app = build_app(
+        local_settings(AUTH_COOKIE_NAME=COOKIE_NAME),
+        account_repository,
+        api_key_repository,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post(
+            "/v1/login", data={"username": "alice", "password": "secret"}
+        )
+        assert response.status_code == 200
+        assert response.json()["csrf_token"] is not None
+        token = response.json()["access_token"]
+
+        client.cookies.clear()
+        response = await client.get(
+            "/v1/api-keys", headers={"Authorization": f"Bearer {token}"}
+        )
+        assert response.status_code == 200
