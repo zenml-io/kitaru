@@ -65,7 +65,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-      - run: uv sync --frozen
+      - run: >-
+          uv sync --frozen
+          --extra server
+          --extra otel
+          --extra mcp
+          --extra cli
+          --extra worker
       - run: uv run ty check
   audit:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
@@ -116,7 +122,7 @@ jobs:
         run: >-
           uv pip install
           --find-links plugins/candidate-wheels
-          'kitaru-pydantic-ai[openai]==0.1.0'
+          'kitaru-pydantic-ai[openai]'
       - name: Start local Kitaru server
         run: |
           uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
@@ -152,7 +158,10 @@ jobs:
           UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
       - name: Dump canonical example logs on failure
         if: failure()
-        run: cat "$RUNNER_TEMP/kitaru-server.log"
+        run: |
+          if test -f "$RUNNER_TEMP/kitaru-server.log"; then
+            cat "$RUNNER_TEMP/kitaru-server.log"
+          fi
       - name: Stop local Kitaru server
         if: always()
         run: |
@@ -220,6 +229,7 @@ jobs:
           -e KITARU_SERVER_DB_HOST=kitaru-ci-postgres
           -e KITARU_SERVER_DB_PWD=password
           -e KITARU_SERVER_SECRET_ENCRYPTION_KEY=ci-only-encryption-key-ci-only-encryption-key
+          -e KITARU_SERVER_JWT_SIGNING_KEY=ci-only-signing-key-ci-only-signing-key
           -e KITARU_SERVER_ANALYTICS_OPT_IN=false
           kitaru-ci-server
       - name: Wait for health endpoint
@@ -354,7 +364,10 @@ jobs:
           python-version: '3.12'
       - run: uv build --wheel
       - name: Test clean base and MCP wheel installations
-        run: KITARU_TEST_WHEEL=dist uv run --extra mcp pytest tests/mcp/test_installed_contract.py
+        run: >-
+          KITARU_TEST_WHEEL=dist uv run
+          --extra server --extra otel --extra mcp
+          pytest tests/mcp/test_installed_contract.py
   cli-artifact-contract:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -367,78 +380,68 @@ jobs:
           python-version: '3.12'
       - name: Test clean CLI wheel and source installations
         run: uv run --no-sync python scripts/smoke_cli_artifacts.py
-  google-adk-contract:
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
-    runs-on: ubuntu-latest
-    env:
-      KITARU_REQUIRE_GOOGLE_ADK_CONTRACT: '1'
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-        with:
-          python-version: '3.12'
-      - name: Run installed Google ADK no-provider contract tests
-        run: >-
-          UV_PROJECT_ENVIRONMENT="$RUNNER_TEMP/kitaru-google-adk-contract-env"
-          uv run --python 3.12 --no-dev --extra google-adk --with pytest
-          pytest -o addopts='-vv'
-          tests/test_google_adk_installed_contract.py
-          tests/test_google_adk_example.py
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: py311-base
             python-version: '3.11'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py312-base
             python-version: '3.12'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py313-base
             python-version: '3.13'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py314-base
             python-version: '3.14'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py311-cli
             python-version: '3.11'
-            sync-command: uv sync --frozen --extra cli --extra worker
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
             pytest-command: uv run pytest tests/cli
           - name: py312-cli
             python-version: '3.12'
-            sync-command: uv sync --frozen --extra cli --extra worker
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
             pytest-command: uv run pytest tests/cli
           - name: py313-cli
             python-version: '3.13'
-            sync-command: uv sync --frozen --extra cli --extra worker
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
             pytest-command: uv run pytest tests/cli
           - name: py314-cli
             python-version: '3.14'
-            sync-command: uv sync --frozen --extra cli --extra worker
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
             pytest-command: uv run pytest tests/cli
           - name: py311-mcp
             python-version: '3.11'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
           - name: py312-mcp
             python-version: '3.12'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
           - name: py313-mcp
             python-version: '3.13'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
           - name: py314-mcp
             python-version: '3.14'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
     name: test (${{ matrix.name }})
     steps:

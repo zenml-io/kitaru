@@ -326,10 +326,9 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 _cli(
                     "investigation",
                     "session",
-                    "update",
+                    "verdict",
                     investigation_id,
                     session_id,
-                    "--verdict",
                     judgment,
                 )
 
