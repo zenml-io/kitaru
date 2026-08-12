@@ -18,7 +18,11 @@ from typing import Any
 
 from anyio import to_thread
 
-from kitaru.analytics.events import AccountOrigin
+from kitaru.analytics.events import (
+    FINISHED_ONBOARDING_SURVEY_KEY,
+    AccountOrigin,
+    AnalyticsEvent,
+)
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
@@ -26,7 +30,10 @@ from kitaru.server.application.interfaces.password_hasher import PasswordHasher
 from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.permissions import Action, ResourceType
-from kitaru.server.application.services.analytics_events import build_account_traits
+from kitaru.server.application.services.analytics_events import (
+    build_account_traits,
+    build_user_enriched_properties,
+)
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import (
@@ -242,6 +249,7 @@ class AccountService:
                 )
             if metadata is not None:
                 raise ForbiddenError("Accounts can only update their own metadata")
+        survey_finished_before = FINISHED_ONBOARDING_SURVEY_KEY in account.metadata
         if metadata is not None:
             account.update_metadata(metadata)
         if is_admin is not None:
@@ -266,7 +274,18 @@ class AccountService:
                 self._password_hasher.hash, password
             )
             account.update_password_hash(password_hash)
-        return await self._repository.update(account)
+        account = await self._repository.update(account)
+        if (
+            self._analytics is not None
+            and not survey_finished_before
+            and FINISHED_ONBOARDING_SURVEY_KEY in account.metadata
+        ):
+            self._analytics.track(
+                account.id,
+                AnalyticsEvent.USER_ENRICHED,
+                build_user_enriched_properties(account),
+            )
+        return account
 
     async def update_service_account(
         self,

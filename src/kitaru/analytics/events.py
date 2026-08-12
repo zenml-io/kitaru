@@ -15,6 +15,8 @@
 
 from enum import StrEnum
 
+FINISHED_ONBOARDING_SURVEY_KEY = "finished_onboarding_survey"
+
 
 class AnalyticsEvent(StrEnum):
     """Analytics event."""
@@ -33,6 +35,7 @@ class AnalyticsEvent(StrEnum):
     ANNOTATION_CREATED = "Annotation Created"
     JOB_COMPLETED = "Job Completed"
     PLUGIN_VERSION_REGISTERED = "Plugin Version Registered"
+    USER_ENRICHED = "User Enriched"
 
 
 class AccountOrigin(StrEnum):
