@@ -193,20 +193,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
   docker-smoke:
-    # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
-    if: github.event_name == 'push'
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-        with:
-          python-version: '3.12'
-      - name: Download stable Kitaru UI
-        run: bash scripts/download-ui.sh
-        env:
-          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
       - name: Build server image
         run: >-
           docker build -f docker/dev-server.Dockerfile --target runtime
@@ -248,59 +240,18 @@ jobs:
           echo "Server did not become healthy in time." >&2
           docker logs kitaru-ci-server || true
           exit 1
-      - name: Verify bundled dashboard assets
-        run: bash scripts/verify-server-ui.sh kitaru-ci-server
-      - name: Smoke test root route serves dashboard HTML
+      - name: Smoke test server info API
         run: |
           set -euo pipefail
-          status=$(curl -sS -o /tmp/root-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/')
-          test "$status" = "200"
-          grep -qi '<!doctype html\|<html' /tmp/root-response.txt || {
-            echo "Root route did not return HTML." >&2
-            cat /tmp/root-response.txt >&2
-            exit 1
-          }
-      - name: Smoke test device verification route
-        run: |
-          set -euo pipefail
-          status=$(curl -sS -o /tmp/device-verify-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/devices/verify?device_id=test&user_code=test')
-          test "$status" = "200"
-          if grep -q 'An unexpected error occurred' /tmp/device-verify-response.txt; then
-            echo "Device verification route returned the generic unexpected-error payload." >&2
-            cat /tmp/device-verify-response.txt >&2
-            exit 1
-          fi
-          if docker logs kitaru-ci-server 2>&1 | grep -q 'TemplateNotFound'; then
-            echo "TemplateNotFound appeared in container logs after hitting /devices/verify." >&2
-            exit 1
-          fi
+          http_status=$(curl -sS -o /tmp/server-info.json -w '%{http_code}' 'http://127.0.0.1:18080/v1/info')
+          test "$http_status" = "200"
+          python -m json.tool /tmp/server-info.json
       - name: Dump container logs on failure
         if: failure()
         run: docker logs kitaru-ci-server || true
       - name: Stop server container
         if: always()
         run: docker rm -f kitaru-ci-server || true
-  wheel-packaging:
-    # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          persist-credentials: false
-      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-        with:
-          python-version: '3.12'
-      - name: Download stable Kitaru UI
-        run: bash scripts/download-ui.sh
-        env:
-          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
-      - name: Build wheel
-        run: uv build --wheel
-      - name: Verify Kitaru UI in wheel
-        run: |
-          WHEEL=$(ls dist/*.whl)
-          uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
   plugin-tests:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

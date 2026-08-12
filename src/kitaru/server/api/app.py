@@ -81,7 +81,6 @@ from kitaru.server.api.bootstrap import (
     register_default_plugins,
 )
 from kitaru.server.api.config import APISettings
-from kitaru.server.api.dashboard import register_dashboard
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.application.services.server_analytics import (
@@ -368,5 +367,4 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(ui.router, prefix="/v1/ui", tags=["ui"])
     app.include_router(users.router, prefix="/v1/users", tags=["users"])
     app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
-    register_dashboard(app)
     return app
