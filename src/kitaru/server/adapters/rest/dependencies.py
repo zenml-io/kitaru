@@ -154,6 +154,7 @@ class RequestCredential(NamedTuple):
 
     token: str
     csrf_token: str | None
+    from_cookie: bool
 
 
 async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
@@ -867,17 +868,17 @@ def get_optional_bearer_credential(
         settings: API settings for this process.
 
     Returns:
-        Credential without the ``Bearer`` prefix and the CSRF token, or
-        ``None``.
+        Credential without the ``Bearer`` prefix, the CSRF token, and where
+        the credential came from, or ``None``.
     """
     credential = get_bearer_credential(request)
     csrf_token = request.headers.get(CSRF_HEADER)
     if credential is not None:
-        return RequestCredential(credential, csrf_token)
+        return RequestCredential(credential, csrf_token, from_cookie=False)
     if settings.AUTH_COOKIE_NAME:
         cookie = request.cookies.get(settings.AUTH_COOKIE_NAME)
         if cookie:
-            return RequestCredential(cookie, csrf_token)
+            return RequestCredential(cookie, csrf_token, from_cookie=True)
     return None
 
 
@@ -976,6 +977,7 @@ async def _authenticate(
         return await auth_service.resolve(
             credential=credential.token,
             csrf_token=credential.csrf_token,
+            from_cookie=credential.from_cookie,
         )
     except AuthenticationError as exc:
         raise HTTPException(
