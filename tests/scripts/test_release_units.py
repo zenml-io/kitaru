@@ -215,6 +215,18 @@ def test_python_release_workflow_resolves_every_tag_from_the_inventory() -> None
     assert "uv version" not in workflow
 
 
+def test_python_release_workflow_can_resume_after_partial_publication() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+
+    assert "skip-existing: true" in workflow
+    assert "GH_REPO: ${{ github.repository }}" in workflow
+    assert 'gh release view "$PACKAGE_TAG"' in workflow
+    assert (
+        'gh release upload "$PACKAGE_TAG" package-dist/* evidence/* --clobber'
+        in workflow
+    )
+
+
 def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
