@@ -94,6 +94,10 @@ def validate_version(value: str) -> str:
         raise ReleaseInventoryError(
             f"version must be canonical PEP 440: {value}"
         ) from error
+    if version.local is not None:
+        raise ReleaseInventoryError(
+            f"PyPI release versions must not contain a local segment: {value}"
+        )
     canonical = str(version)
     if canonical != value:
         raise ReleaseInventoryError(

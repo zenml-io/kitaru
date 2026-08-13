@@ -98,6 +98,18 @@ def test_noncanonical_python_versions_are_rejected(version: str) -> None:
         validate_version(version)
 
 
+def test_local_python_versions_are_rejected_for_pypi() -> None:
+    with pytest.raises(ReleaseInventoryError, match="local segment"):
+        validate_version("1.0+build.1")
+
+
+def test_legacy_release_workflow_accepts_canonical_python_rc_versions() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+
+    assert "1.2.3rc1" in workflow
+    assert "HELM_VERSION" in workflow
+
+
 @pytest.mark.parametrize(
     ("tag", "message"),
     [

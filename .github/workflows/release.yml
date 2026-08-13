@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to release (e.g. 0.2.0)
+        description: Version to release (e.g. 0.22.0 or 0.22.0rc1)
         required: true
         type: string
       kitaru-ui-tag:
@@ -54,11 +54,16 @@ jobs:
           else
             VERSION_CANDIDATE="${GITHUB_REF_NAME#v}"
           fi
-          if ! printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
-            echo "::error::Invalid version format: $VERSION_CANDIDATE (expected semver like 1.2.3 or 1.2.3-rc.1)"
+          if ! printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$'; then
+            echo "::error::Invalid version format: $VERSION_CANDIDATE (expected canonical PEP 440 like 1.2.3 or 1.2.3rc1)"
             exit 1
           fi
           printf 'VERSION=%s\n' "$VERSION_CANDIDATE" >> "$GITHUB_ENV"
+          HELM_VERSION="$VERSION_CANDIDATE"
+          if [[ "$VERSION_CANDIDATE" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(a|b|rc)([0-9]+)$ ]]; then
+            HELM_VERSION="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+          fi
+          printf 'HELM_VERSION=%s\n' "$HELM_VERSION" >> "$GITHUB_ENV"
       # --- Determine checkout ref (dispatch only) ---
       # Normally checks out `develop`. If v$VERSION already exists on origin,
       # this is a partial-recovery dispatch and we must check out that tag so
@@ -641,7 +646,7 @@ jobs:
           version: v3.9.2
       - name: Set Chart.yaml version
         run: |
-          sed -i "s/^version: .*/version: \"$VERSION\"/" helm/Chart.yaml
+          sed -i "s/^version: .*/version: \"$HELM_VERSION\"/" helm/Chart.yaml
           grep -E '^version:' helm/Chart.yaml
       - name: Helm lint
         run: helm lint ./helm
@@ -667,7 +672,7 @@ jobs:
           REGISTRY_ALIAS: zenml
           REPOSITORY: kitaru
         run: |-
-          helm push "${REPOSITORY}-${VERSION}.tgz" \
+          helm push "${REPOSITORY}-${HELM_VERSION}.tgz" \
             "oci://${REGISTRY}/${REGISTRY_ALIAS}"
 
       # --- Dry-run summary ---
@@ -689,7 +694,7 @@ jobs:
             echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
             echo ""
             echo "### Helm chart"
-            echo "Built (not pushed): kitaru-${VERSION}.tgz"
+            echo "Built (not pushed): kitaru-${HELM_VERSION}.tgz"
             echo ""
             echo "No changes were pushed, published, or tagged."
           } >> "$GITHUB_STEP_SUMMARY"
