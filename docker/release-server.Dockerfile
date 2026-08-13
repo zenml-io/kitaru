@@ -49,6 +49,7 @@ ARG KITARU_VERSION
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
+COPY --chown=$USERNAME:$USER_GID docker/install-release-wheel.sh ./
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -70,11 +71,7 @@ RUN test -n "$KITARU_VERSION" && \
     --no-install-project \
     --extra server \
     --extra otel && \
-  uv pip install \
-    --no-deps \
-    --only-binary=:all: \
-    --exclude-newer-package "kitaru=0 days" \
-    "kitaru==$KITARU_VERSION" && \
+  sh ./install-release-wheel.sh && \
   uv pip check && \
   python -c \
     "from kitaru.server.api.main import app; assert callable(app)" && \

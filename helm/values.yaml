@@ -261,41 +261,44 @@ server:
     # NOTE: it is recommended to use the `server.certificates` option instead to
     # configure the CA certificate globally. This option only applies to the
     # PostgreSQL database.
-    sslCa:
-      # value: |
-      #   -----BEGIN CERTIFICATE-----
-      #   ...
-      #   -----END CERTIFICATE-----
-      #
-      # secretRef:
-      #   name: ca-certificate
-      #   key: ca.pem
+    # sslCa:
+    #   value: |
+    #     -----BEGIN CERTIFICATE-----
+    #     ...
+    #     -----END CERTIFICATE-----
+    #
+    #   secretRef:
+    #     name: ca-certificate
+    #     key: ca.pem
+    sslCa: {}
 
     # The PostgreSQL SSL client certificate. Required for SSL enabled authentication
     # if client certificates are used. Can be provided as an inline value or as
     # a Kubernetes secret reference.
-    sslCert:
-      # value: |
-      #   -----BEGIN CERTIFICATE-----
-      #   ...
-      #   -----END CERTIFICATE-----
-      #
-      # secretRef:
-      #   name: client-certificate
-      #   key: client-cert.pem
+    # sslCert:
+    #   value: |
+    #     -----BEGIN CERTIFICATE-----
+    #     ...
+    #     -----END CERTIFICATE-----
+    #
+    #   secretRef:
+    #     name: client-certificate
+    #     key: client-cert.pem
+    sslCert: {}
 
     # The PostgreSQL SSL client key. Required for SSL enabled authentication if
     # client certificates are used. Can be provided as an inline value or as
     # a Kubernetes secret reference.
-    sslKey:
-      # value: |
-      #   -----BEGIN PRIVATE KEY-----
-      #   ...
-      #   -----END PRIVATE KEY-----
-      #
-      # secretRef:
-      #   name: client-key
-      #   key: client-key.pem
+    # sslKey:
+    #   value: |
+    #     -----BEGIN PRIVATE KEY-----
+    #     ...
+    #     -----END PRIVATE KEY-----
+    #
+    #   secretRef:
+    #     name: client-key
+    #     key: client-key.pem
+    sslKey: {}
 
     # SQLAlchemy connection pool settings.
     poolSize: 5
