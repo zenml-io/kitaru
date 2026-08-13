@@ -78,10 +78,14 @@ class StubInvestigationClient:
                 "investigation_id": str(self.investigation.id),
                 "session_id": str(self.session_ids[0]),
                 "position": 0,
-                "question": "What caused the failure?",
+                "questions": [
+                    {
+                        "key": "root-cause",
+                        "question": "What caused the failure?",
+                        "highlights": [],
+                    }
+                ],
                 "verdict": None,
-                "view": None,
-                "highlights": [],
             },
         )
         self.agent_lookups = 0
@@ -167,23 +171,10 @@ class StubInvestigationClient:
             return self.owner.investigation_session
 
 
-async def test_create_maps_sessions_views_questions_and_highlights_to_sdk() -> None:
-    """Create preserves session order and validates curated per-session fields."""
+async def test_create_maps_sessions_questions_and_highlights_to_sdk() -> None:
+    """Create groups keyed questions and highlights per session."""
     client = StubInvestigationClient()
-    node_id = uuid.uuid4()
     highlight_node_id = uuid.uuid4()
-    view = json.dumps(
-        {
-            "summary": "The failed tool call",
-            "items": [
-                {
-                    "label": "Failure",
-                    "description": "The tool returned an error.",
-                    "selectors": [{"node_id": str(node_id)}],
-                }
-            ],
-        }
-    )
     highlights = json.dumps(
         [{"selector": {"node_id": str(highlight_node_id)}, "description": "Odd retry."}]
     )
@@ -194,9 +185,12 @@ async def test_create_maps_sessions_views_questions_and_highlights_to_sdk() -> N
         agent="assistant",
         description="Review selected failures",
         session_ids=client.session_ids,
-        session_views=[f"{client.session_ids[1]}={view}"],
-        session_questions=[f"{client.session_ids[0]}=What caused it?"],
-        session_highlights=[f"{client.session_ids[1]}={highlights}"],
+        session_questions=[
+            f"{client.session_ids[0]}:root-cause=What caused it?",
+            f"{client.session_ids[1]}:root-cause=What caused it?",
+            f"{client.session_ids[1]}:retry=Was the retry appropriate?",
+        ],
+        session_highlights=[f"{client.session_ids[1]}:retry={highlights}"],
     )
 
     [request] = client.create_calls
@@ -207,29 +201,24 @@ async def test_create_maps_sessions_views_questions_and_highlights_to_sdk() -> N
         "sessions": [
             {
                 "session_id": str(client.session_ids[0]),
-                "question": "What caused it?",
+                "questions": [
+                    {"key": "root-cause", "question": "What caused it?"},
+                ],
             },
             {
                 "session_id": str(client.session_ids[1]),
-                "view": {
-                    "summary": "The failed tool call",
-                    "items": [
-                        {
-                            "label": "Failure",
-                            "description": "The tool returned an error.",
-                            "selectors": [
-                                {
-                                    "node_id": str(node_id),
-                                }
-                            ],
-                        }
-                    ],
-                },
-                "highlights": [
+                "questions": [
+                    {"key": "root-cause", "question": "What caused it?"},
                     {
-                        "selector": {"node_id": str(highlight_node_id)},
-                        "description": "Odd retry.",
-                    }
+                        "key": "retry",
+                        "question": "Was the retry appropriate?",
+                        "highlights": [
+                            {
+                                "selector": {"node_id": str(highlight_node_id)},
+                                "description": "Odd retry.",
+                            }
+                        ],
+                    },
                 ],
             },
         ],
@@ -238,70 +227,75 @@ async def test_create_maps_sessions_views_questions_and_highlights_to_sdk() -> N
 
 
 @pytest.mark.parametrize(
-    ("sessions", "views", "questions", "highlights", "message"),
+    ("sessions", "questions", "highlights", "message"),
     [
         (
             [uuid.UUID(int=1), uuid.UUID(int=1)],
             [],
             [],
-            [],
             "--session value must be unique",
         ),
-        ([], [f"{uuid.UUID(int=2)}={{}}"], [], [], "also be selected with --session"),
         (
-            [],
             [],
             ["missing-separator"],
             [],
-            "--session-question must be SESSION=QUESTION",
+            "--session-question must be SESSION:KEY=QUESTION",
         ),
         (
             [],
-            [],
             [f"{uuid.UUID(int=2)}=why?"],
+            [],
+            "--session-question must start with SESSION:KEY",
+        ),
+        (
+            [],
+            [f"{uuid.UUID(int=2)}:root-cause=why?"],
             [],
             "also be selected with --session",
         ),
         (
             [uuid.UUID(int=3)],
+            [
+                f"{uuid.UUID(int=3)}:root-cause=why?",
+                f"{uuid.UUID(int=3)}:root-cause=why not?",
+            ],
             [],
-            [f"{uuid.UUID(int=3)}=why?", f"{uuid.UUID(int=3)}=why not?"],
-            [],
-            "session must be unique",
+            "key must be unique per session",
         ),
         (
-            [],
             [],
             [],
             ["missing-separator"],
-            "--session-highlights must be SESSION=JSON_ARRAY",
+            "--session-highlights must be SESSION:KEY=JSON_ARRAY",
         ),
         (
             [],
             [],
-            [],
-            [f"{uuid.UUID(int=2)}=why?"],
+            [f"{uuid.UUID(int=2)}:root-cause=why?"],
             "also be selected with --session",
         ),
         (
             [uuid.UUID(int=4)],
             [],
-            [],
-            [f"{uuid.UUID(int=4)}=not-json"],
+            [f"{uuid.UUID(int=4)}:root-cause=not-json"],
             "--session-highlights is not valid JSON",
         ),
         (
             [uuid.UUID(int=4)],
             [],
-            [],
-            [f"{uuid.UUID(int=4)}={{}}"],
+            [f"{uuid.UUID(int=4)}:root-cause={{}}"],
             "--session-highlights must contain a JSON array",
+        ),
+        (
+            [uuid.UUID(int=5)],
+            [f"{uuid.UUID(int=5)}:root-cause=why?"],
+            [f"{uuid.UUID(int=5)}:retry=[]"],
+            "has no matching --session-question",
         ),
     ],
 )
 async def test_create_validation_precedes_agent_lookup(
     sessions: list[uuid.UUID],
-    views: list[str],
     questions: list[str],
     highlights: list[str],
     message: str,
@@ -316,7 +310,6 @@ async def test_create_validation_precedes_agent_lookup(
             agent="assistant",
             description=None,
             session_ids=sessions,
-            session_views=views,
             session_questions=questions,
             session_highlights=highlights,
         )

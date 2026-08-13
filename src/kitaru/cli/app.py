@@ -1822,25 +1822,18 @@ async def cohort_version_delete(
                 "Ordered session UUID; repeat for each linked session.",
             ),
             ParameterSpec(
-                "--session-view",
-                "SESSION=JSON_OBJECT[]",
-                "option",
-                False,
-                "Curated view for a session selected with --session.",
-            ),
-            ParameterSpec(
                 "--session-question",
-                "SESSION=QUESTION[]",
+                "SESSION:KEY=QUESTION[]",
                 "option",
                 False,
-                "Question for a session selected with --session.",
+                "Keyed question for a session selected with --session.",
             ),
             ParameterSpec(
                 "--session-highlights",
-                "SESSION=JSON_ARRAY[]",
+                "SESSION:KEY=JSON_ARRAY[]",
                 "option",
                 False,
-                "Curated highlights for a session selected with --session.",
+                "Curated highlights for a question added with --session-question.",
             ),
         ),
         read_only=False,
@@ -1856,7 +1849,6 @@ async def investigation_create(
     agent: str,
     description: str | None = None,
     session: list[uuid.UUID] | None = None,
-    session_view: list[str] | None = None,
     session_question: list[str] | None = None,
     session_highlights: list[str] | None = None,
 ) -> CommandResult:
@@ -1868,7 +1860,6 @@ async def investigation_create(
             agent=agent,
             description=description,
             session_ids=session or [],
-            session_views=session_view or [],
             session_questions=session_question or [],
             session_highlights=session_highlights or [],
         )
@@ -2081,6 +2072,13 @@ async def investigation_session_verdict(
                 "Investigation-session ID for an answer.",
             ),
             ParameterSpec(
+                "--question-key",
+                "string",
+                "option",
+                False,
+                "Key of the question being answered.",
+            ),
+            ParameterSpec(
                 "--selector",
                 "JSON object",
                 "option",
@@ -2100,6 +2098,7 @@ async def annotation_create(
     value: str,
     session: uuid.UUID | None = None,
     investigation_session: uuid.UUID | None = None,
+    question_key: str | None = None,
     selector: str | None = None,
 ) -> CommandResult:
     """Create one manual annotation or investigation answer."""
@@ -2109,6 +2108,7 @@ async def annotation_create(
             value=value,
             session_id=session,
             investigation_session_id=investigation_session,
+            question_key=question_key,
             selector=selector,
         )
 

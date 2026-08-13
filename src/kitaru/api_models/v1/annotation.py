@@ -73,6 +73,7 @@ class InvestigationAnswerCreateRequest(RequestModel):
     investigation_session_id: uuid.UUID = Field(
         description="Investigation session being answered."
     )
+    question_key: str = Field(description="Key of the question being answered.")
     selector: AnnotationSelector | None = Field(
         default=None, description="Part of the session being annotated."
     )
@@ -101,6 +102,9 @@ class AnnotationResponse(OwnedResponseModel):
     session_id: uuid.UUID = Field(description="Session being annotated.")
     investigation_session_id: uuid.UUID | None = Field(
         default=None, description="Investigation session being answered."
+    )
+    question_key: str | None = Field(
+        default=None, description="Key of the question being answered."
     )
     selector: AnnotationSelector | None = Field(
         default=None, description="Part of the session being annotated."

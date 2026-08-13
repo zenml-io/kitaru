@@ -17,12 +17,9 @@ import uuid
 from collections.abc import Mapping
 from typing import ClassVar
 
-from pydantic import Field
-
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionHighlight,
+    InvestigationSessionQuestion,
     InvestigationSessionVerdict,
-    InvestigationSessionView,
     InvestigationStatus,
 )
 from kitaru.base import FrozenModel
@@ -61,9 +58,7 @@ class InvestigationSessionInput(FrozenModel):
     """Investigation session input."""
 
     session_id: uuid.UUID
-    question: str | None = None
-    view: InvestigationSessionView | None = None
-    highlights: list[InvestigationSessionHighlight] = Field(default_factory=list)
+    questions: list[InvestigationSessionQuestion]
 
 
 class InvestigationCreate(FrozenModel):

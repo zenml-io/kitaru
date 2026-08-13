@@ -47,5 +47,6 @@ class InvestigationAnswerCreate(FrozenModel):
     """Investigation answer create command."""
 
     investigation_session_id: uuid.UUID
+    question_key: str
     selector: AnnotationSelector | None = None
     value: Any

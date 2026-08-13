@@ -31,6 +31,7 @@ from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionHighlight,
+    InvestigationSessionQuestion,
     InvestigationSessionVerdict,
     InvestigationStatus,
 )
@@ -146,6 +147,7 @@ def _link(
         "investigation_id": investigation_id,
         "session_id": session_id,
         "position": position,
+        "questions": [],
     }
     values.update(overrides)
     return InvestigationSession(**values)
@@ -590,8 +592,8 @@ async def test_get_session(setup: Setup) -> None:
     assert loaded == linked
 
 
-async def test_create_stores_session_question_and_highlights(setup: Setup) -> None:
-    """Persist a linked session's question and highlights, set at create."""
+async def test_create_stores_session_questions_and_highlights(setup: Setup) -> None:
+    """Persist a linked session's questions and highlights, set at create."""
     repository, owner_id, agent_id, make_session_id, _ = setup
     session_id = await make_session_id()
     other_session_id = await make_session_id()
@@ -607,27 +609,24 @@ async def test_create_stores_session_question_and_highlights(setup: Setup) -> No
             selector=AnnotationSelector(), description="Retried without backoff."
         )
     ]
+    questions = [
+        InvestigationSessionQuestion(
+            key="cause", question="What caused it?", highlights=highlights
+        )
+    ]
     created = await repository.create(
         investigation,
         [
-            _link(
-                investigation.id,
-                session_id,
-                0,
-                question="What caused it?",
-                highlights=highlights,
-            ),
+            _link(investigation.id, session_id, 0, questions=questions),
             _link(investigation.id, other_session_id, 1),
         ],
     )
     linked = await repository.get_session_by_session_id(created.id, session_id)
-    assert linked.question == "What caused it?"
-    assert linked.highlights == highlights
+    assert linked.questions == questions
     other_linked = await repository.get_session_by_session_id(
         created.id, other_session_id
     )
-    assert other_linked.question is None
-    assert other_linked.highlights == []
+    assert other_linked.questions == []
 
 
 async def test_get_session_not_found(setup: Setup) -> None:
@@ -674,8 +673,8 @@ async def test_update_session(setup: Setup) -> None:
     assert loaded == updated
 
 
-async def test_update_session_leaves_highlights_untouched(setup: Setup) -> None:
-    """Leave a linked session's highlights, set at create, untouched by the verdict."""
+async def test_update_session_leaves_questions_untouched(setup: Setup) -> None:
+    """Leave a linked session's questions, set at create, untouched by the verdict."""
     repository, owner_id, agent_id, make_session_id, _ = setup
     session_id = await make_session_id()
     investigation = Investigation(
@@ -690,15 +689,20 @@ async def test_update_session_leaves_highlights_untouched(setup: Setup) -> None:
             selector=AnnotationSelector(), description="Retried without backoff."
         )
     ]
+    questions = [
+        InvestigationSessionQuestion(
+            key="cause", question="What caused it?", highlights=highlights
+        )
+    ]
     created = await repository.create(
         investigation,
-        [_link(investigation.id, session_id, 0, highlights=highlights)],
+        [_link(investigation.id, session_id, 0, questions=questions)],
     )
     linked = await repository.get_session_by_session_id(created.id, session_id)
     linked.update_verdict(InvestigationSessionVerdict.UNCERTAIN)
     updated = await repository.update_session(linked)
     assert updated.verdict is InvestigationSessionVerdict.UNCERTAIN
-    assert updated.highlights == highlights
+    assert updated.questions == questions
     loaded = await repository.get_session(linked.id)
     assert loaded == updated
 
@@ -707,7 +711,7 @@ async def test_update_session_not_found(setup: Setup) -> None:
     """Raise for an unknown investigation session id."""
     repository, _, _, _, _ = setup
     session = InvestigationSession(
-        investigation_id=uuid.uuid4(), session_id=uuid.uuid4(), position=0
+        investigation_id=uuid.uuid4(), session_id=uuid.uuid4(), position=0, questions=[]
     )
     with pytest.raises(
         InvestigationSessionNotFound,

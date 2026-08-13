@@ -43,6 +43,7 @@ class Annotation(DomainModel):
     owner_id: uuid.UUID
     session_id: uuid.UUID
     investigation_session_id: uuid.UUID | None = None
+    question_key: str | None = None
     selector: AnnotationSelector | None = None
     value: Any
     created: datetime | None = None

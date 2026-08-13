@@ -108,8 +108,7 @@ _DESCRIPTION = HumanField("description", "Description")
 _METADATA = HumanField("metadata", "Metadata")
 _INVESTIGATION_SESSION_FIELDS = (
     HumanField("verdict", "Verdict"),
-    HumanField("question", "Question"),
-    HumanField("highlights", "Highlights", formatter=_format_count),
+    HumanField("questions", "Questions", formatter=_format_count),
     HumanField("session_id", "Session"),
     _ID,
 )
@@ -404,7 +403,7 @@ _VIEWS: dict[str, HumanView] = {
         (
             HumanField("position", "Position"),
             HumanField("verdict", "Verdict"),
-            HumanField("question", "Question"),
+            HumanField("questions", "Questions", formatter=_format_count),
             HumanField("session_id", "Session", no_wrap=True),
             _ID,
         ),

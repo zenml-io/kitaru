@@ -16,7 +16,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKeyConstraint, Index
+from sqlalchemy import ForeignKeyConstraint, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -36,6 +36,8 @@ ANNOTATION_INVESTIGATION_SESSION_ID_FOREIGN_KEY = foreign_key_name(
 )
 ANNOTATION_OWNER_ID_INDEX = index_name("annotation", ["owner_id"])
 ANNOTATION_SESSION_ID_INDEX = index_name("annotation", ["session_id"])
+
+QUESTION_KEY_LENGTH = 64
 
 
 class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -65,6 +67,7 @@ class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID]
     session_id: Mapped[uuid.UUID]
     investigation_session_id: Mapped[uuid.UUID | None]
+    question_key: Mapped[str | None] = mapped_column(String(QUESTION_KEY_LENGTH))
     selector: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     value: Mapped[Any] = mapped_column(JSONB)
 
@@ -83,6 +86,7 @@ class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "owner_id": annotation.owner_id,
             "session_id": annotation.session_id,
             "investigation_session_id": annotation.investigation_session_id,
+            "question_key": annotation.question_key,
             "selector": (
                 annotation.selector.model_dump(mode="json")
                 if annotation.selector is not None
@@ -114,6 +118,7 @@ class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=self.owner_id,
             session_id=self.session_id,
             investigation_session_id=self.investigation_session_id,
+            question_key=self.question_key,
             selector=(
                 AnnotationSelector.model_validate(self.selector)
                 if self.selector is not None
