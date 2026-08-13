@@ -24,6 +24,7 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
+    build_scope_condition_binding,
     build_tag_condition_binding,
     compile_filter_expression,
 )
@@ -33,6 +34,7 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
@@ -40,6 +42,7 @@ from kitaru.server.adapters.db.orm.session import (
 from kitaru.server.adapters.db.orm.task import (
     TASK_INPUT_SESSION_ID_FOREIGN_KEY,
     TASK_RESULT_SESSION_ID_FOREIGN_KEY,
+    TaskORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
@@ -55,6 +58,37 @@ from kitaru.server.domain.session import (
     SessionRollups,
 )
 from kitaru.server.filtering import FilterCondition
+
+# A replay's tasks share its job, and the run owns the replay.
+_scopes_to_experiment_run = build_scope_condition_binding(
+    local_column=TaskORM.job_id,
+    related_key=ReplayORM.job_id,
+    scope_column=ReplayORM.experiment_run_id,
+)
+
+
+def _compile_experiment_run_condition(
+    condition: FilterCondition,
+) -> ColumnElement[bool]:
+    """Compile an experiment run scope condition into a task predicate.
+
+    Args:
+        condition: Validated experiment run condition.
+
+    Returns:
+        SQL predicate.
+    """
+    # Matched through the task's result session, so a run's baseline sessions
+    # stay out of the result set.
+    run_tasks = (
+        select(TaskORM.id)
+        .where(
+            TaskORM.result_session_id == SessionORM.id,
+            _scopes_to_experiment_run(condition),
+        )
+        .correlate(SessionORM)
+    )
+    return run_tasks.exists()
 
 
 def _compile_cohort_version_condition(
@@ -112,6 +146,7 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": SessionORM.name,
     "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
     "cohort_version_id": _compile_cohort_version_condition,
+    "experiment_run_id": _compile_experiment_run_condition,
     "has_evaluation": _compile_has_evaluation_condition,
     "started_at": SessionORM.started_at,
     "ended_at": SessionORM.ended_at,
