@@ -7,6 +7,7 @@ export type {
   SessionNodeResponse,
   SessionResponse,
   SessionUpdateRequest,
+  TaskSpecResponse,
   ToolLookupRequest,
   ToolLookupResponse,
 } from "./client.js";

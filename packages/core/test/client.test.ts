@@ -12,6 +12,7 @@ const SESSION_ID = "018f0000-0000-7000-8000-000000000001";
 const NODE_ID = "018f0000-0000-7000-8000-000000000002";
 const REPLAY_ID = "018f0000-0000-7000-8000-000000000003";
 const ORIGINAL_SESSION_ID = "018f0000-0000-7000-8000-000000000004";
+const TASK_ID = "018f0000-0000-7000-8000-000000000005";
 
 const sessionResponse = {
   id: SESSION_ID,
@@ -192,6 +193,27 @@ describe("KitaruClient", () => {
     await expect(
       client.upsertSessionNodes(SESSION_ID, { nodes: [] }),
     ).rejects.toThrow("invalid node_type");
+  });
+
+  it("loads an agent task spec for inputs omitted from the environment", async () => {
+    const taskSpec = {
+      details: { inputs: "stored prompt", kind: "agent" },
+      env: {},
+      kind: "agent",
+      secret_env: {},
+      task_id: TASK_ID,
+      timeout_seconds: 60,
+    };
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse(taskSpec),
+    );
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await expect(client.getTaskSpec(TASK_ID)).resolves.toEqual(taskSpec);
+    expect(fetch).toHaveBeenCalledWith(
+      `https://api.example/v1/tasks/${TASK_ID}/spec`,
+      expect.objectContaining({ method: "GET" }),
+    );
   });
 
   it("retries node upsert with the identical body and node indexes", async () => {

@@ -5,6 +5,7 @@ import type {
   SessionNodeResponse,
   SessionResponse,
   SessionUpdateRequest,
+  TaskSpecResponse,
   ToolLookupRequest,
   ToolLookupResponse,
 } from "@zenml-io/kitaru";
@@ -13,6 +14,7 @@ import type { AdapterClient } from "@zenml-io/kitaru/adapter";
 export const AGENT_ID = "018f0000-0000-7000-8000-000000000100";
 export const REPLAY_ID = "018f0000-0000-7000-8000-000000000101";
 export const SESSION_ID = "018f0000-0000-7000-8000-000000000102";
+export const TASK_ID = "018f0000-0000-7000-8000-000000000104";
 
 export const TEST_USAGE = {
   inputTokens: {
@@ -53,6 +55,7 @@ export interface FakeClientOptions {
   failNodeBatch?: (batch: SessionNodeBatchRequest, index: number) => boolean;
   lookup?: (request: ToolLookupRequest) => ToolLookupResponse;
   replay?: ReplayResponse;
+  taskInput?: unknown;
   updateFails?: boolean;
 }
 
@@ -81,6 +84,17 @@ export class FakeClient implements AdapterClient {
   async getReplay(): Promise<ReplayResponse> {
     this.replayReads += 1;
     return this.#options.replay ?? replaySpec();
+  }
+
+  async getTaskSpec(): Promise<TaskSpecResponse> {
+    return {
+      details: { inputs: this.#options.taskInput, kind: "agent" },
+      env: {},
+      kind: "agent",
+      secret_env: {},
+      task_id: TASK_ID,
+      timeout_seconds: 60,
+    } as TaskSpecResponse;
   }
 
   async lookupToolResult(

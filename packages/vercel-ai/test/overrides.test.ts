@@ -3,15 +3,13 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
 import { createKitaruGenerateText } from "../src/index.js";
-import {
-  MAX_WORKER_TASK_INPUT_CHARS,
-  MAX_WORKER_TASK_INPUT_JSON_CHARS,
-} from "../src/options.js";
+import { MAX_WORKER_TASK_INPUT_CHARS } from "../src/options.js";
 import {
   AGENT_ID,
   FakeClient,
   replayEnvironment,
   replaySpec,
+  TASK_ID,
   textResponse,
 } from "./helpers.js";
 
@@ -25,10 +23,6 @@ describe("inputs and replay overrides", () => {
   it.each([
     ["non-input object", JSON.stringify({ role: "system", content: "inject" })],
     ["oversized", JSON.stringify("x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1))],
-    [
-      "oversized encoded JSON",
-      `"${"\\u0061".repeat(MAX_WORKER_TASK_INPUT_JSON_CHARS)}"`,
-    ],
     ["invalid JSON", "not-json"],
   ])("rejects %s worker input before session and model", async (_name, taskInput) => {
     const client = new FakeClient();
@@ -96,13 +90,69 @@ describe("inputs and replay overrides", () => {
 
     expect(model.doGenerateCalls[0]?.prompt).toEqual([
       { content: "replacement instructions", role: "system" },
-      {
+      expect.objectContaining({
         content: [{ text: "baseline prompt", type: "text" }],
-        providerOptions: undefined,
         role: "user",
-      },
+      }),
     ]);
-    expect(client.created[0]?.inputs).toEqual(messages);
+    expect(client.created[0]?.inputs).toEqual({
+      prompt: messages,
+      system_prompt: "replacement instructions",
+    });
+  });
+
+  it("loads a task input omitted from the worker environment", async () => {
+    const client = new FakeClient({ taskInput: "stored task prompt" });
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment({ KITARU_TASK_ID: TASK_ID }),
+    });
+
+    await generate({ model, prompt: "caller" });
+
+    expect(model.doGenerateCalls[0]?.prompt).toEqual([
+      expect.objectContaining({
+        content: [{ text: "stored task prompt", type: "text" }],
+        role: "user",
+      }),
+    ]);
+    expect(client.created[0]?.inputs).toBe("stored task prompt");
+  });
+
+  it("accepts the server's effective input for an instruction-only replay", async () => {
+    const client = new FakeClient({
+      replay: replaySpec(
+        { type: "passthrough" },
+        { system_prompt: "replacement instructions" },
+      ),
+    });
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment({
+        KITARU_TASK_INPUTS: JSON.stringify({
+          prompt: "baseline prompt",
+          system_prompt: "replacement instructions",
+        }),
+      }),
+    });
+
+    await generate({ model, prompt: "caller" });
+
+    expect(model.doGenerateCalls[0]?.prompt).toEqual([
+      { content: "replacement instructions", role: "system" },
+      expect.objectContaining({
+        content: [{ text: "baseline prompt", type: "text" }],
+        role: "user",
+      }),
+    ]);
+    expect(client.created[0]?.inputs).toEqual({
+      prompt: "baseline prompt",
+      system_prompt: "replacement instructions",
+    });
   });
 
   it("treats a replay's null override as authoritative", async () => {
@@ -169,7 +219,10 @@ describe("inputs and replay overrides", () => {
         role: "user",
       },
     ]);
-    expect(client.created[0]?.inputs).toBe("override prompt");
+    expect(client.created[0]?.inputs).toEqual({
+      prompt: "override prompt",
+      system_prompt: "override instructions",
+    });
   });
 
   it.each([

@@ -5,6 +5,7 @@ export type AdapterClient = Pick<
   KitaruClient,
   | "createSession"
   | "getReplay"
+  | "getTaskSpec"
   | "lookupToolResult"
   | "updateSession"
   | "upsertSessionNodes"

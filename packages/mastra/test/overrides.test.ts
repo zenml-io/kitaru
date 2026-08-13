@@ -71,7 +71,10 @@ describe("replay overrides", () => {
     expect(
       api.calls.find((call) => call.path === "/v1/sessions")?.body,
     ).toMatchObject({
-      inputs: "replacement prompt",
+      inputs: {
+        prompt: "replacement prompt",
+        system_prompt: "replacement instructions",
+      },
       origin: "replay",
     });
     const llm = api

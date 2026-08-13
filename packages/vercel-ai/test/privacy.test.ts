@@ -91,7 +91,7 @@ describe("recording privacy", () => {
         model,
         prompt: "x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1),
       }),
-    ).rejects.toThrow("recorded input exceeds maximum string length");
+    ).rejects.toThrow("exceeds maximum length");
     expect(client.created).toHaveLength(0);
     expect(model.doGenerateCalls).toHaveLength(0);
   });

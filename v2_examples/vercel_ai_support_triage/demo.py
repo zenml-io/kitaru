@@ -321,7 +321,10 @@ async def run_demo(
 
     assert result_session.status is SessionStatus.COMPLETED
     assert result_session.origin is SessionOrigin.REPLAY
-    assert result_session.inputs == OVERRIDE_PROMPT
+    assert result_session.inputs == {
+        "prompt": OVERRIDE_PROMPT,
+        "system_prompt": OVERRIDE_SYSTEM,
+    }
     _assert_recorded_shape(replay_nodes)
     action_nodes = [
         node

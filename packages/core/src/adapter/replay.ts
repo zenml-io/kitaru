@@ -10,14 +10,21 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-export function parseReplayId(value: string | undefined): string | undefined {
+function parseUuidEnvironment(
+  name: string,
+  value: string | undefined,
+): string | undefined {
   if (value === undefined) {
     return undefined;
   }
   if (!UUID_PATTERN.test(value)) {
-    throw new TypeError("KITARU_REPLAY_ID must be a UUID");
+    throw new TypeError(`${name} must be a UUID`);
   }
   return value;
+}
+
+export function parseReplayId(value: string | undefined): string | undefined {
+  return parseUuidEnvironment("KITARU_REPLAY_ID", value);
 }
 
 export function parseJsonEnvironment(name: string, value: string): unknown {
@@ -98,6 +105,61 @@ export interface ReplayContext {
   spec?: ReplaySpec;
 }
 
+async function resolveWorkerInput(options: {
+  callerInput: unknown;
+  client: AdapterClient;
+  environment: KitaruEnvironmentVariables;
+}): Promise<unknown> {
+  const taskInputs = options.environment.KITARU_TASK_INPUTS;
+  if (taskInputs !== undefined) {
+    return parseJsonEnvironment("KITARU_TASK_INPUTS", taskInputs);
+  }
+  const taskId = parseUuidEnvironment(
+    "KITARU_TASK_ID",
+    options.environment.KITARU_TASK_ID,
+  );
+  if (taskId === undefined) {
+    return options.callerInput;
+  }
+  const spec = await options.client.getTaskSpec(taskId);
+  if (spec.kind !== "agent" || spec.details.kind !== "agent") {
+    throw new TypeError(`Task ${taskId} is not an agent task`);
+  }
+  return spec.details.inputs;
+}
+
+function runtimeInput(
+  workerInput: unknown,
+  override: ReplayOverride | undefined,
+): unknown {
+  if (override?.prompt !== undefined && override.prompt !== null) {
+    return override.prompt;
+  }
+  if (
+    override?.system_prompt !== undefined &&
+    override.system_prompt !== null &&
+    isRecord(workerInput) &&
+    Object.hasOwn(workerInput, "prompt")
+  ) {
+    return workerInput.prompt;
+  }
+  return workerInput;
+}
+
+function recordedInput(
+  effectiveRuntimeInput: unknown,
+  override: ReplayOverride | undefined,
+): JsonValue {
+  return toRecorderJson(
+    override?.system_prompt === undefined || override.system_prompt === null
+      ? effectiveRuntimeInput
+      : {
+          prompt: effectiveRuntimeInput,
+          system_prompt: override.system_prompt,
+        },
+  );
+}
+
 export async function resolveReplayContext(options: {
   callerInput: unknown;
   client: AdapterClient;
@@ -107,11 +169,11 @@ export async function resolveReplayContext(options: {
   const environment = options.environment ?? process.env;
   const replayId = parseReplayId(environment.KITARU_REPLAY_ID);
   const spec = replayId ? await options.client.getReplay(replayId) : undefined;
-  const taskInputs = environment.KITARU_TASK_INPUTS;
-  const workerInput =
-    taskInputs === undefined
-      ? options.callerInput
-      : parseJsonEnvironment("KITARU_TASK_INPUTS", taskInputs);
+  const workerInput = await resolveWorkerInput({
+    callerInput: options.callerInput,
+    client: options.client,
+    environment,
+  });
   const override = spec
     ? spec.override
       ? parseReplayOverride(spec.override, "replay override")
@@ -122,8 +184,8 @@ export async function resolveReplayContext(options: {
           "KITARU_OVERRIDE",
         )
       : undefined;
-  const effectiveRuntimeInput = override?.prompt ?? workerInput;
-  const effectiveInput = toRecorderJson(effectiveRuntimeInput);
+  const effectiveRuntimeInput = runtimeInput(workerInput, override);
+  const effectiveInput = recordedInput(effectiveRuntimeInput, override);
 
   return {
     effectiveInput,

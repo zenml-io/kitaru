@@ -15,6 +15,7 @@ export type SessionNodeBatchRequest =
 export type SessionResponse = components["schemas"]["SessionResponse"];
 export type SessionNodeResponse = components["schemas"]["SessionNodeResponse"];
 export type ReplayResponse = components["schemas"]["ReplayResponse"];
+export type TaskSpecResponse = components["schemas"]["TaskSpecResponse"];
 export type ToolLookupRequest = components["schemas"]["ToolLookupRequest"];
 export type ToolLookupResponse = components["schemas"]["ToolLookupResponse"];
 
@@ -143,6 +144,29 @@ function validateReplay(
     validationError(method, path, status, "missing tool_policy");
   }
   validateToolPolicy(value.tool_policy, method, path, status);
+}
+
+function validateTaskSpec(
+  value: unknown,
+  method: HttpMethod,
+  path: string,
+  status: number,
+): asserts value is TaskSpecResponse {
+  if (!isRecord(value)) {
+    validationError(method, path, status, "expected a task spec object");
+  }
+  requireId(value, "task_id", method, path, status);
+  requireString(value, "kind", method, path, status);
+  if (!isRecord(value.details) || typeof value.details.kind !== "string") {
+    validationError(method, path, status, "missing task details");
+  }
+  if (
+    value.kind === "agent" &&
+    value.details.kind === "agent" &&
+    !Object.hasOwn(value.details, "inputs")
+  ) {
+    validationError(method, path, status, "missing task inputs");
+  }
 }
 
 function validateToolPolicyConfig(
@@ -281,6 +305,14 @@ export class KitaruClient {
     const path = `/v1/replays/${encodeURIComponent(replayId)}`;
     const response = await this.#request(method, path, undefined, false);
     validateReplay(response.value, method, path, response.status);
+    return response.value;
+  }
+
+  async getTaskSpec(taskId: string): Promise<TaskSpecResponse> {
+    const method = "GET";
+    const path = `/v1/tasks/${encodeURIComponent(taskId)}/spec`;
+    const response = await this.#request(method, path, undefined, false);
+    validateTaskSpec(response.value, method, path, response.status);
     return response.value;
   }
 

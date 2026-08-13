@@ -6,6 +6,7 @@ import type {
   SessionNodeResponse,
   SessionResponse,
   SessionUpdateRequest,
+  TaskSpecResponse,
   ToolLookupRequest,
   ToolLookupResponse,
 } from "../../../packages/core/dist/index.js";
@@ -31,6 +32,10 @@ export class SmokeClient implements AdapterClient {
 
   async getReplay(): Promise<ReplayResponse> {
     throw new Error("SmokeClient does not support replay metadata");
+  }
+
+  async getTaskSpec(): Promise<TaskSpecResponse> {
+    throw new Error("SmokeClient does not support task execution");
   }
 
   async lookupToolResult(

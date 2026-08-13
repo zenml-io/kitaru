@@ -1,17 +1,6 @@
 import { createRequire } from "node:module";
-import {
-  type JsonValue,
-  KitaruClient,
-  type KitaruEnvironmentVariables,
-  type ReplaySpec,
-} from "@zenml-io/kitaru";
-import {
-  type AdapterClient,
-  modelReplacement,
-  parseJsonEnvironment,
-  parseReplayId,
-  RunRecorder,
-} from "@zenml-io/kitaru/adapter";
+import { type JsonValue, KitaruClient } from "@zenml-io/kitaru";
+import { RunRecorder, resolveReplayContext } from "@zenml-io/kitaru/adapter";
 import {
   generateText,
   type LanguageModel,
@@ -114,31 +103,6 @@ function applyOverride(
   }
 }
 
-async function replayConfiguration(options: {
-  client: AdapterClient;
-  environment: KitaruEnvironmentVariables;
-}): Promise<{
-  override?: SafeReplayOverride;
-  replayId?: string;
-  spec?: ReplaySpec;
-}> {
-  const replayId = parseReplayId(options.environment.KITARU_REPLAY_ID);
-  const spec = replayId ? await options.client.getReplay(replayId) : undefined;
-  const rawOverride = spec
-    ? spec.override
-    : options.environment.KITARU_OVERRIDE
-      ? parseJsonEnvironment(
-          "KITARU_OVERRIDE",
-          options.environment.KITARU_OVERRIDE,
-        )
-      : undefined;
-  return {
-    override: parseVercelReplayOverride(rawOverride, "replay override"),
-    replayId,
-    spec,
-  };
-}
-
 async function resolveReplacementModel(options: {
   adapter: KitaruVercelAIOptions;
   modelId: string | undefined;
@@ -192,15 +156,23 @@ export function createKitaruGenerateText(
       );
     }
 
-    const replay = await replayConfiguration({ client, environment });
-    const taskInput = parseWorkerTaskInput(environment.KITARU_TASK_INPUTS);
+    const replay = await resolveReplayContext({
+      callerInput: effectiveRuntimeInput(callerOptions),
+      client,
+      environment,
+      requestedModelId,
+    });
+    const override = parseVercelReplayOverride(
+      replay.override,
+      "replay override",
+    );
+    const taskInput = parseWorkerTaskInput(replay.effectiveRuntimeInput);
     const effectiveOptions: RuntimeOptions = { ...callerOptions };
-    applyOverride(effectiveOptions, replay.override, taskInput);
+    applyOverride(effectiveOptions, override, taskInput);
 
-    const replacementId = modelReplacement(replay.override, requestedModelId);
     const replacementModel = await resolveReplacementModel({
       adapter: adapterOptions,
-      modelId: replacementId,
+      modelId: replay.replacementModelId,
     });
     if (replacementModel) {
       effectiveOptions.model = replacementModel;
@@ -219,9 +191,7 @@ export function createKitaruGenerateText(
       });
     }
 
-    const recordedInput = projectRecordedInput(
-      effectiveRuntimeInput(effectiveOptions),
-    );
+    const recordedInput = projectRecordedInput(replay.effectiveInput);
     const effectiveModelSettings = callerModelSettings(effectiveOptions);
     const recorder = await RunRecorder.create({
       adapterVersion: ADAPTER_VERSION,

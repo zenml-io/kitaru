@@ -5,6 +5,7 @@ import type {
   SessionNodeResponse,
   SessionResponse,
   SessionUpdateRequest,
+  TaskSpecResponse,
   ToolLookupRequest,
   ToolLookupResponse,
 } from "@zenml-io/kitaru";
@@ -23,6 +24,10 @@ export class SmokeClient implements AdapterClient {
 
   async getReplay(): Promise<ReplayResponse> {
     throw new Error("SmokeClient does not support replay");
+  }
+
+  async getTaskSpec(): Promise<TaskSpecResponse> {
+    throw new Error("SmokeClient does not support task execution");
   }
 
   async lookupToolResult(

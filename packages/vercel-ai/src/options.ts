@@ -1,8 +1,6 @@
 import type { JsonValue, ReplayOverride } from "@zenml-io/kitaru";
-import { parseJsonEnvironment } from "@zenml-io/kitaru/adapter";
 
 export const MAX_WORKER_TASK_INPUT_CHARS = 4_096;
-export const MAX_WORKER_TASK_INPUT_JSON_CHARS = 65_536;
 export const MAX_OVERRIDE_JSON_CHARS = 32_768;
 export const MAX_RECORDED_STRING_CHARS = 4_096;
 export const MAX_RECORDED_JSON_CHARS = 65_536;
@@ -204,31 +202,25 @@ export function projectRecordedMetadata(value: unknown): JsonValue {
 }
 
 export function parseWorkerTaskInput(
-  value: string | undefined,
+  value: unknown,
 ): string | JsonValue[] | undefined {
   if (value === undefined) {
     return undefined;
   }
-  if (value.length > MAX_WORKER_TASK_INPUT_JSON_CHARS) {
-    throw new TypeError(
-      `KITARU_TASK_INPUTS exceeds maximum encoded JSON size ${MAX_WORKER_TASK_INPUT_JSON_CHARS}`,
-    );
-  }
-  const parsed = parseJsonEnvironment("KITARU_TASK_INPUTS", value);
-  if (typeof parsed === "string") {
-    if (parsed.length > MAX_WORKER_TASK_INPUT_CHARS) {
+  if (typeof value === "string") {
+    if (value.length > MAX_WORKER_TASK_INPUT_CHARS) {
       throw new TypeError(
         `KITARU_TASK_INPUTS exceeds maximum length ${MAX_WORKER_TASK_INPUT_CHARS}`,
       );
     }
-    return parsed;
+    return value;
   }
-  if (!Array.isArray(parsed)) {
+  if (!Array.isArray(value)) {
     throw new TypeError(
       "KITARU_TASK_INPUTS must contain a JSON string or message array",
     );
   }
-  const messages = boundedRecorderJson(parsed, "KITARU_TASK_INPUTS");
+  const messages = boundedRecorderJson(value, "KITARU_TASK_INPUTS");
   if (!Array.isArray(messages)) {
     throw new TypeError("KITARU_TASK_INPUTS must contain a message array");
   }

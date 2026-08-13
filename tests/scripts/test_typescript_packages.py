@@ -4,7 +4,6 @@ import subprocess
 from pathlib import Path
 
 import pytest
-import yaml
 
 REPO_ROOT = Path(__file__).parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "typescript-packages.mjs"
@@ -137,23 +136,20 @@ def test_typescript_release_metadata_classifies_stable_versions(
 
 def test_typescript_release_workflow_contract() -> None:
     workflow_source = WORKFLOW_PATH.read_text()
-    workflow = yaml.safe_load(workflow_source)
-    build_job = workflow["jobs"]["build"]
-    publish_job = workflow["jobs"]["publish"]
-    verify_job = workflow["jobs"]["verify-and-release"]
-    publish_source, verify_source = workflow_source.split("\n  publish:\n", maxsplit=1)[
-        1
-    ].split("\n  verify-and-release:\n", maxsplit=1)
+    build_source, remaining = workflow_source.split("\n  publish:\n", maxsplit=1)
+    publish_source, verify_source = remaining.split(
+        "\n  verify-and-release:\n", maxsplit=1
+    )
 
     assert "typescript/kitaru/v*" in workflow_source
-    assert publish_job["if"] == "github.event_name == 'push'"
-    assert publish_job["needs"] == "build"
-    assert verify_job["needs"] == ["build", "publish"]
+    assert "if: github.event_name == 'push'" in publish_source
+    assert "needs: build" in publish_source
+    assert "needs: [build, publish]" in verify_source
     assert "node scripts/typescript-packages.mjs --tag" in workflow_source
-    assert "pnpm run pack:release:built" in workflow_source
-    assert publish_job["environment"] == "npm-publish"
-    assert publish_job["permissions"] == {"contents": "read", "id-token": "write"}
-    assert verify_job["permissions"] == {"contents": "write"}
+    assert "run: pnpm run pack:release:built" in build_source
+    assert "environment: npm-publish" in publish_source
+    assert "contents: read\n      id-token: write" in publish_source
+    assert "permissions:\n      contents: write" in verify_source
     assert "--provenance" in publish_source
     assert "preflight_package" in publish_source
     assert "NPM_CONFIG_USERCONFIG" in publish_source
@@ -167,31 +163,18 @@ def test_typescript_release_workflow_contract() -> None:
     assert publish_source.index(
         "zenml-io-kitaru-mastra-${VERSION}.tgz"
     ) < publish_source.index("zenml-io-kitaru-vercel-ai-${VERSION}.tgz")
-    assert any(
-        step.get("with", {}).get("name") == "typescript-distributions"
-        for step in publish_job["steps"]
-    )
-    assert any(
-        step.get("with", {}).get("name") == "typescript-distributions"
-        for step in verify_job["steps"]
-    )
-    assert any(
-        step.get("run") == "pnpm run pack:release:built" for step in build_job["steps"]
-    )
+    assert "name: typescript-distributions" in publish_source
+    assert "name: typescript-distributions" in verify_source
 
 
 def test_typescript_ci_owns_cross_language_tests() -> None:
-    workflow = yaml.safe_load(CI_WORKFLOW_PATH.read_text())
-    base_jobs = [
-        job
-        for job in workflow["jobs"]["test"]["strategy"]["matrix"]["include"]
-        if job["name"].endswith("-base")
-    ]
-    assert base_jobs
-    assert all(
-        "--ignore=tests/typescript" in job["pytest-command"] for job in base_jobs
-    )
-    assert any(
-        step.get("run") == "uv run pytest -q tests/typescript"
-        for step in workflow["jobs"]["typescript"]["steps"]
-    )
+    workflow_source = CI_WORKFLOW_PATH.read_text()
+    typescript_job = workflow_source.split("\n  typescript:\n", maxsplit=1)[1].split(
+        "\n  client-import:\n", maxsplit=1
+    )[0]
+    base_matrix = workflow_source.split("\n          - name: py311-base\n", maxsplit=1)[
+        1
+    ].split("\n          - name: py311-cli\n", maxsplit=1)[0]
+
+    assert base_matrix.count("--ignore=tests/typescript") == 4
+    assert "run: uv run pytest -q tests/typescript" in typescript_job

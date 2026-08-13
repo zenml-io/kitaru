@@ -4,7 +4,7 @@ import {
   parseReplayId,
   resolveReplayContext,
 } from "../../src/adapter/index.js";
-import { fakeClient, REPLAY_ID, replay } from "./helpers.js";
+import { fakeClient, REPLAY_ID, replay, TASK_ID } from "./helpers.js";
 
 describe("adapter replay preparation", () => {
   it("keeps caller input and legacy override outside replay", async () => {
@@ -22,7 +22,10 @@ describe("adapter replay preparation", () => {
     });
 
     expect(context).toMatchObject({
-      effectiveInput: { source: "caller" },
+      effectiveInput: {
+        prompt: { source: "caller" },
+        system_prompt: "instructions",
+      },
       effectiveRuntimeInput: { source: "caller" },
       override: {
         model: "replacement",
@@ -53,11 +56,49 @@ describe("adapter replay preparation", () => {
     });
 
     expect(context).toMatchObject({
-      effectiveInput: "replay prompt",
+      effectiveInput: {
+        prompt: "replay prompt",
+        system_prompt: "replay instructions",
+      },
       effectiveRuntimeInput: "replay prompt",
       replayId: REPLAY_ID,
       replacementModelId: "replay-model",
       spec,
+    });
+  });
+
+  it("loads task inputs omitted from the worker environment", async () => {
+    const context = await resolveReplayContext({
+      callerInput: "caller prompt",
+      client: fakeClient({ taskInput: "stored task prompt" }),
+      environment: { KITARU_TASK_ID: TASK_ID },
+      requestedModelId: "requested",
+    });
+
+    expect(context.effectiveRuntimeInput).toBe("stored task prompt");
+    expect(context.effectiveInput).toBe("stored task prompt");
+  });
+
+  it("unwraps the server's effective input when only instructions change", async () => {
+    const spec = replay();
+    spec.override = { system_prompt: "replacement instructions" };
+    const context = await resolveReplayContext({
+      callerInput: "caller prompt",
+      client: fakeClient({ replay: spec }),
+      environment: {
+        KITARU_REPLAY_ID: REPLAY_ID,
+        KITARU_TASK_INPUTS: JSON.stringify({
+          prompt: "worker prompt",
+          system_prompt: "replacement instructions",
+        }),
+      },
+      requestedModelId: "requested",
+    });
+
+    expect(context.effectiveRuntimeInput).toBe("worker prompt");
+    expect(context.effectiveInput).toEqual({
+      prompt: "worker prompt",
+      system_prompt: "replacement instructions",
     });
   });
 

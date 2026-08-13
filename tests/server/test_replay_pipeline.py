@@ -60,7 +60,6 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
-from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, AgentTaskDetails, EvaluationTask
 from kitaru.server.filtering import FilterCondition
@@ -127,22 +126,12 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     """A standalone replay runs through the whole pipeline to completion."""
     agent_version = await _agent_version_with_run_spec(services)
     evaluator = await _evaluator_version(services, "accuracy")
-    baseline = await create_session(
-        services.sessions,
-        ACTOR.account.id,
-        agent_id=agent_version.agent_id,
-        agent_version_id=agent_version.id,
-        origin=SessionOrigin.RECORDED,
-        inputs="baseline prompt",
-    )
+    baseline = await _baseline_session(services, agent_version)
 
     bundle = await services.replay_service.create_replay(
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
-            override=ReplayOverride(
-                prompt="replacement prompt", system_prompt="replacement instructions"
-            ),
         ),
         actor=ACTOR,
     )
