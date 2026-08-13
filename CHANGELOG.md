@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc1]
+
+### Changed
+
+- Prepared the second Kitaru 0.22 release candidate with the frontend from RC0 and the current `develop` source.
+
 ## [0.22.0rc0]
 
 ### Added
