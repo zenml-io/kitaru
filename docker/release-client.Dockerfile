@@ -68,6 +68,7 @@ RUN test -n "$KITARU_VERSION" && \
   uv pip install \
     --no-deps \
     --only-binary=:all: \
+    --exclude-newer-package "kitaru=0 days" \
     "kitaru==$KITARU_VERSION" && \
   uv pip check && \
   python -c "import kitaru" && \
