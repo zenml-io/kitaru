@@ -365,7 +365,9 @@ git tag -a "$TAG" "$RELEASE_SHA" -m "$TAG"
 git push origin "$TAG"
 ```
 
-The tag push starts the `Release plugin` workflow. The workflow derives the package and version from the tag. It rejects a tag whose commit is not contained in `origin/main`. It also rejects an existing PyPI version. It then runs the tests, builds the selected distribution, publishes through PyPI Trusted Publishing, and creates a GitHub Release with the wheel and source distribution.
+The tag push starts the `Release Python package` workflow. The workflow derives the package and version from the tag. It rejects a tag whose commit is not contained in `origin/develop`. It then runs the tests, builds the selected distribution, publishes through PyPI Trusted Publishing, and creates a GitHub Release with the wheel, source distribution, and checksums.
+
+If publication stops after PyPI accepts one or more files, rerun the failed jobs from the same workflow run. The rerun downloads the original build artifact, skips files that PyPI already accepted, and creates or updates the GitHub Release. Do not move or recreate the release tag.
 
 Watch the run and require a successful conclusion:
 
