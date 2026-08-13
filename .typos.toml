@@ -5,7 +5,6 @@ extend-exclude = [
     "examples/pydantic_ai_ticket_resolver/traces/*.jsonl",
     "*.js",
     "*.ipynb",
-    "examples/end_to_end/replay_fork_demo/trace_fixtures/support-traces.jsonl",
     "uv.lock",
     "docs/pnpm-lock.yaml",
     "docs/.source/",
