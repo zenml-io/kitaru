@@ -15,6 +15,7 @@ interface ToolLedgerEntry {
   callId: string;
   error?: { message: string; name: string };
   inputs: JsonValue;
+  inputsLossy?: boolean;
   mocked: boolean;
   outcome: "completed" | "failed" | "pending";
   output?: JsonValue;

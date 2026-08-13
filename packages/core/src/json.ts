@@ -8,8 +8,15 @@ interface ConversionBudget {
   items: number;
 }
 
-function isPlainObject(value: object): boolean {
-  const prototype = Object.getPrototypeOf(value);
+/**
+ * Report whether an object's own enumerable keys are all it carries.
+ *
+ * A URL, Map, Set, RegExp, or class instance keeps its contents behind
+ * accessors or internal slots that a walk over its own keys never sees, so it
+ * converts to `{}` or to a partial object that another value can also produce.
+ */
+export function isPlainObject(value: object): boolean {
+  const prototype: unknown = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
 }
 

@@ -2,15 +2,18 @@ export type { CostCalculator, CostInput, ResolvedCost } from "./cost.js";
 export { resolveCost } from "./cost.js";
 export { MODEL_SETTING_KEYS, parseModelSettings } from "./model-settings.js";
 export { providerFamily } from "./provider.js";
+export type { RecordedConversion } from "./recorded-json.js";
 export {
   assertSafeKeys,
   boundedRecordedText,
+  boundedRecorderConversion,
   boundedRecorderJson,
   boundRecordedSize,
   MAX_RECORDED_PAYLOAD_CHARS,
   MAX_RECORDED_STRING_CHARS,
   projectRecordedInput,
   projectRecordedMetadata,
+  recordedPayloadConversion,
   recordedPayloadJson,
   runResultSummary,
   strictRecordedJson,

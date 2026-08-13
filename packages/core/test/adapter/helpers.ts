@@ -1,4 +1,5 @@
 import type { AdapterClient } from "../../src/adapter/index.js";
+import { RunState } from "../../src/adapter/run-state.js";
 import type {
   ReplayResponse,
   SessionCreateRequest,
@@ -32,6 +33,26 @@ export function replay(
     status: "pending",
     tool_policy: toolPolicy,
   } as ReplayResponse;
+}
+
+/** Build a replaying run and the client whose calls it makes observable. */
+export function runState(
+  toolPolicy: Parameters<typeof replay>[0],
+  lookup?: (request: ToolLookupRequest) => unknown,
+): { client: FakeClient; run: RunState } {
+  const spec = replay(toolPolicy);
+  const client = fakeClient({ lookup, replay: spec });
+  return {
+    client,
+    run: new RunState({
+      client,
+      effectiveInput: "input",
+      replayId: REPLAY_ID,
+      requestedModelId: "model",
+      sessionId: SESSION_ID,
+      spec,
+    }),
+  };
 }
 
 export function fakeClient(

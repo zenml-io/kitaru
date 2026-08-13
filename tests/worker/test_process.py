@@ -318,9 +318,6 @@ def test_get_python_run_argv_with_dependencies() -> None:
     assert argv == [
         "uv",
         "run",
-        "--no-sync",
-        "--exclude-newer",
-        "0 days",
         "--with",
         "requests<3",
         "--with",
@@ -330,11 +327,3 @@ def test_get_python_run_argv_with_dependencies() -> None:
         "kitaru.task",
         "import",
     ]
-
-
-def test_get_python_run_argv_neutralizes_ambient_exclude_newer() -> None:
-    """A project's exclude-newer cutoff cannot filter a server-pinned package."""
-    argv = get_python_run_argv(
-        "kitaru.task", ["evaluate"], ["kitaru-evaluator==0.1.0rc0"]
-    )
-    assert argv[:5] == ["uv", "run", "--no-sync", "--exclude-newer", "0 days"]

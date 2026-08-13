@@ -1,4 +1,4 @@
-export { computeToolCacheKey } from "./cache-key.js";
+export { computeToolCacheKey, historyCacheKey } from "./cache-key.js";
 export type {
   KitaruClientOptions,
   ReplayResponse,

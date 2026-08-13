@@ -1,5 +1,5 @@
 import {
-  computeToolCacheKey,
+  historyCacheKey,
   type JsonValue,
   type ReplaySpec,
   ToolPolicyError,
@@ -11,6 +11,8 @@ import {
   completeToolCall,
   decideToolCall,
   failToolCall,
+  type RecordedConversion,
+  recordedPayloadConversion,
   recordedPayloadJson,
   selectToolPolicy,
 } from "@zenml-io/kitaru/adapter";
@@ -116,11 +118,12 @@ function setBaselineLedger(
   state: AdapterRunState,
   callId: string,
   toolName: string,
-  input: JsonValue,
+  input: RecordedConversion,
 ): void {
   state.setToolCall({
     callId,
-    inputs: input,
+    inputs: input.value,
+    inputsLossy: input.lossy,
     mocked: false,
     outcome: "pending",
     toolName,
@@ -178,7 +181,7 @@ function executeBaseline(options: {
   execute: ExecutableTool["execute"];
   executionOptions: ToolExecutionOptions<never>;
   input: never;
-  serializedInput: JsonValue;
+  serializedInput: RecordedConversion;
   state: AdapterRunState;
   toolName: string;
 }): unknown {
@@ -278,10 +281,11 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
         executionOptions: ToolExecutionOptions<never>,
       ) => {
         const callId = executionOptions.toolCallId;
-        const serializedInput = recordedPayloadJson(
+        const convertedInput = recordedPayloadConversion(
           input,
           `tool '${toolName}' input`,
         );
+        const serializedInput = convertedInput.value;
         const spec = options.state.spec;
         if (!spec) {
           return executeBaseline({
@@ -289,17 +293,23 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
             execute: originalExecute,
             executionOptions,
             input,
-            serializedInput,
+            serializedInput: convertedInput,
             state: options.state,
             toolName,
           });
         }
         const executeReplay = async () => {
           // Under passthrough a repeated call runs live and resolves to its own
-          // result, so the warning would be both wrong and pure cost.
+          // result, so the warning would be both wrong and pure cost. A call
+          // with no history key resolves to no recorded result either, which
+          // `historyCacheKey` reports by returning nothing.
           if (selectToolPolicy(spec, toolName).type === "history") {
             warnOnRepeatedCall({
-              cacheKey: computeToolCacheKey(toolName, serializedInput),
+              cacheKey: historyCacheKey(
+                toolName,
+                serializedInput,
+                convertedInput.lossy,
+              ),
               seen: replayedCalls,
               toolName,
               warned: warnedRepeats,
@@ -308,6 +318,7 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
           const decision = await decideToolCall(options.state, {
             callId,
             inputs: serializedInput,
+            inputsLossy: convertedInput.lossy,
             toolName,
           });
           if (decision.type === "mocked_result") {

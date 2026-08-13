@@ -1,4 +1,4 @@
-import { computeToolCacheKey } from "../cache-key.js";
+import { historyCacheKey } from "../cache-key.js";
 import { ToolPolicyError, ToolPolicyMissError } from "../errors.js";
 import { recorderError, toRecorderJson } from "../json.js";
 import type { JsonValue, ToolPolicy } from "../types.js";
@@ -14,6 +14,10 @@ export type ToolPolicyDecision =
 export interface ToolCallInput {
   callId: string;
   inputs: JsonValue;
+  // True when converting the arguments for recording dropped or altered part
+  // of them. Set it from the converter rather than guessing: a value that lost
+  // information no longer identifies the call it came from.
+  inputsLossy?: boolean;
   toolName: string;
 }
 
@@ -122,12 +126,12 @@ function policyMiss(
   entry: ToolLedgerEntry,
   policy: "history" | "static",
   onMiss: "error_result" | "fail" | "passthrough",
+  message = `No ${policy} result for tool '${entry.toolName}'`,
 ): ToolPolicyDecision {
   if (onMiss === "passthrough") {
     entry.policy = undefined;
     return { type: "execute" };
   }
-  const message = `No ${policy} result for tool '${entry.toolName}'`;
   entry.policy = policy;
   if (onMiss === "error_result") {
     const output = { error: message };
@@ -163,6 +167,7 @@ export async function decideToolCall(
   const entry: ToolLedgerEntry = {
     callId: input.callId,
     inputs: input.inputs,
+    inputsLossy: input.inputsLossy,
     mocked: false,
     outcome: "pending",
     startedAt: new Date().toISOString(),
@@ -193,9 +198,23 @@ export async function decideToolCall(
     }
 
     entry.policy = "history";
-    const cacheKey = computeToolCacheKey(input.toolName, input.inputs);
+    const cacheKey = historyCacheKey(
+      input.toolName,
+      input.inputs,
+      input.inputsLossy === true,
+    );
     if (cacheKey === undefined) {
-      return policyMiss(entry, "history", policy.on_miss);
+      // A call with no key of its own never gets to look: the lookup would
+      // confidently return another call's recorded result.
+      return policyMiss(
+        entry,
+        "history",
+        policy.on_miss,
+        input.inputsLossy === true
+          ? `Tool '${input.toolName}' arguments could not be recorded ` +
+              "losslessly, so they could not be matched against recorded history"
+          : undefined,
+      );
     }
     if (!state.replayId) {
       throw new ToolPolicyError("History policy requires a replay ID");

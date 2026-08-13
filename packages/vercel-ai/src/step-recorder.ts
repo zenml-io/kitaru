@@ -5,6 +5,8 @@ import {
   boundRecordedSize,
   type NormalizedToolCall,
   projectRecordedMetadata,
+  type RecordedConversion,
+  recordedPayloadConversion,
   recordedPayloadJson,
   recordNormalizedStep,
   resolveCost,
@@ -38,13 +40,35 @@ function resultPart(
   );
 }
 
-function normalizedTools(step: StepResult<ToolSet>): NormalizedToolCall[] {
+// The tool wrapper converts every tool input it intercepts and stores the
+// result on the run's ledger, so the recorder reads that back rather than
+// walking the same payload a second time. Converting twice also computes the
+// lossy verdict twice, and the trace attribute and the history-lookup guard
+// have to tell the same story about the call. A tool the wrapper never saw
+// (provider-executed, or one with no local execute function) has no ledger
+// entry and is converted here.
+function toolInputConversion(
+  state: AdapterRunState,
+  call: { input: unknown; toolCallId: string; toolName: string },
+): RecordedConversion {
+  const entry = state.getToolCall(call.toolCallId);
+  return entry === undefined
+    ? recordedPayloadConversion(call.input, `tool '${call.toolName}' input`)
+    : { lossy: entry.inputsLossy === true, value: entry.inputs };
+}
+
+function normalizedTools(
+  state: AdapterRunState,
+  step: StepResult<ToolSet>,
+): NormalizedToolCall[] {
   return step.toolCalls.map((call) => {
     const part = resultPart(step.content, call.toolCallId);
     const failed = part?.type === "tool-error";
+    const inputs = toolInputConversion(state, call);
     return {
       callId: call.toolCallId,
-      inputs: recordedPayloadJson(call.input, `tool '${call.toolName}' input`),
+      inputs: inputs.value,
+      inputsLossy: inputs.lossy,
       publicError: failed ? "Tool execution failed" : undefined,
       result:
         part === undefined
@@ -120,7 +144,7 @@ export async function recordVercelStep(
     requestedModelId: state.requestedModelId,
     tokens,
   });
-  const tools = normalizedTools(step);
+  const tools = normalizedTools(state, step);
   await recordNormalizedStep(state, {
     attributes: {
       cost: cost.attribute,

@@ -7,7 +7,7 @@ import type {
 import { ToolPolicyError } from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
-  boundedRecorderJson,
+  boundedRecorderConversion,
   completeToolCall,
   decideToolCall,
   failToolCall,
@@ -95,12 +95,14 @@ export function createReplayToolHooks(options: ReplayHookOptions): ToolHooks {
         throw state.failure;
       }
       const callId = toolCallId(hookContext.context);
+      const converted = boundedRecorderConversion(
+        hookContext.input,
+        `tool '${hookContext.toolName}' input`,
+      );
       const decision = await decideToolCall(state, {
         callId,
-        inputs: boundedRecorderJson(
-          hookContext.input,
-          `tool '${hookContext.toolName}' input`,
-        ),
+        inputs: converted.value,
+        inputsLossy: converted.lossy,
         toolName: hookContext.toolName,
       });
       if (decision.type === "mocked_result") {

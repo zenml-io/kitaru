@@ -125,6 +125,12 @@ uv run kitaru session list \
 
 ## 4. Measure and review the baseline
 
+A built-in evaluator runs as a `uv run --with kitaru-evaluator==VERSION` subprocess, and `uv` applies the `exclude-newer` cutoff configured in whichever project the worker runs from. This repository sets one, so for the first few days after a `kitaru-evaluator` release the pinned version is filtered out and every evaluation task fails with `No solution found`. Start the worker with the cutoff moved to now when that happens:
+
+```bash
+UV_EXCLUDE_NEWER="$(date -u +%Y-%m-%dT%H:%M:%SZ)" uv run kitaru worker start --name vercel-returns-example-worker
+```
+
 Run the broad deterministic evaluators over only the manifest sessions:
 
 ```bash

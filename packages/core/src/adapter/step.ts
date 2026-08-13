@@ -14,6 +14,7 @@ export interface NormalizedToolResult {
 export interface NormalizedToolCall {
   callId: string;
   inputs: JsonValue;
+  inputsLossy?: boolean;
   publicError?: string;
   result?: NormalizedToolResult;
   startedAt?: string;
@@ -36,7 +37,26 @@ export interface NormalizedModelStep {
   tools: NormalizedToolCall[];
 }
 
-function policyAttributes(
+/**
+ * Describe how a recorded tool call was decided and how faithfully it was kept.
+ *
+ * `inputs_bounded` says the recorded arguments are a bounded copy rather than
+ * the arguments themselves, which is why the call is not eligible for a history
+ * lookup: an operator reading the trace would otherwise see arguments that look
+ * ordinary and wonder why no recorded result matched them. How a call was
+ * decided is read from a different place on each path, so the caller supplies
+ * those attributes and only the faithfulness rule is stated here.
+ */
+function toolCallAttributes(
+  policyAttributes: Record<string, JsonValue>,
+  inputsBounded: boolean,
+): Record<string, JsonValue> {
+  return inputsBounded
+    ? { ...policyAttributes, inputs_bounded: true }
+    : policyAttributes;
+}
+
+function policyAttributesFromLedger(
   ledgerEntry: ToolLedgerEntry | undefined,
 ): Record<string, JsonValue> {
   if (!ledgerEntry?.mocked || !ledgerEntry.policy) {
@@ -58,7 +78,10 @@ function toolNode(
     call.result.failed;
   return {
     ...state.allocateNode(),
-    attributes: policyAttributes(ledgerEntry),
+    attributes: toolCallAttributes(
+      policyAttributesFromLedger(ledgerEntry),
+      call.inputsLossy === true || ledgerEntry?.inputsLossy === true,
+    ),
     ended_at: endedAt,
     error: failed
       ? (ledgerEntry?.error?.message ??
@@ -136,10 +159,12 @@ export async function flushFailedPolicyOutcomes(
   const endedAt = new Date().toISOString();
   const nodes: SessionNodeCreateRequest[] = failedEntries.map((entry) => ({
     ...state.allocateNode(),
-    attributes:
+    attributes: toolCallAttributes(
       entry.policy === undefined
         ? {}
         : { mocked: entry.mocked, policy: entry.policy },
+      entry.inputsLossy === true,
+    ),
     ended_at: endedAt,
     error: entry.error?.message ?? "Tool policy failed",
     external_id: entry.callId,

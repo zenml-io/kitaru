@@ -157,9 +157,6 @@ async def test_evaluation_handler_script_plugin_materializes_and_sets_path(
     assert process.command == [
         "uv",
         "run",
-        "--no-sync",
-        "--exclude-newer",
-        "0 days",
         "--with",
         "numpy",
         "python",
@@ -187,9 +184,6 @@ async def test_evaluation_handler_package_plugin_skips_materialization(
     assert process.command == [
         "uv",
         "run",
-        "--no-sync",
-        "--exclude-newer",
-        "0 days",
         "--with",
         "pkg==1.0",
         "python",
@@ -275,9 +269,6 @@ async def test_import_handler_package_plugin_materializes_only_the_payload(
     assert process.command == [
         "uv",
         "run",
-        "--no-sync",
-        "--exclude-newer",
-        "0 days",
         "--with",
         "pkg==2.0",
         "python",

@@ -1,3 +1,4 @@
+import { isPlainObject } from "../json.js";
 import type { JsonValue } from "../types.js";
 
 export const MAX_RECORDED_STRING_CHARS = 4_096;
@@ -51,6 +52,12 @@ interface CloneBudget {
   chars: number;
 }
 
+/** A converted payload together with whether converting it lost information. */
+export interface RecordedConversion {
+  lossy: boolean;
+  value: JsonValue;
+}
+
 interface CloneOptions {
   // Counts down the characters the recorded JSON will need, so a runaway
   // payload stops early instead of being fully cloned and fully stringified
@@ -58,6 +65,12 @@ interface CloneOptions {
   // than the size ceiling: a payload merely near the ceiling still gets
   // converted, and the final size check decides what happens to it.
   budget: CloneBudget;
+  // Set by the walk when it drops or alters part of the original value. A
+  // converted value that lost information no longer identifies the value it
+  // came from: two different tool inputs can truncate, redact, or collapse
+  // onto one recorded value, and so onto one cache key. A caller that uses the
+  // recorded value as an identity reads this to find out whether it may.
+  lossy: boolean;
   maxDepth: number;
   maxItems: number;
   maxStringChars: number;
@@ -65,6 +78,10 @@ interface CloneOptions {
   rejectLongStrings: boolean;
   sensitiveKeyMode: SensitiveKeyMode;
   sensitiveKeys: ReadonlySet<string>;
+}
+
+function markLossy(options: CloneOptions): void {
+  options.lossy = true;
 }
 
 function spendBudget(options: CloneOptions, characters: number): void {
@@ -85,6 +102,7 @@ function boundedString(value: string, options: CloneOptions): JsonValue {
     );
   }
   spendBudget(options, options.maxStringChars);
+  markLossy(options);
   return `${value.slice(0, options.maxStringChars)}${TRUNCATED_MARKER}`;
 }
 
@@ -92,6 +110,7 @@ function unconvertible(options: CloneOptions, reason: string): JsonValue {
   if (options.rejectLongStrings) {
     throw new TypeError(`${options.path} ${reason}`);
   }
+  markLossy(options);
   return null;
 }
 
@@ -114,15 +133,20 @@ function cloneJson(
     return boundedString(value, options);
   }
   if (typeof value === "bigint") {
+    // The decimal text is indistinguishable from the same digits passed as a
+    // string, so the recorded value no longer says which one arrived.
+    markLossy(options);
     return boundedString(value.toString(10), options);
   }
   if (value === undefined) {
+    markLossy(options);
     return null;
   }
   if (typeof value !== "object") {
     if (options.rejectLongStrings) {
       throw new TypeError(`${options.path} must be JSON-compatible`);
     }
+    markLossy(options);
     return UNSUPPORTED_MARKER;
   }
   if (value instanceof Date) {
@@ -131,6 +155,9 @@ function cloneJson(
       : value.toISOString();
   }
   if (value instanceof Error) {
+    // The stack and any custom fields the error carries are dropped, so two
+    // errors that differ only there record as one value.
+    markLossy(options);
     return {
       message: boundedString(value.message, options),
       name: value.name,
@@ -140,6 +167,7 @@ function cloneJson(
     if (options.rejectLongStrings) {
       throw new TypeError(`${options.path} contains a cycle`);
     }
+    markLossy(options);
     return CIRCULAR_MARKER;
   }
   if (depth >= options.maxDepth) {
@@ -148,6 +176,7 @@ function cloneJson(
         `${options.path} exceeds maximum depth ${options.maxDepth}`,
       );
     }
+    markLossy(options);
     return TRUNCATED_MARKER;
   }
 
@@ -168,10 +197,13 @@ function cloneArray(
   depth: number,
   seen: Set<object>,
 ): JsonValue {
-  if (value.length > options.maxItems && options.rejectLongStrings) {
-    throw new TypeError(
-      `${options.path} exceeds maximum array length ${options.maxItems}`,
-    );
+  if (value.length > options.maxItems) {
+    if (options.rejectLongStrings) {
+      throw new TypeError(
+        `${options.path} exceeds maximum array length ${options.maxItems}`,
+      );
+    }
+    markLossy(options);
   }
   const limit = Math.min(value.length, options.maxItems);
   const items: JsonValue[] = [];
@@ -191,6 +223,9 @@ function cloneRecord(
   // reassigning the prototype of the recorded object, so an argument that
   // happens to be named "__proto__" is recorded and cache-keyed as it stands.
   const result: Record<string, JsonValue> = Object.create(null);
+  if (!isPlainObject(value)) {
+    markLossy(options);
+  }
   let kept = 0;
   for (const key in value) {
     if (!Object.hasOwn(value, key)) {
@@ -202,6 +237,7 @@ function cloneRecord(
           `${options.path} exceeds maximum object size ${options.maxItems}`,
         );
       }
+      markLossy(options);
       break;
     }
     kept += 1;
@@ -215,6 +251,7 @@ function cloneRecord(
           `${options.path} contains unsupported sensitive key '${key}'`,
         );
       }
+      markLossy(options);
       result[key] = REDACTED_MARKER;
       continue;
     }
@@ -239,67 +276,96 @@ function degradedPayload(path: string, reason: string): JsonValue {
 }
 
 function withoutFailing(
-  path: string,
+  options: CloneOptions,
   convertValue: () => JsonValue,
-): JsonValue {
+): RecordedConversion {
   try {
-    return convertValue();
+    const value = convertValue();
+    return { lossy: options.lossy, value };
   } catch (error) {
-    return degradedPayload(
-      path,
-      error instanceof Error ? error.message : String(error),
-    );
+    return {
+      lossy: true,
+      value: degradedPayload(
+        options.path,
+        error instanceof Error ? error.message : String(error),
+      ),
+    };
   }
 }
 
 /**
- * Convert a runtime payload for recording without ever failing the run.
+ * Convert a runtime payload for recording, reporting what the bounds dropped.
  *
  * Model text, tool arguments, and tool results routinely exceed any bound an
  * adapter picks, so oversized values are truncated, unconvertible ones get an
  * inline marker, and a payload past the size ceiling collapses to a degraded
  * marker. Throwing here would abort a generation the caller's own code handled.
  */
-export function recordedPayloadJson(value: unknown, path: string): JsonValue {
-  return withoutFailing(path, () => {
-    const converted = convert(value, {
-      budget: { chars: MAX_RECORDED_PAYLOAD_CHARS * 2 },
-      maxDepth: MAX_RECORDED_PAYLOAD_DEPTH,
-      maxItems: MAX_RECORDED_PAYLOAD_ITEMS,
-      maxStringChars: MAX_RECORDED_PAYLOAD_CHARS,
-      path,
-      rejectLongStrings: false,
-      sensitiveKeyMode: "allow",
-      sensitiveKeys: SENSITIVE_KEYS,
-    });
+export function recordedPayloadConversion(
+  value: unknown,
+  path: string,
+): RecordedConversion {
+  const options: CloneOptions = {
+    budget: { chars: MAX_RECORDED_PAYLOAD_CHARS * 2 },
+    lossy: false,
+    maxDepth: MAX_RECORDED_PAYLOAD_DEPTH,
+    maxItems: MAX_RECORDED_PAYLOAD_ITEMS,
+    maxStringChars: MAX_RECORDED_PAYLOAD_CHARS,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "allow",
+    sensitiveKeys: SENSITIVE_KEYS,
+  };
+  return withoutFailing(options, () => {
+    const converted = convert(value, options);
     assertJsonSize(converted, path, MAX_RECORDED_PAYLOAD_CHARS);
     return converted;
   });
 }
 
 /**
+ * Convert a runtime payload for recording without ever failing the run.
+ */
+export function recordedPayloadJson(value: unknown, path: string): JsonValue {
+  return recordedPayloadConversion(value, path).value;
+}
+
+/**
  * Convert a payload for recording with narrow bounds and credentials hidden.
  *
- * The bounds also decide the recorded tool arguments a replay looks results up
- * by, so only keys whose value is always a credential are redacted: redacting
- * an ordinary argument would make two different calls share one cache key.
+ * This path produces the recorded tool arguments a replay looks results up by,
+ * and a redacted argument marks the conversion lossy, which disqualifies the
+ * call from a history lookup altogether. Redacting the wider `SENSITIVE_KEYS`
+ * here would therefore take every tool that takes a `url`, `data`, `file`,
+ * `request`, or `providerOptions` argument out of recorded history in every
+ * replay, so only keys whose value is always a credential are redacted.
+ */
+export function boundedRecorderConversion(
+  value: unknown,
+  path: string,
+): RecordedConversion {
+  const options: CloneOptions = {
+    // The per-string, per-item, and depth bounds already cap this payload, and
+    // a whole-payload degraded marker is lossy, so budgeting the total size
+    // here would take every merely large tool input out of recorded history.
+    budget: { chars: Number.POSITIVE_INFINITY },
+    lossy: false,
+    maxDepth: MAX_RECORDED_DEPTH,
+    maxItems: MAX_RECORDED_ITEMS,
+    maxStringChars: MAX_RECORDED_STRING_CHARS,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "redact",
+    sensitiveKeys: SECRET_KEYS,
+  };
+  return withoutFailing(options, () => convert(value, options));
+}
+
+/**
+ * Convert a payload for recording with narrow bounds and credentials hidden.
  */
 export function boundedRecorderJson(value: unknown, path: string): JsonValue {
-  return withoutFailing(path, () =>
-    convert(value, {
-      // The per-string, per-item, and depth bounds already cap this payload,
-      // and a whole-payload marker here would give two different oversized
-      // tool inputs the same recorded value, and so the same cache key.
-      budget: { chars: Number.POSITIVE_INFINITY },
-      maxDepth: MAX_RECORDED_DEPTH,
-      maxItems: MAX_RECORDED_ITEMS,
-      maxStringChars: MAX_RECORDED_STRING_CHARS,
-      path,
-      rejectLongStrings: false,
-      sensitiveKeyMode: "redact",
-      sensitiveKeys: SECRET_KEYS,
-    }),
-  );
+  return boundedRecorderConversion(value, path).value;
 }
 
 /**
@@ -312,20 +378,22 @@ export function projectRecordedMetadata(
   value: unknown,
   path = "recorded metadata",
 ): JsonValue {
-  return withoutFailing(path, () => {
-    const converted = convert(value, {
-      budget: { chars: MAX_RECORDED_JSON_CHARS * 2 },
-      maxDepth: MAX_RECORDED_DEPTH,
-      maxItems: MAX_RECORDED_ITEMS,
-      maxStringChars: MAX_RECORDED_STRING_CHARS,
-      path,
-      rejectLongStrings: false,
-      sensitiveKeyMode: "redact",
-      sensitiveKeys: SENSITIVE_KEYS,
-    });
+  const options: CloneOptions = {
+    budget: { chars: MAX_RECORDED_JSON_CHARS * 2 },
+    lossy: false,
+    maxDepth: MAX_RECORDED_DEPTH,
+    maxItems: MAX_RECORDED_ITEMS,
+    maxStringChars: MAX_RECORDED_STRING_CHARS,
+    path,
+    rejectLongStrings: false,
+    sensitiveKeyMode: "redact",
+    sensitiveKeys: SENSITIVE_KEYS,
+  };
+  return withoutFailing(options, () => {
+    const converted = convert(value, options);
     assertJsonSize(converted, path, MAX_RECORDED_JSON_CHARS);
     return converted;
-  });
+  }).value;
 }
 
 /**
@@ -341,6 +409,7 @@ export function projectRecordedInput(
 ): JsonValue {
   const converted = convert(value, {
     budget: { chars: MAX_RECORDED_PAYLOAD_CHARS * 2 },
+    lossy: false,
     maxDepth: MAX_RECORDED_PAYLOAD_DEPTH,
     maxItems: MAX_RECORDED_PAYLOAD_ITEMS,
     maxStringChars: MAX_RECORDED_PAYLOAD_CHARS,
@@ -359,6 +428,7 @@ export function projectRecordedInput(
 export function strictRecordedJson(value: unknown, path: string): JsonValue {
   const converted = convert(value, {
     budget: { chars: MAX_RECORDED_JSON_CHARS * 2 },
+    lossy: false,
     maxDepth: MAX_RECORDED_DEPTH,
     maxItems: MAX_RECORDED_ITEMS,
     maxStringChars: MAX_RECORDED_STRING_CHARS,

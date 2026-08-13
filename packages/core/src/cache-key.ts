@@ -94,3 +94,20 @@ export function computeToolCacheKey(
     .update(canonical, "utf8")
     .digest("hex");
 }
+
+/**
+ * Compute the key a history lookup uses, or nothing when the call has no key.
+ *
+ * Recorded results are keyed by the converted arguments, and a conversion that
+ * truncated, redacted, or collapsed part of the arguments maps different calls
+ * onto one key. Such a call has no key of its own, so anything that reasons
+ * about which recorded result a call resolves to asks here rather than keying
+ * arguments that no longer identify the call they came from.
+ */
+export function historyCacheKey(
+  toolName: string,
+  inputs: JsonValue,
+  inputsLossy: boolean,
+): string | undefined {
+  return inputsLossy ? undefined : computeToolCacheKey(toolName, inputs);
+}

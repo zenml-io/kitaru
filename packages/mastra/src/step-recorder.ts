@@ -2,6 +2,7 @@ import type { LLMStepResult } from "@mastra/core/stream";
 import type { JsonValue, SessionNodeCreateRequest } from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
+  boundedRecorderConversion,
   boundedRecorderJson,
   type NormalizedToolCall,
   projectRecordedMetadata,
@@ -168,9 +169,14 @@ export async function recordStep(
   );
   const tools: NormalizedToolCall[] = calls.map((call) => {
     const result = results.get(call.toolCallId);
+    const inputs = boundedRecorderConversion(
+      call.args,
+      `tool '${call.toolName}' input`,
+    );
     return {
       callId: call.toolCallId,
-      inputs: boundedRecorderJson(call.args, `tool '${call.toolName}' input`),
+      inputs: inputs.value,
+      inputsLossy: inputs.lossy,
       publicError: toolErrorFromContent(step.content, call.toolCallId),
       result: result
         ? {

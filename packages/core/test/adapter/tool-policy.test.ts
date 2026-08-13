@@ -4,23 +4,15 @@ import {
   decideToolCall,
   failToolCall,
 } from "../../src/adapter/index.js";
-import { RunState } from "../../src/adapter/run-state.js";
+import type { RunState } from "../../src/adapter/run-state.js";
 import { ToolPolicyError, ToolPolicyMissError } from "../../src/errors.js";
-import { fakeClient, REPLAY_ID, replay, SESSION_ID } from "./helpers.js";
+import { type replay, runState } from "./helpers.js";
 
 function state(
   toolPolicy: Parameters<typeof replay>[0],
-  lookup?: (request: { cache_key: string; tool_name: string }) => unknown,
+  lookup?: Parameters<typeof runState>[1],
 ): RunState {
-  const spec = replay(toolPolicy);
-  return new RunState({
-    client: fakeClient({ lookup, replay: spec }),
-    effectiveInput: "input",
-    replayId: REPLAY_ID,
-    requestedModelId: "model",
-    sessionId: SESSION_ID,
-    spec,
-  });
+  return runState(toolPolicy, lookup).run;
 }
 
 describe("normalized replay policy decisions", () => {
