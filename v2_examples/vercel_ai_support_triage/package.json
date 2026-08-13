@@ -8,8 +8,8 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.20",
-    "@zenml-io/kitaru": "workspace:0.1.0-experimental.0",
-    "@zenml-io/kitaru-vercel-ai": "workspace:0.1.0-experimental.0",
+    "@zenml-io/kitaru": "workspace:*",
+    "@zenml-io/kitaru-vercel-ai": "workspace:*",
     "ai": "7.0.55"
   },
   "scripts": {

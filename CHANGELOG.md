@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ## [Unreleased]
 
 ### Added
+- TypeScript release packaging for the core, Mastra, and Vercel AI SDK packages, with lockstep release-candidate versions, clean-consumer tarball checks, npm publishing, and GitHub release artifacts.
 - Session lists filter by `experiment_run_id`, returning the sessions produced as the results of the run's replays. Baseline sessions do not match.
 - The PydanticAI adapter records estimated LLM costs from its bundled pricing catalog and accepts a custom cost calculator for private models or negotiated rates.
 - Service accounts, managed via `/v1/service-accounts`. A service account is created active without credentials and cannot be an admin, and admins update its metadata and active state. Account writes moved from `/v1/accounts` to `/v1/users` and `/v1/service-accounts`, leaving `/v1/accounts` read-only over both kinds with a new `is_service_account` filter and a `/v1/accounts/me` endpoint returning the calling account. Like all account management, service accounts require the `local` auth scheme and are unavailable when a control plane owns accounts.

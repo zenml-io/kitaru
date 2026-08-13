@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import { KitaruClient } from "@zenml-io/kitaru";
 import {
   RunRecorder,
@@ -13,7 +14,18 @@ import type {
   RuntimeGenerateOptions,
 } from "./types.js";
 
-const ADAPTER_VERSION = "0.1.0-experimental.0";
+const packageMetadata: unknown = createRequire(import.meta.url)(
+  "../package.json",
+);
+if (
+  typeof packageMetadata !== "object" ||
+  packageMetadata === null ||
+  !("version" in packageMetadata) ||
+  typeof packageMetadata.version !== "string"
+) {
+  throw new TypeError("The package manifest must contain a string version");
+}
+const ADAPTER_VERSION = packageMetadata.version;
 
 type RuntimeGenerate = (
   messages: unknown,

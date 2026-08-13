@@ -2,7 +2,11 @@
 
 Experimental non-streaming recording and replay support for Mastra 1.51.x.
 
-This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. Both packages can be built and packed locally, but neither has been published to npm.
+This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. Release candidates use npm's `rc` tag and remain pre-1.0 compatibility previews.
+
+```bash
+pnpm add @zenml-io/kitaru-mastra@rc @mastra/core@1.51.0
+```
 
 ```ts
 import { KitaruAgent } from "@zenml-io/kitaru-mastra";

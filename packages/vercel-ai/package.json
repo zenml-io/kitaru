@@ -1,7 +1,21 @@
 {
   "name": "@zenml-io/kitaru-vercel-ai",
-  "version": "0.1.0-experimental.0",
-  "description": "Experimental Kitaru tracing and replay adapter for the Vercel AI SDK",
+  "version": "0.1.0-rc.1",
+  "description": "Kitaru tracing and replay adapter for the Vercel AI SDK",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zenml-io/kitaru.git",
+    "directory": "packages/vercel-ai"
+  },
+  "homepage": "https://github.com/zenml-io/kitaru#readme",
+  "bugs": {
+    "url": "https://github.com/zenml-io/kitaru/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.22.0 <23"
@@ -24,7 +38,7 @@
     "vercel-ai-sdk"
   ],
   "dependencies": {
-    "@zenml-io/kitaru": "workspace:0.1.0-experimental.0"
+    "@zenml-io/kitaru": "workspace:0.1.0-rc.1"
   },
   "peerDependencies": {
     "ai": ">=7.0.0 <8.0.0"

@@ -1,3 +1,4 @@
+import { createRequire } from "node:module";
 import {
   type JsonValue,
   KitaruClient,
@@ -38,7 +39,18 @@ import {
 } from "./tool-wrapper.js";
 import type { KitaruGenerateText, KitaruVercelAIOptions } from "./types.js";
 
-const ADAPTER_VERSION = "0.1.0-experimental.0";
+const packageMetadata: unknown = createRequire(import.meta.url)(
+  "../package.json",
+);
+if (
+  typeof packageMetadata !== "object" ||
+  packageMetadata === null ||
+  !("version" in packageMetadata) ||
+  typeof packageMetadata.version !== "string"
+) {
+  throw new TypeError("The package manifest must contain a string version");
+}
+const ADAPTER_VERSION = packageMetadata.version;
 
 type RuntimeOptions = Record<string, unknown> & {
   messages?: unknown;

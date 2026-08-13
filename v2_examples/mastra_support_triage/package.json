@@ -8,7 +8,7 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.20",
-    "@zenml-io/kitaru-mastra": "workspace:0.1.0-experimental.0",
+    "@zenml-io/kitaru-mastra": "workspace:*",
     "@mastra/core": "1.51.0",
     "zod": "3.25.76"
   },

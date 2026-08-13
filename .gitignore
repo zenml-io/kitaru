@@ -12,6 +12,7 @@ helm/Chart.lock
 /v2_examples/mastra_support_triage/node_modules/
 /v2_examples/vercel_ai_support_triage/node_modules/
 /packages/*/dist/
+/typescript-dist/
 
 # pnpm
 **/.pnpm-store

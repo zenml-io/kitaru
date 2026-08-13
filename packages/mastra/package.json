@@ -1,7 +1,21 @@
 {
   "name": "@zenml-io/kitaru-mastra",
-  "version": "0.1.0-experimental.0",
-  "description": "Experimental Mastra adapter for Kitaru agent tracing and replay",
+  "version": "0.1.0-rc.1",
+  "description": "Mastra adapter for Kitaru agent tracing and replay",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zenml-io/kitaru.git",
+    "directory": "packages/mastra"
+  },
+  "homepage": "https://github.com/zenml-io/kitaru#readme",
+  "bugs": {
+    "url": "https://github.com/zenml-io/kitaru/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
   "type": "module",
   "engines": {
     "node": ">=22.22.0 <23"
@@ -24,7 +38,7 @@
     "mastra"
   ],
   "dependencies": {
-    "@zenml-io/kitaru": "workspace:0.1.0-experimental.0"
+    "@zenml-io/kitaru": "workspace:0.1.0-rc.1"
   },
   "peerDependencies": {
     "@mastra/core": ">=1.51.0 <1.52.0"

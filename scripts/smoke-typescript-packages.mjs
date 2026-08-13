@@ -3,10 +3,19 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { loadTypescriptPackageMetadata } from "./typescript-packages.mjs";
 
 const repositoryRoot = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const smokeRoot = mkdtempSync(join(tmpdir(), "kitaru-package-smoke-"));
-const consumerRoot = join(smokeRoot, "consumer");
+
+function parseOutputDirectory(args) {
+  if (args.length === 0) {
+    return undefined;
+  }
+  if (args.length !== 2 || args[0] !== "--output-dir") {
+    throw new Error("Usage: smoke-typescript-packages.mjs [--output-dir PATH]");
+  }
+  return resolve(repositoryRoot, args[1]);
+}
 
 function run(command, args, cwd = repositoryRoot) {
   const result = spawnSync(command, args, { cwd, stdio: "inherit" });
@@ -18,13 +27,36 @@ function run(command, args, cwd = repositoryRoot) {
   }
 }
 
+function assertPackageContents(tarball) {
+  const result = spawnSync("tar", ["-tzf", tarball], { encoding: "utf8" });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`tar -tzf ${tarball} exited with ${result.status}`);
+  }
+  if (!result.stdout.split("\n").includes("package/LICENSE")) {
+    throw new Error(`${tarball} does not contain package/LICENSE`);
+  }
+}
+
+const outputDirectory = parseOutputDirectory(process.argv.slice(2));
+const metadata = await loadTypescriptPackageMetadata();
+const smokeRoot = mkdtempSync(join(tmpdir(), "kitaru-package-smoke-"));
+const consumerRoot = join(smokeRoot, "consumer");
+const artifactRoot = outputDirectory ?? join(smokeRoot, "artifacts");
+
 try {
-  for (const packageName of [
-    "@zenml-io/kitaru",
-    "@zenml-io/kitaru-mastra",
-    "@zenml-io/kitaru-vercel-ai",
-  ]) {
-    run("pnpm", ["--filter", packageName, "pack", "--pack-destination", smokeRoot]);
+  mkdirSync(artifactRoot, { recursive: true });
+  for (const packageEntry of metadata.packages) {
+    run("pnpm", [
+      "--filter",
+      packageEntry.name,
+      "pack",
+      "--pack-destination",
+      artifactRoot,
+    ]);
+    assertPackageContents(join(artifactRoot, packageEntry.tarball));
   }
 
   mkdirSync(consumerRoot);
@@ -43,10 +75,19 @@ if (![KitaruClient, KitaruAgent, createKitaruGenerateText].every(Boolean)) {
 `,
   );
   writeFileSync(
-    join(consumerRoot, "core.ts"),
+    join(consumerRoot, "packages.ts"),
     `import { KitaruClient, type KitaruEnvironmentVariables } from "@zenml-io/kitaru";
+import { KitaruAgent, type KitaruAgentOptions } from "@zenml-io/kitaru-mastra";
+import { createKitaruGenerateText, type KitaruVercelAIOptions } from "@zenml-io/kitaru-vercel-ai";
 const environment: KitaruEnvironmentVariables = { KITARU_API_URL: "http://localhost" };
 new KitaruClient({ apiUrl: environment.KITARU_API_URL });
+const mastraOptions: KitaruAgentOptions = {
+  agentId: "package-smoke",
+  requestedModelId: "package-smoke-model",
+};
+new KitaruAgent({ generate: async () => ({}) }, mastraOptions);
+const vercelOptions: KitaruVercelAIOptions = { agentId: "package-smoke" };
+createKitaruGenerateText(vercelOptions);
 `,
   );
   writeFileSync(
@@ -57,18 +98,17 @@ new KitaruClient({ apiUrl: environment.KITARU_API_URL });
         module: "NodeNext",
         moduleResolution: "NodeNext",
         noEmit: true,
+        skipLibCheck: true,
         strict: true,
         types: [],
       },
-      include: ["core.ts"],
+      include: ["packages.ts"],
     }),
   );
 
-  const tarballs = [
-    "zenml-io-kitaru-0.1.0-experimental.0.tgz",
-    "zenml-io-kitaru-mastra-0.1.0-experimental.0.tgz",
-    "zenml-io-kitaru-vercel-ai-0.1.0-experimental.0.tgz",
-  ].map((name) => join(smokeRoot, name));
+  const tarballs = metadata.packages.map(({ tarball }) =>
+    join(artifactRoot, tarball),
+  );
   run(
     "npm",
     [
