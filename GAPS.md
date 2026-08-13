@@ -294,8 +294,10 @@ but **not yet written**.
 
 ### Merge reconciliation (Aug 13)
 
-`develop@6ab4881c` (Kitaru **0.22.0rc0**, adapters **0.1.0rc0**) merged
-in. Code/tests/examples resolved to develop; `docs/book` and README
+`develop` merged in — re-merged later the same day to `7da40490`, by
+which point the version had moved **0.22.0rc0 → rc2** (adapters
+**0.1.0rc0**). The rc1/rc2 commits are release plumbing only; none touch
+`docs/book` or the README. Code/tests/examples resolved to develop; `docs/book` and README
 resolved to us. The 15 v1-layout pages develop still edits stayed
 deleted. Two develop pages kept and registered in `toc.md`:
 `guides/importing-sessions.md` and `guides/deterministic-evaluations.md`
