@@ -105,7 +105,9 @@ jobs:
           set -euo pipefail
           wheel=$(find package-dist -maxdepth 1 -name '*.whl' -print -quit)
           test -n "$wheel"
-          DIST_FILE="$wheel" uv run --no-project --with "$wheel" python - <<'PY'
+          DIST_FILE="$wheel" uv run --no-project \
+            --exclude-newer-package "kitaru=0 days" \
+            --with "$wheel" python - <<'PY'
           import importlib.metadata
           import os
           assert importlib.metadata.version(os.environ["DISTRIBUTION"]) == os.environ["VERSION"]
