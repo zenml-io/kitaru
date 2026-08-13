@@ -8,8 +8,7 @@ on:
         required: true
         type: string
   push:
-    tags:
-      - bundle/kitaru/v*
+    tags: [bundle/kitaru/v*]
 permissions: {}
 concurrency:
   group: release-bundle-${{ github.ref_name }}
@@ -225,7 +224,7 @@ jobs:
       - name: Move Docker latest aliases
         env:
           BUNDLE_VERSION: ${{ needs.prepare.outputs.bundle-version }}
-        run: |
+        run: |-
           docker buildx imagetools create --tag zenmldocker/kitaru:latest "zenmldocker/kitaru:$BUNDLE_VERSION"
           docker buildx imagetools create --tag zenmldocker/kitaru-worker:latest "zenmldocker/kitaru-worker:$BUNDLE_VERSION"
           docker buildx imagetools create --tag zenmldocker/kitaru-server:latest "zenmldocker/kitaru-server:$BUNDLE_VERSION"

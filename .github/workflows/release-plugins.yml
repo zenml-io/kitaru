@@ -8,8 +8,7 @@ on:
         required: true
         type: string
   push:
-    tags:
-      - python/**
+    tags: [python/**]
 permissions: {}
 concurrency:
   group: release-python-${{ github.ref_name }}
@@ -110,7 +109,6 @@ jobs:
           DIST_FILE="$wheel" uv run --no-project --with "$wheel" python - <<'PY'
           import importlib.metadata
           import os
-
           assert importlib.metadata.version(os.environ["DISTRIBUTION"]) == os.environ["VERSION"]
           PY
       - name: Record artifact checksums
@@ -150,7 +148,7 @@ jobs:
           IS_PRERELEASE: ${{ needs.build.outputs.is-prerelease }}
           PACKAGE_TAG: ${{ needs.build.outputs.package-tag }}
           VERSION: ${{ needs.build.outputs.version }}
-        run: |
+        run: |-
           prerelease=()
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
