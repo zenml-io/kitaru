@@ -102,12 +102,29 @@ def test_local_python_versions_are_rejected_for_pypi() -> None:
         validate_version("1.0+build.1")
 
 
-def test_bundle_workflow_maps_semver_rc_to_python_rc() -> None:
+def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
 
-    assert "bundle/kitaru/v*" in workflow
-    assert 'kitaru_version="${BASH_REMATCH[1]}rc${BASH_REMATCH[2]}"' in workflow
+    assert "workflows: [Release Python package]" in workflow
+    assert "bundle/kitaru/v*" not in workflow
+    assert (
+        "startsWith(github.event.workflow_run.head_branch, 'python/kitaru/v')"
+        in workflow
+    )
+    assert "plugins/default-requirements.txt" not in workflow
+    assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
+    assert 'gh release upload "$PACKAGE_TAG" bundle-dist/* --clobber' in workflow
     assert "promote-latest:" in workflow
+
+
+def test_release_images_can_install_a_new_core_release() -> None:
+    for dockerfile in (
+        "docker/release-client.Dockerfile",
+        "docker/release-server.Dockerfile",
+        "docker/release-worker.Dockerfile",
+    ):
+        content = (REPO_ROOT / dockerfile).read_text()
+        assert '--exclude-newer-package "kitaru=0 days"' in content
 
 
 @pytest.mark.parametrize(
