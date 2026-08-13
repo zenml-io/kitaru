@@ -11,22 +11,18 @@ import {
 import { AGENT_ID, FakeClient, textResponse } from "./helpers.js";
 
 describe("recording privacy", () => {
-  it("redacts file, URL, and provider request values in input projections", () => {
-    const projected = projectRecordedInput([
-      {
-        content: [
-          { data: "FILE_SENTINEL", type: "file", url: "URL_SENTINEL" },
-          { text: "kept", type: "text" },
-        ],
-        providerOptions: { secret: "PROVIDER_SENTINEL" },
-        role: "user",
-      },
-    ]);
-    const serialized = JSON.stringify(projected);
-    expect(serialized).toContain("kept");
-    expect(serialized).not.toContain("FILE_SENTINEL");
-    expect(serialized).not.toContain("URL_SENTINEL");
-    expect(serialized).not.toContain("PROVIDER_SENTINEL");
+  it("rejects input values that cannot be recorded losslessly", () => {
+    expect(() =>
+      projectRecordedInput([
+        {
+          content: [
+            { data: "FILE_SENTINEL", type: "file", url: "URL_SENTINEL" },
+            { text: "kept", type: "text" },
+          ],
+          role: "user",
+        },
+      ]),
+    ).toThrow("contains unsupported sensitive key 'data'");
   });
 
   it("bounds metadata without making it part of the replay contract", () => {

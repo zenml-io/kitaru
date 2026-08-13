@@ -84,7 +84,11 @@ function assertSafeKeys(value: unknown, path = "value", depth = 0): void {
 
 function cloneJson(
   value: unknown,
-  options: { path: string; redactInput: boolean; rejectLongStrings: boolean },
+  options: {
+    path: string;
+    rejectLongStrings: boolean;
+    sensitiveKeys: "allow" | "redact" | "reject";
+  },
   depth = 0,
   seen = new WeakSet<object>(),
 ): JsonValue {
@@ -152,10 +156,18 @@ function cloneJson(
       if (DANGEROUS_KEYS.has(key)) {
         throw new TypeError(`${options.path} contains dangerous key '${key}'`);
       }
-      result[key] =
-        options.redactInput && REDACTED_INPUT_KEYS.has(key.toLowerCase())
-          ? "[redacted]"
-          : cloneJson(item, options, depth + 1, seen);
+      if (REDACTED_INPUT_KEYS.has(key.toLowerCase())) {
+        if (options.sensitiveKeys === "reject") {
+          throw new TypeError(
+            `${options.path} contains unsupported sensitive key '${key}'`,
+          );
+        }
+        if (options.sensitiveKeys === "redact") {
+          result[key] = "[redacted]";
+          continue;
+        }
+      }
+      result[key] = cloneJson(item, options, depth + 1, seen);
     }
     return result;
   } finally {
@@ -174,8 +186,8 @@ function assertJsonSize(value: JsonValue, path: string): void {
 export function boundedRecorderJson(value: unknown, path: string): JsonValue {
   const result = cloneJson(value, {
     path,
-    redactInput: false,
     rejectLongStrings: true,
+    sensitiveKeys: "allow",
   });
   assertJsonSize(result, path);
   return result;
@@ -184,8 +196,8 @@ export function boundedRecorderJson(value: unknown, path: string): JsonValue {
 export function projectRecordedInput(value: unknown): JsonValue {
   const result = cloneJson(value, {
     path: "recorded input",
-    redactInput: true,
     rejectLongStrings: true,
+    sensitiveKeys: "reject",
   });
   assertJsonSize(result, "recorded input");
   return result;
@@ -194,8 +206,8 @@ export function projectRecordedInput(value: unknown): JsonValue {
 export function projectRecordedMetadata(value: unknown): JsonValue {
   const result = cloneJson(value, {
     path: "recorded metadata",
-    redactInput: true,
     rejectLongStrings: false,
+    sensitiveKeys: "redact",
   });
   assertJsonSize(result, "recorded metadata");
   return result;
