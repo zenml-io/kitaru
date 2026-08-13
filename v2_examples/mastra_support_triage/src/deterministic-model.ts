@@ -1,6 +1,13 @@
 // @ts-expect-error Mastra exports this public test helper without declarations.
 import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 
+const BASELINE_INPUT =
+  "Investigate account acct-1001 and delayed order ord-1001. The customer reports a suspected duplicate charge.";
+const REPLAY_INPUT =
+  "Priority escalation: investigate account acct-1001 and order ord-1001. Confirm the delayed order and suspected duplicate charge from tool evidence.";
+const REPLAY_INSTRUCTIONS =
+  "Follow the configured support workflow. Use the account and order lookup tools, queue one refund review for a delayed duplicate charge, and return the required structured triage decision.";
+
 type ModelResult = {
   content: unknown[];
   finishReason: string;
@@ -60,7 +67,7 @@ function textResult(): ModelResult {
   };
 }
 
-export function createDeterministicModel(): unknown {
+export function createDeterministicModel(replay = false): unknown {
   const results = [
     toolResult("lookup", [
       {
@@ -87,7 +94,15 @@ export function createDeterministicModel(): unknown {
   return new MastraLanguageModelV2Mock({
     modelId: "gpt-5-nano-fixture",
     provider: "openai-fixture",
-    doGenerate: async () => {
+    doGenerate: async (options: unknown) => {
+      const serializedOptions = JSON.stringify(options);
+      const expectedInput = replay ? REPLAY_INPUT : BASELINE_INPUT;
+      if (!serializedOptions.includes(expectedInput)) {
+        throw new Error("Expected task input was not applied");
+      }
+      if (replay && !serializedOptions.includes(REPLAY_INSTRUCTIONS)) {
+        throw new Error("Expected replay instructions were not applied");
+      }
       const result = results[index++];
       if (!result) {
         throw new Error("Deterministic model ran out of results");

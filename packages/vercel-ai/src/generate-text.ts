@@ -180,7 +180,6 @@ export function createKitaruGenerateText(
   const boundGenerateText = async (
     callerOptions: RuntimeOptions,
   ): Promise<unknown> => {
-    const taskInput = parseWorkerTaskInput(environment.KITARU_TASK_INPUTS);
     const requestedModelId =
       adapterOptions.requestedModelId ?? readableModelId(callerOptions.model);
     if (!requestedModelId) {
@@ -190,6 +189,10 @@ export function createKitaruGenerateText(
     }
 
     const replay = await replayConfiguration({ client, environment });
+    const taskInput =
+      replay.override?.prompt === undefined
+        ? parseWorkerTaskInput(environment.KITARU_TASK_INPUTS)
+        : undefined;
     const effectiveOptions: RuntimeOptions = { ...callerOptions };
     applyOverride(effectiveOptions, replay.override, taskInput);
 

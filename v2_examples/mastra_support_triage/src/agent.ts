@@ -18,7 +18,7 @@ Never claim that an action was queued unless the tool returned queued=true.
 
 function configuredModel(): unknown {
   if (process.env.KITARU_MASTRA_TEST_MODEL === "1") {
-    return createDeterministicModel();
+    return createDeterministicModel(process.env.KITARU_REPLAY_ID !== undefined);
   }
   return openai("gpt-5-nano");
 }

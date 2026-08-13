@@ -30,7 +30,7 @@ describe("inputs and replay overrides", () => {
       `"${"\\u0061".repeat(MAX_WORKER_TASK_INPUT_JSON_CHARS)}"`,
     ],
     ["invalid JSON", "not-json"],
-  ])("rejects %s worker input before replay, session, and model", async (_name, taskInput) => {
+  ])("rejects %s worker input before session and model", async (_name, taskInput) => {
     const client = new FakeClient();
     const model = new MockLanguageModelV4({ doGenerate: textResponse() });
     const generate = createKitaruGenerateText({
@@ -40,9 +40,39 @@ describe("inputs and replay overrides", () => {
     });
 
     await expect(generate({ model, prompt: "caller" })).rejects.toThrow();
-    expect(client.replayReads).toBe(0);
+    expect(client.replayReads).toBe(1);
     expect(client.created).toHaveLength(0);
     expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("ignores non-string worker input when replay replaces the prompt", async () => {
+    const client = new FakeClient({
+      replay: replaySpec(
+        { type: "passthrough" },
+        { prompt: "replacement prompt" },
+      ),
+    });
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment({
+        KITARU_TASK_INPUTS: JSON.stringify([
+          { content: "baseline prompt", role: "user" },
+        ]),
+      }),
+    });
+
+    await generate({ model, prompt: "caller" });
+
+    expect(model.doGenerateCalls[0]?.prompt).toEqual([
+      {
+        content: [{ text: "replacement prompt", type: "text" }],
+        providerOptions: undefined,
+        role: "user",
+      },
+    ]);
+    expect(client.created[0]?.inputs).toBe("replacement prompt");
   });
 
   it("treats a replay's null override as authoritative", async () => {

@@ -6,7 +6,11 @@ All customers, orders, shipments, and actions are synthetic. Every invocation ge
 
 The default `MockLanguageModelV4` path is scripted. Its recordings use the requested model ID `openai/gpt-5-nano` and fixed synthetic token counts, so token and cost figures are scripted rather than measured. Its fixed outcomes prove the adapter, recording, evaluation, cohort, and replay workflow. They do not prove that prompting caused a real model to improve. The optional OpenAI path is paid, non-deterministic evidence to inspect and never promises the fixed result table below.
 
-Run commands from `v2_examples/vercel_ai_ticket_resolver` unless a command says otherwise.
+From the repository root, enter the standalone example directory before running the commands below unless a command says otherwise:
+
+```bash
+cd v2_examples/vercel_ai_ticket_resolver
+```
 
 ## 1. Install and start Kitaru
 

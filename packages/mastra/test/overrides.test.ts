@@ -28,7 +28,7 @@ function replaySpec(override: Record<string, unknown> | null) {
 describe("replay overrides", () => {
   it("uses replay precedence and public per-run override options", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
-    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify({ source: "environment" }));
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify("worker prompt"));
     vi.stubEnv(
       "KITARU_OVERRIDE",
       JSON.stringify({ model: "ignored-model", system_prompt: "ignored" }),
@@ -37,7 +37,7 @@ describe("replay overrides", () => {
       replaySpec: replaySpec({
         model: { "caller-model": "replacement-model" },
         model_params: { temperature: 0.8 },
-        prompt: "must not be reapplied",
+        prompt: "replacement prompt",
         system_prompt: "replacement instructions",
       }),
     });
@@ -59,7 +59,7 @@ describe("replay overrides", () => {
 
     expect(resolver).toHaveBeenCalledWith("replacement-model");
     expect(agent.calls[0]).toMatchObject({
-      messages: { source: "environment" },
+      messages: "replacement prompt",
       options: {
         instructions: "replacement instructions",
         maxSteps: 4,
@@ -71,7 +71,7 @@ describe("replay overrides", () => {
     expect(
       api.calls.find((call) => call.path === "/v1/sessions")?.body,
     ).toMatchObject({
-      inputs: { source: "environment" },
+      inputs: "replacement prompt",
       origin: "replay",
     });
     const llm = api

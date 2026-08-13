@@ -65,6 +65,13 @@ export function parseReplayOverride(
   ) {
     throw new TypeError(`${source}.system_prompt must be a string`);
   }
+  if (
+    value.prompt !== undefined &&
+    value.prompt !== null &&
+    typeof value.prompt !== "string"
+  ) {
+    throw new TypeError(`${source}.prompt must be a string`);
+  }
   return value as ReplayOverride;
 }
 
@@ -101,11 +108,10 @@ export async function resolveReplayContext(options: {
   const replayId = parseReplayId(environment.KITARU_REPLAY_ID);
   const spec = replayId ? await options.client.getReplay(replayId) : undefined;
   const taskInputs = environment.KITARU_TASK_INPUTS;
-  const effectiveRuntimeInput =
+  const workerInput =
     taskInputs === undefined
       ? options.callerInput
       : parseJsonEnvironment("KITARU_TASK_INPUTS", taskInputs);
-  const effectiveInput = toRecorderJson(effectiveRuntimeInput);
   const override = spec
     ? spec.override
       ? parseReplayOverride(spec.override, "replay override")
@@ -116,6 +122,8 @@ export async function resolveReplayContext(options: {
           "KITARU_OVERRIDE",
         )
       : undefined;
+  const effectiveRuntimeInput = override?.prompt ?? workerInput;
+  const effectiveInput = toRecorderJson(effectiveRuntimeInput);
 
   return {
     effectiveInput,
