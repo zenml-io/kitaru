@@ -233,7 +233,8 @@ def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
         in workflow
     )
     assert "PACKAGE_PATH: ${{ matrix.path }}" in workflow
-    assert '--package "$PACKAGE_PATH"' in workflow
+    assert "--package" in workflow
+    assert '"$PACKAGE_PATH"' in workflow
     assert "          - braintrust-importer\n" not in workflow
 
 
@@ -249,6 +250,16 @@ def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
             assert f"plugin package ({unit.slug})" in unit.required_checks
 
 
+def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [sys.executable, str(REPO_ROOT / "scripts" / "release_units.py"), *arguments],
+        cwd=REPO_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+
 @pytest.mark.parametrize(
     ("arguments", "expected_fragment"),
     [
@@ -260,13 +271,7 @@ def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
 def test_cli_text_commands_succeed(
     arguments: list[str], expected_fragment: str
 ) -> None:
-    result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "release_units.py"), *arguments],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_cli(*arguments)
 
     assert result.returncode == 0
     assert expected_fragment in result.stdout
@@ -283,13 +288,7 @@ def test_cli_text_commands_succeed(
     ],
 )
 def test_cli_json_commands_succeed(arguments: list[str], expected_key: str) -> None:
-    result = subprocess.run(
-        [sys.executable, str(REPO_ROOT / "scripts" / "release_units.py"), *arguments],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_cli(*arguments)
 
     assert result.returncode == 0
     assert json.loads(result.stdout)[expected_key]
@@ -298,21 +297,7 @@ def test_cli_json_commands_succeed(arguments: list[str], expected_key: str) -> N
 
 def test_cli_resolves_the_current_package_tag() -> None:
     tag = load_inventory().units[0].tag
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "release_units.py"),
-            "resolve",
-            "--tag",
-            tag,
-            "--format",
-            "json",
-        ],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_cli("resolve", "--tag", tag, "--format", "json")
 
     assert result.returncode == 0
     assert json.loads(result.stdout)["unit"]["tag"] == tag
@@ -320,21 +305,7 @@ def test_cli_resolves_the_current_package_tag() -> None:
 
 
 def test_cli_json_errors_are_structured() -> None:
-    result = subprocess.run(
-        [
-            sys.executable,
-            str(REPO_ROOT / "scripts" / "release_units.py"),
-            "resolve",
-            "--unit",
-            "unknown",
-            "--format",
-            "json",
-        ],
-        cwd=REPO_ROOT,
-        check=False,
-        capture_output=True,
-        text=True,
-    )
+    result = _run_cli("resolve", "--unit", "unknown", "--format", "json")
 
     assert result.returncode == 2
     assert result.stdout == ""

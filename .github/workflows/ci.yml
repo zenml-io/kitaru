@@ -313,7 +313,8 @@ jobs:
       - name: Test installed package artifact
         env:
           PACKAGE_PATH: ${{ matrix.path }}
-        run: uv run --no-project python scripts/smoke_plugin_artifacts.py --package "$PACKAGE_PATH"
+        run: uv run --no-project python scripts/smoke_plugin_artifacts.py --package
+          "$PACKAGE_PATH"
   mcp-wheel-contract:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
