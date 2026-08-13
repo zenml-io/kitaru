@@ -7,7 +7,7 @@ icon: flask
 
 ## The canonical example — a returns agent, improved
 
-[`examples/canonical_example/`](https://github.com/zenml-io/kitaru/tree/develop/examples/canonical_example)
+[`examples/pydantic_ai_ticket_resolver/`](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver)
 follows an autonomous returns agent from production evidence to a
 measured improvement — the whole record → replay → improve loop in one
 sitting:
@@ -27,7 +27,7 @@ commerce tools only touch an in-memory store — so the example is safe
 to run anywhere.
 
 ```bash
-cd examples/canonical_example
+cd examples/pydantic_ai_ticket_resolver
 cp .env.example .env
 set -a; source .env; set +a
 docker compose -f ../../docker-compose.yml up -d --build

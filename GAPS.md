@@ -324,7 +324,7 @@ split wants a deliberate decision before publish.
   `node_id` + `path` (RFC 6901) + `span`, and `span` requires a `path`.
 - **Agent skills documented (#682)** — the Aug 7 "if it ships" item
   shipped. `agent-native/mcp-server.md` gained a skills section as
-  planned, rather than restoring develop's v1-flavoured
+  planned, rather than restoring develop's v1-flavored
   `claude-code-skill.md`. Verified: `npx skills add
   zenml-io/kitaru-skills`, discovery across project/user locations and
   the Claude marketplace, surfaced in bare-`kitaru` root help and under
@@ -359,6 +359,24 @@ split wants a deliberate decision before publish.
 - **Replay's unit is a session, not a "run"** — `concepts/replay.md` and
   `guides/regression-suite.md` both said "one replay answers a question
   about one run" and spoke of a "cohort of runs". Cohorts hold sessions.
+
+### CI fixes on PR #747 (Aug 13)
+
+- **Example coverage audit** — `scripts/audit-example-coverage.py` reads
+  `docs/book/getting-started/examples.md` and cross-checks every example
+  path against `examples/example-coverage.yaml`. Our page pointed at
+  `examples/canonical_example/`, which has never existed: the canonical
+  example is **`examples/pydantic_ai_ticket_resolver`** (manifest id
+  `canonical-returns`). Fixed, which also cleared one lychee 404. This
+  was on the Aug 7 dead-until-merge list as if it would resolve at
+  merge; it would not have.
+- **typos** — `flavoured` → `flavored` (US spelling, mine), and
+  rephrased `PNGs` in these notes, which the checker reads as `PN`.
+- **lychee** — the four remaining 404s are `docs.zenml.io/kitaru/*` deep
+  paths. `/kitaru` is live; the restructured paths only exist once this
+  merges and GitBook syncs. Added a **temporary** scoped exclusion in
+  `lychee.toml` with a removal note. **Remove it after the v2 docs
+  publish**, or genuinely broken Kitaru doc links will stop being caught.
 
 ### Logged, not yet written
 
@@ -491,6 +509,6 @@ d. **`wait()` / HITL** — unchanged: zero v2 mention in code; docs treat
   removed wholesale on Aug 3 — none of it exists in v2.
 - All removed doc paths have redirects in `docs/book/.gitbook.yaml`
   (the `deploy/helm` redirect was dropped Aug 4 when the page returned).
-  The hosted diagram PNGs referenced by deleted concept pages are
+  The hosted diagram images referenced by deleted concept pages are
   orphaned; a v2 architecture diagram for `concepts/under-the-hood.md`
   would be worth commissioning.
