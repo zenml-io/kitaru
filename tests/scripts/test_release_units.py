@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -117,14 +118,93 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     assert "promote-latest:" in workflow
 
 
-def test_release_images_can_install_a_new_core_release() -> None:
+def test_release_images_use_the_pypi_propagation_retry() -> None:
     for dockerfile in (
         "docker/release-client.Dockerfile",
         "docker/release-server.Dockerfile",
         "docker/release-worker.Dockerfile",
     ):
         content = (REPO_ROOT / dockerfile).read_text()
-        assert '--exclude-newer-package "kitaru=0 days"' in content
+        assert "COPY --chown=$USERNAME:$USER_GID " in content
+        assert "docker/install-release-wheel.sh ./" in content
+        assert "sh ./install-release-wheel.sh" in content
+
+
+def test_release_wheel_install_retries_until_the_package_is_available(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    attempts = tmp_path / "attempts"
+    (fake_bin / "uv").write_text(
+        "#!/bin/sh\n"
+        'attempt=$(($(cat "$ATTEMPTS" 2>/dev/null || echo 0) + 1))\n'
+        'printf "%s\\n" "$attempt" > "$ATTEMPTS"\n'
+        'printf "%s\\n" "$*" >> "$UV_ARGS"\n'
+        '[ "$attempt" -ge 3 ]\n'
+    )
+    (fake_bin / "sleep").write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$SLEEPS"\n')
+    (fake_bin / "uv").chmod(0o755)
+    (fake_bin / "sleep").chmod(0o755)
+    env = {
+        **os.environ,
+        "ATTEMPTS": str(attempts),
+        "KITARU_INSTALL_RETRY_DELAY": "0",
+        "KITARU_VERSION": "0.22.0rc2",
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "SLEEPS": str(tmp_path / "sleeps"),
+        "UV_ARGS": str(tmp_path / "uv-args"),
+    }
+
+    result = subprocess.run(
+        ["sh", str(REPO_ROOT / "docker" / "install-release-wheel.sh")],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert attempts.read_text() == "3\n"
+    assert (tmp_path / "sleeps").read_text() == "0\n0\n"
+    uv_args = (tmp_path / "uv-args").read_text().splitlines()
+    assert len(uv_args) == 3
+    assert all("--refresh-package kitaru" in args for args in uv_args)
+    assert all("kitaru==0.22.0rc2" in args for args in uv_args)
+
+
+def test_release_wheel_install_fails_after_the_attempt_limit(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    attempts = tmp_path / "attempts"
+    (fake_bin / "uv").write_text(
+        "#!/bin/sh\n"
+        'attempt=$(($(cat "$ATTEMPTS" 2>/dev/null || echo 0) + 1))\n'
+        'printf "%s\\n" "$attempt" > "$ATTEMPTS"\n'
+        "exit 1\n"
+    )
+    (fake_bin / "sleep").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "uv").chmod(0o755)
+    (fake_bin / "sleep").chmod(0o755)
+    env = {
+        **os.environ,
+        "ATTEMPTS": str(attempts),
+        "KITARU_INSTALL_ATTEMPTS": "3",
+        "KITARU_INSTALL_RETRY_DELAY": "0",
+        "KITARU_VERSION": "0.22.0rc2",
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["sh", str(REPO_ROOT / "docker" / "install-release-wheel.sh")],
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert attempts.read_text() == "3\n"
 
 
 @pytest.mark.parametrize(
