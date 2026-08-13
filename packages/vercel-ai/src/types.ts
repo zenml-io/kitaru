@@ -1,5 +1,9 @@
 import type { KitaruEnvironmentVariables } from "@zenml-io/kitaru";
-import type { AdapterClient } from "@zenml-io/kitaru/adapter";
+import type {
+  AdapterClient,
+  CostCalculator,
+  CostInput,
+} from "@zenml-io/kitaru/adapter";
 import type {
   GenerateTextOnStepEndCallback,
   generateText,
@@ -9,6 +13,9 @@ import type {
 
 export type KitaruGenerateText = typeof generateText;
 
+export type KitaruCostInput = CostInput;
+export type KitaruCostCalculator = CostCalculator;
+
 export interface KitaruVercelAIOptions {
   agentId: string;
   agentVersionId?: string;
@@ -17,6 +24,7 @@ export interface KitaruVercelAIOptions {
   apiUrl?: string;
   client?: AdapterClient;
   configuredOnStepEnd?: GenerateTextOnStepEndCallback<ToolSet>;
+  costCalculator?: KitaruCostCalculator;
   environment?: KitaruEnvironmentVariables;
   fetch?: typeof globalThis.fetch;
   requestedModelId?: string;

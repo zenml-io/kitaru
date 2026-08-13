@@ -114,7 +114,9 @@ async def test_worker_records_and_history_replays_compiled_vercel_ai(
     ]
     assert len(initial_llm_nodes) >= 2
     assert len(replay_llm_nodes) >= 2
-    assert any(node.model == REQUESTED_MODEL_ID for node in replay_llm_nodes)
+    assert all(node.requested_model == REQUESTED_MODEL_ID for node in replay_llm_nodes)
+    assert all(node.model != REQUESTED_MODEL_ID for node in replay_llm_nodes)
+    assert all(node.cost is not None and node.cost > 0 for node in replay_llm_nodes)
     assert any(
         node.model_params == {"maxOutputTokens": 2000} for node in replay_llm_nodes
     )

@@ -68,7 +68,7 @@ describe("session lifecycle", () => {
       requestedModelId: "requested-model",
     });
 
-    await expect(recorded.generate("run")).rejects.toThrow("Request failed");
+    await expect(recorded.generate("run")).rejects.toThrow("terminal failed");
 
     expect(api.calls.at(-1)?.body).toMatchObject({ status: "failed" });
   });
@@ -105,16 +105,20 @@ describe("session lifecycle", () => {
 
     await expect(
       recorded.generate("run", { onStepFinish: callerCallback }),
-    ).rejects.toThrow("Request failed");
+    ).rejects.toThrow("step failed");
 
     expect(configuredCallback).not.toHaveBeenCalled();
     expect(callerCallback).not.toHaveBeenCalled();
     expect(api.calls.at(-1)?.body).toMatchObject({ status: "failed" });
   });
 
-  it("fails on an unsupported final output and records the session failure", async () => {
+  it("records a bounded summary of an otherwise unserializable result", async () => {
     const api = installTestApi();
-    const circular: Record<string, unknown> = {};
+    const circular: Record<string, unknown> = {
+      finishReason: "stop",
+      steps: [{}, {}],
+      text: "final answer",
+    };
     circular.self = circular;
     const agent = new FakeAgent(async (_messages, options) => {
       await options.onStepFinish?.(textStep());
@@ -126,11 +130,17 @@ describe("session lifecycle", () => {
       requestedModelId: "requested-model",
     });
 
-    await expect(recorded.generate("run")).rejects.toThrow(
-      "circular reference",
-    );
+    const result = await recorded.generate("run");
 
-    expect(api.calls.at(-1)?.body).toMatchObject({ status: "failed" });
+    expect(result).toBe(circular);
+    expect(api.calls.at(-1)?.body).toMatchObject({
+      outputs: {
+        finish_reason: "stop",
+        step_count: 2,
+        text: "final answer",
+      },
+      status: "completed",
+    });
   });
 
   it("does not replace an agent failure when cleanup also fails", async () => {

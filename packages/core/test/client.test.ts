@@ -99,15 +99,32 @@ describe("KitaruClient", () => {
     expect((error as Error).message).not.toContain("private prompt");
   });
 
-  it("does not expose a raw string error detail", async () => {
+  it("reports a string error detail like the Python SDK", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      jsonResponse({ detail: "private prompt and credential" }, 400),
+      jsonResponse(
+        { detail: "Session names no agent and no task to infer one from" },
+        422,
+      ),
     );
     const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
 
     await expect(client.createSession(createRequest)).rejects.toMatchObject({
-      message: expect.not.stringContaining("private prompt"),
-      status: 400,
+      message: expect.stringContaining(
+        "Session names no agent and no task to infer one from",
+      ),
+      status: 422,
+    });
+  });
+
+  it("falls back to the status text for a blank error detail", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse({ detail: "   " }, 404),
+    );
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await expect(client.createSession(createRequest)).rejects.toMatchObject({
+      message: expect.stringContaining("POST /v1/sessions"),
+      status: 404,
     });
   });
 

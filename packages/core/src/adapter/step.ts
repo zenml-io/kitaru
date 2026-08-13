@@ -1,5 +1,6 @@
 import { toRecorderJson } from "../json.js";
 import type { JsonValue, SessionNodeCreateRequest } from "../types.js";
+import { providerFamily } from "./provider.js";
 import type { AdapterRunState } from "./run-state.js";
 
 type ToolLedgerEntry = NonNullable<ReturnType<AdapterRunState["getToolCall"]>>;
@@ -15,6 +16,7 @@ export interface NormalizedToolCall {
   inputs: JsonValue;
   publicError?: string;
   result?: NormalizedToolResult;
+  startedAt?: string;
   toolName: string;
 }
 
@@ -29,6 +31,7 @@ export interface NormalizedModelStep {
   model?: string;
   outputs: JsonValue;
   provider?: string;
+  startedAt?: string;
   tokens?: SessionNodeCreateRequest["tokens"];
   tools: NormalizedToolCall[];
 }
@@ -69,6 +72,7 @@ function toolNode(
     node_type: "tool_call",
     outputs: call.result?.output ?? ledgerEntry?.output ?? null,
     parent_index: parentIndex,
+    started_at: call.startedAt ?? ledgerEntry?.startedAt,
     status: failed ? "failed" : "completed",
     tool_name: call.toolName,
   };
@@ -80,10 +84,15 @@ export async function recordNormalizedStep(
 ): Promise<void> {
   await state.enqueueStep(async () => {
     const endedAt = step.endedAt ?? new Date().toISOString();
+    const startedAt = step.startedAt ?? state.takeStepStart(endedAt);
     const llmAllocation = state.allocateNode();
+    const provider = step.provider;
     const llmNode: SessionNodeCreateRequest = {
       ...llmAllocation,
-      attributes: step.attributes,
+      attributes:
+        provider === undefined
+          ? step.attributes
+          : { ...step.attributes, provider_id: provider },
       cost: step.cost ?? null,
       ended_at: endedAt,
       error: step.failed ? (step.error ?? "Model step failed") : null,
@@ -95,8 +104,10 @@ export async function recordNormalizedStep(
       node_type: "llm_call",
       outputs: step.outputs,
       parent_index: state.rootIndex,
-      model_provider: step.provider,
+      model_provider:
+        provider === undefined ? undefined : providerFamily(provider),
       requested_model: state.requestedModelId,
+      started_at: startedAt,
       status: step.failed ? "failed" : "completed",
       tokens: step.tokens ?? null,
     };
@@ -137,6 +148,7 @@ export async function flushFailedPolicyOutcomes(
     node_type: "tool_call",
     outputs: entry.output ?? null,
     parent_index: state.rootIndex,
+    started_at: entry.startedAt,
     status: "failed",
     tool_name: entry.toolName,
   }));

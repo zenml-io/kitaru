@@ -56,6 +56,7 @@ EXAMPLE_DIR = Path(__file__).resolve().parent
 COMPILED_MAIN = EXAMPLE_DIR / "dist" / "main.js"
 SCORER_SOURCE = EXAMPLE_DIR / "scorers.py"
 RUN_COMMAND = "node v2_examples/mastra_support_triage/dist/main.js"
+REQUESTED_MODEL_ID = "openai/gpt-5-nano"
 INITIAL_PROMPT = (
     "Investigate account acct-1001 and delayed order ord-1001. "
     "The customer reports a suspected duplicate charge."
@@ -64,10 +65,14 @@ OVERRIDE_PROMPT = (
     "Priority escalation: investigate account acct-1001 and order ord-1001. "
     "Confirm the delayed order and suspected duplicate charge from tool evidence."
 )
+# The replay override replaces the agent's own instructions, so it has to restate
+# the output contract the scorers grade. Asking for "the required structured
+# decision" without naming the keys lets the model answer in prose instead.
 OVERRIDE_SYSTEM = (
     "Follow the configured support workflow. Use the account and order lookup "
-    "tools, queue one refund review for a delayed duplicate charge, and return "
-    "the required structured triage decision."
+    "tools and queue one refund review for a delayed duplicate charge. Answer "
+    "with a JSON object only, using exactly the keys decision, evidence, risk, "
+    "and nextAction, and record the queued refund review under evidence."
 )
 
 
@@ -334,6 +339,9 @@ async def run_demo(
     assert (action_nodes[0].attributes or {}).get("mocked") is True
     assert (action_nodes[0].attributes or {}).get("policy") == "history"
     llm_nodes = [node for node in replay_nodes if node.node_type is NodeType.LLM_CALL]
+    assert all(node.requested_model == REQUESTED_MODEL_ID for node in llm_nodes)
+    assert all(node.model != REQUESTED_MODEL_ID for node in llm_nodes)
+    assert all(node.cost is not None and node.cost > 0 for node in llm_nodes)
     assert any(node.model_params == {"maxOutputTokens": 2000} for node in llm_nodes)
     assert {evaluation.name for evaluation in evaluations} == {
         "decision_structure",

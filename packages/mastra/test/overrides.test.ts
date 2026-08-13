@@ -45,6 +45,7 @@ describe("replay overrides", () => {
     const agent = new FakeAgent();
     const recorded = new KitaruAgent(agent, {
       agentId: AGENT_ID,
+      allowedReplayModels: ["replacement-model"],
       apiUrl: "https://api.example",
       requestedModelId: "fallback-model",
       resolveModel: resolver,
@@ -87,6 +88,129 @@ describe("replay overrides", () => {
     });
   });
 
+  it("replaces a system message carried inside a message-array input", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const messages = [
+      { content: "Always answer in French", role: "system" },
+      { content: "baseline prompt", role: "user" },
+    ];
+    vi.stubEnv("KITARU_TASK_INPUTS", JSON.stringify(messages));
+    installTestApi({
+      replaySpec: replaySpec({ system_prompt: "Always answer in English" }),
+    });
+    const agent = new FakeAgent();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "fallback-model",
+    });
+
+    await recorded.generate("caller input");
+
+    // A system message left in the array would shadow the replacement
+    // instructions, and the replay would report no meaningful difference.
+    expect(agent.calls[0]?.messages).toEqual([
+      { content: "baseline prompt", role: "user" },
+    ]);
+    expect(agent.calls[0]?.options.instructions).toBe(
+      "Always answer in English",
+    );
+  });
+
+  it("merges overridden model parameters into the caller settings", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const api = installTestApi({
+      replaySpec: replaySpec({ model_params: { temperature: 0.8 } }),
+    });
+    const agent = new FakeAgent();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "fallback-model",
+    });
+
+    await recorded.generate("caller input", {
+      modelSettings: { maxOutputTokens: 500, temperature: 0.1, topP: 0.2 },
+    });
+
+    expect(agent.calls[0]?.options.modelSettings).toEqual({
+      maxOutputTokens: 500,
+      temperature: 0.8,
+      topP: 0.2,
+    });
+    const llm = api
+      .nodeBatches()
+      .flat()
+      .find((node) => node.node_type === "llm_call");
+    expect(llm?.model_params).toEqual({
+      maxOutputTokens: 500,
+      temperature: 0.8,
+      topP: 0.2,
+    });
+  });
+
+  it("rejects out-of-range model parameters before creating a session", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const api = installTestApi({
+      replaySpec: replaySpec({ model_params: { maxOutputTokens: -5 } }),
+    });
+    const agent = new FakeAgent();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "fallback-model",
+    });
+
+    await expect(recorded.generate("caller input")).rejects.toThrow(
+      "maxOutputTokens must be an integer between 1 and 1000000",
+    );
+
+    expect(agent.calls).toHaveLength(0);
+    expect(api.sessionIds).toHaveLength(0);
+  });
+
+  it("rejects an unknown model parameter before creating a session", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const api = installTestApi({
+      replaySpec: replaySpec({ model_params: { temprature: 0.4 } }),
+    });
+    const agent = new FakeAgent();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "fallback-model",
+    });
+
+    await expect(recorded.generate("caller input")).rejects.toThrow(
+      "Unsupported replay model setting 'temprature'",
+    );
+
+    expect(agent.calls).toHaveLength(0);
+    expect(api.sessionIds).toHaveLength(0);
+  });
+
+  it("rejects a replacement model outside allowedReplayModels", async () => {
+    vi.stubEnv("KITARU_OVERRIDE", JSON.stringify({ model: "o3-pro" }));
+    const api = installTestApi();
+    const resolver = vi.fn(async (modelId: string) => modelId);
+    const agent = new FakeAgent();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      allowedReplayModels: ["replacement-model"],
+      apiUrl: "https://api.example",
+      requestedModelId: "fallback-model",
+      resolveModel: resolver,
+    });
+
+    await expect(recorded.generate("caller input")).rejects.toThrow(
+      "Replacement model 'o3-pro' is not in allowedReplayModels",
+    );
+
+    expect(resolver).not.toHaveBeenCalled();
+    expect(agent.calls).toHaveLength(0);
+    expect(api.sessionIds).toHaveLength(0);
+  });
+
   it("keeps the requested model when an exact model-map entry is absent", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     installTestApi({
@@ -96,6 +220,7 @@ describe("replay overrides", () => {
     const agent = new FakeAgent();
     const recorded = new KitaruAgent(agent, {
       agentId: AGENT_ID,
+      allowedReplayModels: ["replacement-model"],
       apiUrl: "https://api.example",
       requestedModelId: "fallback-model",
       resolveModel: resolver,
@@ -117,6 +242,7 @@ describe("replay overrides", () => {
     const recorded = new KitaruAgent(agent, {
       agentId: AGENT_ID,
       apiUrl: "https://api.example",
+      allowedReplayModels: ["replacement-model"],
       requestedModelId: "fallback-model",
       resolveModel: vi.fn(async (modelId: string) => modelId),
     });
@@ -138,6 +264,7 @@ describe("replay overrides", () => {
     const agent = new FakeAgent();
     const recorded = new KitaruAgent(agent, {
       agentId: AGENT_ID,
+      allowedReplayModels: ["replacement-model"],
       apiUrl: "https://api.example",
       requestedModelId: "fallback-model",
     });

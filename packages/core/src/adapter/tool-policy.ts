@@ -2,6 +2,7 @@ import { computeToolCacheKey } from "../cache-key.js";
 import { ToolPolicyError, ToolPolicyMissError } from "../errors.js";
 import { recorderError, toRecorderJson } from "../json.js";
 import type { JsonValue, ToolPolicy } from "../types.js";
+import { recordedPayloadJson } from "./recorded-json.js";
 import type { AdapterRunState } from "./run-state.js";
 
 type ToolLedgerEntry = NonNullable<ReturnType<AdapterRunState["getToolCall"]>>;
@@ -82,6 +83,41 @@ export function selectToolPolicy(
   return config.default;
 }
 
+export type SupportedToolPolicy = Exclude<ToolPolicy, { type: "llm" }>;
+
+/**
+ * Select a tool's policy and reject the ones no TypeScript adapter can run.
+ */
+export function assertSupportedToolPolicy(
+  spec: NonNullable<AdapterRunState["spec"]>,
+  toolName: string,
+): SupportedToolPolicy {
+  const policy = selectToolPolicy(spec, toolName);
+  if (policy.type === "llm") {
+    throw new ToolPolicyError(
+      "Tool policy 'llm' is not supported by TypeScript adapters",
+    );
+  }
+  return policy;
+}
+
+/**
+ * Reject a tool the adapter cannot intercept before the replay starts.
+ *
+ * A tool the framework runs elsewhere, or one with no local execute function,
+ * never reaches the Kitaru hooks, so a replay would let it fire for real.
+ */
+export function assertInterceptableTool(
+  toolName: string,
+  interceptable: boolean,
+): void {
+  if (!interceptable) {
+    throw new ToolPolicyError(
+      `Replay requires a local execute function for tool '${toolName}'`,
+    );
+  }
+}
+
 function policyMiss(
   entry: ToolLedgerEntry,
   policy: "history" | "static",
@@ -118,11 +154,18 @@ export async function decideToolCall(
   state: AdapterRunState,
   input: ToolCallInput,
 ): Promise<ToolPolicyDecision> {
+  // Every tool call passes through here, so this is the one place that can
+  // stop a later tool from firing its side effect for real once a policy has
+  // already failed, whatever the framework does with the rejected call.
+  if (state.failure !== undefined) {
+    throw state.failure;
+  }
   const entry: ToolLedgerEntry = {
     callId: input.callId,
     inputs: input.inputs,
     mocked: false,
     outcome: "pending",
+    startedAt: new Date().toISOString(),
     toolName: input.toolName,
   };
   state.setToolCall(entry);
@@ -131,14 +174,9 @@ export async function decideToolCall(
     if (!state.spec) {
       throw new ToolPolicyError("Replay spec omitted its tool policy");
     }
-    const policy = selectToolPolicy(state.spec, input.toolName);
+    const policy = assertSupportedToolPolicy(state.spec, input.toolName);
     if (policy.type === "passthrough") {
       return { type: "execute" };
-    }
-    if (policy.type === "llm") {
-      throw new ToolPolicyError(
-        "Tool policy 'llm' is not supported by TypeScript adapters",
-      );
     }
     if (policy.type === "static") {
       const matchingCase = policy.cases.find((candidate) =>
@@ -202,7 +240,10 @@ export function completeToolCall(
   if (entry.mocked) {
     return;
   }
-  entry.output = toRecorderJson(output);
+  // A passthrough tool during a replay has already fired its side effect by
+  // the time its result is recorded, so an oversized or circular result is
+  // bounded rather than thrown: crashing here would strand a sent email.
+  entry.output = recordedPayloadJson(output, `tool '${entry.toolName}' output`);
   entry.outcome = "completed";
 }
 

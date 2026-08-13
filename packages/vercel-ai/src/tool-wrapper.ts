@@ -1,13 +1,17 @@
 import {
+  computeToolCacheKey,
   type JsonValue,
   type ReplaySpec,
   ToolPolicyError,
 } from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
+  assertInterceptableTool,
+  assertSupportedToolPolicy,
   completeToolCall,
   decideToolCall,
   failToolCall,
+  recordedPayloadJson,
   selectToolPolicy,
 } from "@zenml-io/kitaru/adapter";
 import {
@@ -18,7 +22,6 @@ import {
   type ToolSet,
 } from "ai";
 
-import { boundedRecorderJson } from "./options.js";
 import type { ExecutionTickets } from "./tickets.js";
 
 type ExecutableTool = Tool & {
@@ -78,12 +81,8 @@ export function assertSupportedReplayTools(options: {
         `Replay cannot intercept dynamic tool '${toolName}'`,
       );
     }
-    if (!isExecutable(tool)) {
-      throw new ToolPolicyError(
-        `Replay requires a local execute function for tool '${toolName}'`,
-      );
-    }
-    selectToolPolicy(options.spec, toolName);
+    assertInterceptableTool(toolName, isExecutable(tool));
+    assertSupportedToolPolicy(options.spec, toolName);
   }
 }
 
@@ -92,7 +91,7 @@ async function validateMockedOutput(
   output: unknown,
   toolName: string,
 ): Promise<JsonValue> {
-  const bounded = boundedRecorderJson(output, `mocked '${toolName}' output`);
+  const bounded = recordedPayloadJson(output, `mocked '${toolName}' output`);
   if (tool.outputSchema === undefined) {
     return bounded;
   }
@@ -107,7 +106,7 @@ async function validateMockedOutput(
       { cause: validation.error },
     );
   }
-  return boundedRecorderJson(
+  return recordedPayloadJson(
     validation.value,
     `validated mocked '${toolName}' output`,
   );
@@ -219,6 +218,42 @@ function executeBaseline(options: {
   return output;
 }
 
+/**
+ * Warn once when a replay repeats a tool call with identical arguments.
+ *
+ * Kitaru looks recorded results up by (tool name, arguments), so every repeat
+ * of the same call resolves to the last recorded result for that pair. The
+ * replayed trajectory then diverges from the baseline, and only the run itself
+ * can tell the operator that happened.
+ */
+function warnOnRepeatedCall(options: {
+  cacheKey: string | undefined;
+  seen: Set<string>;
+  toolName: string;
+  warned: Set<string>;
+}): void {
+  // The cache key is a fixed-size digest of the same (tool name, arguments)
+  // pair the lookup uses, so a long generation does not retain a copy of every
+  // serialized tool input just to spot the repeats.
+  const key = options.cacheKey;
+  if (key === undefined) {
+    return;
+  }
+  if (!options.seen.has(key)) {
+    options.seen.add(key);
+    return;
+  }
+  if (options.warned.has(key)) {
+    return;
+  }
+  options.warned.add(key);
+  console.warn(
+    `Kitaru replay: tool '${options.toolName}' was called again with identical ` +
+      "arguments. Recorded results are keyed by tool name and arguments, so " +
+      "every repeat resolves to the last recorded result for that pair.",
+  );
+}
+
 export function wrapTools<TOOLS extends ToolSet>(options: {
   state: AdapterRunState;
   tickets: ExecutionTickets;
@@ -228,6 +263,8 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
     return undefined;
   }
   const wrapped: Record<string, Tool> = Object.create(null);
+  const warnedRepeats = new Set<string>();
+  const replayedCalls = new Set<string>();
   for (const [toolName, tool] of Object.entries(options.tools)) {
     if (!isExecutable(tool)) {
       wrapped[toolName] = tool;
@@ -241,17 +278,12 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
         executionOptions: ToolExecutionOptions<never>,
       ) => {
         const callId = executionOptions.toolCallId;
-        let serializedInput: JsonValue;
-        try {
-          serializedInput = boundedRecorderJson(
-            input,
-            `tool '${toolName}' input`,
-          );
-        } catch (error) {
-          storeAdapterFailure(options.state, error);
-          throw error;
-        }
-        if (!options.state.spec) {
+        const serializedInput = recordedPayloadJson(
+          input,
+          `tool '${toolName}' input`,
+        );
+        const spec = options.state.spec;
+        if (!spec) {
           return executeBaseline({
             callId,
             execute: originalExecute,
@@ -263,6 +295,16 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
           });
         }
         const executeReplay = async () => {
+          // Under passthrough a repeated call runs live and resolves to its own
+          // result, so the warning would be both wrong and pure cost.
+          if (selectToolPolicy(spec, toolName).type === "history") {
+            warnOnRepeatedCall({
+              cacheKey: computeToolCacheKey(toolName, serializedInput),
+              seen: replayedCalls,
+              toolName,
+              warned: warnedRepeats,
+            });
+          }
           const decision = await decideToolCall(options.state, {
             callId,
             inputs: serializedInput,
@@ -306,7 +348,7 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
             executeReplay,
             executionOptions.abortSignal,
             () => options.state.failure !== undefined,
-            () => options.state.failure !== undefined,
+            () => options.state.failure,
           )
           .catch((error: unknown) => {
             const entry = options.state.getToolCall(callId);

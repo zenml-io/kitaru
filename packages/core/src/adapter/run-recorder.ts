@@ -1,11 +1,11 @@
 import { writeFile } from "node:fs/promises";
 
-import { toRecorderJson } from "../json.js";
 import type {
   JsonValue,
   ReplaySpec,
   SessionNodeCreateRequest,
 } from "../types.js";
+import { recordedPayloadJson } from "./recorded-json.js";
 import {
   type AdapterClient,
   type AdapterRunState,
@@ -135,7 +135,10 @@ export class RunRecorder {
 
   async complete(result: unknown): Promise<void> {
     await this.state.awaitSteps();
-    const serializedOutput = toRecorderJson(result);
+    // The run has finished by the time its result is recorded, so a result too
+    // large or too circular to record is bounded instead of turning a
+    // successful generation into a failed one.
+    const serializedOutput = recordedPayloadJson(result, "run output");
     const endedAt = new Date().toISOString();
     await this.#client.upsertSessionNodes(this.state.sessionId, {
       nodes: [
@@ -156,6 +159,9 @@ export class RunRecorder {
 
   async fail(error: unknown): Promise<void> {
     this.state.storeFailure(error);
+    // Let queued step writes land before the failed ledger and the closing
+    // node, so a late step cannot arrive after the session is marked failed.
+    await bestEffort(() => this.state.awaitSteps());
     const endedAt = new Date().toISOString();
     await bestEffort(() => flushFailedPolicyOutcomes(this.state));
     await bestEffort(() =>

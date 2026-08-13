@@ -1,13 +1,13 @@
+import {
+  MAX_RECORDED_STRING_CHARS,
+  projectRecordedInput,
+  projectRecordedMetadata,
+} from "@zenml-io/kitaru/adapter";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { createKitaruGenerateText } from "../src/index.js";
-import {
-  MAX_RECORDED_STRING_CHARS,
-  MAX_WORKER_TASK_INPUT_CHARS,
-  projectRecordedInput,
-  projectRecordedMetadata,
-} from "../src/options.js";
+import { MAX_WORKER_TASK_INPUT_CHARS } from "../src/options.js";
 import { AGENT_ID, FakeClient, textResponse } from "./helpers.js";
 
 describe("recording privacy", () => {
@@ -84,11 +84,38 @@ describe("recording privacy", () => {
 
     await expect(
       generate({
+        messages: [
+          {
+            content: [
+              {
+                data: "FILE_SENTINEL",
+                mediaType: "text/plain",
+                type: "file",
+              },
+            ],
+            role: "user",
+          },
+        ],
         model,
-        prompt: "x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1),
       }),
-    ).rejects.toThrow("exceeds maximum length");
+    ).rejects.toThrow("contains unsupported sensitive key 'data'");
     expect(client.created).toHaveLength(0);
     expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("records a caller prompt that is longer than the worker input bound", async () => {
+    const client = new FakeClient();
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+    const prompt = "x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1);
+
+    await generate({ model, prompt });
+
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(client.created[0]?.inputs).toBe(prompt);
   });
 });

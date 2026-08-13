@@ -204,6 +204,45 @@ describe("replay tool policies", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it("warns once when a replay repeats a tool call with identical arguments", async () => {
+    const client = new FakeClient({
+      lookup: () => ({ found: true, result: "recorded" }),
+      replay: replaySpec({ on_miss: "fail", type: "history" }),
+    });
+    const model = new MockLanguageModelV4({
+      doGenerate: toolResponse([
+        { id: "call-1", input: '{"value":"a"}', name: "write" },
+        { id: "call-2", input: '{"value":"a"}', name: "write" },
+      ]),
+    });
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    try {
+      await generate({
+        model,
+        prompt: "go",
+        tools: {
+          write: tool({
+            execute: async () => "live",
+            inputSchema: VALUE_INPUT,
+          }),
+        },
+      });
+
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain(
+        "called again with identical arguments",
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it("keeps an ordinary replay passthrough error native", async () => {
     const client = new FakeClient({ replay: replaySpec() });
     const generate = createKitaruGenerateText({

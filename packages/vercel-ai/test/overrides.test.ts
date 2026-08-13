@@ -101,6 +101,37 @@ describe("inputs and replay overrides", () => {
     });
   });
 
+  it("replaces a system message carried inside a message-array input", async () => {
+    const messages = [
+      { content: "Always answer in French", role: "system" },
+      { content: "baseline prompt", role: "user" },
+    ];
+    const client = new FakeClient({
+      replay: replaySpec(
+        { type: "passthrough" },
+        { system_prompt: "Always answer in English" },
+      ),
+    });
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment({
+        KITARU_TASK_INPUTS: JSON.stringify(messages),
+      }),
+    });
+
+    await generate({ allowSystemInMessages: true, model, prompt: "caller" });
+
+    expect(model.doGenerateCalls[0]?.prompt).toEqual([
+      { content: "Always answer in English", role: "system" },
+      expect.objectContaining({
+        content: [{ text: "baseline prompt", type: "text" }],
+        role: "user",
+      }),
+    ]);
+  });
+
   it("loads a task input omitted from the worker environment", async () => {
     const client = new FakeClient({ taskInput: "stored task prompt" });
     const model = new MockLanguageModelV4({ doGenerate: textResponse() });

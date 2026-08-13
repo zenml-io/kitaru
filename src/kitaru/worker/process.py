@@ -343,7 +343,12 @@ def get_python_run_argv(
     """
     if not dependencies:
         return [sys.executable, "-m", module, *args]
-    parts = ["uv", "run"]
+    # A task's dependencies are chosen by the server, not by whatever project
+    # the worker happens to run inside. `--exclude-newer 0 days` moves that
+    # project's freshness cutoff to now, so a package published after the
+    # cutoff still resolves, and `--no-sync` keeps the run from relocking and
+    # rewriting that project's lockfile.
+    parts = ["uv", "run", "--no-sync", "--exclude-newer", "0 days"]
     for dependency in dependencies:
         parts.extend(["--with", dependency])
     parts.extend(["python", "-m", module, *args])

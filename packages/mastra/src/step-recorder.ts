@@ -1,16 +1,15 @@
 import type { LLMStepResult } from "@mastra/core/stream";
-import {
-  type JsonValue,
-  type SessionNodeCreateRequest,
-  toRecorderJson,
-} from "@zenml-io/kitaru";
+import type { JsonValue, SessionNodeCreateRequest } from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
+  boundedRecorderJson,
   type NormalizedToolCall,
+  projectRecordedMetadata,
   recordNormalizedStep,
+  resolveCost,
 } from "@zenml-io/kitaru/adapter";
 
-import type { PublicModelIdentity } from "./types.js";
+import type { KitaruCostCalculator, PublicModelIdentity } from "./types.js";
 
 export type RecordedStep = LLMStepResult<unknown> & {
   error?: unknown;
@@ -116,15 +115,21 @@ function usageTokens(usage: unknown): SessionNodeCreateRequest["tokens"] {
     : null;
 }
 
-function stepOutputs(step: RecordedStep, calls: ToolCallPayload[]): JsonValue {
-  return toRecorderJson({
-    content: step.content,
-    finish_reason: step.finishReason,
-    response_messages: step.response?.messages,
-    text: step.text,
-    tool_calls: calls,
-    warnings: step.warnings,
-  });
+function stepOutputs(
+  step: RecordedStep,
+  calls: ToolCallPayload[],
+  results: Map<string, ToolResultPayload>,
+): JsonValue {
+  return boundedRecorderJson(
+    {
+      finish_reason: step.finishReason,
+      text: step.text,
+      tool_calls: calls,
+      tool_results: [...results.values()],
+      warnings: step.warnings,
+    },
+    "model step output",
+  );
 }
 
 function toolErrorFromContent(
@@ -149,6 +154,7 @@ function toolErrorFromContent(
 export async function recordStep(
   state: AdapterRunState,
   step: RecordedStep,
+  costCalculator?: KitaruCostCalculator,
 ): Promise<void> {
   const calls = step.toolCalls.flatMap((item) => {
     const call = toolCallPayload(item);
@@ -164,7 +170,7 @@ export async function recordStep(
     const result = results.get(call.toolCallId);
     return {
       callId: call.toolCallId,
-      inputs: toRecorderJson(call.args),
+      inputs: boundedRecorderJson(call.args, `tool '${call.toolName}' input`),
       publicError: toolErrorFromContent(step.content, call.toolCallId),
       result: result
         ? {
@@ -172,27 +178,41 @@ export async function recordStep(
               ? errorMessage(result.result, "Tool failed")
               : undefined,
             failed: result.isError,
-            output: toRecorderJson(result.result),
+            output: boundedRecorderJson(
+              result.result,
+              `tool '${call.toolName}' output`,
+            ),
           }
         : undefined,
       toolName: call.toolName,
     };
   });
   const failed = step.finishReason === "error";
+  const servedModelId = step.response?.modelId ?? step.model?.modelId;
+  const tokens = usageTokens(step.usage);
+  const cost = await resolveCost(costCalculator, {
+    model: servedModelId ?? "",
+    provider: step.model?.provider ?? "",
+    requestedModelId: state.requestedModelId,
+    tokens,
+  });
 
   await recordNormalizedStep(state, {
-    attributes: isRecord(step.providerMetadata)
-      ? { provider_metadata: toRecorderJson(step.providerMetadata) }
-      : {},
-    cost: null,
+    attributes: {
+      cost: cost.attribute,
+      ...(isRecord(step.providerMetadata)
+        ? { provider_metadata: projectRecordedMetadata(step.providerMetadata) }
+        : {}),
+    },
+    cost: cost.cost,
     error: failed ? errorMessage(step.error, "Model step failed") : undefined,
     externalId: step.response?.id,
     failed,
-    inputs: toRecorderJson(step.request?.body),
-    model: step.response?.modelId ?? step.model?.modelId,
-    outputs: stepOutputs(step, calls),
+    inputs: null,
+    model: servedModelId,
+    outputs: stepOutputs(step, calls, results),
     provider: step.model?.provider,
-    tokens: usageTokens(step.usage),
+    tokens,
     tools,
   });
 }

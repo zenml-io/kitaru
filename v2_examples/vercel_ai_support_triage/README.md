@@ -7,6 +7,8 @@ This demo records and replays an AI SDK 7 `generateText` call using OpenAI `gpt-
 
 The Python driver registers the compiled command and evaluator with the current Kitaru API, creates a session-run job, and executes the Node command through a job-scoped `Worker`. It then creates and runs a replay job. During replay, Kitaru returns the original `queueRefundReview` result from history, so the append-only outbox stays at one line. The replay also replaces the bounded task prompt, instructions, model, and `maxOutputTokens`, then runs three Python evaluations against the result session.
 
+Every LLM node records `openai/gpt-5-nano` as the requested model and whatever model id the provider served, which is not the same string. Kitaru never prices a call itself, so `agent.ts` passes a `costCalculator` that turns recorded token usage into dollars; without it the session would total `$0`.
+
 ## Run
 
 Use Node 22 and a running Kitaru API backed by PostgreSQL. Export `KITARU_API_URL` and, when the server requires it, `KITARU_API_KEY`. Then install, build, and run:
@@ -24,7 +26,7 @@ Mutable output is written under `.state/`, which is gitignored. The JSON fixture
 
 ## Focused validation
 
-The deterministic path uses the public AI SDK 7 `MockLanguageModelV4` test model, but otherwise runs the same compiled adapter and tools. A local smoke run does not need a Kitaru server:
+The deterministic path uses the public AI SDK 7 `MockLanguageModelV4` test model, but otherwise runs the same compiled adapter and tools, and it reports a provider-shaped model id (`gpt-5-nano-fixture`) so it cannot hide a live model-id mismatch. A local smoke run does not need a Kitaru server:
 
 ```bash
 KITARU_VERCEL_AI_SMOKE=1 KITARU_VERCEL_AI_TEST_MODEL=1 KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage build

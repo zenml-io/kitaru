@@ -22,7 +22,9 @@ function compareCodePoints(left: string, right: string): number {
 }
 
 function pythonJsonString(value: string): string {
-  return JSON.stringify(value).replace(/[\u0080-\uffff]/g, (character) => {
+  // Python's json.dumps with ensure_ascii escapes everything above 0x7e, so
+  // DEL has to be escaped here too even though JSON.stringify leaves it bare.
+  return JSON.stringify(value).replace(/[\u007f-\uffff]/g, (character) => {
     return `\\u${character.charCodeAt(0).toString(16).padStart(4, "0")}`;
   });
 }

@@ -104,6 +104,9 @@ EXPECTED_INVESTIGATION_TOOLS = {
     "ticket-010": {"lookup_order", "get_return_policy"},
 }
 REQUESTED_MODEL_ID = "openai/gpt-5-nano"
+# The scripted fixture answers as its own served model, the way a provider
+# returns a dated model id rather than the id the caller asked for.
+SERVED_MODEL_ID = "kitaru-returns-scripted-fixture"
 BASELINE_ACTIONS = {
     "ticket-001": ("refund", 98),
     "ticket-002": ("escalate", None),
@@ -255,6 +258,27 @@ def _build_compiled_commands() -> None:
     _run(["pnpm", "--ignore-workspace", "build"], cwd=EXAMPLE_DIR)
 
 
+def _assert_documented_registration(invocation: str, *, env: tuple[str, ...]) -> None:
+    """Assert the documented registration still teaches the shape that works."""
+    readme = README_PATH.read_text(encoding="utf-8")
+    start = readme.index(f"uv run kitaru {invocation}")
+    command = readme[start : readme.index("\n```", start)]
+    required = (
+        '--command "node dist/main.js"',
+        # A relative --working-dir resolves against whichever worker claims the
+        # task, so the documented command has to capture an absolute path.
+        '--working-dir "$PWD"',
+        "--timeout-seconds 180",
+        *(f"--env {pair}" for pair in env),
+        *(f"--tool {tool}" for tool in TOOLS),
+    )
+    missing = [fragment for fragment in required if fragment not in command]
+    assert not missing, (
+        f"`uv run kitaru {invocation}` in {README_PATH} no longer documents "
+        f"{missing}; the README must keep teaching a registration that works."
+    )
+
+
 def _documented_evaluator_source() -> str:
     matches = DOCUMENTED_EVALUATOR.findall(README_PATH.read_text(encoding="utf-8"))
     assert len(matches) == 1, "README must contain one stable evaluator source block"
@@ -314,7 +338,8 @@ def _assert_evidence(
     )
     assert len(roots) == 1
     assert len(llm_nodes) >= 2
-    assert any(node.model == REQUESTED_MODEL_ID for node in llm_nodes)
+    assert all(node.requested_model == REQUESTED_MODEL_ID for node in llm_nodes)
+    assert all(node.model == SERVED_MODEL_ID for node in llm_nodes)
     assert investigation == EXPECTED_INVESTIGATION_TOOLS[_ticket_id(session)]
     terminal = _accepted_terminal(nodes)
     action, amount = expected
@@ -479,6 +504,9 @@ async def test_typescript_canonical_improvement_loop(tmp_path: Path) -> None:
                     description="Synthetic TypeScript returns resolver E2E.",
                 )
             )
+            _assert_documented_registration(
+                "agent register", env=("RETURNS_POLICY_MODE=baseline",)
+            )
             baseline_version = await client.agents.create_version(
                 agent.id,
                 AgentVersionCreateRequest(
@@ -629,6 +657,13 @@ async def test_typescript_canonical_improvement_loop(tmp_path: Path) -> None:
                 baseline_ids[ticket] for ticket in CONTROL_TICKETS
             }
 
+            _assert_documented_registration(
+                "agent version register",
+                env=(
+                    "RETURNS_POLICY_MODE=strict",
+                    'KITARU_AGENT_ID="${KITARU_AGENT_ID}"',
+                ),
+            )
             strict_version = await client.agents.create_version(
                 agent.id,
                 AgentVersionCreateRequest(

@@ -19,6 +19,7 @@ interface ToolLedgerEntry {
   outcome: "completed" | "failed" | "pending";
   output?: JsonValue;
   policy?: "history" | "static";
+  startedAt?: string;
   toolName: string;
 }
 
@@ -51,6 +52,7 @@ export interface AdapterRunState {
   getToolCall(callId: string): ToolLedgerEntry | undefined;
   setToolCall(entry: ToolLedgerEntry): void;
   storeFailure(error: unknown): void;
+  takeStepStart(endedAt: string): string;
 }
 
 export class RunState implements AdapterRunState {
@@ -66,6 +68,8 @@ export class RunState implements AdapterRunState {
   #failure: unknown;
   #ledger = new Map<string, ToolLedgerEntry>();
   #nextIndex: number;
+  #stepBoundary: string = new Date().toISOString();
+  #stepFailure: unknown;
   #stepTail: Promise<void> = Promise.resolve();
 
   constructor(options: RunStateOptions) {
@@ -88,12 +92,29 @@ export class RunState implements AdapterRunState {
 
   enqueueStep(operation: () => Promise<void>): Promise<void> {
     const pending = this.#stepTail.then(operation);
-    this.#stepTail = pending;
+    // Each batch upsert is independent and idempotent, so one failed step must
+    // not stop the queue from attempting the steps that follow it.
+    this.#stepTail = pending.catch((error: unknown) => {
+      if (this.#stepFailure === undefined) {
+        this.#stepFailure = error;
+      }
+    });
     return pending;
   }
 
   async awaitSteps(): Promise<void> {
     await this.#stepTail;
+    if (this.#stepFailure !== undefined) {
+      throw this.#stepFailure;
+    }
+  }
+
+  // Steps run one after another, so the previous step's end is the earliest
+  // known start for the next one, and run creation anchors the first step.
+  takeStepStart(endedAt: string): string {
+    const startedAt = this.#stepBoundary;
+    this.#stepBoundary = endedAt;
+    return Date.parse(startedAt) <= Date.parse(endedAt) ? startedAt : endedAt;
   }
 
   clearLedger(callIds: readonly string[]): void {

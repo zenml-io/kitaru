@@ -4,9 +4,10 @@ import type {
   ToolHookContext,
   ToolHooks,
 } from "@mastra/core/tools";
-import { ToolPolicyError, toRecorderJson } from "@zenml-io/kitaru";
+import { ToolPolicyError } from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
+  boundedRecorderJson,
   completeToolCall,
   decideToolCall,
   failToolCall,
@@ -88,10 +89,18 @@ export function createReplayToolHooks(options: ReplayHookOptions): ToolHooks {
 
   return {
     beforeToolCall: async (hookContext) => {
+      // Mastra keeps the loop alive after a rejected hook, so every later tool
+      // has to refuse to run rather than fire its side effect for real.
+      if (state.failure !== undefined) {
+        throw state.failure;
+      }
       const callId = toolCallId(hookContext.context);
       const decision = await decideToolCall(state, {
         callId,
-        inputs: toRecorderJson(hookContext.input),
+        inputs: boundedRecorderJson(
+          hookContext.input,
+          `tool '${hookContext.toolName}' input`,
+        ),
         toolName: hookContext.toolName,
       });
       if (decision.type === "mocked_result") {

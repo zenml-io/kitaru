@@ -3,6 +3,10 @@ import type { MastraModelConfig } from "@mastra/core/llm";
 import type { LLMStepResult } from "@mastra/core/stream";
 import type { ToolHooks } from "@mastra/core/tools";
 import type { KitaruEnvironmentOptions } from "@zenml-io/kitaru";
+import type { CostCalculator, CostInput } from "@zenml-io/kitaru/adapter";
+
+export type KitaruCostInput = CostInput;
+export type KitaruCostCalculator = CostCalculator;
 
 export type ConfiguredOnStepFinish = (
   step: LLMStepResult<unknown> & {
@@ -16,6 +20,8 @@ export type ConfiguredAfterToolCall = NonNullable<ToolHooks["afterToolCall"]>;
 export interface KitaruAgentOptions extends KitaruEnvironmentOptions {
   agentId: string;
   agentVersionId?: string;
+  allowedReplayModels?: readonly string[];
+  costCalculator?: KitaruCostCalculator;
   requestedModelId: string;
   resolveModel?: (
     replacementModelId: string,

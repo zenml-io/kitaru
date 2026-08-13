@@ -21,12 +21,14 @@ Build the local TypeScript packages without registering this standalone example 
 ```bash
 pnpm --dir ../.. --filter @zenml-io/kitaru build
 pnpm --dir ../.. --filter @zenml-io/kitaru-vercel-ai build
-pnpm --ignore-workspace install --frozen-lockfile
+CI=true pnpm --ignore-workspace install --frozen-lockfile
 pnpm build
 pnpm test
 pnpm typecheck
 pnpm lint
 ```
+
+`CI=true` keeps the standalone install non-interactive. Without it, pnpm refuses to remove a `node_modules` directory left by a root workspace install and aborts with `ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY`.
 
 With PostgreSQL reachable on the configured Kitaru test database port, run the provider-free live API, evaluator, cohort, and replay proof:
 
@@ -34,16 +36,18 @@ With PostgreSQL reachable on the configured Kitaru test database port, run the p
 pnpm test:e2e
 ```
 
-Start PostgreSQL, the API, and dashboard, then install and connect the Python CLI and worker:
+Start PostgreSQL and the API, then install and connect the Python CLI and worker. That compose stack serves the REST API only; this walkthrough is entirely CLI-driven and never opens a browser.
 
 ```bash
 docker compose -f ../../docker-compose.yml up -d --build
 uv sync --extra cli --extra worker --extra mcp
 cp .env.example .env
 set -a; source .env; set +a
-uv run kitaru login --local
+uv run kitaru login http://localhost:8000
 uv run kitaru status
 ```
+
+Point the CLI at the running compose stack by URL. `kitaru login --local` provisions a second Kitaru deployment of its own and refuses to start while the compose stack holds port 8000.
 
 Load `.env` in every terminal used for the example. It gives both the TypeScript adapter and Python tools the local API URL; the default values do not authorize a provider call.
 
@@ -57,7 +61,7 @@ uv run kitaru agent register \
   --command "node dist/main.js" \
   --description "Resolve one synthetic returns or delivery ticket." \
   --display-version baseline-v1 \
-  --working-dir . \
+  --working-dir "$PWD" \
   --env RETURNS_POLICY_MODE=baseline \
   --timeout-seconds 180 \
   --tool lookup_order \
@@ -68,12 +72,18 @@ uv run kitaru agent register \
   --tool escalate_to_human
 ```
 
+Run that command from this directory so `$PWD` stores the example's absolute path. A worker runs the command in the recorded directory, and a relative `--working-dir` would resolve against whichever worker claimed the job.
+
+Version 1 records its sessions from this shell in step 3, so its run spec needs no agent identity. Any version a worker executes does: the worker gives the process only the Kitaru API URL, a task token, the task ID and inputs, and the version's own `--env` pairs. Step 7 therefore registers the replayed strict version with `KITARU_AGENT_ID` in its run spec, using the ID exported in step 3.
+
 Start a worker in a second terminal from this directory and leave it active:
 
 ```bash
 set -a; source .env; set +a
 uv run kitaru worker start --name vercel-returns-example-worker
 ```
+
+Attach exactly one worker to this server while running the walkthrough. A worker claims any queued task the server offers it, so a second worker started for another agent or example can claim these replay jobs and run them in its own directory.
 
 ## 3. Record the exact deterministic baseline
 
@@ -94,7 +104,7 @@ The runner writes the exact ticket-to-session map to `.state/baseline-sessions.j
 If a process stops after Kitaru writes a session ID but before the manifest commits it, the runner refuses to guess. Inspect the orphan named in `.state/attempts/<evidence-set-id>/<ticket-id>.session-id` with `uv run kitaru session get SESSION_ID`. Adopt it only after confirming that the remote session completed:
 
 ```bash
-pnpm baseline -- --adopt ticket-004=SESSION_ID
+pnpm baseline --adopt ticket-004=SESSION_ID
 ```
 
 The general recovery form is `--adopt ticket-id=session-id`. If the session failed or is still in progress, do not adopt it. After you inspect the exact remote session and confirm it failed, use `--retry ticket-id=session-id`. Retry archives the local orphan marker, records a new remote session, and never deletes remote state.
@@ -140,7 +150,7 @@ uv run kitaru session nodes \
   --size 100
 ```
 
-Create an investigation with a bounded evidence view, answer each question, anchor the outcome annotation to the completed accepted `issue_refund` node, and mark the session complete. Replace the node placeholder after inspecting the trace:
+Create an investigation whose questions carry curated highlights, answer each question, anchor the outcome annotation to the completed accepted `issue_refund` node, and settle the session with a verdict. Replace the node placeholder after inspecting the trace:
 
 ```bash
 TICKET_004_REFUND_NODE_ID="YOUR_COMPLETED_REFUND_NODE_UUID"
@@ -148,28 +158,30 @@ INVESTIGATION_ID="$(
   uv run kitaru --output json investigation create refund-policy-review \
     --agent returns-resolver \
     --description "Review whether risky refunds require human approval." \
-    --question 'outcome=Is this outcome acceptable, problematic, or uncertain, and why?' \
-    --question 'expected=What should the agent have done?' \
-    --session "$TICKET_004_SESSION_ID" \
-    --session-view "$TICKET_004_SESSION_ID={\"summary\":\"A \$280 refund exceeded the automatic approval threshold.\",\"items\":[{\"label\":\"Accepted refund\",\"selectors\":[{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}]}]}" \
+    --session "${TICKET_004_SESSION_ID}" \
+    --session-question "${TICKET_004_SESSION_ID}:outcome=Is this outcome acceptable, problematic, or uncertain, and why?" \
+    --session-question "${TICKET_004_SESSION_ID}:expected=What should the agent have done?" \
+    --session-highlights "${TICKET_004_SESSION_ID}:outcome=[{\"selector\":{\"node_id\":\"${TICKET_004_REFUND_NODE_ID}\",\"path\":\"/outputs\"},\"description\":\"A \$280 refund exceeded the automatic approval threshold.\"}]" \
   | jq -r '.item.id'
 )"
 INVESTIGATION_SESSION_ID="$(
   uv run kitaru --output json investigation session list \
-    "$INVESTIGATION_ID" --size 20 | jq -r '.items[0].id'
+    "${INVESTIGATION_ID}" --size 20 | jq -r '.items[0].id'
 )"
 uv run kitaru annotation create \
-  --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --investigation-session "${INVESTIGATION_SESSION_ID}" \
   --question-key outcome \
-  --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}" \
+  --selector "{\"node_id\":\"${TICKET_004_REFUND_NODE_ID}\",\"path\":\"/outputs\"}" \
   --value '{"judgment":"problematic","reason":"The amount exceeds the automatic approval threshold."}'
 uv run kitaru annotation create \
-  --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --investigation-session "${INVESTIGATION_SESSION_ID}" \
   --question-key expected \
   --value '{"action":"escalate","reason":"Human approval is required."}'
-uv run kitaru investigation session complete \
-  "$INVESTIGATION_ID" "$TICKET_004_SESSION_ID"
+uv run kitaru investigation session verdict \
+  "${INVESTIGATION_ID}" "${TICKET_004_SESSION_ID}" problematic
 ```
+
+Each `--session-question` and `--session-highlights` value starts with the session ID of a session already selected by `--session`, so the braces around `${TICKET_004_SESSION_ID}` are required: zsh reads `"$TICKET_004_SESSION_ID:outcome=..."` as a modifier expression and expands it to something else. A highlight and an annotation selector accept `node_id`, an RFC 6901 `path` into that node, and an optional `span`. The verdict is `acceptable`, `problematic`, or `uncertain`.
 
 Repeat the review for a diverse set before fixing the rule. The agreed behavior for this story is: refunds above the category's approval threshold escalate; orders with risk flags escalate; valid refunds remain refunds and never exceed the amount paid; missing evidence is an error rather than a guess.
 
@@ -381,15 +393,16 @@ uv run kitaru session list --cohort safe-refund-control@1 --size 20
 
 ## 7. Register the strict candidate and experiment
 
-The strict mode checks approval thresholds and risk flags before `issue_refund`. Register the candidate after reviewing that source change:
+The strict mode checks approval thresholds and risk flags before `issue_refund`. Register the candidate after reviewing that source change, from this directory and in the shell that exported `KITARU_AGENT_ID` in step 3. A worker runs this version, so its run spec carries the agent ID the adapter records replay sessions under:
 
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
   --command "node dist/main.js" \
   --display-version strict-policy-v2 \
-  --working-dir . \
+  --working-dir "$PWD" \
   --env RETURNS_POLICY_MODE=strict \
+  --env KITARU_AGENT_ID="${KITARU_AGENT_ID}" \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \
@@ -442,9 +455,11 @@ uv run kitaru experiment run get RUN_UUID
 uv run kitaru experiment run jobs RUN_UUID --size 100
 ```
 
+On a server that holds other work, the job listing can include jobs outside this run. The run-scoped counts are the `progress` fields of `experiment run get`, which must reach five settled replays across the two runs.
+
 ## 9. Compare and decide
 
-List replay sessions and policy results, then inspect changed tool nodes in the dashboard at [http://localhost:8000](http://localhost:8000):
+List replay sessions and policy results, then inspect changed tool nodes with `kitaru session nodes`:
 
 ```bash
 uv run kitaru session list \
@@ -467,7 +482,7 @@ The OpenAI path makes paid network calls and requires both a key and explicit op
 ```bash
 export OPENAI_API_KEY="YOUR_KEY"
 export RETURNS_ALLOW_PAID_MODEL=1
-pnpm baseline -- --provider openai --fresh
+pnpm baseline --provider openai --fresh
 ```
 
 `--fresh` archives the previous evidence set. Regenerate every session-ID file before scoring or creating cohorts, otherwise those files still refer to archived evidence:

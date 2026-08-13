@@ -6,7 +6,7 @@ const BASELINE_INPUT =
 const REPLAY_INPUT =
   "Priority escalation: investigate account acct-1001 and order ord-1001. Confirm the delayed order and suspected duplicate charge from tool evidence.";
 const REPLAY_INSTRUCTIONS =
-  "Follow the configured support workflow. Use the account and order lookup tools, queue one refund review for a delayed duplicate charge, and return the required structured triage decision.";
+  "Follow the configured support workflow. Use the account and order lookup tools and queue one refund review for a delayed duplicate charge. Answer with a JSON object only, using exactly the keys decision, evidence, risk, and nextAction, and record the queued refund review under evidence.";
 
 type ModelResult = {
   content: unknown[];

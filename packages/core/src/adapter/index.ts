@@ -1,3 +1,20 @@
+export type { CostCalculator, CostInput, ResolvedCost } from "./cost.js";
+export { resolveCost } from "./cost.js";
+export { MODEL_SETTING_KEYS, parseModelSettings } from "./model-settings.js";
+export { providerFamily } from "./provider.js";
+export {
+  assertSafeKeys,
+  boundedRecordedText,
+  boundedRecorderJson,
+  boundRecordedSize,
+  MAX_RECORDED_PAYLOAD_CHARS,
+  MAX_RECORDED_STRING_CHARS,
+  projectRecordedInput,
+  projectRecordedMetadata,
+  recordedPayloadJson,
+  runResultSummary,
+  strictRecordedJson,
+} from "./recorded-json.js";
 export type { ReplayContext } from "./replay.js";
 export {
   modelReplacement,
@@ -5,6 +22,7 @@ export {
   parseReplayId,
   parseReplayOverride,
   resolveReplayContext,
+  stripSystemMessages,
 } from "./replay.js";
 export type { RunRecorderOptions } from "./run-recorder.js";
 export { RunRecorder } from "./run-recorder.js";
@@ -20,10 +38,13 @@ export {
   serializedSettings,
 } from "./step.js";
 export type {
+  SupportedToolPolicy,
   ToolCallInput,
   ToolPolicyDecision,
 } from "./tool-policy.js";
 export {
+  assertInterceptableTool,
+  assertSupportedToolPolicy,
   completeToolCall,
   decideToolCall,
   failToolCall,

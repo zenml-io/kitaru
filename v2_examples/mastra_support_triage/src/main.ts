@@ -2,6 +2,7 @@ import { KitaruAgent } from "@zenml-io/kitaru-mastra";
 
 import {
   createSupportAgent,
+  estimateSupportCost,
   REQUESTED_MODEL_ID,
   resolveModel,
 } from "./agent.js";
@@ -28,6 +29,8 @@ async function main(): Promise<void> {
   const agent = new KitaruAgent(createSupportAgent(), {
     agentId: requiredEnvironment("KITARU_AGENT_ID"),
     agentVersionId: versionId,
+    allowedReplayModels: [REQUESTED_MODEL_ID],
+    costCalculator: estimateSupportCost,
     requestedModelId: REQUESTED_MODEL_ID,
     resolveModel: (modelId) => resolveModel(modelId) as never,
     sessionName: "Mastra support triage",

@@ -1,12 +1,17 @@
 import type { JsonValue, SessionNodeCreateRequest } from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
+  boundedRecordedText,
+  boundRecordedSize,
   type NormalizedToolCall,
+  projectRecordedMetadata,
+  recordedPayloadJson,
   recordNormalizedStep,
+  resolveCost,
 } from "@zenml-io/kitaru/adapter";
 import type { ContentPart, StepResult, ToolSet } from "ai";
 
-import { boundedRecorderJson, projectRecordedMetadata } from "./options.js";
+import type { KitaruCostCalculator } from "./types.js";
 
 function usageTokens(
   usage: StepResult<ToolSet>["usage"],
@@ -39,7 +44,7 @@ function normalizedTools(step: StepResult<ToolSet>): NormalizedToolCall[] {
     const failed = part?.type === "tool-error";
     return {
       callId: call.toolCallId,
-      inputs: boundedRecorderJson(call.input, `tool '${call.toolName}' input`),
+      inputs: recordedPayloadJson(call.input, `tool '${call.toolName}' input`),
       publicError: failed ? "Tool execution failed" : undefined,
       result:
         part === undefined
@@ -49,7 +54,7 @@ function normalizedTools(step: StepResult<ToolSet>): NormalizedToolCall[] {
               failed,
               output:
                 part.type === "tool-result"
-                  ? boundedRecorderJson(
+                  ? recordedPayloadJson(
                       part.output,
                       `tool '${call.toolName}' output`,
                     )
@@ -60,47 +65,76 @@ function normalizedTools(step: StepResult<ToolSet>): NormalizedToolCall[] {
   });
 }
 
-function safeOutputs(step: StepResult<ToolSet>): JsonValue {
-  return boundedRecorderJson(
+// The tool nodes and the model node record the same arguments and results, so
+// the model node reuses what the tool nodes already converted. Converting them
+// twice costs a second deep clone of every payload on the generation path.
+function stepOutputs(
+  step: StepResult<ToolSet>,
+  tools: readonly NormalizedToolCall[],
+): JsonValue {
+  const converted = new Map(tools.map((call) => [call.callId, call]));
+  return boundRecordedSize(
     {
       finish_reason: step.finishReason,
-      reasoning_text: step.reasoningText,
-      text: step.text,
+      reasoning_text: boundedRecordedText(step.reasoningText),
+      text: boundedRecordedText(step.text),
       tool_calls: step.toolCalls.map((call) => ({
-        input: boundedRecorderJson(call.input, `tool '${call.toolName}' input`),
+        input:
+          converted.get(call.toolCallId)?.inputs ??
+          recordedPayloadJson(call.input, `tool '${call.toolName}' input`),
         tool_call_id: call.toolCallId,
         tool_name: call.toolName,
       })),
-      tool_results: step.toolResults.map((result) => ({
-        output: boundedRecorderJson(
-          result.output,
-          `tool '${result.toolName}' output`,
-        ),
-        tool_call_id: result.toolCallId,
-        tool_name: result.toolName,
-      })),
+      tool_results: step.toolResults.map((result) => {
+        const recorded = converted.get(result.toolCallId)?.result;
+        return {
+          output:
+            recorded && !recorded.failed
+              ? recorded.output
+              : recordedPayloadJson(
+                  result.output,
+                  `tool '${result.toolName}' output`,
+                ),
+          tool_call_id: result.toolCallId,
+          tool_name: result.toolName,
+        };
+      }),
     },
     "model step output",
   );
 }
 
+function servedModelId(step: StepResult<ToolSet>): string {
+  return step.response.modelId || step.model.modelId;
+}
+
 export async function recordVercelStep(
   state: AdapterRunState,
   step: StepResult<ToolSet>,
+  costCalculator?: KitaruCostCalculator,
 ): Promise<void> {
+  const tokens = usageTokens(step.usage);
+  const cost = await resolveCost(costCalculator, {
+    model: servedModelId(step),
+    provider: step.model.provider,
+    requestedModelId: state.requestedModelId,
+    tokens,
+  });
+  const tools = normalizedTools(step);
   await recordNormalizedStep(state, {
     attributes: {
+      cost: cost.attribute,
       finish_reason: step.finishReason,
       provider_metadata: projectRecordedMetadata(step.providerMetadata),
     },
-    cost: null,
+    cost: cost.cost,
     externalId: step.response.id,
     failed: step.finishReason === "error",
     inputs: null,
-    model: step.model.modelId,
-    outputs: safeOutputs(step),
+    model: servedModelId(step),
+    outputs: stepOutputs(step, tools),
     provider: step.model.provider,
-    tokens: usageTokens(step.usage),
-    tools: normalizedTools(step),
+    tokens,
+    tools,
   });
 }

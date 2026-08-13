@@ -1,6 +1,13 @@
 import { createRequire } from "node:module";
 import { type JsonValue, KitaruClient } from "@zenml-io/kitaru";
-import { RunRecorder, resolveReplayContext } from "@zenml-io/kitaru/adapter";
+import {
+  projectRecordedInput,
+  RunRecorder,
+  recordedPayloadJson,
+  resolveReplayContext,
+  runResultSummary,
+  stripSystemMessages,
+} from "@zenml-io/kitaru/adapter";
 import {
   generateText,
   type LanguageModel,
@@ -11,11 +18,9 @@ import {
 
 import { composeStopConditions } from "./failure.js";
 import {
-  boundedRecorderJson,
   callerModelSettings,
   parseVercelReplayOverride,
   parseWorkerTaskInput,
-  projectRecordedInput,
   type SafeReplayOverride,
 } from "./options.js";
 import { recordVercelStep } from "./step-recorder.js";
@@ -70,14 +75,7 @@ function effectiveRuntimeInput(options: RuntimeOptions): unknown {
 }
 
 function safeResultSummary(result: RuntimeResult): JsonValue {
-  return boundedRecorderJson(
-    {
-      finish_reason: result.finishReason,
-      step_count: Array.isArray(result.steps) ? result.steps.length : 0,
-      text: typeof result.text === "string" ? result.text : undefined,
-    },
-    "generation result",
-  );
+  return recordedPayloadJson(runResultSummary(result), "generation result");
 }
 
 function applyOverride(
@@ -97,6 +95,14 @@ function applyOverride(
   if (override?.systemPrompt !== undefined) {
     options.instructions = override.systemPrompt;
     delete options.system;
+    // A message array can carry its own system message, which would otherwise
+    // survive alongside the replacement instructions and hide the override.
+    if (options.messages !== undefined) {
+      options.messages = stripSystemMessages(options.messages);
+    }
+    if (Array.isArray(options.prompt)) {
+      options.prompt = stripSystemMessages(options.prompt);
+    }
   }
   if (override?.modelSettings) {
     Object.assign(options, override.modelSettings);
@@ -109,11 +115,6 @@ async function resolveReplacementModel(options: {
 }): Promise<LanguageModel | undefined> {
   if (options.modelId === undefined) {
     return undefined;
-  }
-  if (!options.adapter.allowedReplayModels?.includes(options.modelId)) {
-    throw new TypeError(
-      `Replacement model '${options.modelId}' is not in allowedReplayModels`,
-    );
   }
   if (!options.adapter.resolveModel) {
     throw new TypeError(
@@ -156,8 +157,10 @@ export function createKitaruGenerateText(
       );
     }
 
+    const callerInput = effectiveRuntimeInput(callerOptions);
     const replay = await resolveReplayContext({
-      callerInput: effectiveRuntimeInput(callerOptions),
+      allowedReplayModels: adapterOptions.allowedReplayModels,
+      callerInput,
       client,
       environment,
       requestedModelId,
@@ -166,7 +169,12 @@ export function createKitaruGenerateText(
       replay.override,
       "replay override",
     );
-    const taskInput = parseWorkerTaskInput(replay.effectiveRuntimeInput);
+    // The worker-input bounds apply to input Kitaru injects, not to the
+    // caller's own prompt, which the adapter passes through untouched.
+    const taskInput =
+      replay.effectiveRuntimeInput === callerInput
+        ? undefined
+        : parseWorkerTaskInput(replay.effectiveRuntimeInput);
     const effectiveOptions: RuntimeOptions = { ...callerOptions };
     applyOverride(effectiveOptions, override, taskInput);
 
@@ -246,7 +254,7 @@ export function createKitaruGenerateText(
       };
       effectiveOptions.onStepEnd = async (step: StepResult<ToolSet>) => {
         try {
-          await recordVercelStep(state, step);
+          await recordVercelStep(state, step, adapterOptions.costCalculator);
         } catch (error) {
           state.storeFailure(error);
           throw error;

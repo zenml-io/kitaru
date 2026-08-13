@@ -87,7 +87,7 @@ describe("KitaruAgent", () => {
     });
     expect(rootBatches.at(-1)?.[0]).toMatchObject({
       index: rootBatches[0]?.[0]?.index,
-      outputs: expected,
+      outputs: { finish_reason: null, step_count: 0, text: null },
       status: "completed",
     });
   });

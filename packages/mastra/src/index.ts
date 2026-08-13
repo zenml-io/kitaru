@@ -4,4 +4,6 @@ export type {
   ConfiguredBeforeToolCall,
   ConfiguredOnStepFinish,
   KitaruAgentOptions,
+  KitaruCostCalculator,
+  KitaruCostInput,
 } from "./types.js";

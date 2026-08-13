@@ -28,12 +28,34 @@ Replay supports local executable tools with passthrough, static, and history pol
 
 History matching is guaranteed only for traces recorded and replayed through this Vercel AI SDK adapter. Another framework may validate, default, or serialize the same logical tool input differently, so cross-framework history replay is not a compatibility promise.
 
+Kitaru looks recorded tool results up by tool name and arguments. When one run calls the same tool twice with identical arguments, both replayed calls resolve to the last recorded result for that pair, so a polling loop replays differently from its baseline. The adapter writes a `console.warn` the first time a run repeats a call, because nothing else can tell you the replayed trajectory diverged.
+
+## Model identity
+
+Each LLM node records `requested_model` (the Kitaru model id the run asked for, before any replay override), `model` (the model id the provider says it served, such as `gpt-5-nano-2026-08-07`), and `model_provider` (the bare provider family, such as `openai`). The AI SDK reports transport-qualified provider strings such as `openai.responses`; the adapter keeps that original string as the `provider_id` attribute so evaluator model policies can match one exact provider family.
+
+## Cost
+
+The adapter records the model, provider, and token usage of every step, and Kitaru stores whatever cost the adapter sends. Nothing computes a price server-side, so cost stays `null` and a session totals `$0` unless you pass `costCalculator`:
+
+```ts
+const generateText = createKitaruGenerateText({
+  agentId: "your-agent-id",
+  costCalculator: ({ model, tokens }) =>
+    priceFor(model, tokens?.input_tokens ?? 0, tokens?.output_tokens ?? 0),
+});
+```
+
+Each LLM node carries a `cost` attribute recording where the number came from: `disabled` with no calculator, `estimated` for a calculated value, and `unavailable` when the calculator throws or returns nothing. A throwing calculator never fails the run.
+
 ## Data boundary
 
-`KITARU_TASK_INPUTS` must contain a JSON prompt string or message array. Prompt strings and strings inside recorded inputs are limited to 4,096 characters. Replay prompt and instruction overrides must also be bounded strings. The adapter records bounded tool values, model settings, usage, response metadata, and result summaries. It never records provider request data and sets LLM-node inputs to `null`. Even so, tool values and result summaries can contain application data. Do not put secrets or unnecessary personal data in recorded values; neither this adapter nor the shared package performs semantic redaction.
+`KITARU_TASK_INPUTS` must contain a JSON prompt string or message array, and prompt strings Kitaru injects are limited to 4,096 characters. Replay prompt and instruction overrides must also be bounded strings. Values the caller supplies and values the run produces are not held to that bound: recorded inputs, model text, tool arguments, and tool results are recorded in full up to 1 MiB per payload. A payload beyond that ceiling is replaced with a `{"kitaru_recording": "degraded"}` marker, and a single value that cannot be converted, such as a circular reference or a function, is replaced in place with `[circular]`, `[truncated]`, or `[unsupported]`; recording never aborts a generation the caller's own code handled. The adapter never records provider request data and sets LLM-node inputs to `null`. Even so, tool values and result summaries can contain application data. Do not put secrets or unnecessary personal data in recorded values; neither this adapter nor the shared package performs semantic redaction.
 
 ## Current scope
 
 This experimental release supports AI SDK 7 non-streaming `generateText` with local executable tools. It does not support streaming generation, provider-executed or dynamic tools, tool approval, sandboxed replay, async-iterable tools during replay, or the LLM tool policy.
+
+Replay runs tools one at a time in model-output order. `ticketTimeoutMs` (30 seconds by default) bounds how long a queued tool waits for its predecessor to *start*, not how long that predecessor runs, so a slow passthrough tool does not fail the calls queued behind it.
 
 The adapter disables generation retries. Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure. The adapter reports that failure, but it cannot roll back the completed effect. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.

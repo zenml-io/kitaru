@@ -172,4 +172,46 @@ describe("normalized replay policy decisions", () => {
       outcome: "failed",
     });
   });
+
+  it.each([
+    ["oversized", () => ({ body: "x".repeat(2 * 1_048_576), sent: true })],
+    [
+      "circular",
+      () => {
+        const output: Record<string, unknown> = { sent: true };
+        output.self = output;
+        return output;
+      },
+    ],
+  ])("records a %s passthrough result without failing the run", (_name, build) => {
+    const run = state({ default: { type: "passthrough" }, tools: {} });
+    run.setToolCall({
+      callId: "call-1",
+      inputs: {},
+      mocked: false,
+      outcome: "pending",
+      toolName: "sendEmail",
+    });
+
+    // The email has already been sent by the time its result is recorded,
+    // so a result too large or too circular to record must not throw.
+    expect(() => completeToolCall(run, "call-1", build())).not.toThrow();
+    expect(run.getToolCall("call-1")?.outcome).toBe("completed");
+    expect(run.failure).toBeUndefined();
+  });
+
+  it("refuses a later tool once a policy has already failed", async () => {
+    const run = state({ default: { type: "passthrough" }, tools: {} });
+    const failure = new ToolPolicyMissError("No static result for 'normalize'");
+    run.storeFailure(failure);
+
+    await expect(
+      decideToolCall(run, {
+        callId: "call-2",
+        inputs: {},
+        toolName: "sendEmail",
+      }),
+    ).rejects.toBe(failure);
+    expect(run.getToolCall("call-2")).toBeUndefined();
+  });
 });

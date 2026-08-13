@@ -1,6 +1,8 @@
 export const TICKET_WAIT_TIMEOUT_MS = 30_000;
 
 interface Ticket {
+  activate(): void;
+  predecessorActive: Promise<void>;
   reject(error: unknown): void;
   resolve(): void;
   turn: Promise<void>;
@@ -11,7 +13,7 @@ function abortError(signal: AbortSignal): unknown {
 }
 
 async function waitForTurn(
-  turn: Promise<void>,
+  ticket: Ticket,
   abortSignal: AbortSignal | undefined,
   timeoutMs: number,
 ): Promise<void> {
@@ -20,10 +22,25 @@ async function waitForTurn(
   const timeoutPromise = new Promise<never>((_resolve, reject) => {
     timeout = setTimeout(
       () =>
-        reject(new Error(`Replay tool ticket timed out after ${timeoutMs}ms`)),
+        reject(
+          new Error(
+            `Replay tool ticket timed out after ${timeoutMs}ms waiting to start`,
+          ),
+        ),
       timeoutMs,
     );
   });
+  // The timeout guards a predecessor that never starts, not one that is slow:
+  // a legitimately long tool must not fail the calls queued behind it.
+  void ticket.predecessorActive.then(
+    () => {
+      if (timeout !== undefined) {
+        clearTimeout(timeout);
+        timeout = undefined;
+      }
+    },
+    () => undefined,
+  );
   const abortPromise = new Promise<never>((_resolve, reject) => {
     if (!abortSignal) {
       return;
@@ -36,7 +53,7 @@ async function waitForTurn(
     abortSignal.addEventListener("abort", onAbort, { once: true });
   });
   try {
-    await Promise.race([turn, timeoutPromise, abortPromise]);
+    await Promise.race([ticket.turn, timeoutPromise, abortPromise]);
   } finally {
     if (timeout !== undefined) {
       clearTimeout(timeout);
@@ -65,16 +82,28 @@ export class ExecutionTickets {
     }
 
     let predecessor = Promise.resolve();
+    let predecessorActive = Promise.resolve();
     for (const callId of callIds) {
       let resolve!: () => void;
       let reject!: (error: unknown) => void;
+      let activate!: () => void;
       const completion = new Promise<void>((resolvePromise, rejectPromise) => {
         resolve = resolvePromise;
         reject = rejectPromise;
       });
+      const activation = new Promise<void>((resolveActivation) => {
+        activate = resolveActivation;
+      });
       void completion.catch(() => undefined);
-      this.#tickets.set(callId, { reject, resolve, turn: predecessor });
+      this.#tickets.set(callId, {
+        activate,
+        predecessorActive,
+        reject,
+        resolve,
+        turn: predecessor,
+      });
       predecessor = completion;
+      predecessorActive = activation;
     }
   }
 
@@ -83,7 +112,7 @@ export class ExecutionTickets {
     execute: () => PromiseLike<T> | T,
     abortSignal?: AbortSignal,
     blocksFollowing: (error: unknown) => boolean = () => true,
-    hasStoredFailure: () => boolean = () => false,
+    storedFailure: () => unknown = () => undefined,
   ): Promise<T> {
     const ticket = this.#tickets.get(callId);
     if (!ticket) {
@@ -91,10 +120,14 @@ export class ExecutionTickets {
     }
     this.#tickets.delete(callId);
     try {
-      await waitForTurn(ticket.turn, abortSignal, this.#timeoutMs);
-      if (hasStoredFailure()) {
-        throw new Error("Replay execution stopped after an adapter failure");
+      await waitForTurn(ticket, abortSignal, this.#timeoutMs);
+      // Rethrowing the stored failure keeps one error identity for callers:
+      // the same value core's decideToolCall throws once a policy has failed.
+      const failure = storedFailure();
+      if (failure !== undefined) {
+        throw failure;
       }
+      ticket.activate();
       const result = await execute();
       ticket.resolve();
       return result;

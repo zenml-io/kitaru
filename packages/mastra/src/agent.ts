@@ -1,10 +1,18 @@
 import { createRequire } from "node:module";
 import { KitaruClient } from "@zenml-io/kitaru";
 import {
+  boundedRecorderJson,
+  parseModelSettings,
   RunRecorder,
   resolveReplayContext,
+  runResultSummary,
   serializedSettings,
+  stripSystemMessages,
 } from "@zenml-io/kitaru/adapter";
+import {
+  assertReplayToolCoverage,
+  stripLiveMemoryOptions,
+} from "./replay-guards.js";
 import { type RecordedStep, recordStep } from "./step-recorder.js";
 import { createReplayToolHooks } from "./tool-policies.js";
 import type {
@@ -79,11 +87,12 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     const requestedModelId =
       readableModelId(callerOptions.model) ?? this.#options.requestedModelId;
     const replay = await resolveReplayContext({
+      allowedReplayModels: this.#options.allowedReplayModels,
       callerInput: callerMessages,
       client: this.#client,
       requestedModelId,
     });
-    const effectiveMessages = replay.effectiveRuntimeInput;
+    let effectiveMessages = replay.effectiveRuntimeInput;
     const effectiveOptions: RuntimeGenerateOptions = { ...callerOptions };
 
     if (replay.replacementModelId !== undefined) {
@@ -108,12 +117,27 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     ) {
       delete effectiveOptions.system;
       effectiveOptions.instructions = replay.override.system_prompt;
+      effectiveMessages = stripSystemMessages(effectiveMessages);
     }
-    if (
-      replay.override?.model_params !== undefined &&
-      replay.override.model_params !== null
-    ) {
-      effectiveOptions.modelSettings = replay.override.model_params;
+    const overrideModelSettings = parseModelSettings(
+      replay.override?.model_params,
+    );
+    if (overrideModelSettings) {
+      effectiveOptions.modelSettings = {
+        ...callerOptions.modelSettings,
+        ...overrideModelSettings,
+      };
+    }
+    if (replay.spec) {
+      await assertReplayToolCoverage({
+        agent: this.#agent,
+        runtimeOptions: effectiveOptions,
+        spec: replay.spec,
+      });
+      stripLiveMemoryOptions(effectiveOptions);
+      // Serial tool calls let a policy failure stop the run before another
+      // tool in the same step executes for real.
+      effectiveOptions.toolCallConcurrency = 1;
     }
     const effectiveModelSettings = serializedSettings(
       effectiveOptions.modelSettings,
@@ -140,9 +164,18 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
 
       const callerOnStepFinish = effectiveOptions.onStepFinish;
       effectiveOptions.onStepFinish = async (step) => {
-        await recordStep(state, step as RecordedStep);
+        await recordStep(
+          state,
+          step as RecordedStep,
+          this.#options.costCalculator,
+        );
         await this.#options.configuredOnStepFinish?.(step);
         await callerOnStepFinish?.(step);
+        // Mastra turns a tool-hook rejection into a tool-error result and keeps
+        // looping, so the adapter stops the run itself once a policy failed.
+        if (state.failure !== undefined) {
+          throw state.failure;
+        }
       };
       if (replay.spec) {
         effectiveOptions.hooks = createReplayToolHooks({
@@ -159,11 +192,17 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
         effectiveMessages,
         effectiveOptions,
       );
-      await recorder.complete(result);
+      if (state.failure !== undefined) {
+        throw state.failure;
+      }
+      await recorder.complete(
+        boundedRecorderJson(runResultSummary(result), "generation result"),
+      );
       return result;
     } catch (error) {
-      await recorder.fail(error);
-      throw error;
+      const primary = state.failure ?? error;
+      await recorder.fail(primary);
+      throw primary;
     }
   }
 }

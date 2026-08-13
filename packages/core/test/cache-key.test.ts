@@ -39,6 +39,16 @@ describe("tool cache keys", () => {
       { x: 1e21 },
       "4a74a9b1501cfc1adb593065ec0f419079b87491caad01afbadce9ecf51987ca",
     ],
+    [
+      "search",
+      { q: "weird\u007fchar" },
+      "630fd6b20b7f4d1bfd02a6a29d9a41035ff7953561091fd783f9bd01a2dcb36a",
+    ],
+    [
+      "search",
+      { q: "del\u007f\u001f\u0080end" },
+      "236d4613c418242045937ed89feaea74b05981c5981557b4efee958fd28058aa",
+    ],
   ])("matches the Python key for %s", (toolName, inputs, expected) => {
     expect(computeToolCacheKey(toolName, inputs)).toBe(expected);
   });

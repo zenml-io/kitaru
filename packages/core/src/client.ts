@@ -243,7 +243,9 @@ function safeErrorDetail(payload: unknown, fallback: string): string {
     return fallback;
   }
   if (typeof payload.detail === "string") {
-    return fallback;
+    // Kitaru raises its actionable domain errors as plain-string details, and
+    // the Python SDK reports them verbatim.
+    return payload.detail.trim() || fallback;
   }
   if (!Array.isArray(payload.detail)) {
     return fallback;

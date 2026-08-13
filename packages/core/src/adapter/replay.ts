@@ -96,6 +96,22 @@ export function modelReplacement(
   return undefined;
 }
 
+/**
+ * Drop the system messages a caller's message array already carries.
+ *
+ * A replaced system prompt reaches the model as instructions. A system message
+ * left in the array would survive alongside it, so the run would answer with
+ * the old prompt still in force and the replay would report no difference.
+ */
+export function stripSystemMessages(value: unknown): unknown {
+  if (!Array.isArray(value)) {
+    return value;
+  }
+  return value.filter(
+    (message) => !isRecord(message) || message.role !== "system",
+  );
+}
+
 export interface ReplayContext {
   effectiveInput: JsonValue;
   effectiveRuntimeInput: unknown;
@@ -128,39 +144,85 @@ async function resolveWorkerInput(options: {
   return spec.details.inputs;
 }
 
-function runtimeInput(
-  workerInput: unknown,
-  override: ReplayOverride | undefined,
-): unknown {
-  if (override?.prompt !== undefined && override.prompt !== null) {
-    return override.prompt;
-  }
-  if (
-    override?.system_prompt !== undefined &&
-    override.system_prompt !== null &&
-    isRecord(workerInput) &&
-    Object.hasOwn(workerInput, "prompt")
-  ) {
-    return workerInput.prompt;
-  }
-  return workerInput;
+interface EffectiveInputs {
+  // What the session records: the inputs the server would have sent.
+  recorded: unknown;
+  // What the agent is handed: the same inputs without the system prompt, which
+  // reaches the model through the adapter instead.
+  runtime: unknown;
 }
 
-function recordedInput(
-  effectiveRuntimeInput: unknown,
+// The {prompt, system_prompt} wrapper is unwrapped wherever it appears,
+// including when a previous replay recorded it, so replaying a replay hands
+// the agent a prompt rather than the wrapper. A wrapper with no prompt key
+// only loses its system prompt when this replay is the one that put it there:
+// otherwise the key is part of the recorded input and stays.
+function withoutSystemPrompt(
+  recorded: unknown,
+  systemPromptReplaced: boolean,
+): unknown {
+  if (!isRecord(recorded) || !Object.hasOwn(recorded, "system_prompt")) {
+    return recorded;
+  }
+  if (Object.hasOwn(recorded, "prompt")) {
+    return recorded.prompt;
+  }
+  if (!systemPromptReplaced) {
+    return recorded;
+  }
+  const { system_prompt: _replaced, ...rest } = recorded;
+  return rest;
+}
+
+// Mirrors effective_inputs in the server's replay config so a locally applied
+// override produces the same inputs the server would have sent, and so
+// re-applying the server's own override is a no-op.
+function resolveEffectiveInputs(
+  workerInput: unknown,
   override: ReplayOverride | undefined,
-): JsonValue {
-  return toRecorderJson(
-    override?.system_prompt === undefined || override.system_prompt === null
-      ? effectiveRuntimeInput
-      : {
-          prompt: effectiveRuntimeInput,
-          system_prompt: override.system_prompt,
-        },
-  );
+): EffectiveInputs {
+  const prompt = override?.prompt ?? undefined;
+  const systemPrompt = override?.system_prompt ?? undefined;
+  if (prompt === undefined && systemPrompt === undefined) {
+    return {
+      recorded: workerInput,
+      runtime: withoutSystemPrompt(workerInput, false),
+    };
+  }
+  if (isRecord(workerInput)) {
+    const recorded = {
+      ...workerInput,
+      ...(prompt === undefined ? {} : { prompt }),
+      ...(systemPrompt === undefined ? {} : { system_prompt: systemPrompt }),
+    };
+    return {
+      recorded,
+      runtime: withoutSystemPrompt(recorded, systemPrompt !== undefined),
+    };
+  }
+  if (systemPrompt === undefined) {
+    return { recorded: prompt, runtime: prompt };
+  }
+  const runtime = prompt ?? workerInput;
+  return {
+    recorded: { prompt: runtime, system_prompt: systemPrompt },
+    runtime,
+  };
+}
+
+function assertAllowedReplayModel(
+  replacementModelId: string,
+  allowedReplayModels: readonly string[] | undefined,
+): void {
+  if (!allowedReplayModels?.includes(replacementModelId)) {
+    throw new TypeError(
+      `Replacement model '${replacementModelId}' is not in allowedReplayModels`,
+    );
+  }
 }
 
 export async function resolveReplayContext(options: {
+  allowedReplayModels?: readonly string[];
   callerInput: unknown;
   client: AdapterClient;
   environment?: KitaruEnvironmentVariables;
@@ -184,15 +246,23 @@ export async function resolveReplayContext(options: {
           "KITARU_OVERRIDE",
         )
       : undefined;
-  const effectiveRuntimeInput = runtimeInput(workerInput, override);
-  const effectiveInput = recordedInput(effectiveRuntimeInput, override);
+  const effective = resolveEffectiveInputs(workerInput, override);
+  const replacementModelId = modelReplacement(
+    override,
+    options.requestedModelId,
+  );
+  if (replacementModelId !== undefined) {
+    // A replay override that swaps the model decides what every session in a
+    // batch spends, so the allowlist is checked before anything is recorded.
+    assertAllowedReplayModel(replacementModelId, options.allowedReplayModels);
+  }
 
   return {
-    effectiveInput,
-    effectiveRuntimeInput,
+    effectiveInput: toRecorderJson(effective.recorded),
+    effectiveRuntimeInput: effective.runtime,
     override,
     replayId,
-    replacementModelId: modelReplacement(override, options.requestedModelId),
+    replacementModelId,
     spec,
   };
 }
