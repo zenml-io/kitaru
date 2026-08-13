@@ -82,7 +82,6 @@ jobs:
           ui=$(uv run --no-project python scripts/release_ui.py --version "$VERSION")
           {
             printf 'KITARU_UI_ALLOW_PRERELEASE=%s\n' "$(jq -r '.allow_prerelease' <<<"$ui")"
-            printf 'KITARU_UI_EXPECTED_SHA256=%s\n' "$(jq -r '.sha256' <<<"$ui")"
             printf 'KITARU_UI_RELEASE_REPO=%s\n' "$(jq -r '.repository' <<<"$ui")"
             printf 'KITARU_UI_TAG=%s\n' "$(jq -r '.tag' <<<"$ui")"
           } >> "$GITHUB_ENV"
@@ -141,21 +140,33 @@ jobs:
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
         with:
           packages-dir: package-dist
+          skip-existing: true
       - name: Create package GitHub Release
         env:
           DISTRIBUTION: ${{ needs.build.outputs.distribution }}
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           IS_PRERELEASE: ${{ needs.build.outputs.is-prerelease }}
           PACKAGE_TAG: ${{ needs.build.outputs.package-tag }}
           VERSION: ${{ needs.build.outputs.version }}
         run: |-
+          set -euo pipefail
           prerelease=()
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
           fi
-          gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
-            "${prerelease[@]}" \
-            --verify-tag \
-            --latest=false \
-            --title "$DISTRIBUTION $VERSION" \
-            --generate-notes
+          if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
+            gh release upload "$PACKAGE_TAG" package-dist/* evidence/* --clobber
+            gh release edit "$PACKAGE_TAG" \
+              --latest=false \
+              --prerelease="$IS_PRERELEASE" \
+              --title "$DISTRIBUTION $VERSION" \
+              --verify-tag
+          else
+            gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
+              "${prerelease[@]}" \
+              --verify-tag \
+              --latest=false \
+              --title "$DISTRIBUTION $VERSION" \
+              --generate-notes
+          fi
