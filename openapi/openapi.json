@@ -1927,6 +1927,30 @@
             "title": "Count",
             "type": "integer"
           },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Highest score of float and bool evaluations, null for other data types.",
+            "title": "Max"
+          },
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest score of float and bool evaluations, null for other data types.",
+            "title": "Min"
+          },
           "pass_rate": {
             "anyOf": [
               {

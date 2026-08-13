@@ -126,6 +126,8 @@ def _evaluation_stats(
     return EvaluationStats(
         count=len(evaluations),
         average=sum(scores) / len(scores) if scorable and scores else None,
+        min=min(scores) if scorable and scores else None,
+        max=max(scores) if scorable and scores else None,
         pass_rate=sum(flags) / len(flags) if flags else None,
         value_counts=dict(Counter(values))
         if data_type is EvaluationDataType.CATEGORICAL
