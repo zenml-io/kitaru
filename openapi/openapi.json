@@ -1910,18 +1910,6 @@
       "EvaluationStats": {
         "description": "Evaluation stats.",
         "properties": {
-          "average": {
-            "anyOf": [
-              {
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
-            "title": "Average"
-          },
           "count": {
             "description": "Number of aggregated evaluations.",
             "title": "Count",
@@ -1938,6 +1926,18 @@
             ],
             "description": "Highest score of float and bool evaluations, null for other data types.",
             "title": "Max"
+          },
+          "mean": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
+            "title": "Mean"
           },
           "min": {
             "anyOf": [

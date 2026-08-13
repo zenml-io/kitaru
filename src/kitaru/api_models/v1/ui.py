@@ -48,7 +48,7 @@ class EvaluationStats(ResponseModel):
     """Evaluation stats."""
 
     count: int = Field(description="Number of aggregated evaluations.")
-    average: float | None = Field(
+    mean: float | None = Field(
         default=None,
         description="Mean score of float evaluations, share of true results of "
         "bool evaluations, null for other data types.",

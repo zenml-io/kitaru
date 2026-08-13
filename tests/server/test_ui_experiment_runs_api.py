@@ -184,7 +184,7 @@ async def test_aggregates_float_evaluations(
             "data_type": "float",
             "baseline": {
                 "count": 1,
-                "average": 0.1,
+                "mean": 0.1,
                 "min": 0.1,
                 "max": 0.1,
                 "pass_rate": None,
@@ -192,7 +192,7 @@ async def test_aggregates_float_evaluations(
             },
             "result": {
                 "count": 2,
-                "average": 0.75,
+                "mean": 0.75,
                 "min": 0.5,
                 "max": 1.0,
                 "pass_rate": None,
@@ -250,14 +250,14 @@ async def test_aggregates_bool_and_pass_rate(
     assert aggregate["data_type"] == "bool"
     assert aggregate["baseline"] == {
         "count": 0,
-        "average": None,
+        "mean": None,
         "min": None,
         "max": None,
         "pass_rate": None,
         "value_counts": None,
     }
     assert aggregate["result"]["count"] == 3
-    assert aggregate["result"]["average"] == pytest.approx(2 / 3)
+    assert aggregate["result"]["mean"] == pytest.approx(2 / 3)
     assert aggregate["result"]["min"] == 0.0
     assert aggregate["result"]["max"] == 1.0
     assert aggregate["result"]["pass_rate"] == pytest.approx(2 / 3)
@@ -299,7 +299,7 @@ async def test_aggregates_categorical_value_counts(
     assert aggregate["data_type"] == "categorical"
     assert aggregate["baseline"] == {
         "count": 0,
-        "average": None,
+        "mean": None,
         "min": None,
         "max": None,
         "pass_rate": None,
@@ -307,7 +307,7 @@ async def test_aggregates_categorical_value_counts(
     }
     assert aggregate["result"] == {
         "count": 3,
-        "average": None,
+        "mean": None,
         "min": None,
         "max": None,
         "pass_rate": None,
@@ -346,7 +346,7 @@ async def test_aggregates_dedupes_shared_baseline_session(
     aggregate = body[0]
     assert aggregate["baseline"] == {
         "count": 1,
-        "average": 0.42,
+        "mean": 0.42,
         "min": 0.42,
         "max": 0.42,
         "pass_rate": None,
@@ -413,7 +413,7 @@ async def test_aggregates_include_baseline_only_names(
     assert aggregate["name"] == "baseline_only"
     assert aggregate["baseline"] == {
         "count": 1,
-        "average": 0.3,
+        "mean": 0.3,
         "min": 0.3,
         "max": 0.3,
         "pass_rate": None,
@@ -421,7 +421,7 @@ async def test_aggregates_include_baseline_only_names(
     }
     assert aggregate["result"] == {
         "count": 0,
-        "average": None,
+        "mean": None,
         "min": None,
         "max": None,
         "pass_rate": None,

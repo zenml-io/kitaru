@@ -125,7 +125,7 @@ def _evaluation_stats(
     scorable = data_type in (EvaluationDataType.FLOAT, EvaluationDataType.BOOL)
     return EvaluationStats(
         count=len(evaluations),
-        average=sum(scores) / len(scores) if scorable and scores else None,
+        mean=sum(scores) / len(scores) if scorable and scores else None,
         min=min(scores) if scorable and scores else None,
         max=max(scores) if scorable and scores else None,
         pass_rate=sum(flags) / len(flags) if flags else None,
