@@ -82,6 +82,7 @@ def _compile_result_session_condition(
 
 
 REPLAY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": ReplayORM.id,
     "experiment_run_id": ReplayORM.experiment_run_id,
     "baseline_session_id": ReplayORM.baseline_session_id,
     "result_session_id": _compile_result_session_condition,

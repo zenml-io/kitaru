@@ -29,6 +29,7 @@ class ExperimentRunFilter(ListFilter):
     """Experiment run list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "experiment_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "cohort_version_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "cohort_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
@@ -43,6 +44,7 @@ class ExperimentRunJobsFilter(ListFilter):
     """Experiment run jobs list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "status": FilterField(value_type=JobStatus, ops=EQUALITY_OPS),
     }
 

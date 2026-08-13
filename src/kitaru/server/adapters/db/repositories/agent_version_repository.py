@@ -39,6 +39,7 @@ from kitaru.server.domain.agent_version import (
 from kitaru.server.domain.base import NotFoundError
 
 AGENT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": AgentVersionORM.id,
     "tag": build_tag_condition_binding(
         TagResourceType.AGENT_VERSION, AgentVersionORM.id
     ),

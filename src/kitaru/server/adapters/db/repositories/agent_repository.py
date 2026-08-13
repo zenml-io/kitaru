@@ -35,6 +35,7 @@ from kitaru.server.domain.agent import (
 from kitaru.server.domain.base import NotFoundError
 
 AGENT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": AgentORM.id,
     "name": AgentORM.name,
 }
 

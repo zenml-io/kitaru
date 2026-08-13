@@ -29,6 +29,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job, JobNotFound
 
 JOB_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": JobORM.id,
     "kind": JobORM.kind,
     "status": JobORM.status,
 }

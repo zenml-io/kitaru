@@ -41,6 +41,7 @@ from kitaru.server.domain.tag import (
 )
 
 TAG_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": TagORM.id,
     "name": TagORM.name,
 }
 

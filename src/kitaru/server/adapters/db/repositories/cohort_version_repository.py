@@ -45,6 +45,7 @@ from kitaru.server.domain.cohort_version import (
 )
 
 COHORT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": CohortVersionORM.id,
     "tag": build_tag_condition_binding(
         TagResourceType.COHORT_VERSION, CohortVersionORM.id
     ),

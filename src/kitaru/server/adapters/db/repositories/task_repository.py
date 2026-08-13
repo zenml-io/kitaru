@@ -43,6 +43,7 @@ IN_FLIGHT_STATUS_VALUES = [TaskStatus.CLAIMED.value, TaskStatus.RUNNING.value]
 _LAST_SEEN = func.coalesce(TaskORM.heartbeat_at, TaskORM.claimed_at)
 
 TASK_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": TaskORM.id,
     "job_id": TaskORM.job_id,
     "kind": TaskORM.kind,
     "status": TaskORM.status,

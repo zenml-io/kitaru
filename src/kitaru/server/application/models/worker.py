@@ -13,19 +13,21 @@
 #  permissions and limitations under the License.
 """Worker filter model."""
 
+import uuid
 from collections.abc import Mapping
 from typing import ClassVar
 
 from pydantic import AwareDatetime
 
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import STRING_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, STRING_OPS, FilterField
 
 
 class WorkerFilter(ListFilter):
     """Worker list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
     }
 

@@ -135,6 +135,7 @@ def _compile_has_evaluation_condition(
 
 
 SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": SessionORM.id,
     "agent_id": SessionORM.agent_id,
     "agent_version_id": SessionORM.agent_version_id,
     "task_id": SessionORM.task_id,

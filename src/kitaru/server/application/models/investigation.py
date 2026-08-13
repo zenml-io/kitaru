@@ -31,6 +31,7 @@ class InvestigationFilter(ListFilter):
     """Investigation list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "status": FilterField(value_type=InvestigationStatus, ops=EQUALITY_OPS),
     }
