@@ -2235,6 +2235,7 @@ class FakeSessionRepository:
         Returns:
             Page of matching sessions and the next cursor.
         """
+        _refuse_unresolvable_fields(session_filter.expression, ("experiment_run_id",))
         sessions = list(self._sessions.values())
         if session_filter.expression is not None:
             resolvers = {
