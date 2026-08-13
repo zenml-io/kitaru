@@ -33,7 +33,7 @@ from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
-from kitaru.server.domain.replay_config import ReplayConfig
+from kitaru.server.domain.replay_config import ReplayConfig, effective_inputs
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
 
@@ -53,10 +53,10 @@ async def create_replay_pipelines(
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
-    Each agent task carries its baseline session's inputs and the agent
-    version as a label. With ``evaluate_baselines``, one baseline evaluator
-    task is appended per evaluator that has not already scored the baseline
-    session.
+    Each agent task carries its baseline session's inputs with the config's
+    override applied and the agent version as a label. With
+    ``evaluate_baselines``, one baseline evaluator task is appended per
+    evaluator that has not already scored the baseline session.
 
     Args:
         baselines: Sessions being replayed.
@@ -98,7 +98,7 @@ async def create_replay_pipelines(
             AgentTask(
                 job_id=job.id,
                 agent_version_id=agent_version_id,
-                inputs=baseline.inputs,
+                inputs=effective_inputs(baseline.inputs, config.override),
                 labels={AGENT_VERSION_LABEL: str(agent_version_id)},
                 on_failure=TaskOnFailure.ABORT,
             )

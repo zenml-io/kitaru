@@ -24,8 +24,10 @@ from kitaru.server.domain.replay_config import (
     HistoryConfig,
     PassthroughConfig,
     ReplayConfig,
+    ReplayOverride,
     ToolPolicy,
     default_tool_policy,
+    effective_inputs,
 )
 
 
@@ -34,6 +36,58 @@ def test_default_tool_policy_passes_every_tool_through() -> None:
     policy = default_tool_policy()
     assert policy.default == PassthroughConfig()
     assert policy.tools == {}
+
+
+def test_effective_inputs_no_override() -> None:
+    """Leave inputs unchanged with no override."""
+    assert effective_inputs({"prompt": "hi"}, None) == {"prompt": "hi"}
+
+
+def test_effective_inputs_no_prompt_fields() -> None:
+    """Leave inputs unchanged when the override carries no prompt fields."""
+    override = ReplayOverride(model="openai:gpt-5")
+    assert effective_inputs({"prompt": "hi"}, override) == {"prompt": "hi"}
+
+
+def test_effective_inputs_dict_replaces_system_prompt_key() -> None:
+    """Replace a dict's system prompt key without a prompt override."""
+    override = ReplayOverride(system_prompt="be terse")
+    result = effective_inputs({"prompt": "hi", "system_prompt": "old"}, override)
+    assert result == {"prompt": "hi", "system_prompt": "be terse"}
+
+
+def test_effective_inputs_dict_replaces_prompt_key() -> None:
+    """Replace a dict's prompt key, keeping the other keys."""
+    override = ReplayOverride(prompt="new prompt")
+    result = effective_inputs({"prompt": "hi", "temperature": 0.5}, override)
+    assert result == {"prompt": "new prompt", "temperature": 0.5}
+
+
+def test_effective_inputs_dict_replaces_prompt_and_system_prompt() -> None:
+    """Replace both the prompt and system prompt keys of a dict."""
+    override = ReplayOverride(prompt="new prompt", system_prompt="new system")
+    result = effective_inputs({"prompt": "hi", "system_prompt": "old"}, override)
+    assert result == {"prompt": "new prompt", "system_prompt": "new system"}
+
+
+def test_effective_inputs_plain_value_replaced_by_prompt() -> None:
+    """Replace a non-dict input wholesale with the override prompt."""
+    override = ReplayOverride(prompt="new prompt")
+    assert effective_inputs("hi", override) == "new prompt"
+
+
+def test_effective_inputs_plain_value_with_prompt_and_system_prompt() -> None:
+    """Wrap a non-dict input into a dict carrying both override fields."""
+    override = ReplayOverride(prompt="new prompt", system_prompt="new system")
+    result = effective_inputs("hi", override)
+    assert result == {"prompt": "new prompt", "system_prompt": "new system"}
+
+
+def test_effective_inputs_plain_value_with_system_prompt_only() -> None:
+    """Wrap a non-dict input into a dict, keeping it as the prompt."""
+    override = ReplayOverride(system_prompt="new system")
+    result = effective_inputs("hi", override)
+    assert result == {"prompt": "hi", "system_prompt": "new system"}
 
 
 def _config(tool_policy: ToolPolicy) -> ReplayConfig:

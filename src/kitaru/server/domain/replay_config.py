@@ -166,3 +166,35 @@ class ReplayConfig(DomainModel):
                 raise ValidationError(
                     "A standalone replay cannot use cohort-version-scoped history"
                 )
+
+
+def effective_inputs(inputs: Any, override: ReplayOverride | None) -> Any:
+    """Apply a replay override's prompt fields to recorded inputs.
+
+    The prompt and system prompt overrides apply independently. Model and
+    model parameter overrides do not touch inputs, they apply at the adapter
+    level.
+
+    Args:
+        inputs: Recorded session inputs.
+        override: Replay override, if any.
+
+    Returns:
+        Inputs with the override's prompt fields applied, dict inputs keeping
+        their other keys.
+    """
+    if override is None or (override.prompt is None and override.system_prompt is None):
+        return inputs
+    if isinstance(inputs, dict):
+        result = dict(inputs)
+        if override.prompt is not None:
+            result["prompt"] = override.prompt
+        if override.system_prompt is not None:
+            result["system_prompt"] = override.system_prompt
+        return result
+    if override.system_prompt is None:
+        return override.prompt
+    return {
+        "prompt": override.prompt if override.prompt is not None else inputs,
+        "system_prompt": override.system_prompt,
+    }
