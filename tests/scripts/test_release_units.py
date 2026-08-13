@@ -232,7 +232,8 @@ def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
         "matrix: ${{ fromJSON(needs.release-units.outputs.plugin-matrix).matrix }}"
         in workflow
     )
-    assert '--package "${{ matrix.path }}"' in workflow
+    assert "PACKAGE_PATH: ${{ matrix.path }}" in workflow
+    assert '--package "$PACKAGE_PATH"' in workflow
     assert "          - braintrust-importer\n" not in workflow
 
 
