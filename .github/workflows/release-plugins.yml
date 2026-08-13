@@ -82,7 +82,6 @@ jobs:
           ui=$(uv run --no-project python scripts/release_ui.py --version "$VERSION")
           {
             printf 'KITARU_UI_ALLOW_PRERELEASE=%s\n' "$(jq -r '.allow_prerelease' <<<"$ui")"
-            printf 'KITARU_UI_EXPECTED_SHA256=%s\n' "$(jq -r '.sha256' <<<"$ui")"
             printf 'KITARU_UI_RELEASE_REPO=%s\n' "$(jq -r '.repository' <<<"$ui")"
             printf 'KITARU_UI_TAG=%s\n' "$(jq -r '.tag' <<<"$ui")"
           } >> "$GITHUB_ENV"

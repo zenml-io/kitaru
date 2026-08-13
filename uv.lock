@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
+exclude-newer = "2026-08-10T10:10:44.774005Z"
 exclude-newer-span = "P3D"
 
 [[package]]
@@ -981,7 +981,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.21.0"
+version = "0.22.0rc0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },

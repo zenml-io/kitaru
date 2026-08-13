@@ -11,8 +11,9 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parents[1]
 UI_REPOSITORY = "zenml-io/zenml-frontend-monorepo"
 UI_ARCHIVE = "kitaru-ui.tar.gz"
-UI_TAG_PATTERN = re.compile(r"kitaru-ui-v\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?")
-SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+UI_TAG_PATTERN = re.compile(
+    r"kitaru-ui-v\d+\.\d+\.\d+(?P<prerelease>-[0-9A-Za-z][0-9A-Za-z.-]*)?"
+)
 
 
 class UIReleaseError(ValueError):
@@ -27,7 +28,6 @@ class UIRelease:
     repository: str
     tag: str
     archive: str
-    sha256: str
     allow_prerelease: bool
 
     def to_json(self) -> str:
@@ -59,31 +59,17 @@ def load_ui_release(version: str, repo_root: Path = REPO_ROOT) -> UIRelease:
         raise UIReleaseError(
             f"kitaru-version {declared_version} does not match {version}"
         )
-    repository = _get_string(document, "ui-repository")
-    if repository != UI_REPOSITORY:
-        raise UIReleaseError(f"ui-repository must be {UI_REPOSITORY}")
     tag = _get_string(document, "ui-tag")
-    if UI_TAG_PATTERN.fullmatch(tag) is None:
+    tag_match = UI_TAG_PATTERN.fullmatch(tag)
+    if tag_match is None:
         raise UIReleaseError(f"invalid ui-tag: {tag}")
-    archive = _get_string(document, "ui-archive")
-    if archive != UI_ARCHIVE:
-        raise UIReleaseError(f"ui-archive must be {UI_ARCHIVE}")
-    sha256 = _get_string(document, "ui-sha256")
-    if SHA256_PATTERN.fullmatch(sha256) is None:
-        raise UIReleaseError("ui-sha256 must be 64 lowercase hexadecimal characters")
-    allow_prerelease = document.get("allow-prerelease")
-    if not isinstance(allow_prerelease, bool):
-        raise UIReleaseError("allow-prerelease must be true or false")
-    if "-" in tag and not allow_prerelease:
-        raise UIReleaseError("a frontend prerelease requires allow-prerelease = true")
 
     return UIRelease(
         kitaru_version=version,
-        repository=repository,
+        repository=UI_REPOSITORY,
         tag=tag,
-        archive=archive,
-        sha256=sha256,
-        allow_prerelease=allow_prerelease,
+        archive=UI_ARCHIVE,
+        allow_prerelease=tag_match.group("prerelease") is not None,
     )
 
 
