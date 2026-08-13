@@ -227,6 +227,12 @@ def test_python_release_workflow_can_resume_after_partial_publication() -> None:
     )
 
 
+def test_python_release_workflow_can_install_a_new_core_release() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+
+    assert '--exclude-newer-package "kitaru=0 days"' in workflow
+
+
 def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
