@@ -6,6 +6,7 @@ import sys
 from pathlib import Path
 
 import pytest
+import yaml
 from scripts.release_units import (
     ReleaseInventoryError,
     build_plugin_matrix,
@@ -116,6 +117,31 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
     assert 'gh release upload "$PACKAGE_TAG" bundle-dist/* --clobber' in workflow
     assert "promote-latest:" in workflow
+
+
+def test_managed_image_failure_does_not_block_the_release() -> None:
+    workflow = yaml.safe_load(
+        (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    )
+    publish_steps = workflow["jobs"]["publish"]["steps"]
+    steps_by_name = {step["name"]: step for step in publish_steps if "name" in step}
+
+    managed_step = steps_by_name["Publish managed image"]
+    report_step = steps_by_name["Report managed image failure"]
+    assert managed_step["id"] == "publish-managed-image"
+    assert managed_step["continue-on-error"] is True
+    assert report_step["if"] == "steps.publish-managed-image.outcome == 'failure'"
+    assert "::warning::Managed image publication failed" in report_step["run"]
+    assert "GITHUB_STEP_SUMMARY" in report_step["run"]
+    assert next(
+        index
+        for index, step in enumerate(publish_steps)
+        if step.get("name") == "Publish managed image"
+    ) < next(
+        index
+        for index, step in enumerate(publish_steps)
+        if step.get("name") == "Publish Helm chart"
+    )
 
 
 def test_release_images_use_the_pypi_propagation_retry() -> None:
