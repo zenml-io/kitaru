@@ -97,20 +97,22 @@ Do not describe the inherited `llm-integration.yml` provider markers or absent `
 
 `.github/workflows/docs.yml` runs on manual dispatch, `main` pushes, and selected docs/reference pull-request paths. It is configured to regenerate SDK reference docs and build the FumaDocs export, but the v2 checkout currently lacks `scripts/generate_sdk_docs.py`; treat that workflow as blocked until a v2 generator is restored. Deployment conditions remain `main` push or manual dispatch, and hand-written docs publish separately through GitBook Git Sync.
 
-## Release Workflow
+## Release Workflows
 
-The authoritative release procedure is `.github/workflows/release.yml`. A normal dispatch checks out `develop`; a recovery dispatch may reuse an existing release tag. Therefore a v2 feature branch cannot be released through the normal dispatch until the intended v2 history is present on the release source branch.
+`.github/workflows/release-plugins.yml` publishes one Python distribution from an immutable namespaced tag. A core tag such as `python/kitaru/v0.22.0rc1` publishes Kitaru to PyPI and creates its GitHub Release. Plugin tags publish independently and do not gate the core release.
 
-Before dispatching:
+After a successful core Python workflow, `.github/workflows/release.yml` automatically publishes the matching client, server, worker, and managed images plus the Helm chart. It converts Python RC versions such as `0.22.0rc1` to deployable tags such as `0.22.0-rc.1`. No separate bundle tag is used. A manual dispatch with the existing core package tag is the recovery path.
+
+Before creating a core tag:
 
 1. Fetch `develop`, `main`, and tags.
 2. Confirm the intended release commits are on `develop` and identify the last immutable release tag.
-3. Review the `[Unreleased]` changelog and version classification.
+3. Review the changelog and version classification.
 4. Confirm no other release run is active.
 5. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just plugin-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
-6. Use the workflow's `dry-run` input when a non-publishing rehearsal is needed.
+6. Dispatch `release-plugins.yml` with the proposed package tag when a non-publishing rehearsal is needed.
 
-The release workflow itself installs the CLI, MCP, and worker extras; checks lint, types, MCP schemas, base/CLI/MCP tests, clean CLI artifacts, migrations, UI wheel contents, and the installed MCP wheel contract; then handles versioning, tagging, PyPI, GitHub Release, public and managed images, Helm packaging, release branches, and `main` advancement.
+The core Python workflow builds and verifies the wheel, publishes it to PyPI, and creates the GitHub Release. The deployables workflow then verifies the core package, tests the release images, publishes the images and Helm chart, and attaches the chart to the core GitHub Release. Stable releases also move the Docker `latest` aliases.
 
 Do not use the removed `scripts/smoke-test.sh`, provider-area flags, remote-stack smoke, v1 adapters, or local ZenML flow runs as v2 release gates.
 
@@ -119,6 +121,7 @@ Do not use the removed `scripts/smoke-test.sh`, provider-area flags, remote-stac
 - Default branch is `develop`.
 - Pull requests normally target `develop`; v2 feature work may target its explicit integration branch until that migration lands.
 - `main` tracks the latest released version only; do not push directly.
-- Releases are cut through `.github/workflows/release.yml` by dispatch or `v*` tag push.
-- The workflow maintains the version in `pyproject.toml`; application code should use `importlib.metadata.version("kitaru")` rather than hardcoding it.
+- Python releases are cut with namespaced tags handled by `.github/workflows/release-plugins.yml`.
+- A successful core Python release automatically starts `.github/workflows/release.yml`; manual dispatch is reserved for recovery.
+- Release preparation maintains the version in `pyproject.toml`; application code should use `importlib.metadata.version("kitaru")` rather than hardcoding it.
 - Update `CHANGELOG.md` under `[Unreleased]` for user-facing changes.
