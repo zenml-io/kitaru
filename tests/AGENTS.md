@@ -1,68 +1,38 @@
-# Test Suite Guidelines
+# Test rules
 
-This file applies to everything under `tests/`. It supplements the repo-root
-`AGENTS.md`; when there is no conflict, follow both documents.
+Async tests and fixtures are plain `async def`. pytest-asyncio runs in auto
+mode, so no decorators and no `asyncio.run` wrappers.
 
-## What Lives Here
+## Test surfaces per server resource
 
-- `tests/test_*.py`: unit, contract, and integration tests for the SDK and CLI
-- `tests/test_phase*.py`: example-driven end-to-end tests for runnable flows in `examples/`
-- `tests/mcp/test_*.py`: MCP-specific tests for the optional `kitaru[mcp]` surface
-- `tests/live/test_*.py`: paid/external provider checks, always marked
-  `live_llm` plus a provider-specific marker and excluded from default pytest runs
-- `tests/conftest.py`: shared isolation harness and provider-call guard
-- `tests/mcp/conftest.py`: MCP-only fixtures and sample objects
+1. Service tests against the in-memory fake repository
+   (`tests/server/test_<x>_service.py`).
+2. REST tests over `httpx.ASGITransport` with the service dependency
+   overridden to the fake (`tests/server/test_<x>s_api.py`).
+3. Repository contract tests parametrized over the in-memory fake and the SQL
+   implementation (`tests/server/test_<x>_repository.py`). One shared suite
+   runs against both backends so the fake cannot drift from the real
+   repository. The postgres parameter skips when the local database is
+   unreachable.
+4. An end-to-end PostgreSQL test that runs the app through its lifespan, which
+   also executes the Alembic migrations
+   (`tests/server/test_<x>s_api_pg.py`). Cross-request visibility proves the
+   per-request commit.
 
-When adding a new test file, mirror the source area it protects where possible.
-For example, `src/kitaru/runtime.py` maps naturally to `tests/test_runtime.py`.
+The SDK gets a round-trip test in `tests/client/` routing the client through
+`httpx.ASGITransport`.
 
-## Running Tests
+## Fakes
 
-Run tests from the repo root:
+Fake repositories live in `tests/conftest.py` and implement the full
+repository Protocol, including domain error behavior and `updated` timestamp
+renewal on update.
 
-- `just test`: whole default suite
-- `just test tests/test_runtime.py`: one file
-- `just test tests/test_runtime.py::test_name`: one test
-- `just check`: formatting, lint, type, typo, YAML, actionlint, and link checks
+## PostgreSQL
 
-Default pytest uses `-vv -n auto -m 'not live_llm'`, so tests must be safe under
-parallel execution. If a failure looks timing- or isolation-related, rerun it
-serially with `just test -n 0 tests/...`.
-
-Use `uv sync` for the base suite. Tests that execute real local Kitaru/ZenML
-flows often assume `uv sync --extra local`; MCP tests assume `uv sync --extra mcp`.
-
-## Shared Isolation Rules
-
-`tests/conftest.py` protects local state before tests run. It clears Kitaru and
-ZenML environment variables, redirects config/home lookups into `tmp_path`,
-resets global clients/config singletons, and blocks accidental provider calls
-from unmarked deterministic tests.
-
-When writing new tests:
-
-- use `tmp_path` for filesystem work; do not write to fixed paths
-- use `monkeypatch` for env vars and process-global state
-- prefer test-local fixtures or helpers over hidden module-level state
-- do not rely on execution order
-- do not bypass the provider guard in deterministic tests; fake the provider or
-  patch Kitaru's local call point instead
-
-## Live Provider Tests
-
-Live provider tests live under `tests/live/` and are off by default. They are
-for trusted manual or scheduled runs, not normal PR CI.
-
-- Mark every live provider test with `@pytest.mark.live_llm` plus exactly the
-  provider marker it needs, such as `live_openai`, `live_anthropic`, or
-  `live_gemini`.
-- Use `@pytest.mark.provider_extended` for slower or higher-cost checks.
-- Skip cleanly when required credentials are absent.
-- Keep prompts tiny and set max-turns or equivalent limits explicitly.
-- Do not add live provider tests to fork PR workflows.
-
-## More Test Guidance
-
-For fixture placement, `primed_zenml`, CLI-test patterns, example-driven tests,
-MCP tests, and bug-fix regression-test workflow, load the
-`kitaru-tests-release` skill.
+Tests point at `localhost:5433` (override with `KITARU_TEST_DB_HOST` and
+`KITARU_TEST_DB_PORT`) and expect `docker compose up -d db`. Each pg test
+creates a uniquely named database and drops it on teardown, so tests stay
+independent and concurrent runs never share state. A session-scoped fixture
+reaps databases left behind by a killed run, age-gated on the timestamp in
+the database name so it never drops a concurrent run's live databases.

@@ -1,214 +1,523 @@
-# Default values for the Kitaru Helm chart.
-#
-# The Kitaru server runs on ZenML's server runtime. All server configuration
-# is passed to the ZenML subchart under the 'kitaru' key. ZenML-native settings
-# (database, auth, ingress, secrets store, etc.) go under 'kitaru.server'.
-#
-# See the ZenML Helm chart values reference for the full list of options:
-# https://artifacthub.io/packages/helm/zenml/zenml?modal=values
+# Default values for kitaru.
 
-kitaru:
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
 
-  # -- Server configuration
-  server:
+# Kitaru server related options.
+server:
+  replicaCount: 1
 
-    # -- Number of server pod replicas. When running >1 replica, ensure
-    # auth.jwtSecretKey is set explicitly so all pods share the same key.
-    replicaCount: 1
+  image:
+    repository: zenmldocker/kitaru-server
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart version.
+    tag:
 
-    # -- Container image settings
-    image:
-      # -- Server image repository
-      repository: zenmldocker/kitaru
-      # -- Image pull policy
-      pullPolicy: Always
-      # -- Overrides the image tag whose default is the chart appVersion
-      tag:
-
-    # -- The URL where the Kitaru server API is reachable from outside the
-    # cluster. Used for browser-based login redirects and CLI connection
-    # instructions. Example: "https://kitaru.example.com"
-    serverURL:
-
-    # -- Enable debug logging on the server
-    debug: false
-
-    # -- Flag to enable/disable the tracking process of the analytics
-    analyticsOptIn: false
-
-    # -- Authentication settings
-    auth:
-      # -- Authentication type
-      authType: OAUTH2_PASSWORD_BEARER
-
-      # -- JWT secret key for signing auth tokens. If not set, a random key is
-      # generated on first install and reused on upgrades. Set this explicitly
-      # when running multiple replicas — all pods must share the same key.
-      #
-      # Generate one with: openssl rand -hex 32
-      jwtSecretKey:
-
-    # -- Database configuration
-    # If url is not set, a local SQLite database is used and persisted via a
-    # PVC. Set url to a MySQL connection string for production use.
-    database:
-
-      # -- Persist the SQLite database across pod restarts via a PVC.
-      # Only relevant when no external database url is set.
-      persistence:
-        # -- Enable SQLite persistence
-        enabled: true
-        # -- PVC size for SQLite database
-        size: 1Gi
-        # -- Storage class name. Empty string uses the cluster default.
-        storageClassName: ""
-
-      # -- External database URL. When set, SQLite persistence is ignored and
-      # the server connects to this database instead.
-      #
-      # Example: "mysql://user:password@mysql-host:3306/kitaru"
-      #
-      # Prefer using passwordSecretRef below instead of embedding the password
-      # directly in the URL.
-      url:
-
-      # -- Reference a Kubernetes Secret for the database password instead of
-      # embedding it in the url.
-      passwordSecretRef: {}
-        # name: kitaru-db-password
-        # key: password
-
-      # -- MySQL SSL settings
-      ssl: false
-      sslCa: {}
-      sslCert: {}
-      sslKey: {}
-      sslVerifyServerCert: false
-
-    # -- Secrets store settings
-    # Controls how Kitaru stores secrets (API keys, credentials, etc.).
-    secretsStore:
-      # -- Enable the secrets store
-      enabled: true
-      # -- Backend type. Options: sql, aws, gcp, azure, hashicorp, custom
-      type: sql
-
-      sql:
-        # -- Encryption key for secrets stored in the SQL database. Set this to
-        # a random 32+ character hex string. If not set, secrets are stored
-        # unencrypted.
-        #
-        # Generate one with: openssl rand -hex 32
-        #
-        # IMPORTANT: keep this value safe — losing it means losing access to
-        # all stored secrets.
-        encryptionKey:
-
-      # -- AWS Secrets Manager settings (when type: aws)
-      # aws:
-      #   region_name: us-east-1
-      #   aws_access_key_id: ""
-      #   aws_secret_access_key: ""
-
-      # -- GCP Secrets Manager settings (when type: gcp)
-      # gcp:
-      #   project_id: my-project
-
-      # -- Azure Key Vault settings (when type: azure)
-      # azure:
-      #   key_vault_name: my-vault
-
-    # -- Extra environment variables to set on the server container.
-    # Use this to pass additional configuration flags.
-    # Example:
-    #   KITARU_LOGGING_VERBOSITY: INFO
-    environment: {}
-
-    # -- Extra secret environment variables. These are stored in a Kubernetes
-    # Secret and mounted as env vars. Use for sensitive values that should not
-    # appear in plain-text ConfigMaps.
-    secretEnvironment: {}
-
-    # -- Service configuration
-    service:
-      # -- Kubernetes service type (ClusterIP, NodePort, LoadBalancer)
-      type: ClusterIP
-      # -- Service port
-      port: 80
-      # -- Additional service annotations
-      annotations: {}
-
-    # -- Ingress configuration
-    ingress:
-      # -- Enable Ingress resource creation
-      enabled: false
-      # -- Ingress class name
-      className: "nginx"
-      # -- Additional ingress annotations
-      # Example annotations for cert-manager + nginx:
-      #   nginx.ingress.kubernetes.io/ssl-redirect: "true"
-      #   cert-manager.io/cluster-issuer: "letsencrypt"
-      annotations: {}
-      # -- Hostname for the Ingress rule
-      host:
-      # -- Path prefix
-      path: /
-      # -- TLS settings
-      tls:
-        # -- Enable TLS on the Ingress
-        enabled: false
-        # -- Name of the Kubernetes Secret containing TLS certificate
-        secretName: kitaru-tls-certs
-
-  # -- Service account configuration
-  serviceAccount:
-    # -- Create a service account
-    create: true
-    # -- Additional service account annotations (useful for IAM roles)
-    annotations: {}
-    # -- Override the service account name. If not set, a name is generated
-    # using the release name.
-    name: ""
-
-  # -- Additional pod annotations
-  podAnnotations: {}
-
-  # -- Pod security context
-  podSecurityContext:
-    fsGroup: 1000
-
-  # -- Container security context
-  securityContext:
-    runAsNonRoot: true
-    runAsUser: 1000
-
-  # -- CPU/memory resource requests and limits
-  resources: {}
-    # requests:
-    #   cpu: 250m
-    #   memory: 512Mi
-    # limits:
-    #   cpu: "1"
-    #   memory: 2Gi
-
-  # -- Horizontal Pod Autoscaler configuration
-  autoscaling:
-    # -- Enable HPA
+  # ZenML Pro related options.
+  pro:
+    # Set `enabled` to true to enable ZenML Pro workspaces. If set, some of the
+    # configuration options in the `kitaru` section will be overridden with
+    # values specific to ZenML Pro workspaces computed from the values set in the
+    # `pro` section.
     enabled: false
-    # -- Minimum number of replicas
-    minReplicas: 1
-    # -- Maximum number of replicas
-    maxReplicas: 5
-    # -- Target CPU utilization percentage
-    targetCPUUtilizationPercentage: 80
-    # -- Target memory utilization percentage (uncomment to enable)
-    # targetMemoryUtilizationPercentage: 80
 
-  # -- Node selector for pod scheduling
-  nodeSelector: {}
+    # The URL where the ZenML Pro control plane API is reachable
+    apiURL: https://cloudapi.zenml.io
 
-  # -- Tolerations for pod scheduling
-  tolerations: []
+    # The URL where the ZenML Pro dashboard is reachable.
+    dashboardURL: https://cloud.zenml.io
 
-  # -- Affinity rules for pod scheduling
-  affinity: {}
+    # Additional origins to allow in the CORS policy.
+    extraCorsOrigins:
+
+    # The ID of the ZenML Pro workspace to use.
+    workspaceID:
+
+    # The name of the ZenML Pro workspace to use.
+    workspaceName:
+
+    # The ID of the ZenML Pro organization to use.
+    organizationID:
+
+    # The name of the ZenML Pro organization to use.
+    organizationName:
+
+  # The URL where the Kitaru server API is reachable. If not specified, the
+  # clients will use the same URL used to connect them to the Kitaru server.
+  #
+  # IMPORTANT: this value must be set for ZenML Pro workspaces.
+  serverURL:
+
+  # The URL where the Kitaru dashboard is reachable.
+  #
+  # This value is overridden if the `server.pro.enabled` value is set.
+  dashboardURL:
+
+  # Flag to enable/disable the tracking process of the analytics
+  analyticsOptIn: true
+
+  # Authentication settings that control how the Kitaru server authenticates
+  # its users.
+  auth:
+    # The Kitaru authentication scheme. Use one of:
+    #
+    # none - No authentication
+    # local - Local authentication
+    # control_plane - ZenML Pro control plane authentication
+    #
+    # This value is overridden if the `server.pro.enabled` value is set.
+    authScheme: local
+
+    # Settings for the default account created when the server starts for the
+    # first time. These settings are only used when server.auth.authScheme
+    # is `local`.
+    #
+    # The password is only applied when the account is first created. Changing
+    # it here after the first deployment does not change the account password.
+    defaultAccount:
+      # The name of the default account.
+      name: default
+
+      # The initial password of the default account. For production
+      # deployments, use passwordSecretRef instead.
+      password:
+
+      # Reference to an existing Kubernetes secret containing the initial
+      # default account password. If set, password above is ignored.
+      passwordSecretRef:
+        # name:
+        # key:
+
+    # The secret key used to sign JWT tokens. This should be set to
+    # a random string with a recommended length of at least 32 characters, e.g.:
+    #
+    #   ```python
+    #   from secrets import token_hex
+    #   token_hex(32)
+    #   ```
+    #
+    # or:
+    #
+    #   ```shell
+    #   openssl rand -hex 32
+    #   ```
+    #
+    # If not explicitly set, a random key will be generated when the helm
+    # chart is installed and reused for all subsequent upgrades.
+    jwtSigningKey:
+
+    # The issuer of the JWT tokens.
+    #
+    # This value is overridden if the `server.pro.enabled` value is set.
+    jwtIssuer:
+
+    # The audience of the JWT tokens.
+    #
+    # This value is overridden if the `server.pro.enabled` value is set.
+    jwtAudience:
+
+    # The lifetime of JWT tokens in seconds.
+    jwtLifetimeSeconds: 3600
+
+    # The name of the http-only cookie used to store the JWT tokens used to
+    # authenticate web clients.
+    #
+    # This value is overridden if the `server.pro.enabled` value is set.
+    authCookieName:
+
+    # The domain of the http-only cookie used to store the JWT tokens used to
+    # authenticate web clients. If not specified, the cookie domain is set to
+    # the domain of the Kitaru server.
+    authCookieDomain:
+
+    # The origins allowed to make cross-origin requests to the Kitaru server. If
+    # not specified, all origins are allowed. Set this when the Kitaru dashboard
+    # is hosted on a different domain than the Kitaru server.
+    #
+    # This value is overridden if the `server.pro.enabled` value is set.
+    corsAllowOrigins:
+      - "*"
+
+    # The maximum number of failed authentication attempts allowed for an OAuth
+    # 2.0 device before the device is locked.
+    #
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
+    # `none`.
+    maxFailedDeviceAuthAttempts: 3
+
+    # The timeout in seconds after which a pending OAuth 2.0 device
+    # authorization request expires.
+    #
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
+    # `none`.
+    deviceAuthTimeoutSeconds: 300
+
+    # The polling interval in seconds used by clients to poll the OAuth 2.0
+    # device authorization endpoint for the status of a pending device
+    # authorization request.
+    #
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
+    # `none`.
+    deviceAuthPollingIntervalSeconds: 5
+
+    # The time in minutes that an OAuth 2.0 device is allowed to be used to
+    # authenticate with the Kitaru server. If not set or if
+    # `server.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
+    # be used indefinitely. This controls the expiration time of the JWT tokens
+    # issued to clients after they have authenticated with the Kitaru server
+    # using an OAuth 2.0 device.
+    #
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
+    # `none`.
+    deviceExpirationMinutes:
+
+    # The time in minutes that a trusted OAuth 2.0 device is allowed to be used
+    # to authenticate with the Kitaru server. If not set or if
+    # `server.auth.jwtLifetimeSeconds` is not set, the devices are allowed to
+    # be used indefinitely. This controls the expiration time of the JWT tokens
+    # issued to clients after they have authenticated with the Kitaru server
+    # using an OAuth 2.0 device that was previously trusted by the user.
+    #
+    # This value is ignored if `server.auth.authScheme` is set to `control_plane` or
+    # `none`.
+    trustedDeviceExpirationMinutes:
+
+  # The root URL path to use when behind a proxy. This is useful when the
+  # `rewrite-target` annotation is used in the ingress controller, e.g.:
+  #
+  # ```yaml
+  # rootUrlPath: /kitaru
+  #
+  # ingress:
+  #   enabled: true
+  #   className: "nginx"
+  #   annotations:
+  #     nginx.ingress.kubernetes.io/rewrite-target: /$1
+  #   host:
+  #   path: /kitaru/?(.*)
+  # ```
+  rootUrlPath:
+
+  # PostgreSQL database configuration.
+  database:
+    # The host of the external database service.
+    host:
+
+    # The port where the external database service is accepting connections.
+    port: 5432
+
+    # The username to use to connect to the external database service.
+    username: postgres
+
+    # The password to use to connect to the external database service.
+    password:
+
+    # Reference to an existing Kubernetes secret containing the database
+    # password. If set, the password field above is ignored and the password
+    # is sourced from the referenced secret instead.
+    passwordSecretRef:
+      # name:
+      # key:
+
+    # The key used to encrypt secrets stored in the database. This should be a
+    # random string with a recommended length of at least 32 characters. Do not
+    # change this value after secrets have been stored, as the existing secrets
+    # can no longer be decrypted with a different key.
+    #
+    # If neither this value nor encryptionKeySecretRef is set, a random key is
+    # generated when the chart is installed and reused on subsequent upgrades.
+    encryptionKey:
+
+    # Reference to an existing Kubernetes secret containing the database
+    # encryption key. If set, encryptionKey above is ignored and the key is
+    # sourced from the referenced secret instead.
+    encryptionKeySecretRef:
+      # name:
+      # key:
+
+    # The name of the database to use. Will be created on first run if it
+    # doesn't exist.
+    #
+    # NOTE: if the user doesn't have permissions to create this database, the
+    # database should be created manually before installing the helm chart.
+    database: kitaru
+
+    # PostgreSQL SSL mode. Supported values are:
+    #
+    # disable     - Do not use TLS.
+    # require     - Use TLS without verifying the server certificate.
+    # verify-ca   - Verify the server certificate against sslCa without
+    #               verifying its hostname.
+    # verify-full - Verify the server certificate and hostname. Uses sslCa when
+    #               configured, otherwise the system CA trust store.
+    sslMode: disable
+
+    # The PostgreSQL SSL CA certificate. Required for SSL enabled authentication if
+    # the CA certificate is not part of the certificates shipped with the
+    # container image. Can be provided as an inline value or as a Kubernetes
+    # secret reference.
+    #
+    # NOTE: it is recommended to use the `server.certificates` option instead to
+    # configure the CA certificate globally. This option only applies to the
+    # PostgreSQL database.
+    sslCa:
+      # value: |
+      #   -----BEGIN CERTIFICATE-----
+      #   ...
+      #   -----END CERTIFICATE-----
+      #
+      # secretRef:
+      #   name: ca-certificate
+      #   key: ca.pem
+
+    # The PostgreSQL SSL client certificate. Required for SSL enabled authentication
+    # if client certificates are used. Can be provided as an inline value or as
+    # a Kubernetes secret reference.
+    sslCert:
+      # value: |
+      #   -----BEGIN CERTIFICATE-----
+      #   ...
+      #   -----END CERTIFICATE-----
+      #
+      # secretRef:
+      #   name: client-certificate
+      #   key: client-cert.pem
+
+    # The PostgreSQL SSL client key. Required for SSL enabled authentication if
+    # client certificates are used. Can be provided as an inline value or as
+    # a Kubernetes secret reference.
+    sslKey:
+      # value: |
+      #   -----BEGIN PRIVATE KEY-----
+      #   ...
+      #   -----END PRIVATE KEY-----
+      #
+      # secretRef:
+      #   name: client-key
+      #   key: client-key.pem
+
+    # SQLAlchemy connection pool settings.
+    poolSize: 5
+    maxOverflow: 10
+    # Maximum number of seconds to wait for a connection before timing out.
+    poolTimeoutSeconds: 30
+
+  # Logging settings for the Kitaru server container.
+  logging:
+    # Set the logging verbosity.
+    # Supported values are: debug, info, warning, error, critical
+    verbosity: info
+
+  # OpenTelemetry export settings for the Kitaru server container.
+  openTelemetry:
+    # Base OTLP/HTTP collector endpoint. When set, traces, metrics, and logs
+    # use this endpoint with /v1/traces, /v1/metrics, and /v1/logs appended
+    # unless a per-signal endpoint below overrides it.
+    endpoint:
+
+    # Service name attached to exported telemetry. If not set, the server uses
+    # its default service name.
+    serviceName:
+
+    # Optional per-signal OTLP/HTTP endpoints. Without a base endpoint, only
+    # signals with a per-signal endpoint are exported.
+    tracesEndpoint:
+    metricsEndpoint:
+    logsEndpoint:
+
+    # Controls whether each telemetry signal is exported when an endpoint is
+    # configured.
+    tracesEnabled: true
+    metricsEnabled: true
+    logsEnabled: true
+
+  # Extra environment variables to set in the Kitaru server container.
+  environment: {}
+
+  # Extra environment variables to set in the Kitaru server container that
+  # should be kept secret. These will be set as Kubernetes secrets and
+  # mounted as environment variables in the Kitaru server container.
+  secretEnvironment: {}
+
+  # Extra environment variables sourced from existing Kubernetes secrets via
+  # valueFrom.secretKeyRef. Use this to inject sensitive values (API keys,
+  # passwords, tokens) from secrets that already exist in the cluster without
+  # committing them to values.yaml.
+  #
+  # Example:
+  #   environmentSecretKeyRefs:
+  #     - name: MY_API_KEY
+  #       secretName: my-existing-secret
+  #       secretKey: api-key
+  #     - name: DB_PASSWORD
+  #       secretName: db-credentials
+  #       secretKey: password
+  environmentSecretKeyRefs: []
+
+  # Custom 'app.kubernetes.io/instance' label value to use. This is used to
+  # uniquely identify the Kitaru deployment in the Kubernetes cluster. All
+  # resources in the deployment will be labeled with this value, if set. The
+  # label will also be used as a selector label for the Kitaru server deployment
+  # and database migration job.
+  #
+  # If not set, the default value will be the release name.
+  #
+  # It is recommended to set this value to a unique identifier in your cluster
+  # to avoid conflicts with other Kitaru deployments in the same cluster,
+  # especially when using the same Helm release name for multiple deployments.
+  # This can also be useful when used in conjunction with affinity rules.
+  instanceLabel:
+
+  service:
+    type: ClusterIP
+    port: 80
+    annotations: {}
+
+  # Uvicorn proxy header handling.
+  #
+  # SECURITY WARNING: Only enable this if Kitaru is behind trusted proxies that
+  # control the X-Forwarded-* headers. Client-supplied X-Forwarded-For values
+  # can be forged and may bypass IP-based protections such as login rate
+  # limiting if they are trusted blindly.
+  #
+  # Safe configurations are either:
+  #   1. Set forwardedAllowIPs to a strict comma-separated list of trusted
+  #      proxy IPs/CIDRs; or
+  #   2. Ensure your ingress/gateway sanitizes or overwrites incoming
+  #      X-Forwarded-* headers before forwarding requests to Kitaru.
+  #
+  # When disabled, Uvicorn ignores X-Forwarded-* headers and Kitaru sees the
+  # direct peer address, which is usually the ingress/gateway IP in Kubernetes.
+  proxyHeaders:
+    enabled: false
+    forwardedAllowIPs: "*"
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations: {}
+      # nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      # nginx.ingress.kubernetes.io/rewrite-target: /$1
+      # kubernetes.io/ingress.class: nginx
+      # kubernetes.io/tls-acme: "true"
+      # cert-manager.io/cluster-issuer: "letsencrypt"
+
+    # hint: you can use a service like nip.io to get a wildcard DNS for your
+    # ingress IP address. For example, if your ingress IP is 192.168.0.1, you
+    # can use a host name like kitaru.192.168.0.1.nip.io. This allows you to
+    # reuse the same ingress for multiple deployments and/or services.
+    host:
+    path: /
+    tls:
+      enabled: false
+      # NOTE: if enabled, this will generate self-signed certificates during
+      # installation. This also requires that the ingress host be set to the
+      # domain name or IP address used to access the Kitaru server from outside
+      # the cluster.
+      generateCerts: false
+      secretName: kitaru-tls-certs
+
+  # Gateway API (gateway.networking.k8s.io/v1) as an alternative to Ingress.
+  # Only one of ingress.enabled and gateway.enabled can be true.
+  #
+  # NOTE on TLS: Unlike Ingress, TLS termination in Gateway API is configured
+  # on the Gateway resource's listeners, not on the HTTPRoute. To enable HTTPS:
+  #   1. Configure an HTTPS listener on your Gateway with a certificateRef
+  #   2. Set sectionName below to the name of that HTTPS listener (e.g. "https")
+  # This chart only creates the HTTPRoute; the Gateway resource (and its TLS
+  # config) must be managed separately.
+  gateway:
+    enabled: false
+    annotations: {}
+    gatewayRef:
+      name: ""
+      namespace: ""
+    # Name of the Gateway listener to attach to. Set this to your HTTPS
+    # listener name (e.g. "https") for TLS termination. If empty, the route
+    # attaches to all compatible listeners on the referenced Gateway.
+    sectionName: ""
+    host: ""
+    path: /
+
+  # Configuration for custom CA certificates.
+  certificates:
+    # Direct injection of CA certificates in PEM format
+    customCAs: []
+      # - name: "my-custom-ca"
+      #   certificate: |
+      #     -----BEGIN CERTIFICATE-----
+      #     MIIDXTCCAkWgAwIBAgIJAJC1HiIAZAiIMA0GCSqGSIb3DQEBCwUAMEUxCzAJBgNV
+      #     ...
+      #     -----END CERTIFICATE-----
+
+    # Reference existing secrets containing CA certificates
+    secretRefs: []
+      # - name: "my-secret"
+      #   key: "ca.crt"
+
+  # Proxy configuration
+  proxy:
+    # Enable proxy configuration
+    enabled: false
+    # HTTP proxy URL
+    httpProxy: ""
+    # HTTPS proxy URL
+    httpsProxy: ""
+    # Comma-separated list of hostnames/domains/IPs/CIDRs to exclude from proxying
+    noProxy: "localhost,127.0.0.1,::1,fe80::/10,.svc,.svc.cluster.local"
+    # Additional hostnames/domains/IPs/CIDRs to exclude from proxying
+    additionalNoProxy: []
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: "kitaru"
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+  # fsGroupChangePolicy controls when fsGroup ownership changes are applied.
+  # "OnRootMismatch" only changes ownership if the root of the volume doesn't match the fsGroup.
+  fsGroupChangePolicy: "OnRootMismatch"
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  # capabilities:
+  #   drop:
+  #   - ALL
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+resourcesMigrationPod: {}
+  # Resource requests and limits for the database migration pod.
+  # If not set, falls back to the global resources configuration defined in .Values.resources
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

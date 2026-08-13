@@ -1,32 +1,14 @@
-"""Kitaru MCP server entrypoint.
-
-This module is intentionally isolated behind the optional ``kitaru[mcp]`` extra.
-Importing ``kitaru`` must continue to work without MCP dependencies installed.
-"""
-
-from __future__ import annotations
-
-import importlib
-
-_MCP_INSTALL_ERROR = (
-    "MCP server dependencies are not installed. Install with: pip install kitaru[mcp]"
-)
-
-
-def _require_mcp_dependencies() -> None:
-    """Ensure optional MCP dependencies are available."""
-    try:
-        importlib.import_module("mcp.server.fastmcp")
-    except ImportError:
-        raise ImportError(_MCP_INSTALL_ERROR) from None
-
-
-_require_mcp_dependencies()
-
-
-def main() -> object:
-    """Run the Kitaru MCP server entrypoint lazily."""
-    return importlib.import_module("kitaru.mcp.server").main()
-
-
-__all__ = ["main"]
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Optional Kitaru MCP server package."""

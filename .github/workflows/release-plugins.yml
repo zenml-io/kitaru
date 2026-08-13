@@ -1,0 +1,160 @@
+---
+name: Release Python package
+on:
+  workflow_dispatch:
+    inputs:
+      package-tag:
+        description: Namespaced package tag to rehearse, such as python/kitaru/v0.22.0rc1.
+        required: true
+        type: string
+  push:
+    tags: [python/**]
+permissions: {}
+concurrency:
+  group: release-python-${{ github.ref_name }}
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      distribution: ${{ steps.metadata.outputs.distribution }}
+      is-prerelease: ${{ steps.metadata.outputs.is-prerelease }}
+      package-tag: ${{ steps.metadata.outputs.package-tag }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Resolve package from the release inventory
+        id: metadata
+        env:
+          DISPATCH_TAG: ${{ inputs.package-tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = push ]; then
+            package_tag="$PUSH_TAG"
+          else
+            package_tag="$DISPATCH_TAG"
+          fi
+          unit=$(uv run --no-project --with packaging==26.2 python scripts/release_units.py resolve --tag "$package_tag" --format json)
+          distribution=$(jq -r '.unit.distribution' <<<"$unit")
+          project_dir=$(jq -r '.unit.path' <<<"$unit")
+          version=$(jq -r '.unit.version' <<<"$unit")
+          is_prerelease=false
+          if [[ "$version" =~ (a|b|rc|dev)[0-9]+ ]]; then
+            is_prerelease=true
+          fi
+          {
+            printf 'DISTRIBUTION=%s\n' "$distribution"
+            printf 'IS_PRERELEASE=%s\n' "$is_prerelease"
+            printf 'PACKAGE_TAG=%s\n' "$package_tag"
+            printf 'PROJECT_DIR=%s\n' "$project_dir"
+            printf 'VERSION=%s\n' "$version"
+          } >> "$GITHUB_ENV"
+          {
+            printf 'distribution=%s\n' "$distribution"
+            printf 'is-prerelease=%s\n' "$is_prerelease"
+            printf 'package-tag=%s\n' "$package_tag"
+            printf 'version=%s\n' "$version"
+          } >> "$GITHUB_OUTPUT"
+      - name: Validate release source
+        run: |
+          set -euo pipefail
+          git fetch origin develop
+          release_sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
+            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
+            exit 1
+          fi
+      - name: Resolve exact frontend artifact
+        if: env.DISTRIBUTION == 'kitaru'
+        run: |
+          set -euo pipefail
+          ui=$(uv run --no-project python scripts/release_ui.py --version "$VERSION")
+          {
+            printf 'KITARU_UI_ALLOW_PRERELEASE=%s\n' "$(jq -r '.allow_prerelease' <<<"$ui")"
+            printf 'KITARU_UI_RELEASE_REPO=%s\n' "$(jq -r '.repository' <<<"$ui")"
+            printf 'KITARU_UI_TAG=%s\n' "$(jq -r '.tag' <<<"$ui")"
+          } >> "$GITHUB_ENV"
+      - name: Download exact frontend artifact
+        if: env.DISTRIBUTION == 'kitaru'
+        env:
+          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
+        run: bash scripts/download-ui.sh
+      - name: Build Kitaru
+        if: env.DISTRIBUTION == 'kitaru'
+        run: |
+          uv build --out-dir package-dist
+          wheel=$(find package-dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          uv run --no-project scripts/verify-ui-wheel.py "$wheel"
+      - name: Build plugin
+        if: env.DISTRIBUTION != 'kitaru'
+        run: uv build --project "$PROJECT_DIR" --out-dir package-dist
+      - name: Test installed distribution
+        run: |
+          set -euo pipefail
+          wheel=$(find package-dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          DIST_FILE="$wheel" uv run --no-project --with "$wheel" python - <<'PY'
+          import importlib.metadata
+          import os
+          assert importlib.metadata.version(os.environ["DISTRIBUTION"]) == os.environ["VERSION"]
+          PY
+      - name: Record artifact checksums
+        run: |
+          mkdir evidence
+          sha256sum -- package-dist/*.whl package-dist/*.tar.gz > evidence/SHA256SUMS
+          cat evidence/SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: python-distribution
+          path: |
+            package-dist/*
+            evidence/*
+          if-no-files-found: error
+          retention-days: 90
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: python-distribution
+          path: .
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+        with:
+          packages-dir: package-dist
+      - name: Create package GitHub Release
+        env:
+          DISTRIBUTION: ${{ needs.build.outputs.distribution }}
+          GH_TOKEN: ${{ github.token }}
+          IS_PRERELEASE: ${{ needs.build.outputs.is-prerelease }}
+          PACKAGE_TAG: ${{ needs.build.outputs.package-tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |-
+          prerelease=()
+          if [ "$IS_PRERELEASE" = true ]; then
+            prerelease+=(--prerelease)
+          fi
+          gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
+            "${prerelease[@]}" \
+            --verify-tag \
+            --latest=false \
+            --title "$DISTRIBUTION $VERSION" \
+            --generate-notes

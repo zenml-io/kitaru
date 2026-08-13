@@ -1,0 +1,189 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""On-disk client configuration."""
+
+import contextlib
+import json
+import logging
+import os
+import tempfile
+import uuid
+from pathlib import Path
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+logger = logging.getLogger(__name__)
+
+ENV_CONFIG_DIR = "KITARU_CONFIG_DIR"
+ENV_CLIENT_ID = "KITARU_CLIENT_ID"
+
+CONFIG_FILE_NAME = "config.json"
+# Only the owner may read the files or list the directory holding them.
+FILE_MODE = 0o600
+DIRECTORY_MODE = 0o700
+
+
+def get_config_directory() -> Path:
+    """Return the directory holding Kitaru client configuration.
+
+    Returns:
+        ``KITARU_CONFIG_DIR`` when set, otherwise ``$XDG_CONFIG_HOME/kitaru``,
+        falling back to ``~/.config/kitaru``.
+    """
+    override = os.environ.get(ENV_CONFIG_DIR)
+    if override:
+        return Path(override)
+    base = os.environ.get("XDG_CONFIG_HOME")
+    root = Path(base) if base else Path.home() / ".config"
+    return root / "kitaru"
+
+
+def get_config_path() -> Path:
+    """Return the configuration file path without reading it.
+
+    Returns:
+        Location of the configuration file.
+    """
+    return get_config_directory() / CONFIG_FILE_NAME
+
+
+def write_json_file(path: Path, payload: object) -> None:
+    """Write a JSON file, replacing it in one step.
+
+    Args:
+        path: File location.
+        payload: JSON-serializable content.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
+    # mkdir applies its mode only to a directory it creates, so a directory
+    # that already existed keeps whatever mode it was given.
+    os.chmod(path.parent, DIRECTORY_MODE)
+    # A partial write must never replace a good file, and the content must
+    # never be readable by others between creating the file and setting its
+    # mode.
+    handle, temporary = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as file:
+            json.dump(payload, file, indent=2, sort_keys=True)
+        os.chmod(temporary, FILE_MODE)
+        os.replace(temporary, path)
+    except OSError:
+        Path(temporary).unlink(missing_ok=True)
+        raise
+
+
+def normalize_server_url(url: str) -> str:
+    """Normalize a server URL into the key credentials are stored under.
+
+    Args:
+        url: Server base URL.
+
+    Returns:
+        URL without a trailing slash.
+    """
+    return url.rstrip("/")
+
+
+class CLISettings(BaseModel):
+    """CLI settings."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    machine_mode: bool = False
+
+
+class ClientConfig(BaseModel):
+    """Client configuration."""
+
+    server_url: str | None = None
+    client_id: uuid.UUID | None = None
+    cli: CLISettings = Field(default_factory=CLISettings)
+
+
+def load_config() -> ClientConfig:
+    """Read the configuration file, ignoring one that cannot be parsed.
+
+    Returns:
+        Stored configuration, or an empty one when the file is missing or
+        malformed.
+    """
+    path = get_config_path()
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return ClientConfig()
+    try:
+        return ClientConfig.model_validate_json(raw)
+    except ValidationError:
+        logger.warning("Ignoring malformed configuration file %s.", path)
+        return ClientConfig()
+
+
+def save_config(config: ClientConfig) -> None:
+    """Write the configuration file, replacing it in one step.
+
+    Args:
+        config: Configuration to write.
+    """
+    write_json_file(
+        get_config_path(),
+        config.model_dump(mode="json", exclude_none=True),
+    )
+
+
+def get_server_url() -> str | None:
+    """Return the stored server URL.
+
+    Returns:
+        Server URL, or None when none is stored.
+    """
+    return load_config().server_url
+
+
+def set_server_url(url: str | None) -> None:
+    """Store the server URL.
+
+    Args:
+        url: Server base URL, None clears the stored URL.
+    """
+    config = load_config()
+    config.server_url = normalize_server_url(url) if url else None
+    save_config(config)
+
+
+def get_client_id() -> uuid.UUID:
+    """Return the id the control plane knows this installation by.
+
+    The control plane device authorization grant keys a device on the client
+    id, so the same machine has to present the same one across logins.
+
+    Returns:
+        Id read from ``KITARU_CLIENT_ID``, from the configuration file, or
+        newly generated and written there.
+    """
+    override = os.environ.get(ENV_CLIENT_ID)
+    if override:
+        try:
+            return uuid.UUID(override)
+        except ValueError:
+            pass
+    config = load_config()
+    if config.client_id is not None:
+        return config.client_id
+    config.client_id = uuid.uuid4()
+    # A read-only config directory costs a new device per login, which is
+    # worse than reusing one but still authenticates.
+    with contextlib.suppress(OSError):
+        save_config(config)
+    return config.client_id

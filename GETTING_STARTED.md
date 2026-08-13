@@ -21,14 +21,14 @@ fastest way to try it.
 git clone https://github.com/zenml-io/kitaru.git
 cd kitaru
 
-# Install with all extras (recommended)
-uv sync --extra mcp --extra pydantic-ai
-
-# Or minimal install (core only, no MCP/PydanticAI support)
+# Install the core package
 uv sync
 
+# Add optional PydanticAI and native MCP support when needed
+uv sync --extra pydantic-ai --extra mcp
+
 # Or with pip (editable install)
-pip install -e ".[mcp,pydantic-ai]"
+pip install -e ".[pydantic-ai,mcp]"
 
 ```
 
@@ -36,7 +36,7 @@ The extras give you:
 
 | Extra | What it enables |
 |---|---|
-| `mcp` | MCP server (`kitaru-mcp`) — query executions, artifacts, and logs from Claude Code, Cursor, or any MCP client |
+| `mcp` | Read-only-by-default v2 MCP server (`kitaru-mcp`) for registry and activity reads, with explicit standard and destructive modes |
 | `pydantic-ai` | PydanticAI adapter — wrap PydanticAI agents with Kitaru tracking |
 
 ### 2. Initialize the project
@@ -169,47 +169,38 @@ uv run examples/integrations/pydantic_ai_agent/pydantic_ai_adapter.py
 Wraps a PydanticAI agent with Kitaru tracking. Uses `TestModel` so no
 API keys are required.
 
-## Use with Claude Code / Cursor (MCP)
+## Use with Claude Code, Codex, or Cursor (MCP)
 
-If you installed the `mcp` extra, you get a `kitaru-mcp` server that
-lets AI assistants query your executions, artifacts, and logs directly.
+Installing the `mcp` extra adds the local stdio command `kitaru-mcp`. Set `KITARU_API_URL`, or pass `--server`, before starting it. The server starts in read-only mode, where the client sees only two tools for bounded registry and activity reads.
 
-### Add to Claude Code
+Add it to Claude Code:
 
 ```bash
-claude mcp add kitaru-mcp kitaru-mcp
+claude mcp add --scope project kitaru -- /absolute/path/to/.venv/bin/kitaru-mcp
 ```
 
-### Add to Cursor
+Codex uses `~/.codex/config.toml`:
 
-Add this to your Cursor MCP config (`.cursor/mcp.json`):
+```toml
+[mcp_servers.kitaru]
+command = "/absolute/path/to/.venv/bin/kitaru-mcp"
+args = []
+```
+
+Cursor uses `.cursor/mcp.json`:
 
 ```json
 {
   "mcpServers": {
     "kitaru": {
-      "command": "kitaru-mcp",
-      "transport": "stdio"
+      "command": "/absolute/path/to/.venv/bin/kitaru-mcp",
+      "args": []
     }
   }
 }
 ```
 
-### What can the MCP server do?
-
-Once connected, your AI assistant can:
-
-- **List and inspect executions** — "show me my recent executions"
-- **Read execution logs** — "what did my last flow print?"
-- **Browse artifacts** — "load the output of the research checkpoint"
-- **Run flows** — "run examples/features/basic_flow/first_working_flow.py:research_agent"
-- **Provide wait input** — "approve the pending wait"
-- **Replay executions** — "replay my last run from write_draft"
-- **Check status** — "what stack am I connected to?"
-
-This is a great way to explore Kitaru interactively — run a few
-examples first, then ask your AI assistant questions about what
-happened.
+Read-only mode can inspect agents, cohorts, experiments, importers, evaluators, versions, sessions, replays, evaluations, experiment runs, jobs, and bounded child pages. Standard mode adds cohort and experiment management plus immediate asynchronous workflow starts; destructive mode adds exact-ID cancellation and deletion. Read the [MCP server guide](https://docs.zenml.io/kitaru/agent-native/mcp-server) before enabling either broader mode.
 
 ### Claude Code skills
 

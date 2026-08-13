@@ -9,6 +9,7 @@
 #   TAG                         — explicit release tag (kitaru-ui-v<semver>)
 #   KITARU_UI_TAG               — alias for TAG (used by release workflows)
 #   KITARU_UI_ALLOW_PRERELEASE  — set to "true" to allow prerelease tags
+#   KITARU_UI_EXPECTED_SHA256    — optional exact archive checksum requirement
 #   KITARU_UI_RELEASE_TOKEN     — GitHub token with Contents: read access
 #   KITARU_UI_INSTALL_DIR       — destination parent dir (default: src/kitaru/_ui)
 #   VERIFY_CHECKSUM             — set to "false" to skip checksum verification
@@ -33,6 +34,7 @@ DIST_DIR="$INSTALL_DIR/dist"
 MANIFEST_FILE="$INSTALL_DIR/bundle_manifest.json"
 VERIFY_CHECKSUM="${VERIFY_CHECKSUM:-true}"
 ALLOW_PRERELEASE="${KITARU_UI_ALLOW_PRERELEASE:-false}"
+EXPECTED_SHA256="${KITARU_UI_EXPECTED_SHA256:-}"
 TAG_PATTERN='^kitaru-ui-v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?(\+[0-9A-Za-z][0-9A-Za-z.-]*)?$'
 
 find_python() {
@@ -320,6 +322,12 @@ main() {
 
     local bundle_sha256
     bundle_sha256=$(compute_sha256 "$archive")
+    if [ -n "$EXPECTED_SHA256" ] && [ "$bundle_sha256" != "$EXPECTED_SHA256" ]; then
+        echo "Error: archive SHA256 does not match the release declaration" >&2
+        echo "  expected: $EXPECTED_SHA256" >&2
+        echo "  actual:   $bundle_sha256" >&2
+        exit 1
+    fi
 
     # Clean and extract.
     rm -rf "$DIST_DIR"

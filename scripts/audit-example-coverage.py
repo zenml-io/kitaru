@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Audit the public example coverage manifest without running examples."""
 
-from __future__ import annotations
-
 import re
 import shlex
 import sys
@@ -43,7 +41,6 @@ LLM_INTEGRATION_WORKFLOW_PATH = ".github/workflows/llm-integration.yml"
 LLM_INTEGRATION_PROVIDER_INPUTS = (
     "include_openai",
     "include_anthropic",
-    "include_research_bot",
     "include_google_adk",
 )
 EXAMPLE_PATH_RE = re.compile(

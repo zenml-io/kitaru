@@ -1,0 +1,61 @@
+[tool.uv]
+exclude-newer = "3 days"
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+kitaru = { path = "..", editable = true }
+kitaru-langgraph = { workspace = true }
+kitaru-openai-agents = { workspace = true }
+kitaru-pydantic-ai = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "kitaru[server]",
+    "kitaru-langgraph[deepagents]",
+    "kitaru-openai-agents",
+    "kitaru-pydantic-ai[openai]",
+    "pytest>=8.0",
+    "pytest-asyncio>=1.4.0",
+    "ruff>=0.11",
+    "ty>=0.0.1a7",
+]
+
+[tool.ruff]
+target-version = "py311"
+src = ["packages", "tests"]
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+known-first-party = [
+    "kitaru",
+    "kitaru_evaluator",
+    "kitaru_braintrust_importer",
+    "kitaru_jsonl_importer",
+    "kitaru_langfuse_importer",
+    "kitaru_langgraph",
+    "kitaru_langsmith_importer",
+    "kitaru_openai_agents",
+    "kitaru_opentelemetry_importer",
+    "kitaru_pydantic_ai",
+]
+
+[tool.ty.src]
+include = ["packages/*/src/**/*.py", "tests/**/*.py"]
+
+[tool.ty.environment]
+python-version = "3.11"
+root = ["."]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = [".", ".."]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

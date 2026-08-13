@@ -19,7 +19,6 @@ env:
   KITARU_ANALYTICS_OPT_IN: false
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
-  ZENML_MCP_ANALYTICS_DEV: true
   AUTO_OPEN_DASHBOARD: false
   ZENML_ENABLE_RICH_TRACEBACK: false
 jobs:
@@ -31,11 +30,25 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-      - run: uv sync --frozen
+      - run: uv sync --frozen --extra server --extra otel --extra mcp
       - run: uv run ruff check .
       - run: uv run ruff format --check .
+      - run: uv run lint-imports
+      - run: uv run python scripts/report_mcp_schema.py --check
+      - run: uv run bash scripts/check_openapi.sh
       - run: find .github -type f \( -name '*.yml' -o -name '*.yaml' \) ! -name dependabot.yml
           -print0 | xargs -0 uv run yamlfix --check
+  client-import:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+      - run: uv venv .venv-clean
+      - run: uv pip install --python .venv-clean/bin/python .
+      - run: .venv-clean/bin/python -c "import kitaru.client"
   typos:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -52,7 +65,13 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-      - run: uv sync --frozen
+      - run: >-
+          uv sync --frozen
+          --extra server
+          --extra otel
+          --extra mcp
+          --extra cli
+          --extra worker
       - run: uv run ty check
   audit:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
@@ -62,21 +81,96 @@ jobs:
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
-      - run: uv sync --frozen
+      - run: uv sync --frozen --all-extras
       - name: Run pip-audit (with documented ignore list)
         run: |
           awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
             .github/pip-audit-ignored.txt | xargs uv run pip-audit
-  example-coverage-audit:
+  canonical-example:
+    name: Canonical example end to end
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: password
+        ports: [5433:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+      - name: Install canonical example runtime
+        run: >-
+          uv sync --frozen
+          --extra server
+          --extra cli
+          --extra worker
+          --extra examples
+      - name: Build local plugin candidates
+        run: >-
+          uv run --no-sync python scripts/smoke_plugin_artifacts.py
+          --candidate-dir plugins/candidate-wheels
+      - name: Install canonical example adapter
+        run: |
+          PLUGIN_VERSION=$(uv run --no-sync python -c \
+            'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("plugins/packages/pydantic-ai/pyproject.toml").read_text())["project"]["version"])')
+          uv pip install \
+            --no-index \
+            --find-links plugins/candidate-wheels \
+            "kitaru-pydantic-ai[openai]==${PLUGIN_VERSION}"
+      - name: Start local Kitaru server
+        run: |
+          uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
+          echo "$!" >"$RUNNER_TEMP/kitaru-server.pid"
+        env:
+          KITARU_SERVER_AUTH_SCHEME: none
+          KITARU_SERVER_DB_HOST: 127.0.0.1
+          KITARU_SERVER_DB_PORT: 5433
+          KITARU_SERVER_DB_PWD: password
+          KITARU_SERVER_SECRET_ENCRYPTION_KEY: ci-only-encryption-key-ci-only-encryption-key
+          KITARU_SERVER_JWT_SIGNING_KEY: ci-only-signing-key-ci-only-signing-key
+          KITARU_SERVER_ANALYTICS_OPT_IN: false
+      - name: Wait for local Kitaru server
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8000/health/live; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat "$RUNNER_TEMP/kitaru-server.log"
+          exit 1
       - name: Audit public example coverage manifest
         run: uv run --with pyyaml python scripts/audit-example-coverage.py
+      - name: Test canonical example contracts
+        run: PYTHONPATH=. uv run pytest -q tests/test_canonical_example.py
+      - name: Run canonical example end to end
+        run: uv run pytest -q tests/integration/test_canonical_example_e2e.py
+        env:
+          KITARU_CANONICAL_E2E: '1'
+          KITARU_CANONICAL_SERVER_URL: http://127.0.0.1:8000
+          KITARU_CANONICAL_API_KEY: canonical-ci-worker
+          UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
+      - name: Dump canonical example logs on failure
+        if: failure()
+        run: |
+          if test -f "$RUNNER_TEMP/kitaru-server.log"; then
+            cat "$RUNNER_TEMP/kitaru-server.log"
+          fi
+      - name: Stop local Kitaru server
+        if: always()
+        run: |
+          if test -f "$RUNNER_TEMP/kitaru-server.pid"; then
+            kill "$(cat "$RUNNER_TEMP/kitaru-server.pid")" || true
+          fi
   links:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
@@ -98,28 +192,58 @@ jobs:
           jobSummary: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  docker-smoke:
-    # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
-    if: github.event_name == 'push'
+  release-units:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
-    env:
-      ZENML_SERVER_TAG: 0.96.1
+    outputs:
+      plugin-matrix: ${{ steps.inventory.outputs.plugin-matrix }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           persist-credentials: false
-      - name: Download stable Kitaru UI
-        run: bash scripts/download-ui.sh
-        env:
-          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - name: Validate release units and build plugin matrix
+        id: inventory
+        run: |
+          plugin_matrix=$(uv run --no-project --with packaging==26.2 python scripts/release_units.py matrix)
+          printf 'plugin-matrix=%s\n' "$plugin_matrix" >> "$GITHUB_OUTPUT"
+  docker-smoke:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
       - name: Build server image
         run: >-
-          docker build -f docker/Dockerfile --target server
-          --build-arg ZENML_SERVER_TAG=${{ env.ZENML_SERVER_TAG }}
+          docker build -f docker/dev-server.Dockerfile --target runtime
           -t kitaru-ci-server .
+      - name: Start PostgreSQL
+        run: |
+          docker network create kitaru-ci
+          docker run -d --rm --name kitaru-ci-postgres --network kitaru-ci \
+            -e POSTGRES_PASSWORD=password postgres:16-alpine
+          for _ in $(seq 1 30); do
+            if docker exec kitaru-ci-postgres pg_isready -U postgres; then
+              exit 0
+            fi
+            sleep 2
+          done
+          docker logs kitaru-ci-postgres
+          exit 1
       - name: Start server container
-        run: docker run -d --rm --name kitaru-ci-server -p 18080:8080 -e KITARU_ANALYTICS_OPT_IN=false
-          -e ZENML_ANALYTICS_OPT_IN=false kitaru-ci-server
+        run: >-
+          docker run -d --rm --name kitaru-ci-server --network kitaru-ci
+          -p 18080:8000
+          -e KITARU_SERVER_AUTH_SCHEME=none
+          -e KITARU_SERVER_DB_HOST=kitaru-ci-postgres
+          -e KITARU_SERVER_DB_PWD=password
+          -e KITARU_SERVER_SECRET_ENCRYPTION_KEY=ci-only-encryption-key-ci-only-encryption-key
+          -e KITARU_SERVER_JWT_SIGNING_KEY=ci-only-signing-key-ci-only-signing-key
+          -e KITARU_SERVER_ANALYTICS_OPT_IN=false
+          kitaru-ci-server
       - name: Wait for health endpoint
         run: |
           set -euo pipefail
@@ -133,41 +257,20 @@ jobs:
           echo "Server did not become healthy in time." >&2
           docker logs kitaru-ci-server || true
           exit 1
-      - name: Verify bundled and copied dashboard assets
-        run: bash scripts/verify-server-ui.sh kitaru-ci-server
-      - name: Smoke test root route serves dashboard HTML
+      - name: Smoke test server info API
         run: |
           set -euo pipefail
-          status=$(curl -sS -o /tmp/root-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/')
-          test "$status" = "200"
-          grep -qi '<!doctype html\|<html' /tmp/root-response.txt || {
-            echo "Root route did not return HTML." >&2
-            cat /tmp/root-response.txt >&2
-            exit 1
-          }
-      - name: Smoke test device verification route
-        run: |
-          set -euo pipefail
-          status=$(curl -sS -o /tmp/device-verify-response.txt -w '%{http_code}' 'http://127.0.0.1:18080/devices/verify?device_id=test&user_code=test')
-          test "$status" = "200"
-          if grep -q 'An unexpected error occurred' /tmp/device-verify-response.txt; then
-            echo "Device verification route returned the generic unexpected-error payload." >&2
-            cat /tmp/device-verify-response.txt >&2
-            exit 1
-          fi
-          if docker logs kitaru-ci-server 2>&1 | grep -q 'TemplateNotFound'; then
-            echo "TemplateNotFound appeared in container logs after hitting /devices/verify." >&2
-            exit 1
-          fi
+          http_status=$(curl -sS -o /tmp/server-info.json -w '%{http_code}' 'http://127.0.0.1:18080/v1/info')
+          test "$http_status" = "200"
+          python -m json.tool /tmp/server-info.json
       - name: Dump container logs on failure
         if: failure()
         run: docker logs kitaru-ci-server || true
       - name: Stop server container
         if: always()
         run: docker rm -f kitaru-ci-server || true
-  wheel-packaging:
-    # UI release assets may require KITARU_UI_RELEASE_TOKEN; never expose it to PR code.
-    if: github.event_name == 'push'
+  plugin-tests:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
@@ -176,49 +279,132 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           python-version: '3.12'
-      - name: Download stable Kitaru UI
-        run: bash scripts/download-ui.sh
+      - run: uv sync --project plugins --frozen --all-packages
+      - run: >-
+          uv run --project plugins ruff format
+          --config plugins/pyproject.toml --check plugins
+      - run: >-
+          uv run --project plugins ruff check
+          --config plugins/pyproject.toml plugins
+      - run: uv run --project plugins ty check --project plugins
+      - run: >-
+          uv run --project plugins pytest -q -c plugins/pyproject.toml
+          plugins/tests
+          tests/server/test_default_plugins.py
+      - run: >-
+          uv run --project plugins python -c
+          "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS;
+          assert DEFAULT_PLUGIN_DEFINITIONS"
+  plugin-package:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    needs: release-units
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.release-units.outputs.plugin-matrix).matrix }}
+    name: plugin package (${{ matrix.package }})
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - name: Test installed package artifact
         env:
-          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
-      - name: Build wheel
-        run: uv build --wheel
-      - name: Verify Kitaru UI in wheel
-        run: |
-          WHEEL=$(ls dist/*.whl)
-          uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
+          PACKAGE_PATH: ${{ matrix.path }}
+        run: uv run --no-project python scripts/smoke_plugin_artifacts.py --package
+          "$PACKAGE_PATH"
+  mcp-wheel-contract:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - run: uv build --wheel
+      - name: Test clean base and MCP wheel installations
+        run: >-
+          KITARU_TEST_WHEEL=dist uv run
+          --extra server --extra otel --extra mcp
+          pytest tests/mcp/test_installed_contract.py
+  cli-artifact-contract:
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+      - name: Test clean CLI wheel and source installations
+        run: uv run --no-sync python scripts/smoke_cli_artifacts.py
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: py311-base
             python-version: '3.11'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py312-base
             python-version: '3.12'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py313-base
             python-version: '3.13'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
           - name: py314-base
             python-version: '3.14'
-            sync-command: uv sync --frozen
-            pytest-command: uv run pytest --ignore=tests/mcp
+            sync-command: uv sync --frozen --extra server --extra otel
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
+              --ignore=tests/integration/test_canonical_example_e2e.py
+          - name: py311-cli
+            python-version: '3.11'
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
+            pytest-command: uv run pytest tests/cli
+          - name: py312-cli
+            python-version: '3.12'
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
+            pytest-command: uv run pytest tests/cli
+          - name: py313-cli
+            python-version: '3.13'
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
+            pytest-command: uv run pytest tests/cli
+          - name: py314-cli
+            python-version: '3.14'
+            sync-command: uv sync --frozen --extra server --extra otel --extra cli
+              --extra worker
+            pytest-command: uv run pytest tests/cli
           - name: py311-mcp
             python-version: '3.11'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
           - name: py312-mcp
             python-version: '3.12'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
+            pytest-command: uv run pytest tests/mcp
+          - name: py313-mcp
+            python-version: '3.13'
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
           - name: py314-mcp
             python-version: '3.14'
-            sync-command: uv sync --frozen --extra mcp
+            sync-command: uv sync --frozen --extra server --extra otel --extra mcp
             pytest-command: uv run pytest tests/mcp
     name: test (${{ matrix.name }})
     steps:
@@ -229,4 +415,9 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: ${{ matrix.sync-command }}
+      - name: Verify base install does not resolve MCP
+        if: contains(matrix.name, 'base')
+        run: >-
+          uv run python -c "import importlib.util; import kitaru; import kitaru.client;
+          assert importlib.util.find_spec('mcp') is None"
       - run: ${{ matrix.pytest-command }}

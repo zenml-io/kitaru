@@ -1,0 +1,5307 @@
+[
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read Kitaru registry parents and versions using bounded exact operations.",
+    "inputSchema": {
+      "$defs": {
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
+        },
+        "ParentKind": {
+          "description": "Parent resource families supporting UUID-or-name lookup.",
+          "enum": [
+            "agent",
+            "cohort",
+            "experiment",
+            "importer",
+            "evaluator"
+          ],
+          "title": "ParentKind",
+          "type": "string"
+        },
+        "RegistryGetRequest": {
+          "additionalProperties": false,
+          "description": "Get a registry parent by UUID or exact case-sensitive name.",
+          "properties": {
+            "kind": {
+              "$ref": "#/$defs/ParentKind"
+            },
+            "operation": {
+              "const": "get",
+              "title": "Operation",
+              "type": "string"
+            },
+            "reference": {
+              "minLength": 1,
+              "title": "Reference",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "reference"
+          ],
+          "title": "RegistryGetRequest",
+          "type": "object"
+        },
+        "RegistryGetVersionRequest": {
+          "additionalProperties": false,
+          "description": "Get one exact asset or plugin version.",
+          "properties": {
+            "kind": {
+              "enum": [
+                "agent",
+                "cohort",
+                "importer",
+                "evaluator"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "get_version",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_reference": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Parent Reference"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Version"
+            },
+            "version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Version Id"
+            }
+          },
+          "required": [
+            "operation",
+            "kind"
+          ],
+          "title": "RegistryGetVersionRequest",
+          "type": "object"
+        },
+        "RegistryListRequest": {
+          "additionalProperties": false,
+          "description": "List one page of registry parents.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Filter"
+            },
+            "kind": {
+              "$ref": "#/$defs/ParentKind"
+            },
+            "operation": {
+              "const": "list",
+              "title": "Operation",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind"
+          ],
+          "title": "RegistryListRequest",
+          "type": "object"
+        },
+        "RegistryListVersionsRequest": {
+          "additionalProperties": false,
+          "description": "List one bounded page of versions for an exact parent reference.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "kind": {
+              "enum": [
+                "agent",
+                "cohort",
+                "importer",
+                "evaluator"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_versions",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_reference": {
+              "minLength": 1,
+              "title": "Parent Reference",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_reference"
+          ],
+          "title": "RegistryListVersionsRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "get": "#/$defs/RegistryGetRequest",
+              "get_version": "#/$defs/RegistryGetVersionRequest",
+              "list": "#/$defs/RegistryListRequest",
+              "list_versions": "#/$defs/RegistryListVersionsRequest"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RegistryListRequest"
+            },
+            {
+              "$ref": "#/$defs/RegistryGetRequest"
+            },
+            {
+              "$ref": "#/$defs/RegistryListVersionsRequest"
+            },
+            {
+              "$ref": "#/$defs/RegistryGetVersionRequest"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "registry_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_registry_read",
+    "outputSchema": {
+      "$defs": {
+        "AgentCapabilities": {
+          "additionalProperties": false,
+          "description": "Agent capabilities.",
+          "properties": {
+            "mcp_servers": {
+              "description": "MCP servers the agent connects to.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Mcp Servers",
+              "type": "array"
+            },
+            "skills": {
+              "description": "Skills the agent exposes.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Skills",
+              "type": "array"
+            },
+            "tools": {
+              "description": "Tools the agent exposes.",
+              "items": {
+                "type": "string"
+              },
+              "title": "Tools",
+              "type": "array"
+            }
+          },
+          "title": "AgentCapabilities",
+          "type": "object"
+        },
+        "AgentResponse": {
+          "description": "Agent response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Agent description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Agent id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this agent.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "name": {
+              "description": "Agent name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "latest_version"
+          ],
+          "title": "AgentResponse",
+          "type": "object"
+        },
+        "AgentVersionResponse": {
+          "description": "Agent version response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent this version belongs to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "capabilities": {
+              "$ref": "#/$defs/AgentCapabilities"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Version description.",
+              "title": "Description"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "id": {
+              "description": "Agent version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "run_spec": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/RunSpec"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Run spec."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "version",
+            "display_version",
+            "description",
+            "run_spec",
+            "capabilities"
+          ],
+          "title": "AgentVersionResponse",
+          "type": "object"
+        },
+        "CohortResponse": {
+          "description": "Cohort response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent the cohort's sessions belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cohort description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Cohort id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this cohort.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Cohort name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "agent_id",
+            "metadata",
+            "latest_version"
+          ],
+          "title": "CohortResponse",
+          "type": "object"
+        },
+        "CohortVersionResponse": {
+          "description": "Cohort version response.",
+          "properties": {
+            "cohort_id": {
+              "description": "Cohort this version belongs to.",
+              "format": "uuid",
+              "title": "Cohort Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "id": {
+              "description": "Cohort version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "session_count": {
+              "description": "Number of sessions in the version.",
+              "title": "Session Count",
+              "type": "integer"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "cohort_id",
+            "version",
+            "display_version",
+            "session_count"
+          ],
+          "title": "CohortVersionResponse",
+          "type": "object"
+        },
+        "EvaluatorConfig": {
+          "additionalProperties": false,
+          "description": "Evaluator config.",
+          "properties": {
+            "evaluator": {
+              "description": "Evaluator name.",
+              "title": "Evaluator",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the evaluator.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Evaluator version, an omitted value resolves to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "evaluator"
+          ],
+          "title": "EvaluatorConfig",
+          "type": "object"
+        },
+        "EvaluatorResponse": {
+          "description": "Evaluator response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Evaluator description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Evaluator id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this evaluator.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Evaluator logo URL.",
+              "title": "Logo Url"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Evaluator name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "logo_url",
+            "metadata",
+            "latest_version"
+          ],
+          "title": "EvaluatorResponse",
+          "type": "object"
+        },
+        "EvaluatorVersionResponse": {
+          "description": "Evaluator version response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "evaluator_id": {
+              "description": "Evaluator this version belongs to.",
+              "format": "uuid",
+              "title": "Evaluator Id",
+              "type": "string"
+            },
+            "id": {
+              "description": "Evaluator version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "source": {
+              "description": "Evaluator code to load.",
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "evaluator_id",
+            "version",
+            "display_version",
+            "source"
+          ],
+          "title": "EvaluatorVersionResponse",
+          "type": "object"
+        },
+        "ExperimentResponse": {
+          "description": "Experiment response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent the experiment's runs belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Experiment description.",
+              "title": "Description"
+            },
+            "evaluators": {
+              "description": "Evaluators run against every run's replays.",
+              "items": {
+                "$ref": "#/$defs/EvaluatorConfig"
+              },
+              "title": "Evaluators",
+              "type": "array"
+            },
+            "id": {
+              "description": "Experiment id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "name": {
+              "description": "Experiment name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "override": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReplayOverride"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override applied to every run's replays."
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "tool_policy": {
+              "$ref": "#/$defs/ToolPolicy",
+              "description": "Tool policy applied to every run's replays."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "agent_id",
+            "override",
+            "tool_policy",
+            "evaluators"
+          ],
+          "title": "ExperimentResponse",
+          "type": "object"
+        },
+        "HistoryConfig": {
+          "additionalProperties": false,
+          "description": "History tool config.",
+          "properties": {
+            "on_miss": {
+              "$ref": "#/$defs/ToolPolicyOnMiss",
+              "description": "Behavior when no recorded call matches."
+            },
+            "scope": {
+              "$ref": "#/$defs/HistoryScope",
+              "description": "Source of recorded calls to replay from."
+            },
+            "type": {
+              "const": "history",
+              "default": "history",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "on_miss"
+          ],
+          "title": "HistoryConfig",
+          "type": "object"
+        },
+        "HistoryScope": {
+          "description": "Scope a history tool config draws recorded calls from.",
+          "enum": [
+            "baseline",
+            "cohort_version",
+            "agent"
+          ],
+          "title": "HistoryScope",
+          "type": "string"
+        },
+        "ImporterResponse": {
+          "description": "Importer response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Importer description.",
+              "title": "Description"
+            },
+            "id": {
+              "description": "Importer id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "latest_version": {
+              "description": "Highest version number created for this importer.",
+              "title": "Latest Version",
+              "type": "integer"
+            },
+            "logo_url": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Importer logo URL.",
+              "title": "Logo Url"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Importer name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the owning account, null for a default plugin.",
+              "title": "Owner Id"
+            },
+            "provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Source system this importer reads.",
+              "title": "Provider"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "description",
+            "provider",
+            "logo_url",
+            "metadata",
+            "latest_version"
+          ],
+          "title": "ImporterResponse",
+          "type": "object"
+        },
+        "ImporterVersionResponse": {
+          "description": "Importer version response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "display_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Human-readable designator.",
+              "title": "Display Version"
+            },
+            "id": {
+              "description": "Importer version id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "importer_id": {
+              "description": "Importer this version belongs to.",
+              "format": "uuid",
+              "title": "Importer Id",
+              "type": "string"
+            },
+            "source": {
+              "description": "Importer code to load.",
+              "discriminator": {
+                "mapping": {
+                  "package": "#/$defs/PackagePluginSource",
+                  "script": "#/$defs/ScriptPluginSource"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ScriptPluginSource"
+                },
+                {
+                  "$ref": "#/$defs/PackagePluginSource"
+                }
+              ],
+              "title": "Source"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "version": {
+              "description": "Server-assigned version number.",
+              "title": "Version",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "importer_id",
+            "version",
+            "display_version",
+            "source"
+          ],
+          "title": "ImporterVersionResponse",
+          "type": "object"
+        },
+        "LLMConfig": {
+          "additionalProperties": false,
+          "description": "LLM tool config.",
+          "properties": {
+            "instructions": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Instructions guiding the generated result.",
+              "title": "Instructions"
+            },
+            "model": {
+              "description": "Model used to generate the tool result.",
+              "title": "Model",
+              "type": "string"
+            },
+            "type": {
+              "const": "llm",
+              "default": "llm",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "model"
+          ],
+          "title": "LLMConfig",
+          "type": "object"
+        },
+        "PackagePluginSource": {
+          "additionalProperties": false,
+          "description": "Package plugin source.",
+          "properties": {
+            "entrypoint": {
+              "description": "Module and attribute, as module:attribute.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "requirement": {
+              "description": "Pinned PEP 508 requirement.",
+              "title": "Requirement",
+              "type": "string"
+            },
+            "type": {
+              "const": "package",
+              "default": "package",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "requirement",
+            "entrypoint"
+          ],
+          "title": "PackagePluginSource",
+          "type": "object"
+        },
+        "PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/CohortResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ExperimentResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ImporterResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/EvaluatorResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/AgentVersionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/CohortVersionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ImporterVersionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/EvaluatorVersionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/AgentResponse"
+                  }
+                ]
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "PageData[Union[CohortResponse, ExperimentResponse, ImporterResponse, EvaluatorResponse, AgentVersionResponse, CohortVersionResponse, ImporterVersionResponse, EvaluatorVersionResponse, AgentResponse]]",
+          "type": "object"
+        },
+        "PageMetadata": {
+          "additionalProperties": false,
+          "description": "Opaque one-page cursor metadata.",
+          "properties": {
+            "has_more": {
+              "title": "Has More",
+              "type": "boolean"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Cursor"
+            },
+            "size": {
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "size",
+            "next_cursor",
+            "has_more"
+          ],
+          "title": "PageMetadata",
+          "type": "object"
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Passthrough tool config.",
+          "properties": {
+            "type": {
+              "const": "passthrough",
+              "default": "passthrough",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "PassthroughConfig",
+          "type": "object"
+        },
+        "ReplayOverride": {
+          "additionalProperties": false,
+          "description": "Replay override.",
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New model, or a map from old to new model.",
+              "title": "Model"
+            },
+            "model_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New model parameters.",
+              "title": "Model Params"
+            },
+            "prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New prompt.",
+              "title": "Prompt"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New system prompt.",
+              "title": "System Prompt"
+            }
+          },
+          "title": "ReplayOverride",
+          "type": "object"
+        },
+        "RunSpec": {
+          "additionalProperties": false,
+          "description": "Run spec.",
+          "properties": {
+            "command": {
+              "description": "Shell command to run.",
+              "title": "Command",
+              "type": "string"
+            },
+            "env": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Process environment.",
+              "title": "Env",
+              "type": "object"
+            },
+            "secret_ids": {
+              "description": "Secrets merged into the process environment.",
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Secret Ids",
+              "type": "array"
+            },
+            "timeout_seconds": {
+              "default": 3600,
+              "description": "Process timeout.",
+              "exclusiveMinimum": 0,
+              "title": "Timeout Seconds",
+              "type": "integer"
+            },
+            "working_dir": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Working directory.",
+              "title": "Working Dir"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "title": "RunSpec",
+          "type": "object"
+        },
+        "ScriptPluginSource": {
+          "additionalProperties": false,
+          "description": "Script plugin source.",
+          "properties": {
+            "blob_id": {
+              "description": "Blob holding the script.",
+              "format": "uuid",
+              "title": "Blob Id",
+              "type": "string"
+            },
+            "entrypoint": {
+              "description": "Attribute in the file.",
+              "title": "Entrypoint",
+              "type": "string"
+            },
+            "type": {
+              "const": "script",
+              "default": "script",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "blob_id",
+            "entrypoint"
+          ],
+          "title": "ScriptPluginSource",
+          "type": "object"
+        },
+        "StaticCase": {
+          "additionalProperties": false,
+          "description": "Static tool call case.",
+          "properties": {
+            "match": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Call arguments to match, unset matches any call.",
+              "title": "Match"
+            },
+            "match_mode": {
+              "$ref": "#/$defs/StaticMatchMode",
+              "description": "How the call arguments are matched."
+            },
+            "result": {
+              "description": "Result returned for a matching call.",
+              "title": "Result"
+            }
+          },
+          "required": [
+            "match_mode",
+            "result"
+          ],
+          "title": "StaticCase",
+          "type": "object"
+        },
+        "StaticConfig": {
+          "additionalProperties": false,
+          "description": "Static tool config.",
+          "properties": {
+            "cases": {
+              "description": "Cases tried in order for a matching call.",
+              "items": {
+                "$ref": "#/$defs/StaticCase"
+              },
+              "title": "Cases",
+              "type": "array"
+            },
+            "on_miss": {
+              "$ref": "#/$defs/ToolPolicyOnMiss",
+              "description": "Behavior when no case matches."
+            },
+            "type": {
+              "const": "static",
+              "default": "static",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cases",
+            "on_miss"
+          ],
+          "title": "StaticConfig",
+          "type": "object"
+        },
+        "StaticMatchMode": {
+          "description": "How a static case matches a tool call.",
+          "enum": [
+            "exact",
+            "subset"
+          ],
+          "title": "StaticMatchMode",
+          "type": "string"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        },
+        "ToolPolicy": {
+          "additionalProperties": false,
+          "description": "Tool policy.",
+          "properties": {
+            "default": {
+              "description": "Config applied to tools without an override.",
+              "discriminator": {
+                "mapping": {
+                  "history": "#/$defs/HistoryConfig",
+                  "llm": "#/$defs/LLMConfig",
+                  "passthrough": "#/$defs/PassthroughConfig",
+                  "static": "#/$defs/StaticConfig"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "$ref": "#/$defs/HistoryConfig"
+                },
+                {
+                  "$ref": "#/$defs/StaticConfig"
+                },
+                {
+                  "$ref": "#/$defs/LLMConfig"
+                }
+              ],
+              "title": "Default"
+            },
+            "tools": {
+              "additionalProperties": {
+                "discriminator": {
+                  "mapping": {
+                    "history": "#/$defs/HistoryConfig",
+                    "llm": "#/$defs/LLMConfig",
+                    "passthrough": "#/$defs/PassthroughConfig",
+                    "static": "#/$defs/StaticConfig"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/PassthroughConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/HistoryConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/StaticConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/LLMConfig"
+                  }
+                ]
+              },
+              "description": "Per-tool config overrides.",
+              "title": "Tools",
+              "type": "object"
+            }
+          },
+          "required": [
+            "default"
+          ],
+          "title": "ToolPolicy",
+          "type": "object"
+        },
+        "ToolPolicyOnMiss": {
+          "description": "Behavior when a replayed tool call has no match.",
+          "enum": [
+            "fail",
+            "passthrough",
+            "error_result"
+          ],
+          "title": "ToolPolicyOnMiss",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Registry read result with domain-typed data.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CohortResponse"
+            },
+            {
+              "$ref": "#/$defs/ExperimentResponse"
+            },
+            {
+              "$ref": "#/$defs/ImporterResponse"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorResponse"
+            },
+            {
+              "$ref": "#/$defs/AgentVersionResponse"
+            },
+            {
+              "$ref": "#/$defs/CohortVersionResponse"
+            },
+            {
+              "$ref": "#/$defs/ImporterVersionResponse"
+            },
+            {
+              "$ref": "#/$defs/EvaluatorVersionResponse"
+            },
+            {
+              "$ref": "#/$defs/AgentResponse"
+            },
+            {
+              "$ref": "#/$defs/PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "RegistryReadResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read Kitaru sessions, runs, jobs, and bounded child pages.",
+    "inputSchema": {
+      "$defs": {
+        "ActivityGetRequest": {
+          "additionalProperties": false,
+          "description": "Get one activity record by exact UUID.",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "session",
+                "replay",
+                "evaluation",
+                "experiment_run",
+                "job"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "get",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "id"
+          ],
+          "title": "ActivityGetRequest",
+          "type": "object"
+        },
+        "ActivityListRequest": {
+          "additionalProperties": false,
+          "description": "List one page of activity records.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Filter"
+            },
+            "kind": {
+              "enum": [
+                "session",
+                "replay",
+                "evaluation",
+                "experiment_run",
+                "job"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list",
+              "title": "Operation",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind"
+          ],
+          "title": "ActivityListRequest",
+          "type": "object"
+        },
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
+        },
+        "SessionNodesRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "include_payloads": {
+              "default": false,
+              "title": "Include Payloads",
+              "type": "boolean"
+            },
+            "kind": {
+              "const": "session_nodes",
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_children",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_id": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_id"
+          ],
+          "title": "SessionNodesRequest",
+          "type": "object"
+        },
+        "SortedChildrenRequest": {
+          "additionalProperties": false,
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "kind": {
+              "enum": [
+                "experiment_run_jobs",
+                "job_tasks"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_children",
+              "title": "Operation",
+              "type": "string"
+            },
+            "parent_id": {
+              "format": "uuid",
+              "title": "Parent Id",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "parent_id"
+          ],
+          "title": "SortedChildrenRequest",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "get": "#/$defs/ActivityGetRequest",
+              "list": "#/$defs/ActivityListRequest",
+              "list_children": {
+                "discriminator": {
+                  "mapping": {
+                    "experiment_run_jobs": "#/$defs/SortedChildrenRequest",
+                    "job_tasks": "#/$defs/SortedChildrenRequest",
+                    "session_nodes": "#/$defs/SessionNodesRequest"
+                  },
+                  "propertyName": "kind"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/SessionNodesRequest"
+                  },
+                  {
+                    "$ref": "#/$defs/SortedChildrenRequest"
+                  }
+                ]
+              }
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ActivityListRequest"
+            },
+            {
+              "$ref": "#/$defs/ActivityGetRequest"
+            },
+            {
+              "discriminator": {
+                "mapping": {
+                  "experiment_run_jobs": "#/$defs/SortedChildrenRequest",
+                  "job_tasks": "#/$defs/SortedChildrenRequest",
+                  "session_nodes": "#/$defs/SessionNodesRequest"
+                },
+                "propertyName": "kind"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/SessionNodesRequest"
+                },
+                {
+                  "$ref": "#/$defs/SortedChildrenRequest"
+                }
+              ]
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "activity_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_activity_read",
+    "outputSchema": {
+      "$defs": {
+        "EvaluationDataType": {
+          "description": "Data type an evaluation result carries.",
+          "enum": [
+            "float",
+            "bool",
+            "str",
+            "categorical"
+          ],
+          "title": "EvaluationDataType",
+          "type": "string"
+        },
+        "EvaluationResponse": {
+          "description": "Evaluation response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "data_type": {
+              "$ref": "#/$defs/EvaluationDataType",
+              "description": "Data type of the result."
+            },
+            "evaluator_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Name of the evaluator that produced the result.",
+              "title": "Evaluator Name"
+            },
+            "evaluator_version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Version of the evaluator that produced the result.",
+              "title": "Evaluator Version"
+            },
+            "evaluator_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Evaluator version that produced the result.",
+              "title": "Evaluator Version Id"
+            },
+            "explanation": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Free-form explanation.",
+              "title": "Explanation"
+            },
+            "id": {
+              "description": "Evaluation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "name": {
+              "description": "Evaluation name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "passed": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass or fail verdict.",
+              "title": "Passed"
+            },
+            "score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Numeric or boolean score.",
+              "title": "Score"
+            },
+            "session_id": {
+              "description": "Session being scored.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "task_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Evaluator task that produced the result.",
+              "title": "Task Id"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "value": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Label or string value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "session_id",
+            "name",
+            "data_type"
+          ],
+          "title": "EvaluationResponse",
+          "type": "object"
+        },
+        "EvaluatorConfig": {
+          "additionalProperties": false,
+          "description": "Evaluator config.",
+          "properties": {
+            "evaluator": {
+              "description": "Evaluator name.",
+              "title": "Evaluator",
+              "type": "string"
+            },
+            "params": {
+              "additionalProperties": true,
+              "description": "Parameters passed to the evaluator.",
+              "title": "Params",
+              "type": "object"
+            },
+            "version": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Evaluator version, an omitted value resolves to latest.",
+              "title": "Version"
+            }
+          },
+          "required": [
+            "evaluator"
+          ],
+          "title": "EvaluatorConfig",
+          "type": "object"
+        },
+        "ExperimentRunProgress": {
+          "description": "Experiment run progress.",
+          "properties": {
+            "canceled": {
+              "description": "Replays canceled.",
+              "title": "Canceled",
+              "type": "integer"
+            },
+            "completed": {
+              "description": "Replays completed.",
+              "title": "Completed",
+              "type": "integer"
+            },
+            "evaluating": {
+              "description": "Replays evaluating.",
+              "title": "Evaluating",
+              "type": "integer"
+            },
+            "failed": {
+              "description": "Replays failed.",
+              "title": "Failed",
+              "type": "integer"
+            },
+            "pending": {
+              "description": "Replays pending.",
+              "title": "Pending",
+              "type": "integer"
+            },
+            "total": {
+              "description": "Total replays in the run.",
+              "title": "Total",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "pending",
+            "evaluating",
+            "completed",
+            "failed",
+            "canceled",
+            "total"
+          ],
+          "title": "ExperimentRunProgress",
+          "type": "object"
+        },
+        "ExperimentRunResponse": {
+          "description": "Experiment run response.",
+          "properties": {
+            "agent_version_id": {
+              "description": "Agent version to replay with.",
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "cohort_version_id": {
+              "description": "Cohort version whose sessions are replayed.",
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the run settled.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed run.",
+              "title": "Error"
+            },
+            "evaluate_baselines": {
+              "description": "Whether baseline sessions are also scored.",
+              "title": "Evaluate Baselines",
+              "type": "boolean"
+            },
+            "experiment_id": {
+              "description": "Experiment this run belongs to.",
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "id": {
+              "description": "Experiment run id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "number": {
+              "description": "Run number within the experiment.",
+              "title": "Number",
+              "type": "integer"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "progress": {
+              "$ref": "#/$defs/ExperimentRunProgress",
+              "description": "Replay counts by status."
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the run started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/ExperimentRunStatus",
+              "description": "Run status."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "experiment_id",
+            "number",
+            "status",
+            "cohort_version_id",
+            "agent_version_id",
+            "evaluate_baselines",
+            "progress"
+          ],
+          "title": "ExperimentRunResponse",
+          "type": "object"
+        },
+        "ExperimentRunStatus": {
+          "description": "Experiment run status.",
+          "enum": [
+            "running",
+            "canceling",
+            "completed",
+            "failed",
+            "canceled"
+          ],
+          "title": "ExperimentRunStatus",
+          "type": "string"
+        },
+        "HistoryConfig": {
+          "additionalProperties": false,
+          "description": "History tool config.",
+          "properties": {
+            "on_miss": {
+              "$ref": "#/$defs/ToolPolicyOnMiss",
+              "description": "Behavior when no recorded call matches."
+            },
+            "scope": {
+              "$ref": "#/$defs/HistoryScope",
+              "description": "Source of recorded calls to replay from."
+            },
+            "type": {
+              "const": "history",
+              "default": "history",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "scope",
+            "on_miss"
+          ],
+          "title": "HistoryConfig",
+          "type": "object"
+        },
+        "HistoryScope": {
+          "description": "Scope a history tool config draws recorded calls from.",
+          "enum": [
+            "baseline",
+            "cohort_version",
+            "agent"
+          ],
+          "title": "HistoryScope",
+          "type": "string"
+        },
+        "JobStatus": {
+          "description": "Job status.",
+          "enum": [
+            "pending",
+            "running",
+            "completed",
+            "failed",
+            "canceled"
+          ],
+          "title": "JobStatus",
+          "type": "string"
+        },
+        "LLMConfig": {
+          "additionalProperties": false,
+          "description": "LLM tool config.",
+          "properties": {
+            "instructions": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Instructions guiding the generated result.",
+              "title": "Instructions"
+            },
+            "model": {
+              "description": "Model used to generate the tool result.",
+              "title": "Model",
+              "type": "string"
+            },
+            "type": {
+              "const": "llm",
+              "default": "llm",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "model"
+          ],
+          "title": "LLMConfig",
+          "type": "object"
+        },
+        "NodeStatus": {
+          "description": "Session node status.",
+          "enum": [
+            "in_progress",
+            "completed",
+            "failed"
+          ],
+          "title": "NodeStatus",
+          "type": "string"
+        },
+        "NodeType": {
+          "description": "Kind of work a session node records.",
+          "enum": [
+            "llm_call",
+            "tool_call",
+            "subagent_call",
+            "span"
+          ],
+          "title": "NodeType",
+          "type": "string"
+        },
+        "PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/SessionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ReplayResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/EvaluationResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/ExperimentRunResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/SessionNodeResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/TaskResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/_MCPJob"
+                  }
+                ]
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "PageData[Union[SessionResponse, ReplayResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
+          "type": "object"
+        },
+        "PageMetadata": {
+          "additionalProperties": false,
+          "description": "Opaque one-page cursor metadata.",
+          "properties": {
+            "has_more": {
+              "title": "Has More",
+              "type": "boolean"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Cursor"
+            },
+            "size": {
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "size",
+            "next_cursor",
+            "has_more"
+          ],
+          "title": "PageMetadata",
+          "type": "object"
+        },
+        "PassthroughConfig": {
+          "additionalProperties": false,
+          "description": "Passthrough tool config.",
+          "properties": {
+            "type": {
+              "const": "passthrough",
+              "default": "passthrough",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "PassthroughConfig",
+          "type": "object"
+        },
+        "ReplayOverride": {
+          "additionalProperties": false,
+          "description": "Replay override.",
+          "properties": {
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New model, or a map from old to new model.",
+              "title": "Model"
+            },
+            "model_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New model parameters.",
+              "title": "Model Params"
+            },
+            "prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New prompt.",
+              "title": "Prompt"
+            },
+            "system_prompt": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "New system prompt.",
+              "title": "System Prompt"
+            }
+          },
+          "title": "ReplayOverride",
+          "type": "object"
+        },
+        "ReplayResponse": {
+          "description": "Replay response.",
+          "properties": {
+            "baseline_session_id": {
+              "description": "Session replayed.",
+              "format": "uuid",
+              "title": "Baseline Session Id",
+              "type": "string"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed replay.",
+              "title": "Error"
+            },
+            "evaluate_baselines": {
+              "description": "Whether the baseline session is also scored.",
+              "title": "Evaluate Baselines",
+              "type": "boolean"
+            },
+            "evaluators": {
+              "description": "Evaluators run against the result session.",
+              "items": {
+                "$ref": "#/$defs/EvaluatorConfig"
+              },
+              "title": "Evaluators",
+              "type": "array"
+            },
+            "experiment_run_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Experiment run this replay belongs to.",
+              "title": "Experiment Run Id"
+            },
+            "id": {
+              "description": "Replay id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "job_id": {
+              "description": "Job running the replay.",
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            },
+            "override": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ReplayOverride"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Override applied."
+            },
+            "result_session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session produced by the replay.",
+              "title": "Result Session Id"
+            },
+            "status": {
+              "$ref": "#/$defs/ReplayStatus"
+            },
+            "tool_policy": {
+              "$ref": "#/$defs/ToolPolicy",
+              "description": "Tool policy applied."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "job_id",
+            "baseline_session_id",
+            "override",
+            "tool_policy",
+            "evaluators",
+            "evaluate_baselines",
+            "status"
+          ],
+          "title": "ReplayResponse",
+          "type": "object"
+        },
+        "ReplayStatus": {
+          "description": "Replay status.",
+          "enum": [
+            "pending",
+            "evaluating",
+            "completed",
+            "failed",
+            "canceled"
+          ],
+          "title": "ReplayStatus",
+          "type": "string"
+        },
+        "SessionNodeResponse": {
+          "description": "Session node response.",
+          "properties": {
+            "attributes": {
+              "default": null,
+              "description": "Arbitrary span attributes, null unless include_payloads.",
+              "title": "Attributes"
+            },
+            "cache_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Cache key for a replayed tool call.",
+              "title": "Cache Key"
+            },
+            "cost": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Cost of the call.",
+              "title": "Cost"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the node ended.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed node.",
+              "title": "Error"
+            },
+            "external_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Id from the source system.",
+              "title": "External Id"
+            },
+            "id": {
+              "description": "Node id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "index": {
+              "description": "Position within the session.",
+              "title": "Index",
+              "type": "integer"
+            },
+            "input_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from node inputs.",
+              "title": "Input Text Selector"
+            },
+            "inputs": {
+              "default": null,
+              "description": "Node inputs, null unless include_payloads.",
+              "title": "Inputs"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model that served the call.",
+              "title": "Model"
+            },
+            "model_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Parameters passed to the model.",
+              "title": "Model Params"
+            },
+            "model_provider": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model provider.",
+              "title": "Model Provider"
+            },
+            "name": {
+              "description": "Node name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "node_type": {
+              "$ref": "#/$defs/NodeType",
+              "description": "Kind of work the node records."
+            },
+            "output_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from node outputs.",
+              "title": "Output Text Selector"
+            },
+            "outputs": {
+              "default": null,
+              "description": "Node outputs, null unless include_payloads.",
+              "title": "Outputs"
+            },
+            "parent_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Parent node.",
+              "title": "Parent Id"
+            },
+            "parent_index": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Parent node index.",
+              "title": "Parent Index"
+            },
+            "reasoning": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Visible reasoning, null unless payloads are included.",
+              "title": "Reasoning"
+            },
+            "requested_model": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Model requested by the call.",
+              "title": "Requested Model"
+            },
+            "secondary_parent_ids": {
+              "description": "Additional parent nodes.",
+              "items": {
+                "format": "uuid",
+                "type": "string"
+              },
+              "title": "Secondary Parent Ids",
+              "type": "array"
+            },
+            "secondary_parent_indexes": {
+              "description": "Secondary parent indexes.",
+              "items": {
+                "type": "integer"
+              },
+              "title": "Secondary Parent Indexes",
+              "type": "array"
+            },
+            "session_id": {
+              "description": "Session this node belongs to.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the node started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/NodeStatus",
+              "description": "Node status."
+            },
+            "subagent_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Subagent invoked.",
+              "title": "Subagent Id"
+            },
+            "system_prompt_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting the system prompt from node inputs.",
+              "title": "System Prompt Selector"
+            },
+            "tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TokenUsage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Token usage."
+            },
+            "tool_name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Tool called.",
+              "title": "Tool Name"
+            },
+            "trace_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Distributed trace id.",
+              "title": "Trace Id"
+            }
+          },
+          "required": [
+            "id",
+            "session_id",
+            "index",
+            "parent_index",
+            "secondary_parent_indexes",
+            "secondary_parent_ids",
+            "node_type",
+            "name",
+            "status",
+            "metadata"
+          ],
+          "title": "SessionNodeResponse",
+          "type": "object"
+        },
+        "SessionOrigin": {
+          "description": "How a session came to exist.",
+          "enum": [
+            "imported",
+            "recorded",
+            "replay"
+          ],
+          "title": "SessionOrigin",
+          "type": "string"
+        },
+        "SessionResponse": {
+          "description": "Session response.",
+          "properties": {
+            "adapter_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Recording adapter version.",
+              "title": "Adapter Version"
+            },
+            "agent_id": {
+              "description": "Agent the session belongs to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "agent_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent version recorded for the session.",
+              "title": "Agent Version Id"
+            },
+            "cost": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total cost.",
+              "title": "Cost"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the session ended.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed session.",
+              "title": "Error"
+            },
+            "external_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Id from the source system.",
+              "title": "External Id"
+            },
+            "framework": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent framework used.",
+              "title": "Framework"
+            },
+            "id": {
+              "description": "Session id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "imported_from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source system the session was imported from.",
+              "title": "Imported From"
+            },
+            "inputs": {
+              "description": "Session inputs.",
+              "title": "Inputs"
+            },
+            "llm_call_count": {
+              "description": "Number of LLM call nodes.",
+              "title": "Llm Call Count",
+              "type": "integer"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session name.",
+              "title": "Name"
+            },
+            "number": {
+              "description": "Session number within the agent.",
+              "title": "Number",
+              "type": "integer"
+            },
+            "origin": {
+              "$ref": "#/$defs/SessionOrigin",
+              "description": "How the session came to exist."
+            },
+            "outputs": {
+              "description": "Session outputs.",
+              "title": "Outputs"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the session started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/SessionStatus"
+            },
+            "task_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Task the session was produced by.",
+              "title": "Task Id"
+            },
+            "tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TokenUsage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total token usage."
+            },
+            "tool_call_count": {
+              "description": "Number of tool call nodes.",
+              "title": "Tool Call Count",
+              "type": "integer"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "number",
+            "origin",
+            "status",
+            "inputs",
+            "outputs",
+            "metadata",
+            "llm_call_count",
+            "tool_call_count"
+          ],
+          "title": "SessionResponse",
+          "type": "object"
+        },
+        "SessionStatus": {
+          "description": "Session status.",
+          "enum": [
+            "in_progress",
+            "completed",
+            "failed"
+          ],
+          "title": "SessionStatus",
+          "type": "string"
+        },
+        "StaticCase": {
+          "additionalProperties": false,
+          "description": "Static tool call case.",
+          "properties": {
+            "match": {
+              "anyOf": [
+                {},
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Call arguments to match, unset matches any call.",
+              "title": "Match"
+            },
+            "match_mode": {
+              "$ref": "#/$defs/StaticMatchMode",
+              "description": "How the call arguments are matched."
+            },
+            "result": {
+              "description": "Result returned for a matching call.",
+              "title": "Result"
+            }
+          },
+          "required": [
+            "match_mode",
+            "result"
+          ],
+          "title": "StaticCase",
+          "type": "object"
+        },
+        "StaticConfig": {
+          "additionalProperties": false,
+          "description": "Static tool config.",
+          "properties": {
+            "cases": {
+              "description": "Cases tried in order for a matching call.",
+              "items": {
+                "$ref": "#/$defs/StaticCase"
+              },
+              "title": "Cases",
+              "type": "array"
+            },
+            "on_miss": {
+              "$ref": "#/$defs/ToolPolicyOnMiss",
+              "description": "Behavior when no case matches."
+            },
+            "type": {
+              "const": "static",
+              "default": "static",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "cases",
+            "on_miss"
+          ],
+          "title": "StaticConfig",
+          "type": "object"
+        },
+        "StaticMatchMode": {
+          "description": "How a static case matches a tool call.",
+          "enum": [
+            "exact",
+            "subset"
+          ],
+          "title": "StaticMatchMode",
+          "type": "string"
+        },
+        "TaskKind": {
+          "description": "Kind of work a task runs.",
+          "enum": [
+            "agent",
+            "evaluator",
+            "importer"
+          ],
+          "title": "TaskKind",
+          "type": "string"
+        },
+        "TaskOnFailure": {
+          "description": "What a task's hard failure does to the rest of its job.",
+          "enum": [
+            "abort",
+            "continue",
+            "ignore"
+          ],
+          "title": "TaskOnFailure",
+          "type": "string"
+        },
+        "TaskResponse": {
+          "description": "Task response.",
+          "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent an importer task creates sessions under.",
+              "title": "Agent Id"
+            },
+            "agent_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent version run by an agent task.",
+              "title": "Agent Version Id"
+            },
+            "attempt": {
+              "description": "Current attempt number.",
+              "title": "Attempt",
+              "type": "integer"
+            },
+            "cancel_requested_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time cancellation was requested.",
+              "title": "Cancel Requested At"
+            },
+            "claimed_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the task was claimed.",
+              "title": "Claimed At"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time execution ended.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed task.",
+              "title": "Error"
+            },
+            "heartbeat_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time of the worker's last heartbeat.",
+              "title": "Heartbeat At"
+            },
+            "id": {
+              "description": "Task id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "input_session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Input session for an evaluator task.",
+              "title": "Input Session Id"
+            },
+            "job_id": {
+              "description": "Owning job.",
+              "format": "uuid",
+              "title": "Job Id",
+              "type": "string"
+            },
+            "kind": {
+              "$ref": "#/$defs/TaskKind",
+              "description": "Kind of work the task runs."
+            },
+            "labels": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Labels matched by worker scope selectors.",
+              "title": "Labels",
+              "type": "object"
+            },
+            "on_failure": {
+              "$ref": "#/$defs/TaskOnFailure",
+              "description": "Effect of a hard failure on the job."
+            },
+            "payload_blob_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Payload blob for an importer task.",
+              "title": "Payload Blob Id"
+            },
+            "plugin_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Plugin version run by an evaluator or importer task.",
+              "title": "Plugin Version Id"
+            },
+            "result": {
+              "description": "Task result, diagnostic output on a non-completed task.",
+              "title": "Result"
+            },
+            "result_session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session an agent task produced.",
+              "title": "Result Session Id"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time execution started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/TaskStatus"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "worker_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Worker that claimed the task.",
+              "title": "Worker Id"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "job_id",
+            "kind",
+            "status",
+            "on_failure",
+            "attempt",
+            "labels",
+            "result"
+          ],
+          "title": "TaskResponse",
+          "type": "object"
+        },
+        "TaskStatus": {
+          "description": "Task status.",
+          "enum": [
+            "pending",
+            "claimed",
+            "running",
+            "completed",
+            "failed",
+            "timed_out",
+            "canceled",
+            "abandoned"
+          ],
+          "title": "TaskStatus",
+          "type": "string"
+        },
+        "TokenUsage": {
+          "additionalProperties": false,
+          "description": "Token usage.",
+          "properties": {
+            "cached_input_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Cached input tokens.",
+              "title": "Cached Input Tokens"
+            },
+            "input_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Input tokens.",
+              "title": "Input Tokens"
+            },
+            "output_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Output tokens.",
+              "title": "Output Tokens"
+            },
+            "reasoning_tokens": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reasoning tokens.",
+              "title": "Reasoning Tokens"
+            }
+          },
+          "title": "TokenUsage",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        },
+        "ToolPolicy": {
+          "additionalProperties": false,
+          "description": "Tool policy.",
+          "properties": {
+            "default": {
+              "description": "Config applied to tools without an override.",
+              "discriminator": {
+                "mapping": {
+                  "history": "#/$defs/HistoryConfig",
+                  "llm": "#/$defs/LLMConfig",
+                  "passthrough": "#/$defs/PassthroughConfig",
+                  "static": "#/$defs/StaticConfig"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/PassthroughConfig"
+                },
+                {
+                  "$ref": "#/$defs/HistoryConfig"
+                },
+                {
+                  "$ref": "#/$defs/StaticConfig"
+                },
+                {
+                  "$ref": "#/$defs/LLMConfig"
+                }
+              ],
+              "title": "Default"
+            },
+            "tools": {
+              "additionalProperties": {
+                "discriminator": {
+                  "mapping": {
+                    "history": "#/$defs/HistoryConfig",
+                    "llm": "#/$defs/LLMConfig",
+                    "passthrough": "#/$defs/PassthroughConfig",
+                    "static": "#/$defs/StaticConfig"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/PassthroughConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/HistoryConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/StaticConfig"
+                  },
+                  {
+                    "$ref": "#/$defs/LLMConfig"
+                  }
+                ]
+              },
+              "description": "Per-tool config overrides.",
+              "title": "Tools",
+              "type": "object"
+            }
+          },
+          "required": [
+            "default"
+          ],
+          "title": "ToolPolicy",
+          "type": "object"
+        },
+        "ToolPolicyOnMiss": {
+          "description": "Behavior when a replayed tool call has no match.",
+          "enum": [
+            "fail",
+            "passthrough",
+            "error_result"
+          ],
+          "title": "ToolPolicyOnMiss",
+          "type": "string"
+        },
+        "_MCPJob": {
+          "properties": {
+            "cancel_requested_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time cancellation was requested.",
+              "title": "Cancel Requested At"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the job settled.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "First counted task failure's error.",
+              "title": "Error"
+            },
+            "id": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "session_run",
+                "import",
+                "evaluation",
+                "replay"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the job started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/JobStatus"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "kind",
+            "status"
+          ],
+          "title": "_MCPJob",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed activity read result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SessionResponse"
+            },
+            {
+              "$ref": "#/$defs/ReplayResponse"
+            },
+            {
+              "$ref": "#/$defs/EvaluationResponse"
+            },
+            {
+              "$ref": "#/$defs/ExperimentRunResponse"
+            },
+            {
+              "$ref": "#/$defs/SessionNodeResponse"
+            },
+            {
+              "$ref": "#/$defs/TaskResponse"
+            },
+            {
+              "$ref": "#/$defs/_MCPJob"
+            },
+            {
+              "$ref": "#/$defs/PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ActivityReadResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": true,
+      "openWorldHint": true,
+      "readOnlyHint": true
+    },
+    "description": "Read investigations, annotations, and ordered investigation sessions.",
+    "inputSchema": {
+      "$defs": {
+        "AndFilter": {
+          "additionalProperties": false,
+          "description": "And filter.",
+          "properties": {
+            "and": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "And",
+              "type": "array"
+            }
+          },
+          "required": [
+            "and"
+          ],
+          "title": "AndFilter",
+          "type": "object"
+        },
+        "FilterCondition": {
+          "additionalProperties": false,
+          "description": "Filter condition.",
+          "properties": {
+            "field": {
+              "description": "Field to filter on.",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Field",
+              "type": "string"
+            },
+            "op": {
+              "$ref": "#/$defs/FilterOp",
+              "description": "Comparison operator."
+            },
+            "value": {
+              "default": null,
+              "description": "Comparison value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "field",
+            "op"
+          ],
+          "title": "FilterCondition",
+          "type": "object"
+        },
+        "FilterOp": {
+          "description": "Filter condition operator.",
+          "enum": [
+            "eq",
+            "ne",
+            "lt",
+            "le",
+            "gt",
+            "ge",
+            "in",
+            "is_null",
+            "startswith",
+            "endswith",
+            "contains"
+          ],
+          "title": "FilterOp",
+          "type": "string"
+        },
+        "NotFilter": {
+          "additionalProperties": false,
+          "description": "Not filter.",
+          "properties": {
+            "not": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                }
+              ],
+              "description": "Operand.",
+              "title": "Not"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "title": "NotFilter",
+          "type": "object"
+        },
+        "OrFilter": {
+          "additionalProperties": false,
+          "description": "Or filter.",
+          "properties": {
+            "or": {
+              "description": "Operands.",
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/FilterCondition"
+                  },
+                  {
+                    "$ref": "#/$defs/AndFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/OrFilter"
+                  },
+                  {
+                    "$ref": "#/$defs/NotFilter"
+                  }
+                ]
+              },
+              "minItems": 1,
+              "title": "Or",
+              "type": "array"
+            }
+          },
+          "required": [
+            "or"
+          ],
+          "title": "OrFilter",
+          "type": "object"
+        },
+        "ReviewGet": {
+          "additionalProperties": false,
+          "description": "Get one investigation or annotation by exact UUID.",
+          "properties": {
+            "id": {
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "investigation",
+                "annotation"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "get",
+              "title": "Operation",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind",
+            "id"
+          ],
+          "title": "ReviewGet",
+          "type": "object"
+        },
+        "ReviewList": {
+          "additionalProperties": false,
+          "description": "List one bounded page of investigations or annotations.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Filter"
+            },
+            "kind": {
+              "enum": [
+                "investigation",
+                "annotation"
+              ],
+              "title": "Kind",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list",
+              "title": "Operation",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            },
+            "sort": {
+              "default": "created:desc",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "kind"
+          ],
+          "title": "ReviewList",
+          "type": "object"
+        },
+        "ReviewListSessions": {
+          "additionalProperties": false,
+          "description": "List one ordered page of sessions for an exact investigation.",
+          "properties": {
+            "cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Cursor"
+            },
+            "investigation_id": {
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "operation": {
+              "const": "list_sessions",
+              "title": "Operation",
+              "type": "string"
+            },
+            "size": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "operation",
+            "investigation_id"
+          ],
+          "title": "ReviewListSessions",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "discriminator": {
+            "mapping": {
+              "get": "#/$defs/ReviewGet",
+              "list": "#/$defs/ReviewList",
+              "list_sessions": "#/$defs/ReviewListSessions"
+            },
+            "propertyName": "operation"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/ReviewList"
+            },
+            {
+              "$ref": "#/$defs/ReviewGet"
+            },
+            {
+              "$ref": "#/$defs/ReviewListSessions"
+            }
+          ],
+          "title": "Request"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "review_read_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_review_read",
+    "outputSchema": {
+      "$defs": {
+        "AnnotationResponse": {
+          "description": "Annotation response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Annotation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_session_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Investigation session being answered.",
+              "title": "Investigation Session Id"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "question_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Key of the question being answered.",
+              "title": "Question Key"
+            },
+            "selector": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSelector"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Part of the session being annotated."
+            },
+            "session_id": {
+              "description": "Session being annotated.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "value": {
+              "description": "Annotation value.",
+              "title": "Value"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "session_id",
+            "value"
+          ],
+          "title": "AnnotationResponse",
+          "type": "object"
+        },
+        "AnnotationSelector": {
+          "additionalProperties": false,
+          "description": "Annotation selector.",
+          "properties": {
+            "node_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Targeted node.",
+              "title": "Node Id"
+            },
+            "path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer into the targeted node or the session response.",
+              "title": "Path"
+            },
+            "span": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/AnnotationSpan"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Character range within the resolved string."
+            }
+          },
+          "title": "AnnotationSelector",
+          "type": "object"
+        },
+        "AnnotationSpan": {
+          "additionalProperties": false,
+          "description": "Annotation span.",
+          "properties": {
+            "end": {
+              "description": "End offset of the character range.",
+              "title": "End",
+              "type": "integer"
+            },
+            "start": {
+              "description": "Start offset of the character range.",
+              "title": "Start",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "start",
+            "end"
+          ],
+          "title": "AnnotationSpan",
+          "type": "object"
+        },
+        "InvestigationResponse": {
+          "description": "Investigation response.",
+          "properties": {
+            "agent_id": {
+              "description": "Agent the investigation's sessions belong to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "completed_sessions": {
+              "description": "Number of linked sessions with a verdict.",
+              "title": "Completed Sessions",
+              "type": "integer"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "description": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Curator rationale.",
+              "title": "Description"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the last session settled.",
+              "title": "Ended At"
+            },
+            "id": {
+              "description": "Investigation id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Investigation name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the first answer was recorded.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/InvestigationStatus"
+            },
+            "total_sessions": {
+              "description": "Number of linked sessions.",
+              "title": "Total Sessions",
+              "type": "integer"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "name",
+            "description",
+            "status",
+            "metadata",
+            "total_sessions",
+            "completed_sessions"
+          ],
+          "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
+          "type": "object"
+        },
+        "InvestigationSessionQuestion": {
+          "additionalProperties": false,
+          "description": "Investigation session question.",
+          "properties": {
+            "highlights": {
+              "description": "Curated highlights for the question.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionHighlight"
+              },
+              "title": "Highlights",
+              "type": "array"
+            },
+            "key": {
+              "description": "Question key, unique within the session.",
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "description": "Question to answer about the session.",
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "InvestigationSessionQuestion",
+          "type": "object"
+        },
+        "InvestigationSessionResponse": {
+          "description": "Investigation session response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Investigation session id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "investigation_id": {
+              "description": "Investigation this session belongs to.",
+              "format": "uuid",
+              "title": "Investigation Id",
+              "type": "string"
+            },
+            "position": {
+              "description": "Presentation order within the investigation.",
+              "title": "Position",
+              "type": "integer"
+            },
+            "questions": {
+              "description": "Questions to answer about the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionQuestion"
+              },
+              "title": "Questions",
+              "type": "array"
+            },
+            "session_id": {
+              "description": "Session being investigated.",
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            },
+            "verdict": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Investigation session verdict."
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "id",
+            "investigation_id",
+            "session_id",
+            "position",
+            "questions",
+            "verdict"
+          ],
+          "title": "InvestigationSessionResponse",
+          "type": "object"
+        },
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
+          "enum": [
+            "acceptable",
+            "problematic",
+            "uncertain"
+          ],
+          "title": "InvestigationSessionVerdict",
+          "type": "string"
+        },
+        "InvestigationStatus": {
+          "description": "Investigation status.",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ],
+          "title": "InvestigationStatus",
+          "type": "string"
+        },
+        "PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "anyOf": [
+                  {
+                    "$ref": "#/$defs/InvestigationResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/InvestigationSessionResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/AnnotationResponse"
+                  }
+                ]
+              },
+              "title": "Items",
+              "type": "array"
+            },
+            "page": {
+              "$ref": "#/$defs/PageMetadata"
+            }
+          },
+          "required": [
+            "items",
+            "page"
+          ],
+          "title": "PageData[Union[InvestigationResponse, InvestigationSessionResponse, AnnotationResponse]]",
+          "type": "object"
+        },
+        "PageMetadata": {
+          "additionalProperties": false,
+          "description": "Opaque one-page cursor metadata.",
+          "properties": {
+            "has_more": {
+              "title": "Has More",
+              "type": "boolean"
+            },
+            "next_cursor": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Next Cursor"
+            },
+            "size": {
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          "required": [
+            "size",
+            "next_cursor",
+            "has_more"
+          ],
+          "title": "PageMetadata",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed investigation and annotation read result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/InvestigationResponse"
+            },
+            {
+              "$ref": "#/$defs/InvestigationSessionResponse"
+            },
+            {
+              "$ref": "#/$defs/AnnotationResponse"
+            },
+            {
+              "$ref": "#/$defs/PageData_Union_InvestigationResponse__InvestigationSessionResponse__AnnotationResponse__"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ReviewReadResult",
+      "type": "object"
+    }
+  }
+]

@@ -1,170 +1,120 @@
 # Docker Architecture
 
-This directory contains three Dockerfiles serving different purposes.
-The main project `CLAUDE.md` links here for Docker-specific guidance.
+This directory contains the Kitaru development and release Dockerfiles. The
+main project `CLAUDE.md` links here for Docker-specific guidance.
 
-## Image types
+## Images
 
-| Dockerfile | Purpose | Base image | Installs Kitaru from | UI source |
-|---|---|---|---|---|
-| `Dockerfile` | Production server (API + UI) | `zenmldocker/zenml-server:<tag>` | PyPI when `KITARU_VERSION` is set; local source otherwise | Installed `kitaru` package (`kitaru/_ui/dist`) |
-| `Dockerfile.server-dev` | Local server + UI development | `zenmldocker/zenml-server:<tag>` | Local source | Local `docker/kitaru-ui-dist/` directory |
-| `Dockerfile.dev` | Remote flow execution (K8s, etc.) | `python:3.12-slim-bookworm` | Local source | N/A (no UI) |
+| Dockerfile | Image | Kitaru source |
+|---|---|---|
+| `dev-client.Dockerfile` | Development client | Local repository source |
+| `dev-server.Dockerfile` | Development server | Local repository source |
+| `dev-worker.Dockerfile` | Development worker | Local repository source |
+| `release-client.Dockerfile` | Release client | Published PyPI wheel |
+| `release-server.Dockerfile` | Release server | Published PyPI wheel |
+| `release-worker.Dockerfile` | Release worker | Published PyPI wheel |
 
-## How the UI gets into the server image
+All development and release builds resolve dependencies from the committed
+`uv.lock`. The release
+builds then install the matching published Kitaru wheel without resolving its
+dependencies again. This keeps container releases reproducible while allowing
+the Python package and container publishing processes to be recovered or run
+independently.
 
-The ZenML server serves a dashboard from `<zenml_package>/zen_server/dashboard/`.
-Both server Dockerfiles replace that directory with Kitaru UI files, but they do
-it from different sources:
+The release builders fail when `KITARU_VERSION` is missing, differs from the
+version in `pyproject.toml`, is unavailable on PyPI, or declares dependencies
+that are incompatible with the lockfile.
 
-- **Production** (`Dockerfile`): installs Kitaru first, resolves
-  `kitaru/_ui/dist` from the installed package with Python, verifies
-  `index.html`, and copies those files into ZenML's dashboard directory.
-  Docker must not download a UI release itself.
-- **Dev** (`Dockerfile.server-dev`): copies from `docker/kitaru-ui-dist/`, which
-  the developer populates from a local Kitaru UI build (`pnpm build`).
+## Stages
 
-The safety story is: the Kitaru wheel decides the official UI bundle, and Docker
-only consumes that package. This prevents the wheel and Docker image from
-silently using different UI releases.
+`dev-client.Dockerfile` installs the locked local project non-editably and
+produces the `client` target. `dev-worker.Dockerfile` does the same with the
+`worker` extra and produces the `worker` target.
 
-Both server Dockerfiles verify that `index.html` exists after extraction/copy
-(build sentinel).
+`dev-server.Dockerfile` separates dependency installation from the two server
+runtime modes:
 
-## ZenML server base image
+| Stage | Purpose |
+|---|---|
+| `pre-builder` | Installs locked `server` and `otel` dependencies without the project |
+| `common-runtime` | Installs local source editably for bind-mounted development |
+| `local-runtime` | Runs uvicorn with source reload enabled |
+| `builder` | Installs local source non-editably for the self-contained image |
+| `runtime` | Runs the self-contained development server without copied sources |
 
-The `ZENML_SERVER_TAG` build arg controls which ZenML server version is used.
-This is pinned to a specific version (see the `ARG ZENML_SERVER_TAG` default in
-`Dockerfile`), not `latest`. Both Dockerfiles must use the same pinned tag — a
-contract test enforces alignment.
+Set `INSTALL_DEBUG_TOOLS=true` when building the server to add curl, Git,
+network diagnostics, and the PostgreSQL client. Debug tools are omitted by
+default. Every development server runtime sets
+`KITARU_SERVER_ANALYTICS_DEBUG=true` so opted-in development events use the
+analytics debug service instead of polluting the production analytics namespace.
 
-The base image provides:
+The release Dockerfiles use these stages:
 
-- ZenML with all server + cloud extras
-- Non-root user `zenml` (UID 1000) as the runtime user
-- Entrypoint and CMD (uvicorn)
-- Dashboard directory structure
+| Stage | Purpose |
+|---|---|
+| `uv` | Supplies the pinned uv binary to build stages |
+| `base` | Creates the slim Python base and non-root `kitaru` user |
+| `builder` | Creates the locked virtual environment and installs the published wheel |
+| `client`, `worker`, or `server` | Copies only the virtual environment and dependency snapshot into the runtime image |
 
-Kitaru layers on top without overriding the entrypoint or CMD. Both server
-Dockerfiles use `USER root` for build steps (package installation, file
-operations) and switch back to `USER zenml` at the end. This is required because
-the base image's non-root user cannot delete root-owned files created by `COPY`
-instructions.
+The release runtime images do not contain pip, setuptools, or wheel. The worker
+images include uv. The resolved environment is recorded at
+`/app/requirements.txt` for inspection.
 
-All three Dockerfiles use [uv](https://docs.astral.sh/uv/) for Python package
-installation instead of pip. uv is copied as a static binary from the distroless
-image (`ghcr.io/astral-sh/uv`) — no pip install or apt-get needed. The base image
-sets `VIRTUAL_ENV=/opt/venv`, so `uv pip install` targets the venv automatically
-in the server Dockerfiles. `Dockerfile.dev` uses `UV_SYSTEM_PYTHON=1` instead
-(no venv).
+## Build and run
 
-## Build args
-
-### `Dockerfile` (production)
-
-| Arg | Default | Description |
-|-----|---------|-------------|
-| `ZENML_SERVER_TAG` | *(pinned, see Dockerfile)* | ZenML server Docker image tag |
-| `KITARU_VERSION` | *(empty)* | If set, install Kitaru from PyPI (`kitaru==<version>`); if empty, install from local source |
-
-There is intentionally no `KITARU_UI_TAG` Docker build arg. Select the UI before
-building the package or source tree, not inside Docker.
-
-### `Dockerfile.server-dev` (dev)
-
-| Arg | Default | Description |
-|-----|---------|-------------|
-| `ZENML_SERVER_TAG` | *(pinned, see Dockerfile)* | ZenML server Docker image tag |
-
-## Developer workflow
-
-### Testing with local UI changes (no release needed)
-
-Use this path when you have an unarchived local frontend build and want Docker to
-serve exactly those files:
+Build from the repository root. A release build must use a repository checkout
+whose version and lockfile match the published package version.
 
 ```bash
-# 1. Build Kitaru UI in the frontend monorepo
-cd /path/to/zenml-frontend-monorepo/apps/kitaru-ui
-pnpm install --frozen-lockfile
-pnpm build
+# Development client from local source
+docker build -f docker/dev-client.Dockerfile --target client \
+  -t kitaru-client-dev .
 
-# 2. Copy dist/ into the Kitaru Docker build context
-cd /path/to/kitaru
-rm -rf docker/kitaru-ui-dist
-cp -r /path/to/zenml-frontend-monorepo/apps/kitaru-ui/dist/ docker/kitaru-ui-dist/
+# Development worker from local source
+docker build -f docker/dev-worker.Dockerfile --target worker \
+  -t kitaru-worker-dev .
 
-# 3. Build the dev server image
-just server-dev-image
+# Self-contained development server from local source
+docker build -f docker/dev-server.Dockerfile --target runtime \
+  -t kitaru-server-dev .
 
-# 4. Run it
-docker run -p 8080:8080 kitaru-server-dev
+# Reloading server for a source bind mount
+docker build -f docker/dev-server.Dockerfile --target local-runtime \
+  --build-arg INSTALL_DEBUG_TOOLS=true -t kitaru-server-local .
+docker run --rm -p 8000:8000 -v "$PWD/src:/app/src" kitaru-server-local
+
+# Release client from the matching published package
+docker build -f docker/release-client.Dockerfile --target client \
+  --build-arg KITARU_VERSION=<version> -t kitaru-client .
+
+# Release worker from the matching published package
+docker build -f docker/release-worker.Dockerfile --target worker \
+  --build-arg KITARU_VERSION=<version> -t kitaru-worker .
+
+# Release server from the matching published package
+docker build -f docker/release-server.Dockerfile --target server \
+  --build-arg KITARU_VERSION=<version> -t kitaru-server .
 ```
 
-The `docker/kitaru-ui-dist/` directory is gitignored.
-
-### Building a release-like image
-
-Use this path when you want Docker to behave like the official release path:
+The release server listens on port 8000 and starts the FastAPI application
+factory with uvicorn. Run it against a PostgreSQL instance with the appropriate
+`KITARU_SERVER_` environment variables:
 
 ```bash
-just server-image
+docker run -p 8000:8000 \
+  -e KITARU_SERVER_DB_HOST=<host> \
+  -e KITARU_SERVER_DB_PWD=<password> \
+  kitaru-server
 ```
 
-That command first downloads the highest stable/full `kitaru-ui-v*` release into
-`src/kitaru/_ui/dist/`, then builds the server image. Docker copies the UI from
-the installed Kitaru package.
+## Build arguments
 
-To pin a specific stable UI release:
-
-```bash
-just UI_TAG=kitaru-ui-v0.2.0 server-image
-```
-
-Prerelease UI belongs in the local bundle-selector and prerelease smoke workflow,
-not in official Docker release builds.
-
-### CI and release
-
-- **CI** (`docker-smoke` in `ci.yml`): runs `scripts/download-ui.sh` first, then
-  builds `Dockerfile --target server` without UI build args. It checks `/health`,
-  package UI files, copied dashboard files, root route HTML, and
-  `/devices/verify`.
-- **Release** (`release.yml`): downloads a stable/full Kitaru UI release from
-  `zenml-io/zenml-frontend-monorepo`, builds the Python package, then builds and
-  pushes `zenmldocker/kitaru:<version>` using that package UI.
-- **Prerelease smoke** (`ui-prerelease-smoke.yml`): explicitly enables
-  `KITARU_UI_ALLOW_PRERELEASE=true` for automation-only validation and publishes
-  nothing.
-
-## Release dependency chain
-
-```text
-ZenML server release (zenmldocker/zenml-server:X.Y.Z on DockerHub)
-    → stable/full Kitaru UI release (kitaru-ui-v* in zenml-io/zenml-frontend-monorepo)
-        → Kitaru release (wheel bundles UI, Docker copies from installed package)
-```
-
-Before cutting a Kitaru release, make sure:
-
-- `ZENML_SERVER_TAG` is correct and aligned across Dockerfiles/workflows.
-- At least one full, non-prerelease `kitaru-ui-v*` release exists in
-  `zenml-io/zenml-frontend-monorepo`.
-- The `KITARU_UI_RELEASE_TOKEN` secret can read the frontend monorepo release
-  assets if the repository requires authentication.
-
-## Contract tests
-
-`tests/test_dockerfile_contract.py` validates:
-
-- `pyproject.toml` has no ZenML git direct references or direct-reference allowance
-- Production Dockerfile uses `zenmldocker/zenml-server` as base with a pinned tag
-- Production Dockerfile installs Kitaru from local source or PyPI depending on `KITARU_VERSION`
-- Production Dockerfile does not download Kitaru UI releases directly
-- Production Dockerfile resolves package UI with Python, verifies `index.html`, and copies into ZenML's dashboard directory
-- Dashboard sentinel is checked
-- No legacy git-clone / install-dashboard.sh remains
-- Server-dev Dockerfile exists, uses the same base, and copies from `docker/kitaru-ui-dist/`
-- Both server Dockerfiles pin the same `ZENML_SERVER_TAG`
-- Both server Dockerfiles switch to `USER root` for build steps
-- `Dockerfile.dev` has no git refs
+| Argument | Default | Description |
+|---|---|---|
+| `PYTHON_VERSION` | `3.13` | Base image Python version |
+| `UV_VERSION` | `0.12.1` | uv image version used by release builds |
+| `VIRTUAL_ENV` | `/app/.venv` | Release virtual environment path |
+| `USERNAME` | `kitaru` | Runtime user |
+| `USER_UID` / `USER_GID` | `1000` | Runtime user and group IDs |
+| `KITARU_VERSION` | Empty | Required published Kitaru release version |

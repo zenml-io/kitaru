@@ -2,7 +2,7 @@
 # Must match pyproject.toml, uv.lock, the server Dockerfiles, CI/release
 # workflow pins, and helm/Chart.yaml; contract tests enforce alignment.
 ZENML_SERVER_TAG := "0.96.1"
-DOCKER_REPO := "zenmldocker/kitaru"
+DOCKER_REPO := "zenmldocker/kitaru-server"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
 UI_BUNDLE_ROOT := ".kitaru-ui-bundles"
@@ -83,9 +83,29 @@ fix:
 test *ARGS:
     uv run pytest {{ ARGS }}
 
+# Check Alembic migrations against the ORM schema (requires docker compose up -d db)
+migration-check:
+    uv run python scripts/check_migrations.py
+
 # Build the package locally (does not publish)
 build:
     uv build
+
+# Verify CLI optional dependencies from isolated wheel and sdist installations
+cli-artifact-smoke:
+    uv run --no-sync python scripts/smoke_cli_artifacts.py
+
+# Verify default plugin discovery and registration from isolated wheels
+plugin-artifact-smoke:
+    uv run --no-sync python scripts/smoke_plugin_artifacts.py
+
+# Verify the measured MCP schemas and committed snapshots
+mcp-schema-check:
+    uv run --extra mcp python scripts/report_mcp_schema.py --check
+
+# Verify clean base and MCP installations from the single wheel under dist/
+mcp-wheel-smoke:
+    uv run --no-sync python scripts/smoke_mcp_wheel.py dist
 
 # Download/extract a local Kitaru UI bundle for manual login/smoke testing.
 # Defaults to the latest stable kitaru-ui-v* release.
@@ -126,28 +146,13 @@ ui-login:
     test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
     KITARU_UI_DIST_PATH="$dist" uv run kitaru login
 
-# Run smoke tests against a prepared UI bundle and keep the server for inspection.
-ui-smoke:
-    @set -e; \
-    if [ "{{ UI_TAG }}" = "latest" ]; then \
-        dist="{{ UI_BUNDLE_ROOT }}/current/dist"; \
-    else \
-        dist="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}/dist"; \
-    fi; \
-    test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
-    KITARU_UI_DIST_PATH="$dist" ./scripts/smoke-test.sh --keep-server
-
-# Run release-grade smoke with structured results.
-# Example: just release-smoke --required-provider-area openai --required-provider-area anthropic
-# Remote stack smoke stays opt-in; build/push a flow image with
-# `just dev-image REPO=<operator-image-repo>`, then pass operator-provided
-# remote config via KITARU_REMOTE_SMOKE_* env vars or ./scripts/smoke-test.sh flags.
-release-smoke *ARGS:
-    ./scripts/smoke-test.sh --release --json-out smoke-results.json {{ ARGS }}
-
 # Audit the public example coverage manifest without running examples or providers.
 example-coverage-audit:
     uv run --with pyyaml python scripts/audit-example-coverage.py
+
+# Validate the canonical example without a server or provider credentials.
+canonical-example-test:
+    PYTHONPATH=. uv run pytest -q tests/test_canonical_example.py
 
 # Build and push the dev base image for remote stack testing (K8s, etc.).
 # The image bakes in kitaru from local source + ZenML from PyPI.
@@ -191,9 +196,8 @@ server-dev-image:
         -t kitaru-server-dev .
     @printf 'Server dev image built: kitaru-server-dev\n'
 
-# Generate all docs content from Python source (CLI reference + changelog + SDK reference)
+# Generate changelog and SDK reference content from Python source
 generate-docs:
-    uv run python scripts/generate_cli_docs.py
     uv run python scripts/generate_changelog_docs.py
     @# fumapy is bundled in the fumadocs-python npm package, not on PyPI.
     @# Auto-install it if docs/node_modules exists (requires prior pnpm install in docs/).
