@@ -107,12 +107,12 @@ _STATUS = HumanField("status", "Status")
 _DESCRIPTION = HumanField("description", "Description")
 _METADATA = HumanField("metadata", "Metadata")
 _INVESTIGATION_SESSION_FIELDS = (
-    _STATUS,
+    HumanField("verdict", "Verdict"),
+    HumanField("questions", "Questions", formatter=_format_count),
     HumanField("session_id", "Session"),
     _ID,
 )
 _ANNOTATION_FIELDS = (
-    HumanField("question_key", "Question"),
     HumanField("value", "Value"),
     _ID,
 )
@@ -383,7 +383,6 @@ _VIEWS: dict[str, HumanView] = {
                 (
                     HumanField("completed_sessions", "Completed sessions"),
                     HumanField("total_sessions", "Total sessions"),
-                    HumanField("questions", "Questions"),
                 ),
             ),
             HumanSection(
@@ -403,21 +402,18 @@ _VIEWS: dict[str, HumanView] = {
         "Investigation sessions",
         (
             HumanField("position", "Position"),
-            _STATUS,
+            HumanField("verdict", "Verdict"),
+            HumanField("questions", "Questions", formatter=_format_count),
             HumanField("session_id", "Session", no_wrap=True),
             _ID,
         ),
     ),
-    "investigation.session.complete": _build_view(
-        "Investigation session", _INVESTIGATION_SESSION_FIELDS
-    ),
-    "investigation.session.skip": _build_view(
+    "investigation.session.verdict": _build_view(
         "Investigation session", _INVESTIGATION_SESSION_FIELDS
     ),
     "annotation.list": _build_view(
         "Annotations",
         (
-            HumanField("question_key", "Question"),
             HumanField("value", "Value"),
             HumanField("session_id", "Session", 110),
             _ID,

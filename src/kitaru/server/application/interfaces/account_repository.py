@@ -37,11 +37,15 @@ class AccountRepository(Protocol):
         """
         ...
 
-    async def get(self, account_id: uuid.UUID) -> Account:
+    async def get(
+        self, account_id: uuid.UUID, is_service_account: bool | None = None
+    ) -> Account:
         """Load an account by id.
 
         Args:
             account_id: Id of the account.
+            is_service_account: Whether to look up a service account, ``None``
+                allows both kinds.
 
         Raises:
             AccountNotFound: No account has this id.

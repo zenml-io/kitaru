@@ -60,8 +60,7 @@ class AnnotationService:
         Args:
             repository: Annotation repository.
             investigation_repository: Investigation repository, to resolve
-                the linked session and validate its question key for
-                investigation answers.
+                the linked session for investigation answers.
             session_repository: Session repository, to validate the
                 annotated session exists.
             session_node_repository: Session node repository, to validate a
@@ -141,34 +140,38 @@ class AnnotationService:
     async def create_investigation_answer(
         self, command: InvestigationAnswerCreate, actor: AuthContext
     ) -> Annotation:
-        """Answer one question of an investigation's linked session.
+        """Create an annotation answering an investigation's linked session.
 
-        Answering the same question twice replaces the earlier value. The
-        investigation moves from pending to in_progress on its first answer.
+        The investigation moves from pending to in_progress on its first
+        answer.
 
         Args:
-            command: Linked session, question, selector, and value for the
-                answer.
+            command: Linked session, selector, and value for the answer.
             actor: Caller context.
 
         Raises:
             InvestigationSessionNotFound: No investigation session has the
                 command's investigation session id.
             InvestigationNotFound: No investigation links the session.
-            UnknownQuestionKey: The command's question key does not name one
-                of the investigation's questions.
-            ValidationError: The selector names a node outside the session.
+            ValidationError: The question key does not exist on the linked
+                investigation session, or the selector names a node outside
+                the session.
 
         Returns:
             Stored annotation.
         """
         link = await self._investigations.get_session(command.investigation_session_id)
+        question_keys = {question.key for question in link.questions}
+        if command.question_key not in question_keys:
+            raise ValidationError(
+                f"Question {command.question_key} does not exist on "
+                f"investigation session {link.id}"
+            )
         # Locked because a racing first answer on the same investigation
         # could otherwise both observe pending and both flip the status.
         investigation = await self._investigations.get(
             link.investigation_id, exclusive=True
         )
-        investigation.check_question_key(command.question_key)
         if investigation.status is InvestigationStatus.PENDING:
             investigation.start(datetime.now(UTC))
             await self._investigations.update(investigation)

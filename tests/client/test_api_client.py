@@ -75,7 +75,7 @@ async def test_retries_retryable_status_with_same_idempotency_key() -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    response = await client.request("POST", "/v1/accounts", json={"name": "alice"})
+    response = await client.request("POST", "/v1/users", json={"name": "alice"})
     assert response.status_code == 200
     assert len(requests) == 2
     keys = {request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests}
@@ -134,8 +134,8 @@ async def test_fresh_idempotency_key_per_request() -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    await client.request("POST", "/v1/accounts", json={"name": "alice"})
-    await client.request("POST", "/v1/accounts", json={"name": "bob"})
+    await client.request("POST", "/v1/users", json={"name": "alice"})
+    await client.request("POST", "/v1/users", json={"name": "bob"})
     keys = {request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests}
     assert len(keys) == 2
 

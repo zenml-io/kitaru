@@ -17,20 +17,14 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from pydantic import Field, field_validator
+from pydantic import Field
 
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
-    InvestigationSessionView,
+    InvestigationSessionQuestion,
+    InvestigationSessionVerdict,
     InvestigationStatus,
-    QuestionItem,
 )
-from kitaru.server.domain.base import (
-    ConflictError,
-    DomainModel,
-    NotFoundError,
-    ValidationError,
-)
+from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -69,33 +63,6 @@ class IllegalInvestigationStatusTransition(ConflictError):
         )
 
 
-class DuplicateQuestionKey(ValidationError):
-    """Raised when an investigation's questions contain a key more than once."""
-
-    def __init__(self, key: str) -> None:
-        """Initialize the error.
-
-        Args:
-            key: Key that appears more than once.
-        """
-        super().__init__(f"Question key '{key}' appears more than once")
-
-
-class UnknownQuestionKey(ValidationError):
-    """Raised when a key does not name one of an investigation's questions."""
-
-    def __init__(self, investigation_id: uuid.UUID, key: str) -> None:
-        """Initialize the error.
-
-        Args:
-            investigation_id: Id of the investigation.
-            key: Key that does not match a question.
-        """
-        super().__init__(
-            f"Investigation {investigation_id} has no question with key '{key}'"
-        )
-
-
 class InvestigationSessionNotFound(NotFoundError):
     """Raised when an investigation session lookup does not resolve."""
 
@@ -110,28 +77,6 @@ class InvestigationSessionNotFound(NotFoundError):
         )
 
 
-class IllegalInvestigationSessionStatusTransition(ConflictError):
-    """Raised when an investigation session status transition is not allowed."""
-
-    def __init__(
-        self,
-        investigation_session_id: uuid.UUID,
-        current: InvestigationSessionStatus,
-        target: InvestigationSessionStatus,
-    ) -> None:
-        """Initialize the error.
-
-        Args:
-            investigation_session_id: Id of the investigation session.
-            current: Current investigation session status.
-            target: Target investigation session status.
-        """
-        super().__init__(
-            f"Investigation session {investigation_session_id} cannot "
-            f"transition from {current} to {target}"
-        )
-
-
 class Investigation(DomainModel):
     """Investigation."""
 
@@ -141,7 +86,6 @@ class Investigation(DomainModel):
     name: Name
     description: str | None = None
     status: InvestigationStatus = InvestigationStatus.PENDING
-    questions: list[QuestionItem]
     started_at: datetime | None = None
     ended_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
@@ -149,39 +93,6 @@ class Investigation(DomainModel):
     completed_sessions: int
     created: datetime | None = None
     updated: datetime | None = None
-
-    @field_validator("questions")
-    @classmethod
-    def _check_unique_keys(cls, value: list[QuestionItem]) -> list[QuestionItem]:
-        """Reject duplicate question keys.
-
-        Args:
-            value: Questions to check.
-
-        Raises:
-            DuplicateQuestionKey: A key appears more than once.
-
-        Returns:
-            Validated questions.
-        """
-        seen: set[str] = set()
-        for item in value:
-            if item.key in seen:
-                raise DuplicateQuestionKey(item.key)
-            seen.add(item.key)
-        return value
-
-    def check_question_key(self, question_key: str) -> None:
-        """Require a key to name one of the investigation's questions.
-
-        Args:
-            question_key: Key to check.
-
-        Raises:
-            UnknownQuestionKey: No question has this key.
-        """
-        if question_key not in {item.key for item in self.questions}:
-            raise UnknownQuestionKey(self.id, question_key)
 
     def update_name(self, name: str) -> None:
         """Set a new investigation name.
@@ -198,6 +109,25 @@ class Investigation(DomainModel):
             description: New description.
         """
         self.description = description
+
+    def update_status(self, status: InvestigationStatus, now: datetime) -> None:
+        """Set a new investigation status.
+
+        Args:
+            status: New status.
+            now: Current time.
+
+        Raises:
+            IllegalInvestigationStatusTransition: The status moves backwards.
+        """
+        if status is self.status:
+            return
+        if status is InvestigationStatus.IN_PROGRESS:
+            self.start(now)
+        elif status is InvestigationStatus.COMPLETED:
+            self.complete(now)
+        else:
+            raise IllegalInvestigationStatusTransition(self.id, self.status, status)
 
     def start(self, now: datetime) -> None:
         """Move a pending investigation to in_progress on its first answer.
@@ -241,33 +171,15 @@ class InvestigationSession(DomainModel):
     investigation_id: uuid.UUID
     session_id: uuid.UUID
     position: int
-    status: InvestigationSessionStatus = InvestigationSessionStatus.PENDING
-    view: InvestigationSessionView | None = None
+    questions: list[InvestigationSessionQuestion]
+    verdict: InvestigationSessionVerdict | None = None
     created: datetime | None = None
     updated: datetime | None = None
 
-    def complete(self) -> None:
-        """Mark the session completed once its questions are answered.
+    def update_verdict(self, verdict: InvestigationSessionVerdict | None) -> None:
+        """Set a new session verdict.
 
-        Raises:
-            IllegalInvestigationSessionStatusTransition: The session is not
-                pending.
+        Args:
+            verdict: New verdict, None clears it.
         """
-        if self.status is not InvestigationSessionStatus.PENDING:
-            raise IllegalInvestigationSessionStatusTransition(
-                self.id, self.status, InvestigationSessionStatus.COMPLETED
-            )
-        self.status = InvestigationSessionStatus.COMPLETED
-
-    def skip(self) -> None:
-        """Mark the session skipped, abandoning its remaining questions.
-
-        Raises:
-            IllegalInvestigationSessionStatusTransition: The session is not
-                pending.
-        """
-        if self.status is not InvestigationSessionStatus.PENDING:
-            raise IllegalInvestigationSessionStatusTransition(
-                self.id, self.status, InvestigationSessionStatus.SKIPPED
-            )
-        self.status = InvestigationSessionStatus.SKIPPED
+        self.verdict = verdict

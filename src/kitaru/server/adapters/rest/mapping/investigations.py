@@ -49,9 +49,11 @@ def investigation_create_to_command(
         agent_id=body.agent_id,
         name=body.name,
         description=body.description,
-        questions=body.questions,
         sessions=[
-            InvestigationSessionInput(session_id=item.session_id, view=item.view)
+            InvestigationSessionInput(
+                session_id=item.session_id,
+                questions=item.questions,
+            )
             for item in body.sessions
         ],
     )
@@ -75,7 +77,6 @@ def investigation_to_response(investigation: Investigation) -> InvestigationResp
         name=investigation.name,
         description=investigation.description,
         status=investigation.status,
-        questions=investigation.questions,
         started_at=investigation.started_at,
         ended_at=investigation.ended_at,
         metadata=investigation.metadata,
@@ -158,8 +159,8 @@ def investigation_session_to_response(
         investigation_id=session.investigation_id,
         session_id=session.session_id,
         position=session.position,
-        status=session.status,
-        view=session.view,
+        questions=session.questions,
+        verdict=session.verdict,
         created=session.created,
         updated=session.updated,
     )

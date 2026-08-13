@@ -16,8 +16,9 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Self
 
-from pydantic import Field, field_validator
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.annotation import AnnotationSelector
 from kitaru.api_models.v1.base import (
@@ -38,38 +39,28 @@ class InvestigationStatus(StrEnum):
     COMPLETED = "completed"
 
 
-class InvestigationSessionStatus(StrEnum):
-    """Investigation session status."""
+class InvestigationSessionVerdict(StrEnum):
+    """Investigation session verdict."""
 
-    PENDING = "pending"
-    COMPLETED = "completed"
-    SKIPPED = "skipped"
-
-
-class QuestionItem(RequestModel):
-    """Question item."""
-
-    key: str = Field(description="Key identifying the question within the array.")
-    question: str = Field(description="Question display text.")
+    ACCEPTABLE = "acceptable"
+    PROBLEMATIC = "problematic"
+    UNCERTAIN = "uncertain"
 
 
-class InvestigationSessionViewItem(RequestModel):
-    """Investigation session view item."""
+class InvestigationSessionHighlight(RequestModel):
+    """Investigation session highlight."""
 
-    label: str = Field(description="Short title for the item.")
-    description: str = Field(description="Prose explaining what the curator saw.")
-    selectors: list[AnnotationSelector] = Field(
-        default_factory=list, description="References the item covers."
-    )
+    selector: AnnotationSelector = Field(description="Part of the session highlighted.")
+    description: str = Field(description="Prose explaining what the highlight shows.")
 
 
-class InvestigationSessionView(RequestModel):
-    """Investigation session view."""
+class InvestigationSessionQuestion(RequestModel):
+    """Investigation session question."""
 
-    version: int = Field(default=1, description="Format version.")
-    summary: str = Field(description="Summary shown above the trace.")
-    items: list[InvestigationSessionViewItem] = Field(
-        default_factory=list, description="Curated findings for the session."
+    key: str = Field(description="Question key, unique within the session.")
+    question: str = Field(description="Question to answer about the session.")
+    highlights: list[InvestigationSessionHighlight] = Field(
+        default_factory=list, description="Curated highlights for the question."
     )
 
 
@@ -77,9 +68,24 @@ class InvestigationSessionInput(RequestModel):
     """Investigation session input."""
 
     session_id: uuid.UUID = Field(description="Session to link.")
-    view: InvestigationSessionView | None = Field(
-        default=None, description="Curated session view."
+    questions: list[InvestigationSessionQuestion] = Field(
+        min_length=1, description="Questions to answer about the session."
     )
+
+    @model_validator(mode="after")
+    def _unique_question_keys(self) -> Self:
+        """Reject duplicate question keys.
+
+        Raises:
+            ValueError: A question key repeats.
+
+        Returns:
+            The validated input.
+        """
+        keys = [question.key for question in self.questions]
+        if len(keys) != len(set(keys)):
+            raise ValueError("question keys must be unique")
+        return self
 
 
 class InvestigationCreateRequest(RequestModel):
@@ -90,31 +96,9 @@ class InvestigationCreateRequest(RequestModel):
     )
     name: str = Field(description="Investigation name.")
     description: str | None = Field(default=None, description="Curator rationale.")
-    questions: list[QuestionItem] = Field(
-        description="Questions asked about each session."
-    )
     sessions: list[InvestigationSessionInput] = Field(
         description="Sessions to investigate, in presentation order."
     )
-
-    @field_validator("questions")
-    @classmethod
-    def _check_unique_keys(cls, value: list[QuestionItem]) -> list[QuestionItem]:
-        """Reject duplicate question keys.
-
-        Args:
-            value: Questions to check.
-
-        Raises:
-            ValueError: A key appears more than once.
-
-        Returns:
-            Validated questions.
-        """
-        keys = [item.key for item in value]
-        if len(set(keys)) != len(keys):
-            raise ValueError("questions must not contain duplicate keys")
-        return value
 
 
 class InvestigationUpdateRequest(RequestModel):
@@ -122,6 +106,9 @@ class InvestigationUpdateRequest(RequestModel):
 
     name: str | None = Field(default=None, description="New investigation name.")
     description: str | None = Field(default=None, description="New curator rationale.")
+    status: InvestigationStatus | None = Field(
+        default=None, description="New investigation status."
+    )
 
 
 class InvestigationListParams(FilterableListParams):
@@ -138,9 +125,6 @@ class InvestigationResponse(OwnedResponseModel):
     name: str = Field(description="Investigation name.")
     description: str | None = Field(description="Curator rationale.")
     status: InvestigationStatus = Field(description="Investigation status.")
-    questions: list[QuestionItem] = Field(
-        description="Questions asked about each session."
-    )
     started_at: datetime | None = Field(
         default=None, description="Time the first answer was recorded."
     )
@@ -150,7 +134,7 @@ class InvestigationResponse(OwnedResponseModel):
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     total_sessions: int = Field(description="Number of linked sessions.")
     completed_sessions: int = Field(
-        description="Number of linked sessions marked completed or skipped."
+        description="Number of linked sessions with a verdict."
     )
 
 
@@ -161,8 +145,8 @@ class InvestigationSessionsListParams(CursorParams):
 class InvestigationSessionUpdateRequest(RequestModel):
     """Investigation session update request."""
 
-    status: InvestigationSessionStatus = Field(
-        description="New investigation session status."
+    verdict: InvestigationSessionVerdict | None = Field(
+        description="New investigation session verdict, None clears it."
     )
 
 
@@ -175,7 +159,9 @@ class InvestigationSessionResponse(TimestampedResponseModel):
     )
     session_id: uuid.UUID = Field(description="Session being investigated.")
     position: int = Field(description="Presentation order within the investigation.")
-    status: InvestigationSessionStatus = Field(
-        description="Investigation session status."
+    questions: list[InvestigationSessionQuestion] = Field(
+        description="Questions to answer about the session."
     )
-    view: InvestigationSessionView | None = Field(description="Curated session view.")
+    verdict: InvestigationSessionVerdict | None = Field(
+        description="Investigation session verdict."
+    )

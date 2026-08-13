@@ -53,15 +53,15 @@ async def create_annotation(
             "Select exactly one annotation target: --session or "
             "--investigation-session.",
         )
+    if investigation_session_id is None and question_key is not None:
+        raise CLIError(
+            "invalid_arguments",
+            "--question-key requires --investigation-session.",
+        )
     if investigation_session_id is not None and question_key is None:
         raise CLIError(
             "invalid_arguments",
-            "--question-key is required with --investigation-session.",
-        )
-    if session_id is not None and question_key is not None:
-        raise CLIError(
-            "invalid_arguments",
-            "--question-key is only valid with --investigation-session.",
+            "--investigation-session requires --question-key.",
         )
     parsed_value = _parse_json_value(value, option="--value")
     parsed_selector = (

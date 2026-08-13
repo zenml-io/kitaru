@@ -325,7 +325,7 @@ async def test_csrf_token(
     account_repository: FakeAccountRepository,
     api_key_repository: FakeApiKeyRepository,
 ) -> None:
-    """Enforce the CSRF token on cookie credentials only."""
+    """Enforce the CSRF token on cookie credentials that carry one."""
     settings = local_settings(AUTH_COOKIE_NAME="kitaru_session")
     service = AuthService(
         settings=settings,
@@ -350,7 +350,7 @@ async def test_csrf_token_not_required_for_header_credentials(
     account_repository: FakeAccountRepository,
     api_key_repository: FakeApiKeyRepository,
 ) -> None:
-    """Accept a session token from the authorization header without a CSRF token."""
+    """Accept a header credential that carries a CSRF token without one."""
     settings = local_settings(AUTH_COOKIE_NAME="kitaru_session")
     service = AuthService(
         settings=settings,
@@ -360,9 +360,32 @@ async def test_csrf_token_not_required_for_header_credentials(
     )
     await create_account(account_repository)
 
-    token = (await service.login_with_password("alice", "secret")).token
+    issued = await service.login_with_password("alice", "secret")
+    assert issued.csrf_token is not None
 
-    context = await service.resolve(token)
+    context = await service.resolve(issued.token)
+    assert context.account.name == "alice"
+
+
+async def test_csrf_token_not_required_without_encoded_token(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Accept a cookie credential that carries no CSRF token without one."""
+    settings = local_settings(AUTH_COOKIE_NAME="kitaru_session")
+    service = AuthService(
+        settings=settings,
+        account_repository=account_repository,
+        api_key_repository=api_key_repository,
+        password_hasher=FakePasswordHasher(),
+    )
+    account = await create_account(account_repository)
+    _, key = await create_api_key(api_key_repository, account.id)
+
+    issued = await service.login_with_api_key(key)
+    assert issued.csrf_token is None
+
+    context = await service.resolve(issued.token, from_cookie=True)
     assert context.account.name == "alice"
 
 

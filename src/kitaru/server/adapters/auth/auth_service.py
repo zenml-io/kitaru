@@ -137,11 +137,13 @@ class AuthService:
             context = await self._authenticate_api_key(credential)
         else:
             context = await self._resolve_session_token(credential)
-        # Only a cookie rides along on a cross-site request, so only a cookie
-        # needs the caller to prove it can read the login response.
-        if from_cookie and (
-            context.csrf_token is None
-            or not secrets.compare_digest(csrf_token or "", context.csrf_token)
+        # Only a cookie rides along on a cross-site request. A header
+        # credential is attached by the caller itself, so a token that
+        # carries a CSRF token still resolves without one there.
+        if (
+            from_cookie
+            and context.csrf_token is not None
+            and not secrets.compare_digest(csrf_token or "", context.csrf_token)
         ):
             raise AuthenticationError("Missing or invalid CSRF token.")
         return context

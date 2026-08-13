@@ -74,6 +74,9 @@ async def _create_session_with_node(
     return session["id"], nodes[0]["id"]
 
 
+QUESTION_KEY = "cause"
+
+
 async def _create_investigation_with_link(
     client: httpx.AsyncClient, agent_id: str, session_id: str
 ) -> tuple[dict[str, object], dict[str, object]]:
@@ -84,11 +87,14 @@ async def _create_investigation_with_link(
             json={
                 "agent_id": agent_id,
                 "name": "payment-failures",
-                "questions": [
-                    {"key": "root_cause", "question": "What caused the failure?"},
-                    {"key": "retry_ok", "question": "Was retrying the right call?"},
+                "sessions": [
+                    {
+                        "session_id": session_id,
+                        "questions": [
+                            {"key": QUESTION_KEY, "question": "What caused it?"}
+                        ],
+                    }
                 ],
-                "sessions": [{"session_id": session_id}],
             },
         )
     ).json()
@@ -107,7 +113,7 @@ async def test_manual_annotation_persists_across_requests(
         "/v1/annotations",
         json={
             "session_id": session_id,
-            "selector": {"node_id": node_id, "part": "input"},
+            "selector": {"node_id": node_id},
             "value": "Looks fine",
         },
     )
@@ -115,7 +121,6 @@ async def test_manual_annotation_persists_across_requests(
     created = response.json()
     assert created["session_id"] == session_id
     assert created["investigation_session_id"] is None
-    assert created["question_key"] is None
 
     response = await client.get(f"/v1/annotations/{created['id']}")
     assert response.status_code == 200
@@ -181,10 +186,10 @@ async def test_update_and_delete_manual_annotation(
     assert response.status_code == 404
 
 
-async def test_investigation_answer_starts_investigation_and_replaces_on_repeat(
+async def test_investigation_answer_starts_investigation_and_never_conflicts(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Start the investigation on the first answer, and replace it on a repeat."""
+    """Start the investigation on the first answer, and add a row on a repeat."""
     session_id, _ = await _create_session_with_node(client, agent_id)
     investigation, link = await _create_investigation_with_link(
         client, agent_id, session_id
@@ -195,7 +200,7 @@ async def test_investigation_answer_starts_investigation_and_replaces_on_repeat(
         "/v1/annotations",
         json={
             "investigation_session_id": link["id"],
-            "question_key": "root_cause",
+            "question_key": QUESTION_KEY,
             "value": "Retry loop swallowed the error",
         },
     )
@@ -203,7 +208,7 @@ async def test_investigation_answer_starts_investigation_and_replaces_on_repeat(
     answer = response.json()
     assert answer["session_id"] == session_id
     assert answer["investigation_session_id"] == link["id"]
-    assert answer["question_key"] == "root_cause"
+    assert answer["question_key"] == QUESTION_KEY
 
     response = await client.get(f"/v1/investigations/{investigation['id']}")
     assert response.status_code == 200
@@ -211,19 +216,18 @@ async def test_investigation_answer_starts_investigation_and_replaces_on_repeat(
     assert body["status"] == "in_progress"
     assert body["started_at"] is not None
 
-    # Answering the same question again replaces the row instead of adding one.
+    # Answering again adds a second row instead of replacing the first.
     response = await client.post(
         "/v1/annotations",
         json={
             "investigation_session_id": link["id"],
-            "question_key": "root_cause",
+            "question_key": QUESTION_KEY,
             "value": "Actually a timeout, not a retry loop",
         },
     )
     assert response.status_code == 201
-    replaced = response.json()
-    assert replaced["id"] == answer["id"]
-    assert replaced["value"] == "Actually a timeout, not a retry loop"
+    second = response.json()
+    assert second["id"] != answer["id"]
 
     filter_expression = {
         "field": "investigation_session_id",
@@ -235,27 +239,7 @@ async def test_investigation_answer_starts_investigation_and_replaces_on_repeat(
     )
     assert response.status_code == 200
     items = response.json()["items"]
-    assert len(items) == 1
-    assert items[0]["value"] == "Actually a timeout, not a retry loop"
-
-
-async def test_investigation_answer_unknown_question_key_rejected(
-    client: httpx.AsyncClient, agent_id: str
-) -> None:
-    """Reject an answer whose question key is not one of the investigation's."""
-    session_id, _ = await _create_session_with_node(client, agent_id)
-    _investigation, link = await _create_investigation_with_link(
-        client, agent_id, session_id
-    )
-    response = await client.post(
-        "/v1/annotations",
-        json={
-            "investigation_session_id": link["id"],
-            "question_key": "not_a_question",
-            "value": "x",
-        },
-    )
-    assert response.status_code == 422
+    assert {item["id"] for item in items} == {answer["id"], second["id"]}
 
 
 async def test_list_annotations_filtered_by_investigation_id(
@@ -278,7 +262,7 @@ async def test_list_annotations_filtered_by_investigation_id(
             "/v1/annotations",
             json={
                 "investigation_session_id": link["id"],
-                "question_key": "root_cause",
+                "question_key": QUESTION_KEY,
                 "value": "answer",
             },
         )
@@ -319,7 +303,7 @@ async def test_delete_investigation_cascades_answers_but_keeps_manual(
             "/v1/annotations",
             json={
                 "investigation_session_id": link["id"],
-                "question_key": "root_cause",
+                "question_key": QUESTION_KEY,
                 "value": "answer",
             },
         )

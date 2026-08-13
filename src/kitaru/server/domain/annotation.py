@@ -15,12 +15,12 @@
 
 import uuid
 from datetime import datetime
-from typing import Any, Self
+from typing import Any
 
-from pydantic import Field, model_validator
+from pydantic import Field
 
 from kitaru.api_models.v1.annotation import AnnotationSelector
-from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
+from kitaru.server.domain.base import DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
 
 
@@ -48,21 +48,6 @@ class Annotation(DomainModel):
     value: Any
     created: datetime | None = None
     updated: datetime | None = None
-
-    @model_validator(mode="after")
-    def _check_question_key_pairing(self) -> Self:
-        """Require question_key only alongside investigation_session_id.
-
-        Raises:
-            ValidationError: question_key is set without
-                investigation_session_id.
-
-        Returns:
-            The validated annotation.
-        """
-        if self.question_key is not None and self.investigation_session_id is None:
-            raise ValidationError("question_key requires investigation_session_id")
-        return self
 
     def update_value(self, value: Any) -> None:
         """Set a new annotation value.

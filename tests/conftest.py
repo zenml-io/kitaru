@@ -48,7 +48,6 @@ from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
-from kitaru.api_models.v1.investigation import InvestigationSessionStatus
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
@@ -519,6 +518,40 @@ def isolated_client_environment(
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
 
 
+class RequestRecordingTransport(httpx.AsyncBaseTransport):
+    """Transport wrapper recording every request it saw."""
+
+    def __init__(self, transport: httpx.AsyncBaseTransport) -> None:
+        """Wrap a transport and start with no recorded requests.
+
+        Args:
+            transport: Transport to delegate every request to.
+        """
+        self._transport = transport
+        self.requests: list[httpx.Request] = []
+
+    @property
+    def paths(self) -> list[str]:
+        """Paths of the recorded requests.
+
+        Returns:
+            Paths of the recorded requests.
+        """
+        return [request.url.path for request in self.requests]
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        """Record the request and delegate to the wrapped transport.
+
+        Args:
+            request: Outgoing HTTP request.
+
+        Returns:
+            Response from the wrapped transport.
+        """
+        self.requests.append(request)
+        return await self._transport.handle_async_request(request)
+
+
 def asgi_api_client(
     app: FastAPI,
     credential_store: CredentialStore | None = None,
@@ -546,6 +579,31 @@ def asgi_api_client(
         headers=client._http.headers,
     )
     return client
+
+
+def recording_asgi_api_client(
+    app: FastAPI,
+    credential_store: CredentialStore | None = None,
+) -> tuple[KitaruAPIClient, RequestRecordingTransport]:
+    """Build an SDK client routed to the app, recording every request.
+
+    Args:
+        app: Application to route requests to.
+        credential_store: Store holding the credentials the client
+            authenticates with.
+
+    Returns:
+        Client wired to an ASGI transport, and the transport recording
+        requests.
+    """
+    client = KitaruAPIClient(base_url="http://test", credential_store=credential_store)
+    recorder = RequestRecordingTransport(httpx.ASGITransport(app=app))
+    client._http = httpx.AsyncClient(
+        transport=RetryTransport(recorder),
+        base_url="http://test",
+        headers=client._http.headers,
+    )
+    return client, recorder
 
 
 def _renewed_timestamp(previous: datetime | None) -> datetime:
@@ -722,33 +780,77 @@ def _evaluate_filter_expression(
     assert isinstance(expression, FilterCondition)
     if resolvers is not None and expression.field in resolvers:
         return resolvers[expression.field](item, expression)
-    value = getattr(item, expression.field)
-    if expression.op is FilterOp.IS_NULL:
+    return _matches_condition(getattr(item, expression.field), expression)
+
+
+def _matches_condition(value: Any, condition: FilterCondition) -> bool:
+    """Evaluate a filter condition against a resolved value.
+
+    Args:
+        value: Value the condition applies to.
+        condition: Validated filter condition.
+
+    Returns:
+        Whether the value matches the condition.
+    """
+    if condition.op is FilterOp.IS_NULL:
         return value is None
     if value is None:
         # Comparisons with a null column value never match, mirroring SQL.
         return False
-    match expression.op:
+    match condition.op:
         case FilterOp.EQ:
-            return value == expression.value
+            return value == condition.value
         case FilterOp.NE:
-            return value != expression.value
+            return value != condition.value
         case FilterOp.LT:
-            return value < expression.value
+            return value < condition.value
         case FilterOp.LE:
-            return value <= expression.value
+            return value <= condition.value
         case FilterOp.GT:
-            return value > expression.value
+            return value > condition.value
         case FilterOp.GE:
-            return value >= expression.value
+            return value >= condition.value
         case FilterOp.IN:
-            return value in expression.value
+            return value in condition.value
         case FilterOp.STARTSWITH:
-            return value.startswith(expression.value)
+            return value.startswith(condition.value)
         case FilterOp.ENDSWITH:
-            return value.endswith(expression.value)
+            return value.endswith(condition.value)
         case FilterOp.CONTAINS:
-            return expression.value in value
+            return condition.value in value
+
+
+def _refuse_unresolvable_fields(
+    expression: FilterExpression | None, fields: Collection[str]
+) -> None:
+    """Refuse an expression naming a field the fake cannot resolve.
+
+    Walks the whole expression before any item is evaluated. Refusing per item
+    would stay silent on an empty store, and on an `and` whose earlier operand
+    already answered false, so a test could pass without the filter ever
+    running.
+
+    Args:
+        expression: Filter expression, or ``None`` when the query is unfiltered.
+        fields: Field names that resolve through rows the fake has no handle on.
+
+    Raises:
+        NotImplementedError: The expression names one of those fields.
+    """
+    if expression is None:
+        return
+    if isinstance(expression, (AndExpression, OrExpression)):
+        for operand in expression.operands:
+            _refuse_unresolvable_fields(operand, fields)
+        return
+    if isinstance(expression, NotExpression):
+        _refuse_unresolvable_fields(expression.operand, fields)
+        return
+    if expression.field in fields:
+        raise NotImplementedError(
+            f"The fake cannot resolve the {expression.field} filter"
+        )
 
 
 class FakeAccountRepository:
@@ -785,11 +887,15 @@ class FakeAccountRepository:
         self._accounts[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, account_id: uuid.UUID) -> Account:
+    async def get(
+        self, account_id: uuid.UUID, is_service_account: bool | None = None
+    ) -> Account:
         """Load an account by id.
 
         Args:
             account_id: Id of the account.
+            is_service_account: Whether to look up a service account, ``None``
+                allows both kinds.
 
         Raises:
             AccountNotFound: No account has this id.
@@ -799,6 +905,11 @@ class FakeAccountRepository:
         """
         account = self._accounts.get(account_id)
         if account is None:
+            raise AccountNotFound(account_id)
+        if (
+            is_service_account is not None
+            and account.is_service_account != is_service_account
+        ):
             raise AccountNotFound(account_id)
         return account.model_copy()
 
@@ -2124,6 +2235,7 @@ class FakeSessionRepository:
         Returns:
             Page of matching sessions and the next cursor.
         """
+        _refuse_unresolvable_fields(session_filter.expression, ("experiment_run_id",))
         sessions = list(self._sessions.values())
         if session_filter.expression is not None:
             resolvers = {
@@ -2787,7 +2899,9 @@ class FakeCohortVersionRepository:
                 repository so its query can resolve the
                 ``cohort_version_id`` filter.
             experiment_runs: Fake experiment run repository, consulted by
-                delete to check for an in-use version.
+                delete to check for an in-use version. Also wired back onto
+                the run repository so its query can resolve the ``cohort_id``
+                filter.
             tags: Fake tag repository, consulted by the ``tag`` filter.
         """
         self._cohorts = cohorts
@@ -2795,6 +2909,8 @@ class FakeCohortVersionRepository:
         self._sessions._cohort_versions = self
         self._experiment_runs = experiment_runs
         self._tags = tags
+        if experiment_runs is not None:
+            experiment_runs._cohort_versions = self
         self._versions: dict[uuid.UUID, CohortVersion] = {}
         self._members: dict[uuid.UUID, list[uuid.UUID]] = {}
 
@@ -3881,9 +3997,16 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            tasks: Fake task repository, needed to resolve the result session
+                filter, which reads through the agent task rather than the
+                replay row.
+        """
         self._replays: dict[uuid.UUID, Replay] = {}
+        self._tasks = tasks
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -3996,13 +4119,38 @@ class FakeReplayRepository:
         """
         replays = list(self._replays.values())
         if replay_filter.expression is not None:
+            resolvers = {"result_session_id": self._evaluate_result_session_condition}
             replays = [
                 r
                 for r in replays
-                if _evaluate_filter_expression(r, replay_filter.expression)
+                if _evaluate_filter_expression(r, replay_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(replays, replay_filter)
         return [r.model_copy() for r in page], next_cursor
+
+    def _evaluate_result_session_condition(
+        self, replay: Replay, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a result session condition against a replay.
+
+        Args:
+            replay: Replay to evaluate.
+            condition: Validated result session condition.
+
+        Returns:
+            Whether the replay's agent task produced a matching session.
+        """
+        assert self._tasks is not None
+        agent_task = next(
+            (
+                task
+                for task in self._tasks._tasks.values()
+                if task.job_id == replay.job_id and isinstance(task, AgentTask)
+            ),
+            None,
+        )
+        result_session_id = agent_task.result_session_id if agent_task else None
+        return _matches_condition(result_session_id, condition)
 
     async def list_by_experiment_run(
         self, experiment_run_id: uuid.UUID
@@ -4167,6 +4315,9 @@ class FakeExperimentRunRepository:
         """
         self._runs: dict[uuid.UUID, ExperimentRun] = {}
         self._tag_repository = tag_repository
+        # Wired back by FakeCohortVersionRepository, to resolve the cohort
+        # filter the way the SQL repository resolves it through a subquery.
+        self._cohort_versions: FakeCohortVersionRepository | None = None
 
     async def create(self, run: ExperimentRun) -> ExperimentRun:
         """Persist a new experiment run.
@@ -4225,9 +4376,13 @@ class FakeExperimentRunRepository:
         Returns:
             Page of matching runs and the next cursor.
         """
+        _refuse_unresolvable_fields(run_filter.expression, ("agent_id",))
         runs = list(self._runs.values())
         if run_filter.expression is not None:
-            resolvers = {"tag": self._evaluate_tag_condition}
+            resolvers = {
+                "tag": self._evaluate_tag_condition,
+                "cohort_id": self._evaluate_cohort_condition,
+            }
             runs = [
                 r
                 for r in runs
@@ -4235,6 +4390,22 @@ class FakeExperimentRunRepository:
             ]
         page, next_cursor = _paginate_fake(runs, run_filter)
         return [r.model_copy() for r in page], next_cursor
+
+    def _evaluate_cohort_condition(
+        self, run: ExperimentRun, condition: FilterCondition
+    ) -> bool:
+        """Evaluate a cohort condition against an experiment run.
+
+        Args:
+            run: Experiment run to evaluate.
+            condition: Validated cohort condition.
+
+        Returns:
+            Whether the run pins a version of a matching cohort.
+        """
+        assert self._cohort_versions is not None
+        version = self._cohort_versions._versions.get(run.cohort_version_id)
+        return _matches_condition(version.cohort_id if version else None, condition)
 
     def _evaluate_tag_condition(
         self, run: ExperimentRun, condition: FilterCondition
@@ -4418,6 +4589,9 @@ class FakeEvaluationRepository:
         Returns:
             Page of matching evaluations and the next cursor.
         """
+        _refuse_unresolvable_fields(
+            evaluation_filter.expression, ("agent_id", "cohort_id", "experiment_run_id")
+        )
         evaluations = list(self._evaluations.values())
         if evaluation_filter.expression is not None:
             evaluations = [
@@ -5549,7 +5723,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
-    replays = FakeReplayRepository()
+    replays = FakeReplayRepository(tasks=tasks)
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
     cohort_versions = FakeCohortVersionRepository(
         cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs, tags=tags
@@ -5723,24 +5897,20 @@ class FakeInvestigationRepository:
         self._annotations: FakeAnnotationRepository | None = None
 
     def _counts(self, investigation_id: uuid.UUID) -> tuple[int, int]:
-        """Count an investigation's linked and completed or skipped sessions.
+        """Count an investigation's linked sessions and non-null verdicts.
 
         Args:
             investigation_id: Id of the investigation.
 
         Returns:
-            Total and completed or skipped linked session counts.
+            Total and verdict-set linked session counts.
         """
         links = [
             session
             for session in self._sessions.values()
             if session.investigation_id == investigation_id
         ]
-        completed = sum(
-            1
-            for session in links
-            if session.status is not InvestigationSessionStatus.PENDING
-        )
+        completed = sum(1 for session in links if session.verdict is not None)
         return len(links), completed
 
     def _with_counts(self, investigation: Investigation) -> Investigation:
@@ -5999,41 +6169,8 @@ class FakeAnnotationRepository:
         if investigations is not None:
             investigations._annotations = self
 
-    def _find_upsert_target(self, annotation: Annotation) -> uuid.UUID | None:
-        """Resolve the id of the row an insert would upsert onto.
-
-        Manual annotations, and any insert missing either half of the
-        (investigation_session_id, question_key) pair, never conflict,
-        mirroring Postgres treating null as distinct within a unique index.
-
-        Args:
-            annotation: Annotation about to be inserted.
-
-        Returns:
-            Id of the conflicting row, or None when the insert is a plain
-            create.
-        """
-        if (
-            annotation.investigation_session_id is None
-            or annotation.question_key is None
-        ):
-            return None
-        for stored in self._annotations.values():
-            if (
-                stored.investigation_session_id == annotation.investigation_session_id
-                and stored.question_key == annotation.question_key
-            ):
-                return stored.id
-        return None
-
     async def create(self, annotation: Annotation) -> Annotation:
-        """Persist a new annotation, upserting an investigation answer.
-
-        An investigation answer upserts on (investigation_session_id,
-        question_key), renewing the selector, value, and updated timestamp
-        of the existing row. A manual annotation always inserts, since
-        Postgres treats its null investigation_session_id as distinct from
-        every other row.
+        """Persist a new annotation.
 
         Args:
             annotation: Annotation to store.
@@ -6041,18 +6178,6 @@ class FakeAnnotationRepository:
         Returns:
             Stored annotation with timestamps set.
         """
-        target_id = self._find_upsert_target(annotation)
-        if target_id is not None:
-            stored = self._annotations[target_id]
-            updated = stored.model_copy(
-                update={
-                    "selector": annotation.selector,
-                    "value": annotation.value,
-                    "updated": _renewed_timestamp(stored.updated),
-                }
-            )
-            self._annotations[target_id] = updated
-            return updated.model_copy()
         now = datetime.now(UTC)
         stored = annotation.model_copy(update={"created": now, "updated": now})
         self._annotations[stored.id] = stored

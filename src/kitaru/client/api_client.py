@@ -57,10 +57,12 @@ from kitaru.client.resources.investigations import InvestigationsResource
 from kitaru.client.resources.jobs import JobsResource
 from kitaru.client.resources.replays import ReplaysResource
 from kitaru.client.resources.secrets import SecretsResource
+from kitaru.client.resources.service_accounts import ServiceAccountsResource
 from kitaru.client.resources.session_runs import SessionRunsResource
 from kitaru.client.resources.sessions import SessionsResource
 from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
+from kitaru.client.resources.users import UsersResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
 
@@ -161,10 +163,12 @@ class KitaruAPIClient:
         self.jobs = JobsResource(self)
         self.replays = ReplaysResource(self)
         self.secrets = SecretsResource(self)
+        self.service_accounts = ServiceAccountsResource(self)
         self.session_runs = SessionRunsResource(self)
         self.sessions = SessionsResource(self)
         self.tags = TagsResource(self)
         self.tasks = TasksResource(self)
+        self.users = UsersResource(self)
         self.workers = WorkersResource(self)
 
     def with_token(self, token: str) -> "KitaruAPIClient":

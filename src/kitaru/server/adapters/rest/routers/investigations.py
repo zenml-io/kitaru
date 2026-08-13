@@ -55,11 +55,11 @@ async def create_investigation(
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> InvestigationResponse:
-    """Create an investigation with its questions and linked sessions in one shot.
+    """Create an investigation with its linked sessions in one shot.
 
     Clients observe HTTP 201 on success, 404 when the agent does not exist,
     and 422 when a linked session id repeats, is missing, or belongs to a
-    different agent, or the questions contain a duplicate key.
+    different agent.
 
     Args:
         body: Investigation create request.
@@ -133,10 +133,11 @@ async def update_investigation(
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> InvestigationResponse:
-    """Update an investigation's name and description.
+    """Update an investigation's name, description, and status.
 
     Clients observe HTTP 200 on success, 404 when no investigation has this
-    id, and 422 when the update clears the investigation name.
+    id, 409 when the update moves the status backwards, and 422 when the
+    update clears the investigation name or status.
 
     Args:
         investigation_id: Id of the investigation.
@@ -207,19 +208,18 @@ async def list_investigation_sessions(
 
 
 @router.patch("/{investigation_id}/sessions/{session_id}")
-async def update_investigation_session_status(
+async def update_investigation_session_verdict(
     investigation_id: uuid.UUID,
     session_id: uuid.UUID,
     body: InvestigationSessionUpdateRequest,
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> InvestigationSessionResponse:
-    """Mark a linked session completed or skipped.
+    """Set or clear a linked session's verdict.
 
-    Completes the investigation once no linked session is left pending.
-    Clients observe HTTP 200 on success, 404 when no investigation has this
-    id or no investigation session links this investigation and session, and
-    409 when the linked session is not pending.
+    Clients observe HTTP 200 on success and 404 when no investigation has
+    this id or no investigation session links this investigation and
+    session.
 
     Args:
         investigation_id: Id of the investigation.
@@ -231,7 +231,7 @@ async def update_investigation_session_status(
     Returns:
         Updated investigation session.
     """
-    session = await service.update_investigation_session_status(
-        investigation_id, session_id, body.status, actor=actor
+    session = await service.update_investigation_session_verdict(
+        investigation_id, session_id, body.verdict, actor=actor
     )
     return investigation_session_to_response(session)

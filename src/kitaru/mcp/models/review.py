@@ -13,7 +13,7 @@ from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
-    QuestionItem,
+    InvestigationSessionVerdict,
 )
 from kitaru.mcp.models.common import MCPModel, PageOptions
 
@@ -58,14 +58,10 @@ class InvestigationCreate(MCPModel):
     agent_id: uuid.UUID
     name: str = Field(min_length=1)
     description: str | None = None
-    questions: list[QuestionItem] = Field(max_length=100)
     sessions: list[InvestigationSessionInput] = Field(max_length=100)
 
     @model_validator(mode="after")
     def _validate_contents(self) -> "InvestigationCreate":
-        question_keys = [item.key for item in self.questions]
-        if len(set(question_keys)) != len(question_keys):
-            raise ValueError("question keys must be unique")
         session_ids = [item.session_id for item in self.sessions]
         if len(set(session_ids)) != len(session_ids):
             raise ValueError("session ids must be unique")
@@ -80,6 +76,7 @@ class InvestigationUpdate(MCPModel):
     name: str | None = None
     description: str | None = None
     clear_description: bool = False
+    status: Literal["in_progress", "completed"] | None = None
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InvestigationUpdate":
@@ -93,20 +90,22 @@ class InvestigationUpdate(MCPModel):
             raise ValueError("description cannot be null without clear_description")
         if self.description is not None and self.clear_description:
             raise ValueError("description and clear_description conflict")
-        if not ({"name", "description"} & self.model_fields_set) and not (
+        if "status" in self.model_fields_set and self.status is None:
+            raise ValueError("status cannot be null")
+        if not ({"name", "description", "status"} & self.model_fields_set) and not (
             self.clear_description
         ):
             raise ValueError("investigation update must change at least one field")
         return self
 
 
-class SetInvestigationSessionStatus(MCPModel):
-    """Set one linked session to a terminal status."""
+class SetInvestigationSessionVerdict(MCPModel):
+    """Set or clear one linked session's verdict."""
 
-    operation: Literal["set_session_status"]
+    operation: Literal["set_session_verdict"]
     investigation_id: uuid.UUID
     session_id: uuid.UUID
-    status: Literal["completed", "skipped"]
+    verdict: InvestigationSessionVerdict | None
 
 
 class ManualAnnotationCreate(MCPModel):
@@ -123,7 +122,7 @@ class InvestigationAnswerCreate(MCPModel):
 
     operation: Literal["answer_question"]
     investigation_session_id: uuid.UUID
-    question_key: str = Field(min_length=1)
+    question_key: str
     selector: AnnotationSelector | None = None
     value: JsonValue = Field()
 
@@ -139,7 +138,7 @@ class AnnotationUpdate(MCPModel):
 ReviewManageRequest = Annotated[
     InvestigationCreate
     | InvestigationUpdate
-    | SetInvestigationSessionStatus
+    | SetInvestigationSessionVerdict
     | ManualAnnotationCreate
     | InvestigationAnswerCreate
     | AnnotationUpdate,

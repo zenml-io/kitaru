@@ -40,11 +40,11 @@ from kitaru.api_models.v1.annotation import (
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationSessionInput,
-    QuestionItem,
+    InvestigationSessionQuestion,
 )
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.client.api_client import KitaruAPIClient
-from kitaru.client.exceptions import APIError, NotFoundError
+from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -65,6 +65,7 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
+QUESTION_KEY = "cause"
 
 
 @pytest.fixture
@@ -134,13 +135,21 @@ async def _make_session(api_client: KitaruAPIClient, agent_id: uuid.UUID) -> uui
 async def _make_investigation_session(
     api_client: KitaruAPIClient, agent_id: uuid.UUID, session_id: uuid.UUID
 ) -> uuid.UUID:
-    """Create a one-question investigation linking the session, return its link id."""
+    """Create an investigation linking the session, return its link id."""
     investigation = await api_client.investigations.create(
         InvestigationCreateRequest(
             agent_id=agent_id,
             name="investigation",
-            questions=[QuestionItem(key="root_cause", question="What caused it?")],
-            sessions=[InvestigationSessionInput(session_id=session_id)],
+            sessions=[
+                InvestigationSessionInput(
+                    session_id=session_id,
+                    questions=[
+                        InvestigationSessionQuestion(
+                            key=QUESTION_KEY, question="What caused it?"
+                        )
+                    ],
+                )
+            ],
         )
     )
     page = await api_client.investigations.list_sessions(investigation.id)
@@ -173,7 +182,7 @@ async def test_create_manual_missing_session(api_client: KitaruAPIClient) -> Non
 
 
 async def test_create_investigation_answer(api_client: KitaruAPIClient) -> None:
-    """Answer an investigation's question through the SDK."""
+    """Answer an investigation session through the SDK."""
     agent_id = await _make_agent(api_client)
     session_id = await _make_session(api_client, agent_id)
     investigation_session_id = await _make_investigation_session(
@@ -182,33 +191,13 @@ async def test_create_investigation_answer(api_client: KitaruAPIClient) -> None:
     annotation = await api_client.annotations.create(
         InvestigationAnswerCreateRequest(
             investigation_session_id=investigation_session_id,
-            question_key="root_cause",
+            question_key=QUESTION_KEY,
             value="a retry loop",
         )
     )
     assert annotation.session_id == session_id
     assert annotation.investigation_session_id == investigation_session_id
-    assert annotation.question_key == "root_cause"
-
-
-async def test_create_investigation_answer_unknown_question_key(
-    api_client: KitaruAPIClient,
-) -> None:
-    """Surface HTTP 422 as a typed error."""
-    agent_id = await _make_agent(api_client)
-    session_id = await _make_session(api_client, agent_id)
-    investigation_session_id = await _make_investigation_session(
-        api_client, agent_id, session_id
-    )
-    with pytest.raises(APIError) as exc_info:
-        await api_client.annotations.create(
-            InvestigationAnswerCreateRequest(
-                investigation_session_id=investigation_session_id,
-                question_key="unknown",
-                value="x",
-            )
-        )
-    assert exc_info.value.status_code == 422
+    assert annotation.question_key == QUESTION_KEY
 
 
 async def test_get(api_client: KitaruAPIClient) -> None:

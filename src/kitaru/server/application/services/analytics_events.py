@@ -65,6 +65,21 @@ def build_account_traits(account: Account, origin: AccountOrigin) -> dict[str, A
     return traits
 
 
+def build_user_enriched_properties(account: Account) -> dict[str, Any]:
+    """Build the properties of a user finishing the onboarding survey.
+
+    Args:
+        account: Account that finished the survey.
+
+    Returns:
+        Event properties.
+    """
+    properties: dict[str, Any] = {**account.metadata, "name": account.name}
+    if account.email is not None:
+        properties["email"] = account.email
+    return properties
+
+
 def build_session_completed_properties(session: Session) -> dict[str, Any]:
     """Build the properties of a session's transition to a terminal status.
 
@@ -242,10 +257,7 @@ def build_investigation_created_properties(
     Returns:
         Event properties.
     """
-    return {
-        "question_count": len(investigation.questions),
-        "session_count": investigation.total_sessions,
-    }
+    return {"session_count": investigation.total_sessions}
 
 
 def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any]:

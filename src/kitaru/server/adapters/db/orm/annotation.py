@@ -16,7 +16,7 @@
 import uuid
 from typing import Any
 
-from sqlalchemy import ForeignKeyConstraint, Index, String, UniqueConstraint
+from sqlalchemy import ForeignKeyConstraint, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,24 +26,18 @@ from kitaru.server.adapters.db.orm.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from kitaru.server.adapters.db.orm.orm_utils import (
-    foreign_key_name,
-    index_name,
-    unique_constraint_name,
-)
+from kitaru.server.adapters.db.orm.orm_utils import foreign_key_name, index_name
 from kitaru.server.domain.annotation import Annotation
-from kitaru.server.domain.names import MAX_NAME_LENGTH
 
 ANNOTATION_OWNER_ID_FOREIGN_KEY = foreign_key_name("annotation", ["owner_id"])
 ANNOTATION_SESSION_ID_FOREIGN_KEY = foreign_key_name("annotation", ["session_id"])
 ANNOTATION_INVESTIGATION_SESSION_ID_FOREIGN_KEY = foreign_key_name(
     "annotation", ["investigation_session_id"]
 )
-ANNOTATION_INVESTIGATION_SESSION_ID_QUESTION_KEY_UNIQUE_CONSTRAINT = (
-    unique_constraint_name("annotation", ["investigation_session_id", "question_key"])
-)
 ANNOTATION_OWNER_ID_INDEX = index_name("annotation", ["owner_id"])
 ANNOTATION_SESSION_ID_INDEX = index_name("annotation", ["session_id"])
+
+QUESTION_KEY_LENGTH = 64
 
 
 class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -66,11 +60,6 @@ class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=ANNOTATION_INVESTIGATION_SESSION_ID_FOREIGN_KEY,
             ondelete="CASCADE",
         ),
-        UniqueConstraint(
-            "investigation_session_id",
-            "question_key",
-            name=ANNOTATION_INVESTIGATION_SESSION_ID_QUESTION_KEY_UNIQUE_CONSTRAINT,
-        ),
         Index(ANNOTATION_OWNER_ID_INDEX, "owner_id"),
         Index(ANNOTATION_SESSION_ID_INDEX, "session_id"),
     )
@@ -78,7 +67,7 @@ class AnnotationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID]
     session_id: Mapped[uuid.UUID]
     investigation_session_id: Mapped[uuid.UUID | None]
-    question_key: Mapped[str | None] = mapped_column(String(MAX_NAME_LENGTH))
+    question_key: Mapped[str | None] = mapped_column(String(QUESTION_KEY_LENGTH))
     selector: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     value: Mapped[Any] = mapped_column(JSONB)
 

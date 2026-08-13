@@ -4823,18 +4823,6 @@
               "description": "Targeted node.",
               "title": "Node Id"
             },
-            "part": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/AnnotationSelectorPart"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Payload of the node targeted."
-            },
             "path": {
               "anyOf": [
                 {
@@ -4845,7 +4833,7 @@
                 }
               ],
               "default": null,
-              "description": "RFC 6901 JSON Pointer within the targeted payload.",
+              "description": "RFC 6901 JSON Pointer into the targeted node or the session response.",
               "title": "Path"
             },
             "span": {
@@ -4863,19 +4851,6 @@
           },
           "title": "AnnotationSelector",
           "type": "object"
-        },
-        "AnnotationSelectorPart": {
-          "description": "Payload of a session node an annotation selector targets.",
-          "enum": [
-            "input",
-            "output",
-            "error",
-            "metadata",
-            "attributes",
-            "model_params"
-          ],
-          "title": "AnnotationSelectorPart",
-          "type": "string"
         },
         "AnnotationSpan": {
           "additionalProperties": false,
@@ -4909,7 +4884,7 @@
               "type": "string"
             },
             "completed_sessions": {
-              "description": "Number of linked sessions marked completed or skipped.",
+              "description": "Number of linked sessions with a verdict.",
               "title": "Completed Sessions",
               "type": "integer"
             },
@@ -4968,14 +4943,6 @@
               "title": "Owner Id",
               "type": "string"
             },
-            "questions": {
-              "description": "Questions asked about each session.",
-              "items": {
-                "$ref": "#/$defs/QuestionItem"
-              },
-              "title": "Questions",
-              "type": "array"
-            },
             "started_at": {
               "anyOf": [
                 {
@@ -5014,12 +4981,62 @@
             "name",
             "description",
             "status",
-            "questions",
             "metadata",
             "total_sessions",
             "completed_sessions"
           ],
           "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
+          "type": "object"
+        },
+        "InvestigationSessionQuestion": {
+          "additionalProperties": false,
+          "description": "Investigation session question.",
+          "properties": {
+            "highlights": {
+              "description": "Curated highlights for the question.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionHighlight"
+              },
+              "title": "Highlights",
+              "type": "array"
+            },
+            "key": {
+              "description": "Question key, unique within the session.",
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "description": "Question to answer about the session.",
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "InvestigationSessionQuestion",
           "type": "object"
         },
         "InvestigationSessionResponse": {
@@ -5048,14 +5065,19 @@
               "title": "Position",
               "type": "integer"
             },
+            "questions": {
+              "description": "Questions to answer about the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionQuestion"
+              },
+              "title": "Questions",
+              "type": "array"
+            },
             "session_id": {
               "description": "Session being investigated.",
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
-            },
-            "status": {
-              "$ref": "#/$defs/InvestigationSessionStatus"
             },
             "updated": {
               "description": "Last modification time.",
@@ -5063,16 +5085,16 @@
               "title": "Updated",
               "type": "string"
             },
-            "view": {
+            "verdict": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/InvestigationSessionView"
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Curated session view."
+              "description": "Investigation session verdict."
             }
           },
           "required": [
@@ -5082,81 +5104,21 @@
             "investigation_id",
             "session_id",
             "position",
-            "status",
-            "view"
+            "questions",
+            "verdict"
           ],
           "title": "InvestigationSessionResponse",
           "type": "object"
         },
-        "InvestigationSessionStatus": {
-          "description": "Investigation session status.",
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
           "enum": [
-            "pending",
-            "completed",
-            "skipped"
+            "acceptable",
+            "problematic",
+            "uncertain"
           ],
-          "title": "InvestigationSessionStatus",
+          "title": "InvestigationSessionVerdict",
           "type": "string"
-        },
-        "InvestigationSessionView": {
-          "additionalProperties": false,
-          "description": "Investigation session view.",
-          "properties": {
-            "items": {
-              "description": "Curated findings for the session.",
-              "items": {
-                "$ref": "#/$defs/InvestigationSessionViewItem"
-              },
-              "title": "Items",
-              "type": "array"
-            },
-            "summary": {
-              "description": "Summary shown above the trace.",
-              "title": "Summary",
-              "type": "string"
-            },
-            "version": {
-              "default": 1,
-              "description": "Format version.",
-              "title": "Version",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "summary"
-          ],
-          "title": "InvestigationSessionView",
-          "type": "object"
-        },
-        "InvestigationSessionViewItem": {
-          "additionalProperties": false,
-          "description": "Investigation session view item.",
-          "properties": {
-            "description": {
-              "description": "Prose explaining what the curator saw.",
-              "title": "Description",
-              "type": "string"
-            },
-            "label": {
-              "description": "Short title for the item.",
-              "title": "Label",
-              "type": "string"
-            },
-            "selectors": {
-              "description": "References the item covers.",
-              "items": {
-                "$ref": "#/$defs/AnnotationSelector"
-              },
-              "title": "Selectors",
-              "type": "array"
-            }
-          },
-          "required": [
-            "label",
-            "description"
-          ],
-          "title": "InvestigationSessionViewItem",
-          "type": "object"
         },
         "InvestigationStatus": {
           "description": "Investigation status.",
@@ -5229,28 +5191,6 @@
             "has_more"
           ],
           "title": "PageMetadata",
-          "type": "object"
-        },
-        "QuestionItem": {
-          "additionalProperties": false,
-          "description": "Question item.",
-          "properties": {
-            "key": {
-              "description": "Key identifying the question within the array.",
-              "title": "Key",
-              "type": "string"
-            },
-            "question": {
-              "description": "Question display text.",
-              "title": "Question",
-              "type": "string"
-            }
-          },
-          "required": [
-            "key",
-            "question"
-          ],
-          "title": "QuestionItem",
           "type": "object"
         },
         "ToolError": {
@@ -7297,18 +7237,6 @@
               "description": "Targeted node.",
               "title": "Node Id"
             },
-            "part": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/AnnotationSelectorPart"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Payload of the node targeted."
-            },
             "path": {
               "anyOf": [
                 {
@@ -7319,7 +7247,7 @@
                 }
               ],
               "default": null,
-              "description": "RFC 6901 JSON Pointer within the targeted payload.",
+              "description": "RFC 6901 JSON Pointer into the targeted node or the session response.",
               "title": "Path"
             },
             "span": {
@@ -7337,19 +7265,6 @@
           },
           "title": "AnnotationSelector",
           "type": "object"
-        },
-        "AnnotationSelectorPart": {
-          "description": "Payload of a session node an annotation selector targets.",
-          "enum": [
-            "input",
-            "output",
-            "error",
-            "metadata",
-            "attributes",
-            "model_params"
-          ],
-          "title": "AnnotationSelectorPart",
-          "type": "string"
         },
         "AnnotationSpan": {
           "additionalProperties": false,
@@ -7414,7 +7329,6 @@
               "type": "string"
             },
             "question_key": {
-              "minLength": 1,
               "title": "Question Key",
               "type": "string"
             },
@@ -7473,14 +7387,6 @@
               "title": "Operation",
               "type": "string"
             },
-            "questions": {
-              "items": {
-                "$ref": "#/$defs/QuestionItem"
-              },
-              "maxItems": 100,
-              "title": "Questions",
-              "type": "array"
-            },
             "sessions": {
               "items": {
                 "$ref": "#/$defs/InvestigationSessionInput"
@@ -7494,100 +7400,98 @@
             "operation",
             "agent_id",
             "name",
-            "questions",
             "sessions"
           ],
           "title": "InvestigationCreate",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
           "type": "object"
         },
         "InvestigationSessionInput": {
           "additionalProperties": false,
           "description": "Investigation session input.",
           "properties": {
+            "questions": {
+              "description": "Questions to answer about the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionQuestion"
+              },
+              "minItems": 1,
+              "title": "Questions",
+              "type": "array"
+            },
             "session_id": {
               "description": "Session to link.",
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
-            },
-            "view": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/InvestigationSessionView"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Curated session view."
             }
           },
           "required": [
-            "session_id"
+            "session_id",
+            "questions"
           ],
           "title": "InvestigationSessionInput",
           "type": "object"
         },
-        "InvestigationSessionView": {
+        "InvestigationSessionQuestion": {
           "additionalProperties": false,
-          "description": "Investigation session view.",
+          "description": "Investigation session question.",
           "properties": {
-            "items": {
-              "description": "Curated findings for the session.",
+            "highlights": {
+              "description": "Curated highlights for the question.",
               "items": {
-                "$ref": "#/$defs/InvestigationSessionViewItem"
+                "$ref": "#/$defs/InvestigationSessionHighlight"
               },
-              "title": "Items",
+              "title": "Highlights",
               "type": "array"
             },
-            "summary": {
-              "description": "Summary shown above the trace.",
-              "title": "Summary",
+            "key": {
+              "description": "Question key, unique within the session.",
+              "title": "Key",
               "type": "string"
             },
-            "version": {
-              "default": 1,
-              "description": "Format version.",
-              "title": "Version",
-              "type": "integer"
+            "question": {
+              "description": "Question to answer about the session.",
+              "title": "Question",
+              "type": "string"
             }
           },
           "required": [
-            "summary"
+            "key",
+            "question"
           ],
-          "title": "InvestigationSessionView",
+          "title": "InvestigationSessionQuestion",
           "type": "object"
         },
-        "InvestigationSessionViewItem": {
-          "additionalProperties": false,
-          "description": "Investigation session view item.",
-          "properties": {
-            "description": {
-              "description": "Prose explaining what the curator saw.",
-              "title": "Description",
-              "type": "string"
-            },
-            "label": {
-              "description": "Short title for the item.",
-              "title": "Label",
-              "type": "string"
-            },
-            "selectors": {
-              "description": "References the item covers.",
-              "items": {
-                "$ref": "#/$defs/AnnotationSelector"
-              },
-              "title": "Selectors",
-              "type": "array"
-            }
-          },
-          "required": [
-            "label",
-            "description"
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
+          "enum": [
+            "acceptable",
+            "problematic",
+            "uncertain"
           ],
-          "title": "InvestigationSessionViewItem",
-          "type": "object"
+          "title": "InvestigationSessionVerdict",
+          "type": "string"
         },
         "InvestigationUpdate": {
           "additionalProperties": false,
@@ -7631,6 +7535,22 @@
               "const": "update_investigation",
               "title": "Operation",
               "type": "string"
+            },
+            "status": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "in_progress",
+                    "completed"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Status"
             }
           },
           "required": [
@@ -7677,31 +7597,9 @@
           "title": "ManualAnnotationCreate",
           "type": "object"
         },
-        "QuestionItem": {
+        "SetInvestigationSessionVerdict": {
           "additionalProperties": false,
-          "description": "Question item.",
-          "properties": {
-            "key": {
-              "description": "Key identifying the question within the array.",
-              "title": "Key",
-              "type": "string"
-            },
-            "question": {
-              "description": "Question display text.",
-              "title": "Question",
-              "type": "string"
-            }
-          },
-          "required": [
-            "key",
-            "question"
-          ],
-          "title": "QuestionItem",
-          "type": "object"
-        },
-        "SetInvestigationSessionStatus": {
-          "additionalProperties": false,
-          "description": "Set one linked session to a terminal status.",
+          "description": "Set or clear one linked session's verdict.",
           "properties": {
             "investigation_id": {
               "format": "uuid",
@@ -7709,7 +7607,7 @@
               "type": "string"
             },
             "operation": {
-              "const": "set_session_status",
+              "const": "set_session_verdict",
               "title": "Operation",
               "type": "string"
             },
@@ -7718,22 +7616,24 @@
               "title": "Session Id",
               "type": "string"
             },
-            "status": {
-              "enum": [
-                "completed",
-                "skipped"
-              ],
-              "title": "Status",
-              "type": "string"
+            "verdict": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
+                },
+                {
+                  "type": "null"
+                }
+              ]
             }
           },
           "required": [
             "operation",
             "investigation_id",
             "session_id",
-            "status"
+            "verdict"
           ],
-          "title": "SetInvestigationSessionStatus",
+          "title": "SetInvestigationSessionVerdict",
           "type": "object"
         }
       },
@@ -7744,7 +7644,7 @@
               "answer_question": "#/$defs/InvestigationAnswerCreate",
               "create_annotation": "#/$defs/ManualAnnotationCreate",
               "create_investigation": "#/$defs/InvestigationCreate",
-              "set_session_status": "#/$defs/SetInvestigationSessionStatus",
+              "set_session_verdict": "#/$defs/SetInvestigationSessionVerdict",
               "update_annotation": "#/$defs/AnnotationUpdate",
               "update_investigation": "#/$defs/InvestigationUpdate"
             },
@@ -7758,7 +7658,7 @@
               "$ref": "#/$defs/InvestigationUpdate"
             },
             {
-              "$ref": "#/$defs/SetInvestigationSessionStatus"
+              "$ref": "#/$defs/SetInvestigationSessionVerdict"
             },
             {
               "$ref": "#/$defs/ManualAnnotationCreate"
@@ -7888,18 +7788,6 @@
               "description": "Targeted node.",
               "title": "Node Id"
             },
-            "part": {
-              "anyOf": [
-                {
-                  "$ref": "#/$defs/AnnotationSelectorPart"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Payload of the node targeted."
-            },
             "path": {
               "anyOf": [
                 {
@@ -7910,7 +7798,7 @@
                 }
               ],
               "default": null,
-              "description": "RFC 6901 JSON Pointer within the targeted payload.",
+              "description": "RFC 6901 JSON Pointer into the targeted node or the session response.",
               "title": "Path"
             },
             "span": {
@@ -7928,19 +7816,6 @@
           },
           "title": "AnnotationSelector",
           "type": "object"
-        },
-        "AnnotationSelectorPart": {
-          "description": "Payload of a session node an annotation selector targets.",
-          "enum": [
-            "input",
-            "output",
-            "error",
-            "metadata",
-            "attributes",
-            "model_params"
-          ],
-          "title": "AnnotationSelectorPart",
-          "type": "string"
         },
         "AnnotationSpan": {
           "additionalProperties": false,
@@ -7974,7 +7849,7 @@
               "type": "string"
             },
             "completed_sessions": {
-              "description": "Number of linked sessions marked completed or skipped.",
+              "description": "Number of linked sessions with a verdict.",
               "title": "Completed Sessions",
               "type": "integer"
             },
@@ -8033,14 +7908,6 @@
               "title": "Owner Id",
               "type": "string"
             },
-            "questions": {
-              "description": "Questions asked about each session.",
-              "items": {
-                "$ref": "#/$defs/QuestionItem"
-              },
-              "title": "Questions",
-              "type": "array"
-            },
             "started_at": {
               "anyOf": [
                 {
@@ -8079,12 +7946,62 @@
             "name",
             "description",
             "status",
-            "questions",
             "metadata",
             "total_sessions",
             "completed_sessions"
           ],
           "title": "InvestigationResponse",
+          "type": "object"
+        },
+        "InvestigationSessionHighlight": {
+          "additionalProperties": false,
+          "description": "Investigation session highlight.",
+          "properties": {
+            "description": {
+              "description": "Prose explaining what the highlight shows.",
+              "title": "Description",
+              "type": "string"
+            },
+            "selector": {
+              "$ref": "#/$defs/AnnotationSelector",
+              "description": "Part of the session highlighted."
+            }
+          },
+          "required": [
+            "selector",
+            "description"
+          ],
+          "title": "InvestigationSessionHighlight",
+          "type": "object"
+        },
+        "InvestigationSessionQuestion": {
+          "additionalProperties": false,
+          "description": "Investigation session question.",
+          "properties": {
+            "highlights": {
+              "description": "Curated highlights for the question.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionHighlight"
+              },
+              "title": "Highlights",
+              "type": "array"
+            },
+            "key": {
+              "description": "Question key, unique within the session.",
+              "title": "Key",
+              "type": "string"
+            },
+            "question": {
+              "description": "Question to answer about the session.",
+              "title": "Question",
+              "type": "string"
+            }
+          },
+          "required": [
+            "key",
+            "question"
+          ],
+          "title": "InvestigationSessionQuestion",
           "type": "object"
         },
         "InvestigationSessionResponse": {
@@ -8113,14 +8030,19 @@
               "title": "Position",
               "type": "integer"
             },
+            "questions": {
+              "description": "Questions to answer about the session.",
+              "items": {
+                "$ref": "#/$defs/InvestigationSessionQuestion"
+              },
+              "title": "Questions",
+              "type": "array"
+            },
             "session_id": {
               "description": "Session being investigated.",
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
-            },
-            "status": {
-              "$ref": "#/$defs/InvestigationSessionStatus"
             },
             "updated": {
               "description": "Last modification time.",
@@ -8128,16 +8050,16 @@
               "title": "Updated",
               "type": "string"
             },
-            "view": {
+            "verdict": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/InvestigationSessionView"
+                  "$ref": "#/$defs/InvestigationSessionVerdict"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Curated session view."
+              "description": "Investigation session verdict."
             }
           },
           "required": [
@@ -8147,81 +8069,21 @@
             "investigation_id",
             "session_id",
             "position",
-            "status",
-            "view"
+            "questions",
+            "verdict"
           ],
           "title": "InvestigationSessionResponse",
           "type": "object"
         },
-        "InvestigationSessionStatus": {
-          "description": "Investigation session status.",
+        "InvestigationSessionVerdict": {
+          "description": "Investigation session verdict.",
           "enum": [
-            "pending",
-            "completed",
-            "skipped"
+            "acceptable",
+            "problematic",
+            "uncertain"
           ],
-          "title": "InvestigationSessionStatus",
+          "title": "InvestigationSessionVerdict",
           "type": "string"
-        },
-        "InvestigationSessionView": {
-          "additionalProperties": false,
-          "description": "Investigation session view.",
-          "properties": {
-            "items": {
-              "description": "Curated findings for the session.",
-              "items": {
-                "$ref": "#/$defs/InvestigationSessionViewItem"
-              },
-              "title": "Items",
-              "type": "array"
-            },
-            "summary": {
-              "description": "Summary shown above the trace.",
-              "title": "Summary",
-              "type": "string"
-            },
-            "version": {
-              "default": 1,
-              "description": "Format version.",
-              "title": "Version",
-              "type": "integer"
-            }
-          },
-          "required": [
-            "summary"
-          ],
-          "title": "InvestigationSessionView",
-          "type": "object"
-        },
-        "InvestigationSessionViewItem": {
-          "additionalProperties": false,
-          "description": "Investigation session view item.",
-          "properties": {
-            "description": {
-              "description": "Prose explaining what the curator saw.",
-              "title": "Description",
-              "type": "string"
-            },
-            "label": {
-              "description": "Short title for the item.",
-              "title": "Label",
-              "type": "string"
-            },
-            "selectors": {
-              "description": "References the item covers.",
-              "items": {
-                "$ref": "#/$defs/AnnotationSelector"
-              },
-              "title": "Selectors",
-              "type": "array"
-            }
-          },
-          "required": [
-            "label",
-            "description"
-          ],
-          "title": "InvestigationSessionViewItem",
-          "type": "object"
         },
         "InvestigationStatus": {
           "description": "Investigation status.",
@@ -8232,28 +8094,6 @@
           ],
           "title": "InvestigationStatus",
           "type": "string"
-        },
-        "QuestionItem": {
-          "additionalProperties": false,
-          "description": "Question item.",
-          "properties": {
-            "key": {
-              "description": "Key identifying the question within the array.",
-              "title": "Key",
-              "type": "string"
-            },
-            "question": {
-              "description": "Question display text.",
-              "title": "Question",
-              "type": "string"
-            }
-          },
-          "required": [
-            "key",
-            "question"
-          ],
-          "title": "QuestionItem",
-          "type": "object"
         },
         "ToolError": {
           "additionalProperties": false,

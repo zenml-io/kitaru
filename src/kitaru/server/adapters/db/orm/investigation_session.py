@@ -21,8 +21,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
-    InvestigationSessionView,
+    InvestigationSessionQuestion,
+    InvestigationSessionVerdict,
 )
 from kitaru.server.adapters.db.orm.base import (
     Base,
@@ -49,7 +49,7 @@ INVESTIGATION_SESSION_SESSION_ID_INDEX = index_name(
     "investigation_session", ["session_id"]
 )
 
-STATUS_LENGTH = 32
+VERDICT_LENGTH = 32
 
 
 class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -80,8 +80,8 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     investigation_id: Mapped[uuid.UUID]
     session_id: Mapped[uuid.UUID]
     position: Mapped[int]
-    status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
-    view: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    verdict: Mapped[str | None] = mapped_column(String(VERDICT_LENGTH))
+    questions: Mapped[list[Any]] = mapped_column(JSONB)
 
     @classmethod
     def from_domain(cls, session: InvestigationSession) -> "InvestigationSessionORM":
@@ -98,12 +98,10 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             investigation_id=session.investigation_id,
             session_id=session.session_id,
             position=session.position,
-            status=session.status.value,
-            view=(
-                session.view.model_dump(mode="json")
-                if session.view is not None
-                else None
-            ),
+            verdict=session.verdict.value if session.verdict is not None else None,
+            questions=[
+                question.model_dump(mode="json") for question in session.questions
+            ],
         )
 
     def to_domain(self) -> InvestigationSession:
@@ -117,12 +115,15 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             investigation_id=self.investigation_id,
             session_id=self.session_id,
             position=self.position,
-            status=InvestigationSessionStatus(self.status),
-            view=(
-                InvestigationSessionView.model_validate(self.view)
-                if self.view is not None
+            verdict=(
+                InvestigationSessionVerdict(self.verdict)
+                if self.verdict is not None
                 else None
             ),
+            questions=[
+                InvestigationSessionQuestion.model_validate(question)
+                for question in self.questions
+            ],
             created=self.created,
             updated=self.updated,
         )

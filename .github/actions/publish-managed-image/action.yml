@@ -2,8 +2,11 @@
 name: Publish managed Kitaru image
 description: Build and publish the managed Kitaru image to Amazon ECR.
 inputs:
-  version:
-    description: Kitaru release version.
+  package-version:
+    description: Published Kitaru Python package version.
+    required: true
+  image-tag:
+    description: Managed image tag.
     required: true
   dry-run:
     description: Validate the Dockerfile without publishing an image.
@@ -40,12 +43,12 @@ runs:
         target: server
         push: true
         build-args: |
-          KITARU_VERSION=${{ inputs.version }}
-        tags: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.version }}
+          KITARU_VERSION=${{ inputs.package-version }}
+        tags: 715803424590.dkr.ecr.eu-central-1.amazonaws.com/kitaru-pro-server:${{ inputs.image-tag }}
         labels: |-
           org.opencontainers.image.title=kitaru
           org.opencontainers.image.description=Kitaru server
-          org.opencontainers.image.version=${{ inputs.version }}
+          org.opencontainers.image.version=${{ inputs.image-tag }}
           org.opencontainers.image.source=https://github.com/zenml-io/kitaru
           org.opencontainers.image.revision=${{ github.sha }}
           org.opencontainers.image.licenses=Apache-2.0

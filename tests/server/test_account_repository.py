@@ -157,6 +157,32 @@ async def test_query(repository: AccountRepository) -> None:
     assert accounts == []
 
 
+async def test_query_filter_is_service_account(repository: AccountRepository) -> None:
+    """Filter accounts by whether they are service accounts."""
+    alice = await repository.create(Account(name="alice"))
+    svc = await repository.create(Account(name="svc", is_service_account=True))
+
+    accounts, next_cursor = await repository.query(
+        AccountFilter(
+            expression=FilterCondition(
+                field="is_service_account", op=FilterOp.EQ, value=True
+            )
+        )
+    )
+    assert next_cursor is None
+    assert accounts == [svc]
+
+    accounts, next_cursor = await repository.query(
+        AccountFilter(
+            expression=FilterCondition(
+                field="is_service_account", op=FilterOp.EQ, value=False
+            )
+        )
+    )
+    assert next_cursor is None
+    assert accounts == [alice]
+
+
 async def test_query_sort_created_asc(repository: AccountRepository) -> None:
     """Sort accounts oldest-first with sort=created:asc."""
     alice = await repository.create(Account(name="alice"))

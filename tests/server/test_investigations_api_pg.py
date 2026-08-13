@@ -51,12 +51,22 @@ async def _create_session(client: httpx.AsyncClient, agent_id: str) -> str:
     return response.json()["id"]
 
 
+def _highlights() -> list[dict[str, object]]:
+    """Build one highlight for a question payload."""
+    return [
+        {
+            "selector": {"node_id": None, "path": None, "span": None},
+            "description": "Retried without backoff.",
+        }
+    ]
+
+
 async def _create_investigation(
     client: httpx.AsyncClient, agent_id: str, session_ids: list[str]
 ) -> dict[str, object]:
-    """Create an investigation with two questions linking the given sessions.
+    """Create an investigation linking the given sessions.
 
-    The first session carries a curated view.
+    The first session carries a question with highlights.
     """
     response = await client.post(
         "/v1/investigations",
@@ -64,24 +74,26 @@ async def _create_investigation(
             "agent_id": agent_id,
             "name": "payment-failures",
             "description": "Investigate silent payment failures",
-            "questions": [
-                {"key": "root_cause", "question": "What caused the failure?"},
-                {"key": "retry_ok", "question": "Was retrying the right call?"},
-            ],
             "sessions": [
                 {
                     "session_id": session_ids[0],
-                    "view": {
-                        "summary": "Retry loop without backoff",
-                        "items": [
-                            {
-                                "label": "Retry loop",
-                                "description": ("Retries three times without backoff."),
-                            }
-                        ],
-                    },
+                    "questions": [
+                        {
+                            "key": "cause",
+                            "question": "What caused the failure?",
+                            "highlights": _highlights(),
+                        }
+                    ],
                 },
-                *[{"session_id": session_id} for session_id in session_ids[1:]],
+                *[
+                    {
+                        "session_id": session_id,
+                        "questions": [
+                            {"key": "cause", "question": "What caused the failure?"}
+                        ],
+                    }
+                    for session_id in session_ids[1:]
+                ],
             ],
         },
     )
@@ -137,7 +149,7 @@ async def test_update_persists_across_requests(
 async def test_list_sessions_ordered_by_position(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """List an investigation's sessions in position order, with the curated view."""
+    """List an investigation's sessions in position order, with their questions."""
     session_ids = [await _create_session(client, agent_id) for _ in range(2)]
     created = await _create_investigation(client, agent_id, session_ids)
 
@@ -147,35 +159,65 @@ async def test_list_sessions_ordered_by_position(
     items = body["items"]
     assert [item["session_id"] for item in items] == session_ids
     assert [item["position"] for item in items] == [0, 1]
-    assert [item["status"] for item in items] == ["pending", "pending"]
-    assert items[0]["view"]["summary"] == "Retry loop without backoff"
-    assert items[1]["view"] is None
+    assert [item["verdict"] for item in items] == [None, None]
+    assert items[0]["questions"][0]["question"] == "What caused the failure?"
+    assert items[0]["questions"][0]["highlights"] == _highlights()
+    assert items[1]["questions"][0]["highlights"] == []
 
 
-async def test_investigation_completes_once_no_session_pending(
+async def test_verdict_update_leaves_questions_untouched(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
-    """Flip the investigation to completed once every linked session settles."""
+    """Leave a session's questions, set at create, untouched by a verdict PATCH."""
+    session_ids = [await _create_session(client, agent_id) for _ in range(1)]
+    created = await _create_investigation(client, agent_id, session_ids)
+
+    response = await client.patch(
+        f"/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
+        json={"verdict": "acceptable"},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["verdict"] == "acceptable"
+    assert body["questions"][0]["highlights"] == _highlights()
+
+    response = await client.get(f"/v1/investigations/{created['id']}/sessions")
+    assert response.status_code == 200
+    loaded = response.json()["items"][0]
+    assert loaded["verdict"] == "acceptable"
+    assert loaded["questions"][0]["highlights"] == _highlights()
+
+
+async def test_manual_completion_after_verdicts(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Complete the investigation manually after every session got a verdict."""
     session_ids = [await _create_session(client, agent_id) for _ in range(2)]
     created = await _create_investigation(client, agent_id, session_ids)
 
     response = await client.patch(
         f"/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
-        json={"status": "completed"},
+        json={"verdict": "acceptable"},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "completed"
-
-    # The investigation stays open while a linked session is still pending.
-    response = await client.get(f"/v1/investigations/{created['id']}")
-    assert response.json()["status"] == "pending"
+    assert response.json()["verdict"] == "acceptable"
 
     response = await client.patch(
         f"/v1/investigations/{created['id']}/sessions/{session_ids[1]}",
-        json={"status": "skipped"},
+        json={"verdict": "problematic"},
     )
     assert response.status_code == 200
-    assert response.json()["status"] == "skipped"
+    assert response.json()["verdict"] == "problematic"
+
+    # Verdicts alone never complete the investigation.
+    response = await client.get(f"/v1/investigations/{created['id']}")
+    assert response.json()["status"] == "pending"
+    assert response.json()["completed_sessions"] == 2
+
+    response = await client.patch(
+        f"/v1/investigations/{created['id']}", json={"status": "completed"}
+    )
+    assert response.status_code == 200
 
     response = await client.get(f"/v1/investigations/{created['id']}")
     assert response.status_code == 200
@@ -192,7 +234,6 @@ async def test_create_investigation_missing_agent(client: httpx.AsyncClient) -> 
         json={
             "agent_id": "00000000-0000-0000-0000-000000000000",
             "name": "investigation",
-            "questions": [{"key": "q", "question": "Why?"}],
             "sessions": [],
         },
     )

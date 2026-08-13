@@ -28,7 +28,7 @@ from kitaru.mcp.models.review import (
     ReviewListSessions,
     ReviewManageRequest,
     ReviewReadRequest,
-    SetInvestigationSessionStatus,
+    SetInvestigationSessionVerdict,
 )
 from kitaru.mcp.tools.registry import build_page_data
 
@@ -73,23 +73,24 @@ async def handle_review_manage(
             agent_id=request.agent_id,
             name=request.name,
             description=request.description,
-            questions=request.questions,
             sessions=request.sessions,
         )
         return await state.client.investigations.create(dto)
     if isinstance(request, InvestigationUpdate):
-        values = request.model_dump(include={"name", "description"}, exclude_unset=True)
+        values = request.model_dump(
+            include={"name", "description", "status"}, exclude_unset=True
+        )
         if request.clear_description:
             values["description"] = None
         return await state.client.investigations.update(
             request.investigation_id,
             InvestigationUpdateRequest.model_validate(values),
         )
-    if isinstance(request, SetInvestigationSessionStatus):
+    if isinstance(request, SetInvestigationSessionVerdict):
         return await state.client.investigations.update_session(
             request.investigation_id,
             request.session_id,
-            InvestigationSessionUpdateRequest(status=request.status),
+            InvestigationSessionUpdateRequest(verdict=request.verdict),
         )
     if isinstance(request, ManualAnnotationCreate):
         return await state.client.annotations.create(

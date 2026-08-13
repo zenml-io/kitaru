@@ -18,14 +18,13 @@ from collections.abc import Mapping
 from typing import ClassVar
 
 from kitaru.api_models.v1.investigation import (
-    InvestigationSessionStatus,
-    InvestigationSessionView,
+    InvestigationSessionQuestion,
+    InvestigationSessionVerdict,
     InvestigationStatus,
-    QuestionItem,
 )
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, FilterField
+from kitaru.server.filtering import EQUALITY_OPS, NULLABLE_OPS, FilterField
 
 
 class InvestigationFilter(ListFilter):
@@ -46,7 +45,9 @@ class InvestigationSessionFilter(ListFilter):
 
     sortable_fields: ClassVar[frozenset[str]] = frozenset({"position"})
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
-        "status": FilterField(value_type=InvestigationSessionStatus, ops=EQUALITY_OPS),
+        "verdict": FilterField(
+            value_type=InvestigationSessionVerdict, ops=EQUALITY_OPS | NULLABLE_OPS
+        ),
     }
 
     investigation_id: uuid.UUID
@@ -57,7 +58,7 @@ class InvestigationSessionInput(FrozenModel):
     """Investigation session input."""
 
     session_id: uuid.UUID
-    view: InvestigationSessionView | None = None
+    questions: list[InvestigationSessionQuestion]
 
 
 class InvestigationCreate(FrozenModel):
@@ -66,7 +67,6 @@ class InvestigationCreate(FrozenModel):
     agent_id: uuid.UUID
     name: str
     description: str | None = None
-    questions: list[QuestionItem]
     sessions: list[InvestigationSessionInput]
 
 
@@ -75,3 +75,4 @@ class InvestigationUpdate(FrozenModel):
 
     name: str | None = None
     description: str | None = None
+    status: InvestigationStatus | None = None

@@ -36,6 +36,7 @@ from kitaru.server.domain.base import NotFoundError
 ACCOUNT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": AccountORM.name,
     "active": AccountORM.active,
+    "is_service_account": AccountORM.is_service_account,
 }
 
 
@@ -78,11 +79,15 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
         )
         return row.to_domain()
 
-    async def get(self, account_id: uuid.UUID) -> Account:
+    async def get(
+        self, account_id: uuid.UUID, is_service_account: bool | None = None
+    ) -> Account:
         """Load an account by id.
 
         Args:
             account_id: Id of the account.
+            is_service_account: Whether to look up a service account, ``None``
+                allows both kinds.
 
         Raises:
             AccountNotFound: No account has this id.
@@ -91,6 +96,11 @@ class SQLAccountRepository(BaseSQLRepository[AccountORM]):
             Stored account.
         """
         row = await self._get_row(account_id)
+        if (
+            is_service_account is not None
+            and row.is_service_account != is_service_account
+        ):
+            raise AccountNotFound(account_id)
         return row.to_domain()
 
     async def get_by_name(self, name: str, is_service_account: bool = False) -> Account:

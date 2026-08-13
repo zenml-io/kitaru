@@ -303,7 +303,8 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
 
     assert "source .env" in readme
     assert "--env-file .env" not in readme
-    assert r"\"summary\":\"A \$280 refund exceeded" in readme
+    assert "$TICKET_004_SESSION_ID:outcome=" in readme
+    assert "--question-key outcome" in readme
     assert (
         "uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'"
         in readme

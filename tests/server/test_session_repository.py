@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Contract tests for session repositories."""
 
+import itertools
 import uuid
 from collections.abc import AsyncGenerator
 from datetime import UTC, datetime
@@ -32,6 +33,7 @@ from conftest import (
 )
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.orm.session import SessionORM
@@ -43,6 +45,9 @@ from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
 from kitaru.server.adapters.db.repositories.cohort_repository import (
     SQLCohortRepository,
 )
@@ -52,10 +57,21 @@ from kitaru.server.adapters.db.repositories.cohort_version_repository import (
 from kitaru.server.adapters.db.repositories.evaluation_repository import (
     SQLEvaluationRepository,
 )
+from kitaru.server.adapters.db.repositories.experiment_repository import (
+    SQLExperimentRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
+)
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.replay_repository import (
+    SQLReplayRepository,
+)
 from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
@@ -70,10 +86,20 @@ from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent, AgentNotFound
+from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.base import QueryTimeoutError, ValidationError
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.evaluation import Evaluation
+from kitaru.server.domain.experiment import Experiment
+from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.job import Job
+from kitaru.server.domain.replay import Replay
+from kitaru.server.domain.replay_config import (
+    PassthroughConfig,
+    ReplayConfig,
+    ToolPolicy,
+)
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
@@ -82,6 +108,7 @@ from kitaru.server.domain.session import (
     SessionRollups,
 )
 from kitaru.server.domain.tag import Tag, TagLink
+from kitaru.server.domain.task import AgentTask
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -892,6 +919,148 @@ async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> Non
         )
     )
     assert [s.id for s in matched] == [member.id]
+
+
+async def test_query_filters_by_experiment_run() -> None:
+    """Filter sessions produced as the results of a run's replays.
+
+    Postgres-only: the run is three hops from the session, reached through
+    the producing task's job and the replay that owns it.
+
+    Matching through the task's result session is what keeps a run's
+    baseline sessions out of the result set, so that is asserted here.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        agent_version = await SQLAgentVersionRepository(session).create(
+            AgentVersion(owner_id=owner.id, agent_id=agent.id)
+        )
+        experiments = SQLExperimentRepository(session)
+        config = await experiments.create_replay_config(
+            ReplayConfig(
+                owner_id=owner.id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        experiment = await experiments.create(
+            Experiment(
+                owner_id=owner.id,
+                name="experiment",
+                agent_id=agent.id,
+                replay_config_id=config.id,
+            )
+        )
+        cohort = await SQLCohortRepository(session).create(
+            Cohort(owner_id=owner.id, name="cohort", agent_id=agent.id)
+        )
+        cohort_version = await SQLCohortVersionRepository(session).create(
+            CohortVersion(owner_id=owner.id, cohort_id=cohort.id, session_count=0),
+            [],
+        )
+        run = await SQLExperimentRunRepository(session).create(
+            ExperimentRun(
+                owner_id=owner.id,
+                experiment_id=experiment.id,
+                number=1,
+                cohort_version_id=cohort_version.id,
+                agent_version_id=agent_version.id,
+            )
+        )
+
+        repository = SQLSessionRepository(session, engine)
+        jobs = SQLJobRepository(session)
+        replays = SQLReplayRepository(session)
+        tasks = SQLTaskRepository(session)
+
+        # Sessions are unique per agent and number, and every session here
+        # belongs to the same agent.
+        session_numbers = itertools.count(1)
+
+        async def create_session() -> Session:
+            """Create a session for the shared agent.
+
+            Returns:
+                Stored session.
+            """
+            return await repository.create(
+                Session(
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    number=next(session_numbers),
+                    origin=SessionOrigin.RECORDED,
+                )
+            )
+
+        async def replay_in_run(
+            experiment_run_id: uuid.UUID | None,
+        ) -> tuple[Session, Session]:
+            """Replay one baseline session into a result session.
+
+            Returns:
+                Baseline and result session.
+            """
+            job = await jobs.create(
+                Job(owner_id=owner.id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+            )
+            baseline = await create_session()
+            result = await create_session()
+            await replays.create(
+                Replay(
+                    owner_id=owner.id,
+                    job_id=job.id,
+                    experiment_run_id=experiment_run_id,
+                    replay_config_id=config.id,
+                    baseline_session_id=baseline.id,
+                )
+            )
+            task = await tasks.create(
+                AgentTask(job_id=job.id, agent_version_id=agent_version.id)
+            )
+            task.link_result_session(result.id)
+            await tasks.update(task)
+            return baseline, result
+
+        baseline, result = await replay_in_run(run.id)
+        loose_baseline, loose_result = await replay_in_run(None)
+
+        sessions, _ = await repository.query(
+            SessionFilter(
+                expression=FilterCondition(
+                    field="experiment_run_id", op=FilterOp.EQ, value=run.id
+                )
+            )
+        )
+        assert [s.id for s in sessions] == [result.id]
+
+        sessions, _ = await repository.query(
+            SessionFilter(
+                expression=FilterCondition(
+                    field="experiment_run_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+        assert sessions == []
+
+        sessions, _ = await repository.query(
+            SessionFilter(
+                expression=NotExpression(
+                    operand=FilterCondition(
+                        field="experiment_run_id", op=FilterOp.EQ, value=run.id
+                    )
+                )
+            )
+        )
+        assert {s.id for s in sessions} == {
+            baseline.id,
+            loose_baseline.id,
+            loose_result.id,
+        }
 
 
 async def test_query_filters_by_and_expression(setup: Setup) -> None:

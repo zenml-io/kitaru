@@ -30,6 +30,7 @@ from kitaru.server.filtering import (
     EQUALITY_OPS,
     NULLABLE_OPS,
     ORDERED_OPS,
+    SCOPE_OPS,
     STRING_OPS,
     FilterField,
 )
@@ -51,9 +52,8 @@ class SessionFilter(ListFilter):
         "external_id": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
-        "cohort_version_id": FilterField(
-            value_type=uuid.UUID, ops=frozenset({FilterOp.EQ, FilterOp.IN})
-        ),
+        "cohort_version_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "experiment_run_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
         "has_evaluation": FilterField(value_type=bool, ops=BOOLEAN_OPS),
         "started_at": FilterField(
             value_type=AwareDatetime, ops=ORDERED_OPS | NULLABLE_OPS

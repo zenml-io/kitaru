@@ -26,8 +26,9 @@ from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationListParams,
     InvestigationSessionsListParams,
-    InvestigationSessionStatus,
     InvestigationSessionUpdateRequest,
+    InvestigationSessionVerdict,
+    InvestigationStatus,
     InvestigationUpdateRequest,
 )
 from kitaru.cli import app as app_module
@@ -67,7 +68,6 @@ class StubInvestigationClient:
                 "name": "failure-review",
                 "description": "Review failures",
                 "status": "pending",
-                "questions": [{"key": "cause", "question": "What caused the failure?"}],
                 "total_sessions": 2,
                 "completed_sessions": 0,
             },
@@ -78,8 +78,14 @@ class StubInvestigationClient:
                 "investigation_id": str(self.investigation.id),
                 "session_id": str(self.session_ids[0]),
                 "position": 0,
-                "status": "pending",
-                "view": None,
+                "questions": [
+                    {
+                        "key": "root-cause",
+                        "question": "What caused the failure?",
+                        "highlights": [],
+                    }
+                ],
+                "verdict": None,
             },
         )
         self.agent_lookups = 0
@@ -165,21 +171,12 @@ class StubInvestigationClient:
             return self.owner.investigation_session
 
 
-async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
-    """Create preserves question/session order and validates curated views."""
+async def test_create_maps_sessions_questions_and_highlights_to_sdk() -> None:
+    """Create groups keyed questions and highlights per session."""
     client = StubInvestigationClient()
-    node_id = uuid.uuid4()
-    view = json.dumps(
-        {
-            "summary": "The failed tool call",
-            "items": [
-                {
-                    "label": "Failure",
-                    "description": "The tool returned an error.",
-                    "selectors": [{"node_id": str(node_id), "part": "error"}],
-                }
-            ],
-        }
+    highlight_node_id = uuid.uuid4()
+    highlights = json.dumps(
+        [{"selector": {"node_id": str(highlight_node_id)}, "description": "Odd retry."}]
     )
 
     result = await investigations.create_investigation(
@@ -187,9 +184,13 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
         "triage",
         agent="assistant",
         description="Review selected failures",
-        questions=["cause=What caused it?", "fix=How should it be fixed?"],
         session_ids=client.session_ids,
-        session_views=[f"{client.session_ids[1]}={view}"],
+        session_questions=[
+            f"{client.session_ids[0]}:root-cause=What caused it?",
+            f"{client.session_ids[1]}:root-cause=What caused it?",
+            f"{client.session_ids[1]}:retry=Was the retry appropriate?",
+        ],
+        session_highlights=[f"{client.session_ids[1]}:retry={highlights}"],
     )
 
     [request] = client.create_calls
@@ -197,29 +198,28 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
         "agent_id": str(client.agent.id),
         "name": "triage",
         "description": "Review selected failures",
-        "questions": [
-            {"key": "cause", "question": "What caused it?"},
-            {"key": "fix", "question": "How should it be fixed?"},
-        ],
         "sessions": [
-            {"session_id": str(client.session_ids[0])},
+            {
+                "session_id": str(client.session_ids[0]),
+                "questions": [
+                    {"key": "root-cause", "question": "What caused it?"},
+                ],
+            },
             {
                 "session_id": str(client.session_ids[1]),
-                "view": {
-                    "summary": "The failed tool call",
-                    "items": [
-                        {
-                            "label": "Failure",
-                            "description": "The tool returned an error.",
-                            "selectors": [
-                                {
-                                    "node_id": str(node_id),
-                                    "part": "error",
-                                }
-                            ],
-                        }
-                    ],
-                },
+                "questions": [
+                    {"key": "root-cause", "question": "What caused it?"},
+                    {
+                        "key": "retry",
+                        "question": "Was the retry appropriate?",
+                        "highlights": [
+                            {
+                                "selector": {"node_id": str(highlight_node_id)},
+                                "description": "Odd retry.",
+                            }
+                        ],
+                    },
+                ],
             },
         ],
     }
@@ -227,23 +227,77 @@ async def test_create_maps_questions_sessions_and_views_to_sdk() -> None:
 
 
 @pytest.mark.parametrize(
-    ("questions", "sessions", "views", "message"),
+    ("sessions", "questions", "highlights", "message"),
     [
-        (["missing-separator"], [], [], "KEY=QUESTION"),
-        (["cause=one", "cause=two"], [], [], "question key must be unique"),
         (
-            [],
             [uuid.UUID(int=1), uuid.UUID(int=1)],
+            [],
             [],
             "--session value must be unique",
         ),
-        ([], [], [f"{uuid.UUID(int=2)}={{}}"], "also be selected with --session"),
+        (
+            [],
+            ["missing-separator"],
+            [],
+            "--session-question must be SESSION:KEY=QUESTION",
+        ),
+        (
+            [],
+            [f"{uuid.UUID(int=2)}=why?"],
+            [],
+            "--session-question must start with SESSION:KEY",
+        ),
+        (
+            [],
+            [f"{uuid.UUID(int=2)}:root-cause=why?"],
+            [],
+            "also be selected with --session",
+        ),
+        (
+            [uuid.UUID(int=3)],
+            [
+                f"{uuid.UUID(int=3)}:root-cause=why?",
+                f"{uuid.UUID(int=3)}:root-cause=why not?",
+            ],
+            [],
+            "key must be unique per session",
+        ),
+        (
+            [],
+            [],
+            ["missing-separator"],
+            "--session-highlights must be SESSION:KEY=JSON_ARRAY",
+        ),
+        (
+            [],
+            [],
+            [f"{uuid.UUID(int=2)}:root-cause=why?"],
+            "also be selected with --session",
+        ),
+        (
+            [uuid.UUID(int=4)],
+            [],
+            [f"{uuid.UUID(int=4)}:root-cause=not-json"],
+            "--session-highlights is not valid JSON",
+        ),
+        (
+            [uuid.UUID(int=4)],
+            [],
+            [f"{uuid.UUID(int=4)}:root-cause={{}}"],
+            "--session-highlights must contain a JSON array",
+        ),
+        (
+            [uuid.UUID(int=5)],
+            [f"{uuid.UUID(int=5)}:root-cause=why?"],
+            [f"{uuid.UUID(int=5)}:retry=[]"],
+            "has no matching --session-question",
+        ),
     ],
 )
 async def test_create_validation_precedes_agent_lookup(
-    questions: list[str],
     sessions: list[uuid.UUID],
-    views: list[str],
+    questions: list[str],
+    highlights: list[str],
     message: str,
 ) -> None:
     """Malformed local inputs fail before resolving remote state."""
@@ -255,9 +309,9 @@ async def test_create_validation_precedes_agent_lookup(
             "triage",
             agent="assistant",
             description=None,
-            questions=questions,
             session_ids=sessions,
-            session_views=views,
+            session_questions=questions,
+            session_highlights=highlights,
         )
 
     assert client.agent_lookups == 0
@@ -290,11 +344,25 @@ async def test_crud_and_session_status_commands_map_to_sdk() -> None:
         name="renamed",
         description=None,
         clear_description=True,
+        status=None,
     )
     _, request = client.update_calls[-1]
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "name": "renamed",
         "description": None,
+    }
+
+    await investigations.update_investigation(
+        client,
+        investigation_id,
+        name=None,
+        description=None,
+        clear_description=False,
+        status=InvestigationStatus.COMPLETED,
+    )
+    _, request = client.update_calls[-1]
+    assert request.model_dump(mode="json", exclude_unset=True) == {
+        "status": "completed",
     }
 
     sessions = await investigations.list_investigation_sessions(
@@ -309,17 +377,17 @@ async def test_crud_and_session_status_commands_map_to_sdk() -> None:
     assert sessions.page["next_cursor"] == "next-session"
 
     for target in (
-        InvestigationSessionStatus.COMPLETED,
-        InvestigationSessionStatus.SKIPPED,
+        InvestigationSessionVerdict.ACCEPTABLE,
+        InvestigationSessionVerdict.PROBLEMATIC,
     ):
-        await investigations.update_investigation_session_status(
+        await investigations.update_investigation_session_verdict(
             client,
             investigation_id,
             client.session_ids[0],
-            status=target,
+            verdict=target,
         )
         _, _, request = client.session_update_calls[-1]
-        assert request.status is target
+        assert request.verdict is target
 
     with pytest.raises(CLIError, match="requires --force"):
         await investigations.delete_investigation(client, investigation_id, force=False)
@@ -341,6 +409,7 @@ async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
             name=None,
             description="set",
             clear_description=True,
+            status=None,
         )
     with pytest.raises(CLIError, match="Select at least one"):
         await investigations.update_investigation(
@@ -349,6 +418,7 @@ async def test_sparse_update_rejects_conflicts_and_empty_changes() -> None:
             name=None,
             description=None,
             clear_description=False,
+            status=None,
         )
     assert client.update_calls == []
 
@@ -387,12 +457,15 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
             "session.list",
         ),
         (
-            ["investigation", "session", "complete", investigation_id, session_id],
-            "session.complete",
-        ),
-        (
-            ["investigation", "session", "skip", investigation_id, session_id],
-            "session.skip",
+            [
+                "investigation",
+                "session",
+                "verdict",
+                investigation_id,
+                session_id,
+                "acceptable",
+            ],
+            "session.verdict",
         ),
         (["investigation", "delete", investigation_id, "--force"], "delete"),
     ]
@@ -407,10 +480,9 @@ def test_public_argv_and_schema_cover_investigation_lifecycle(
         "investigation.delete",
         "investigation.get",
         "investigation.list",
-        "investigation.session.complete",
         "investigation.session.list",
-        "investigation.session.skip",
+        "investigation.session.verdict",
         "investigation.update",
     }
     assert specs["investigation.delete"]["side_effects"]["deletes_remote_state"]
-    assert specs["investigation.session.complete"]["mutating"] is True
+    assert specs["investigation.session.verdict"]["mutating"] is True
