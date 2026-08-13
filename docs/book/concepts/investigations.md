@@ -64,13 +64,56 @@ recordable, not a vibe in a meeting. Highlights on an investigation
 question use the same selector, so a curator points at evidence exactly
 the way a reviewer annotates it.
 
-Annotations come from two places:
+Annotations come from two places, and the difference is which fields the
+create request carries:
 
-* **Answering an investigation question** — the annotation records which
-  question it answers, so an investigation's output is a labeled dataset:
-  every session, every question, one value each.
-* **Manual annotation** — `kitaru annotation create` on any session,
-  investigation or not, for ad-hoc labels.
+* **Answering an investigation question** — addressed by
+  `investigation_session_id` + `question_key`. The stored annotation
+  keeps both, so an investigation's output is a labeled dataset: every
+  session, every question, one value each.
+* **Manual annotation** — addressed by `session_id` alone, on any
+  session, investigation or not, for ad-hoc labels.
+
+Both land in the same place. `AnnotationResponse` always has
+`session_id`, `selector` and `value`; `investigation_session_id` and
+`question_key` are populated only for answers. That is what lets you
+query one surface and still tell curated review apart from a passing
+note.
+
+```bash
+# an answer to a question
+kitaru annotation create --investigation-session <id> \
+  --question-key refund_justified --value 'false'
+
+# a standalone label, pinned to where it happened
+kitaru annotation create --session <id> \
+  --selector '{"node_id": "<node-id>", "path": "/output/text"}' \
+  --value '{"issue": "tone", "severity": "high"}'
+```
+
+`value` is arbitrary JSON — a boolean for a yes/no question, a rubric
+object, a rating. Kitaru does not impose a schema, which means the shape
+is yours to keep consistent; that consistency is what makes the answers
+usable as evaluator calibration data later. Annotations can be listed,
+fetched, updated (`--value` only) and deleted.
+
+## Working through a review
+
+The reviewer's loop is three calls, whoever makes them:
+
+```bash
+kitaru investigation session list refund-complaints   # what's queued, in position order
+kitaru annotation create --investigation-session <id> \
+  --question-key refund_justified --value 'false'     # answer, with evidence
+kitaru investigation session verdict <investigation-id> <session-id> problematic
+```
+
+Answers and the verdict are deliberately separate. The answers are the
+data — per question, per session, comparable across the investigation.
+The verdict is the reviewer's disposition of the session as a whole, and
+it is what `completed_sessions` counts. A session can carry answers and
+still be unsettled; that is the queue telling you the review is not
+finished.
 
 ## Why this feeds everything else
 
