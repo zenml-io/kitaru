@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -102,12 +103,124 @@ def test_local_python_versions_are_rejected_for_pypi() -> None:
         validate_version("1.0+build.1")
 
 
-def test_bundle_workflow_maps_semver_rc_to_python_rc() -> None:
+def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
 
-    assert "bundle/kitaru/v*" in workflow
-    assert 'kitaru_version="${BASH_REMATCH[1]}rc${BASH_REMATCH[2]}"' in workflow
+    assert "workflows: [Release Python package]" in workflow
+    assert "bundle/kitaru/v*" not in workflow
+    assert (
+        "startsWith(github.event.workflow_run.head_branch, 'python/kitaru/v')"
+        in workflow
+    )
+    assert "plugins/default-requirements.txt" not in workflow
+    assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
+    assert 'gh release upload "$PACKAGE_TAG" bundle-dist/* --clobber' in workflow
     assert "promote-latest:" in workflow
+
+
+def test_managed_image_failure_does_not_block_the_release() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    managed_start = workflow.index("      - name: Publish managed image\n")
+    report_start = workflow.index("      - name: Report managed image failure\n")
+    helm_start = workflow.index("      - name: Configure AWS credentials for Helm\n")
+    managed_step = workflow[managed_start:report_start]
+    report_step = workflow[report_start:helm_start]
+
+    assert "        id: publish-managed-image\n" in managed_step
+    assert "        continue-on-error: true\n" in managed_step
+    assert workflow.count("continue-on-error: true") == 1
+    assert "if: steps.publish-managed-image.outcome == 'failure'" in report_step
+    assert "::warning::Managed image publication failed" in report_step
+    assert "GITHUB_STEP_SUMMARY" in report_step
+
+
+def test_release_images_use_the_pypi_propagation_retry() -> None:
+    for dockerfile in (
+        "docker/release-client.Dockerfile",
+        "docker/release-server.Dockerfile",
+        "docker/release-worker.Dockerfile",
+    ):
+        content = (REPO_ROOT / dockerfile).read_text()
+        assert "COPY --chown=$USERNAME:$USER_GID " in content
+        assert "docker/install-release-wheel.sh ./" in content
+        assert "sh ./install-release-wheel.sh" in content
+
+
+def test_release_wheel_install_retries_until_the_package_is_available(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    attempts = tmp_path / "attempts"
+    (fake_bin / "uv").write_text(
+        "#!/bin/sh\n"
+        'attempt=$(($(cat "$ATTEMPTS" 2>/dev/null || echo 0) + 1))\n'
+        'printf "%s\\n" "$attempt" > "$ATTEMPTS"\n'
+        'printf "%s\\n" "$*" >> "$UV_ARGS"\n'
+        '[ "$attempt" -ge 3 ]\n'
+    )
+    (fake_bin / "sleep").write_text('#!/bin/sh\nprintf "%s\\n" "$1" >> "$SLEEPS"\n')
+    (fake_bin / "uv").chmod(0o755)
+    (fake_bin / "sleep").chmod(0o755)
+    env = {
+        **os.environ,
+        "ATTEMPTS": str(attempts),
+        "KITARU_INSTALL_RETRY_DELAY": "0",
+        "KITARU_VERSION": "0.22.0rc2",
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "SLEEPS": str(tmp_path / "sleeps"),
+        "UV_ARGS": str(tmp_path / "uv-args"),
+    }
+
+    result = subprocess.run(
+        ["sh", str(REPO_ROOT / "docker" / "install-release-wheel.sh")],
+        env=env,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert result.returncode == 0
+    assert attempts.read_text() == "3\n"
+    assert (tmp_path / "sleeps").read_text() == "0\n0\n"
+    uv_args = (tmp_path / "uv-args").read_text().splitlines()
+    assert len(uv_args) == 3
+    assert all("--refresh-package kitaru" in args for args in uv_args)
+    assert all("kitaru==0.22.0rc2" in args for args in uv_args)
+
+
+def test_release_wheel_install_fails_after_the_attempt_limit(
+    tmp_path: Path,
+) -> None:
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    attempts = tmp_path / "attempts"
+    (fake_bin / "uv").write_text(
+        "#!/bin/sh\n"
+        'attempt=$(($(cat "$ATTEMPTS" 2>/dev/null || echo 0) + 1))\n'
+        'printf "%s\\n" "$attempt" > "$ATTEMPTS"\n'
+        "exit 1\n"
+    )
+    (fake_bin / "sleep").write_text("#!/bin/sh\nexit 0\n")
+    (fake_bin / "uv").chmod(0o755)
+    (fake_bin / "sleep").chmod(0o755)
+    env = {
+        **os.environ,
+        "ATTEMPTS": str(attempts),
+        "KITARU_INSTALL_ATTEMPTS": "3",
+        "KITARU_INSTALL_RETRY_DELAY": "0",
+        "KITARU_VERSION": "0.22.0rc2",
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        ["sh", str(REPO_ROOT / "docker" / "install-release-wheel.sh")],
+        env=env,
+        check=False,
+    )
+
+    assert result.returncode == 1
+    assert attempts.read_text() == "3\n"
 
 
 @pytest.mark.parametrize(
@@ -213,6 +326,25 @@ def test_python_release_workflow_resolves_every_tag_from_the_inventory() -> None
     assert "scripts/release_units.py resolve --tag" in workflow
     assert "scripts/release_ui.py --version" in workflow
     assert "uv version" not in workflow
+    assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
+
+
+def test_python_release_workflow_can_resume_after_partial_publication() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+
+    assert "skip-existing: true" in workflow
+    assert "GH_REPO: ${{ github.repository }}" in workflow
+    assert 'gh release view "$PACKAGE_TAG"' in workflow
+    assert (
+        'gh release upload "$PACKAGE_TAG" package-dist/* evidence/* --clobber'
+        in workflow
+    )
+
+
+def test_python_release_workflow_can_install_a_new_core_release() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+
+    assert '--exclude-newer-package "kitaru=0 days"' in workflow
 
 
 def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:

@@ -49,6 +49,7 @@ ARG KITARU_VERSION
 
 COPY --from=uv /uv /uvx /bin/
 COPY --chown=$USERNAME:$USER_GID pyproject.toml uv.lock ./
+COPY --chown=$USERNAME:$USER_GID docker/install-release-wheel.sh ./
 
 ENV UV_COMPILE_BYTECODE=1 \
   UV_LINK_MODE=copy \
@@ -65,10 +66,7 @@ USER $USERNAME
 RUN test -n "$KITARU_VERSION" && \
   test "$(uv version --short)" = "$KITARU_VERSION" && \
   uv sync --locked --no-dev --no-install-project && \
-  uv pip install \
-    --no-deps \
-    --only-binary=:all: \
-    "kitaru==$KITARU_VERSION" && \
+  sh ./install-release-wheel.sh && \
   uv pip check && \
   python -c "import kitaru" && \
   uv pip freeze > requirements.txt
