@@ -48,6 +48,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version-file: .node-version
+          package-manager-cache: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           python-version: '3.12'
@@ -93,9 +94,9 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
       - run: pnpm run typecheck
-      - run: pnpm run test
+      - run: pnpm run test:built
       - name: Build and test exact package tarballs
-        run: pnpm run pack:release
+        run: pnpm run pack:release:built
       - run: uv sync --frozen --extra server
       - name: Test compiled TypeScript adapters through Worker
         run: uv run pytest -q tests/typescript
@@ -128,8 +129,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: 22.22.3
+          package-manager-cache: false
       - name: Install npm with trusted publishing support
-        run: npm install --global npm@11.17.0
+        run: npm install --global npm@11.17.0  # zizmor: ignore[adhoc-packages] trusted publishing requires this npm version
       - name: Publish exact package tarballs
         env:
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -205,10 +207,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
         with:
           node-version: 22.22.3
+          package-manager-cache: false
       - name: Verify registry installation
         env:
           VERSION: ${{ needs.build.outputs.version }}
-        run: |
+        run: |  # zizmor: ignore[adhoc-packages] verifies the packages just published by this workflow
           set -euo pipefail
           verification_dir="$RUNNER_TEMP/kitaru-npm-verification"
           mkdir "$verification_dir"

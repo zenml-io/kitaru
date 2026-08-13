@@ -1,7 +1,7 @@
 import type { JsonValue, ReplayOverride } from "@zenml-io/kitaru";
 import { parseJsonEnvironment } from "@zenml-io/kitaru/adapter";
 
-export const MAX_WORKER_TASK_INPUT_CHARS = 16_384;
+export const MAX_WORKER_TASK_INPUT_CHARS = 4_096;
 export const MAX_WORKER_TASK_INPUT_JSON_CHARS = 65_536;
 export const MAX_OVERRIDE_JSON_CHARS = 32_768;
 export const MAX_RECORDED_STRING_CHARS = 4_096;
@@ -187,15 +187,25 @@ export function projectRecordedInput(value: unknown): JsonValue {
   const result = cloneJson(value, {
     path: "recorded input",
     redactInput: true,
-    rejectLongStrings: false,
+    rejectLongStrings: true,
   });
   assertJsonSize(result, "recorded input");
   return result;
 }
 
+export function projectRecordedMetadata(value: unknown): JsonValue {
+  const result = cloneJson(value, {
+    path: "recorded metadata",
+    redactInput: true,
+    rejectLongStrings: false,
+  });
+  assertJsonSize(result, "recorded metadata");
+  return result;
+}
+
 export function parseWorkerTaskInput(
   value: string | undefined,
-): string | undefined {
+): string | JsonValue[] | undefined {
   if (value === undefined) {
     return undefined;
   }
@@ -205,15 +215,24 @@ export function parseWorkerTaskInput(
     );
   }
   const parsed = parseJsonEnvironment("KITARU_TASK_INPUTS", value);
-  if (typeof parsed !== "string") {
-    throw new TypeError("KITARU_TASK_INPUTS must contain a JSON string");
+  if (typeof parsed === "string") {
+    if (parsed.length > MAX_WORKER_TASK_INPUT_CHARS) {
+      throw new TypeError(
+        `KITARU_TASK_INPUTS exceeds maximum length ${MAX_WORKER_TASK_INPUT_CHARS}`,
+      );
+    }
+    return parsed;
   }
-  if (parsed.length > MAX_WORKER_TASK_INPUT_CHARS) {
+  if (!Array.isArray(parsed)) {
     throw new TypeError(
-      `KITARU_TASK_INPUTS exceeds maximum length ${MAX_WORKER_TASK_INPUT_CHARS}`,
+      "KITARU_TASK_INPUTS must contain a JSON string or message array",
     );
   }
-  return parsed;
+  const messages = boundedRecorderJson(parsed, "KITARU_TASK_INPUTS");
+  if (!Array.isArray(messages)) {
+    throw new TypeError("KITARU_TASK_INPUTS must contain a message array");
+  }
+  return messages;
 }
 
 function boundedNumber(

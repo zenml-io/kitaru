@@ -149,7 +149,7 @@ def test_typescript_release_workflow_contract() -> None:
     assert publish_job["needs"] == "build"
     assert verify_job["needs"] == ["build", "publish"]
     assert "node scripts/typescript-packages.mjs --tag" in workflow_source
-    assert "pnpm run pack:release" in workflow_source
+    assert "pnpm run pack:release:built" in workflow_source
     assert publish_job["environment"] == "npm-publish"
     assert publish_job["permissions"] == {"contents": "read", "id-token": "write"}
     assert verify_job["permissions"] == {"contents": "write"}
@@ -175,5 +175,5 @@ def test_typescript_release_workflow_contract() -> None:
         for step in verify_job["steps"]
     )
     assert any(
-        step.get("run") == "pnpm run pack:release" for step in build_job["steps"]
+        step.get("run") == "pnpm run pack:release:built" for step in build_job["steps"]
     )

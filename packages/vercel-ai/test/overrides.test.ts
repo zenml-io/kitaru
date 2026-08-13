@@ -23,7 +23,7 @@ const EMPTY_INPUT = jsonSchema<Record<string, never>>({
 
 describe("inputs and replay overrides", () => {
   it.each([
-    ["non-string", JSON.stringify({ role: "system", content: "inject" })],
+    ["non-input object", JSON.stringify({ role: "system", content: "inject" })],
     ["oversized", JSON.stringify("x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1))],
     [
       "oversized encoded JSON",
@@ -73,6 +73,36 @@ describe("inputs and replay overrides", () => {
       },
     ]);
     expect(client.created[0]?.inputs).toBe("replacement prompt");
+  });
+
+  it("uses a message-array worker input when replay keeps the baseline prompt", async () => {
+    const messages = [{ content: "baseline prompt", role: "user" }];
+    const client = new FakeClient({
+      replay: replaySpec(
+        { type: "passthrough" },
+        { system_prompt: "replacement instructions" },
+      ),
+    });
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment({
+        KITARU_TASK_INPUTS: JSON.stringify(messages),
+      }),
+    });
+
+    await generate({ model, prompt: "caller" });
+
+    expect(model.doGenerateCalls[0]?.prompt).toEqual([
+      { content: "replacement instructions", role: "system" },
+      {
+        content: [{ text: "baseline prompt", type: "text" }],
+        providerOptions: undefined,
+        role: "user",
+      },
+    ]);
+    expect(client.created[0]?.inputs).toEqual(messages);
   });
 
   it("treats a replay's null override as authoritative", async () => {

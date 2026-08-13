@@ -94,12 +94,16 @@ function safeResultSummary(result: RuntimeResult): JsonValue {
 function applyOverride(
   options: RuntimeOptions,
   override: SafeReplayOverride | undefined,
-  taskInput: string | undefined,
+  taskInput: string | JsonValue[] | undefined,
 ): void {
-  const effectivePrompt = override?.prompt ?? taskInput;
+  const effectivePrompt =
+    override?.prompt ?? (typeof taskInput === "string" ? taskInput : undefined);
   if (effectivePrompt !== undefined) {
     options.prompt = effectivePrompt;
     delete options.messages;
+  } else if (taskInput !== undefined) {
+    options.messages = taskInput;
+    delete options.prompt;
   }
   if (override?.systemPrompt !== undefined) {
     options.instructions = override.systemPrompt;
@@ -189,10 +193,7 @@ export function createKitaruGenerateText(
     }
 
     const replay = await replayConfiguration({ client, environment });
-    const taskInput =
-      replay.override?.prompt === undefined
-        ? parseWorkerTaskInput(environment.KITARU_TASK_INPUTS)
-        : undefined;
+    const taskInput = parseWorkerTaskInput(environment.KITARU_TASK_INPUTS);
     const effectiveOptions: RuntimeOptions = { ...callerOptions };
     applyOverride(effectiveOptions, replay.override, taskInput);
 

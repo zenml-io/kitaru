@@ -75,25 +75,35 @@ export interface paths {
          */
         get: operations["list_accounts_v1_accounts_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/accounts/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
         /**
-         * Create Account
-         * @description Create an account.
+         * Get Current Account
+         * @description Get the calling account.
          *
-         *     An account created without a password starts inactive and its response
-         *     carries the activation token once.
-         *
-         *     Clients observe HTTP 201 on success, 403 outside the ``local`` auth
-         *     scheme, 409 when the name is already registered, and 422 on invalid input.
+         *     Clients observe HTTP 200 on success.
          *
          *     Args:
-         *         body: Account create request.
-         *         service: Account service.
          *         actor: Caller context.
          *
          *     Returns:
-         *         Created account.
+         *         Calling account.
          */
-        post: operations["create_account_v1_accounts_post"];
+        get: operations["get_current_account_v1_accounts_me_get"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -125,96 +135,6 @@ export interface paths {
         get: operations["get_account_v1_accounts__account_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        /**
-         * Update Account
-         * @description Partially update an account.
-         *
-         *     A password write carries the current password in ``old_password``.
-         *
-         *     Clients observe HTTP 200 on success, 403 when writing a password or the
-         *     admin flag outside the ``local`` auth scheme, when writing another
-         *     account's password or metadata, when changing the calling account's own
-         *     admin flag, when making a service account an admin, and when the
-         *     supplied current password is missing or wrong, 404 when the account does
-         *     not exist, and 422 on invalid input.
-         *
-         *     Args:
-         *         account_id: Id of the account.
-         *         body: Account update request.
-         *         service: Account service.
-         *         actor: Caller context.
-         *         settings: API settings for this process.
-         *
-         *     Returns:
-         *         Updated account.
-         */
-        patch: operations["update_account_v1_accounts__account_id__patch"];
-        trace?: never;
-    };
-    "/v1/accounts/{account_id}/activate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Activate Account
-         * @description Activate an account with its activation token and a new password.
-         *
-         *     The route is unauthenticated, because the account it activates cannot log
-         *     in until it holds a password.
-         *
-         *     Clients observe HTTP 200 on success, 403 when the account has no pending
-         *     token or the token does not match, 404 when the account does not exist,
-         *     and 422 on invalid input.
-         *
-         *     Args:
-         *         account_id: Id of the account.
-         *         body: Account activate request.
-         *         service: Account service.
-         *
-         *     Returns:
-         *         Activated account.
-         */
-        post: operations["activate_account_v1_accounts__account_id__activate_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/accounts/{account_id}/deactivate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Deactivate Account
-         * @description Deactivate an account and return its fresh activation token once.
-         *
-         *     Clients observe HTTP 200 on success, 403 outside the ``local`` auth scheme
-         *     and when deactivating the calling account, and 404 when the account does
-         *     not exist.
-         *
-         *     Args:
-         *         account_id: Id of the account.
-         *         service: Account service.
-         *         actor: Caller context.
-         *
-         *     Returns:
-         *         Deactivated account carrying its activation token.
-         */
-        post: operations["deactivate_account_v1_accounts__account_id__deactivate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -458,16 +378,15 @@ export interface paths {
         put?: never;
         /**
          * Create Annotation
-         * @description Create a manual annotation, or answer an investigation question.
+         * @description Create a manual annotation, or answer an investigation session.
          *
          *     A body carrying session_id creates a manual annotation. A body carrying
-         *     investigation_session_id and question_key answers an investigation
-         *     question, moving a pending investigation to in_progress on its first
-         *     answer.
+         *     investigation_session_id answers an investigation session, moving a
+         *     pending investigation to in_progress on its first answer.
          *
          *     Clients observe HTTP 201 on success, 404 when the session or the
-         *     investigation session does not exist, and 422 when the question key is
-         *     unknown or the selector names a node outside the session.
+         *     investigation session does not exist, and 422 when the selector names a
+         *     node outside the session.
          *
          *     Args:
          *         body: Manual annotation or investigation answer create request.
@@ -2018,11 +1937,11 @@ export interface paths {
         put?: never;
         /**
          * Create Investigation
-         * @description Create an investigation with its questions and linked sessions in one shot.
+         * @description Create an investigation with its linked sessions in one shot.
          *
          *     Clients observe HTTP 201 on success, 404 when the agent does not exist,
          *     and 422 when a linked session id repeats, is missing, or belongs to a
-         *     different agent, or the questions contain a duplicate key.
+         *     different agent.
          *
          *     Args:
          *         body: Investigation create request.
@@ -2081,10 +2000,11 @@ export interface paths {
         head?: never;
         /**
          * Update Investigation
-         * @description Update an investigation's name and description.
+         * @description Update an investigation's name, description, and status.
          *
          *     Clients observe HTTP 200 on success, 404 when no investigation has this
-         *     id, and 422 when the update clears the investigation name.
+         *     id, 409 when the update moves the status backwards, and 422 when the
+         *     update clears the investigation name or status.
          *
          *     Args:
          *         investigation_id: Id of the investigation.
@@ -2144,13 +2064,12 @@ export interface paths {
         options?: never;
         head?: never;
         /**
-         * Update Investigation Session Status
-         * @description Mark a linked session completed or skipped.
+         * Update Investigation Session Verdict
+         * @description Set or clear a linked session's verdict.
          *
-         *     Completes the investigation once no linked session is left pending.
-         *     Clients observe HTTP 200 on success, 404 when no investigation has this
-         *     id or no investigation session links this investigation and session, and
-         *     409 when the linked session is not pending.
+         *     Clients observe HTTP 200 on success and 404 when no investigation has
+         *     this id or no investigation session links this investigation and
+         *     session.
          *
          *     Args:
          *         investigation_id: Id of the investigation.
@@ -2162,7 +2081,7 @@ export interface paths {
          *     Returns:
          *         Updated investigation session.
          */
-        patch: operations["update_investigation_session_status_v1_investigations__investigation_id__sessions__session_id__patch"];
+        patch: operations["update_investigation_session_verdict_v1_investigations__investigation_id__sessions__session_id__patch"];
         trace?: never;
     };
     "/v1/jobs": {
@@ -2591,6 +2510,71 @@ export interface paths {
          *         Updated secret without values.
          */
         patch: operations["update_secret_v1_secrets__secret_id__patch"];
+        trace?: never;
+    };
+    "/v1/service-accounts": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Service Account
+         * @description Create a service account, active without credentials.
+         *
+         *     Clients observe HTTP 201 on success, 403 outside the ``local`` auth
+         *     scheme and when the caller may not create accounts, 409 when the name is
+         *     already registered, and 422 on invalid input.
+         *
+         *     Args:
+         *         body: Service account create request.
+         *         service: Account service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created account.
+         */
+        post: operations["create_service_account_v1_service_accounts_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service-accounts/{account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Service Account
+         * @description Partially update a service account.
+         *
+         *     Clients observe HTTP 200 on success, 403 outside the ``local`` auth
+         *     scheme and when the caller may not update service accounts, 404 when the
+         *     service account does not exist, and 422 on invalid input.
+         *
+         *     Args:
+         *         account_id: Id of the account.
+         *         body: Service account update request.
+         *         service: Account service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Updated account.
+         */
+        patch: operations["update_service_account_v1_service_accounts__account_id__patch"];
         trace?: never;
     };
     "/v1/session-runs": {
@@ -3148,6 +3132,245 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Experiment Run Evaluation Aggregates
+         * @description Aggregate the evaluations of an experiment run's replays.
+         *
+         *     Baseline and result sessions are aggregated separately, and each
+         *     aggregate carries the per-replay evaluation values of the 50 most
+         *     recent replays. Clients observe HTTP 200 on success and 404 when no
+         *     experiment run has this id.
+         *
+         *     Args:
+         *         experiment_run_id: Id of the experiment run.
+         *         run_service: Experiment run service.
+         *         replay_service: Replay service.
+         *         evaluation_service: Evaluation service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         One aggregate per evaluation name and data type pair, sorted by
+         *         name.
+         */
+        get: operations["list_experiment_run_evaluation_aggregates_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ui/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sessions With Evaluations
+         * @description List sessions, each with every evaluation of the session.
+         *
+         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     parameters.
+         *
+         *     Args:
+         *         session_service: Session service.
+         *         evaluation_service: Evaluation service.
+         *         actor: Caller context.
+         *         params: Session list params.
+         *
+         *     Returns:
+         *         Page of sessions with their evaluations.
+         */
+        get: operations["list_sessions_with_evaluations_v1_ui_sessions_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/ui/sessions/{session_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Session With Evaluations
+         * @description Get a session by id, with every evaluation of the session.
+         *
+         *     Clients observe HTTP 200 on success and 404 when no session has this
+         *     id.
+         *
+         *     Args:
+         *         session_id: Id of the session.
+         *         session_service: Session service.
+         *         evaluation_service: Evaluation service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Stored session with its evaluations.
+         */
+        get: operations["get_session_with_evaluations_v1_ui_sessions__session_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create User
+         * @description Create a user.
+         *
+         *     A user created without a password starts inactive and its response
+         *     carries the activation token once.
+         *
+         *     Clients observe HTTP 201 on success, 403 outside the ``local`` auth
+         *     scheme, 409 when the name is already registered, and 422 on invalid input.
+         *
+         *     Args:
+         *         body: User create request.
+         *         service: Account service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Created account.
+         */
+        post: operations["create_user_v1_users_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{account_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update User
+         * @description Partially update a user.
+         *
+         *     A password write carries the current password in ``old_password``.
+         *
+         *     Clients observe HTTP 200 on success, 403 when writing a password or the
+         *     admin flag outside the ``local`` auth scheme, when writing another
+         *     account's password or metadata, when changing the calling account's own
+         *     admin flag, and when the supplied current password is missing or wrong,
+         *     404 when the user does not exist, and 422 on invalid input.
+         *
+         *     Args:
+         *         account_id: Id of the account.
+         *         body: User update request.
+         *         service: Account service.
+         *         actor: Caller context.
+         *         settings: API settings for this process.
+         *
+         *     Returns:
+         *         Updated account.
+         */
+        patch: operations["update_user_v1_users__account_id__patch"];
+        trace?: never;
+    };
+    "/v1/users/{account_id}/activate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Activate User
+         * @description Activate a user with its activation token and a new password.
+         *
+         *     The route is unauthenticated, because the account it activates cannot log
+         *     in until it holds a password.
+         *
+         *     Clients observe HTTP 200 on success, 403 when the account has no pending
+         *     token or the token does not match, 404 when the user does not exist, and
+         *     422 on invalid input.
+         *
+         *     Args:
+         *         account_id: Id of the account.
+         *         body: User activate request.
+         *         service: Account service.
+         *
+         *     Returns:
+         *         Activated account.
+         */
+        post: operations["activate_user_v1_users__account_id__activate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/users/{account_id}/deactivate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Deactivate User
+         * @description Deactivate a user and return its fresh activation token once.
+         *
+         *     Clients observe HTTP 200 on success, 403 outside the ``local`` auth scheme
+         *     and when deactivating the calling account, and 404 when the user does not
+         *     exist.
+         *
+         *     Args:
+         *         account_id: Id of the account.
+         *         service: Account service.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Deactivated account carrying its activation token.
+         */
+        post: operations["deactivate_user_v1_users__account_id__deactivate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workers": {
         parameters: {
             query?: never;
@@ -3280,110 +3503,6 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
-         * AccountActivateRequest
-         * @description Account activate request.
-         */
-        AccountActivateRequest: {
-            /**
-             * Activation Token
-             * @description Activation token.
-             */
-            activation_token: string;
-            /**
-             * Password
-             * @description Login password to set.
-             */
-            password: string;
-        };
-        /**
-         * AccountActivationTokenResponse
-         * @description Account response carrying a newly minted activation token.
-         */
-        AccountActivationTokenResponse: {
-            /**
-             * Activation Token
-             * @description Plaintext token, shown once.
-             */
-            activation_token: string;
-            /**
-             * Active
-             * @description Whether the account can authenticate.
-             */
-            active: boolean;
-            /**
-             * Created
-             * Format: date-time
-             * @description Creation time.
-             */
-            created: string;
-            /**
-             * Email
-             * @description Contact email.
-             */
-            email: string | null;
-            /**
-             * Id
-             * Format: uuid
-             * @description Account id.
-             */
-            id: string;
-            /**
-             * Is Admin
-             * @description Whether the account has admin rights.
-             */
-            is_admin: boolean;
-            /**
-             * Is Service Account
-             * @description Whether this is a service account.
-             */
-            is_service_account: boolean;
-            /**
-             * Metadata
-             * @description Arbitrary metadata.
-             */
-            metadata: {
-                [key: string]: unknown;
-            };
-            /**
-             * Name
-             * @description Account name.
-             */
-            name: string;
-            /**
-             * Updated
-             * Format: date-time
-             * @description Last modification time.
-             */
-            updated: string;
-        };
-        /**
-         * AccountCreateRequest
-         * @description Account create request.
-         */
-        AccountCreateRequest: {
-            /**
-             * Email
-             * @description Contact email.
-             */
-            email?: string | null;
-            /**
-             * Is Admin
-             * @description Whether the account has admin rights.
-             * @default false
-             */
-            is_admin: boolean;
-            /**
-             * Name
-             * @description Account name.
-             */
-            name: string;
-            /**
-             * Password
-             * @description Login password.
-             */
-            password?: string | null;
-        };
-        /**
          * AccountResponse
          * @description Account response.
          */
@@ -3438,34 +3557,6 @@ export interface components {
              * @description Last modification time.
              */
             updated: string;
-        };
-        /**
-         * AccountUpdateRequest
-         * @description Account update request.
-         */
-        AccountUpdateRequest: {
-            /**
-             * Is Admin
-             * @description New admin rights state.
-             */
-            is_admin?: boolean | null;
-            /**
-             * Metadata
-             * @description New metadata.
-             */
-            metadata?: {
-                [key: string]: unknown;
-            } | null;
-            /**
-             * Old Password
-             * @description Current login password.
-             */
-            old_password?: string | null;
-            /**
-             * Password
-             * @description New login password.
-             */
-            password?: string | null;
         };
         /**
          * AgentCapabilities
@@ -3754,22 +3845,14 @@ export interface components {
              * @description Targeted node.
              */
             node_id?: string | null;
-            /** @description Payload of the node targeted. */
-            part?: components["schemas"]["AnnotationSelectorPart"] | null;
             /**
              * Path
-             * @description RFC 6901 JSON Pointer within the targeted payload.
+             * @description RFC 6901 JSON Pointer into the targeted node or the session response.
              */
             path?: string | null;
             /** @description Character range within the resolved string. */
             span?: components["schemas"]["AnnotationSpan"] | null;
         };
-        /**
-         * AnnotationSelectorPart
-         * @description Payload of a session node an annotation selector targets.
-         * @enum {string}
-         */
-        AnnotationSelectorPart: "input" | "output" | "error" | "metadata" | "attributes" | "model_params";
         /**
          * AnnotationSpan
          * @description Annotation span.
@@ -4355,6 +4438,28 @@ export interface components {
             user_code: string;
         };
         /**
+         * EvaluationAggregateResponse
+         * @description Evaluation aggregate response.
+         */
+        EvaluationAggregateResponse: {
+            /** @description Stats over the baseline sessions. */
+            baseline: components["schemas"]["EvaluationStats"];
+            /** @description Evaluation data type. */
+            data_type: components["schemas"]["EvaluationDataType"];
+            /**
+             * Name
+             * @description Evaluation name.
+             */
+            name: string;
+            /**
+             * Replays
+             * @description Evaluation values of the 50 most recent replays, oldest first.
+             */
+            replays: components["schemas"]["ReplayEvaluationValues"][];
+            /** @description Stats over the result sessions. */
+            result: components["schemas"]["EvaluationStats"];
+        };
+        /**
          * EvaluationBatchCreateRequest
          * @description Evaluation batch create request.
          */
@@ -4491,6 +4596,34 @@ export interface components {
             value?: string | null;
         };
         /**
+         * EvaluationStats
+         * @description Evaluation stats.
+         */
+        EvaluationStats: {
+            /**
+             * Average
+             * @description Mean score of float evaluations, share of true results of bool evaluations, null for other data types.
+             */
+            average?: number | null;
+            /**
+             * Count
+             * @description Number of aggregated evaluations.
+             */
+            count: number;
+            /**
+             * Pass Rate
+             * @description Share of passed evaluations among those carrying a passed flag, null when none do.
+             */
+            pass_rate?: number | null;
+            /**
+             * Value Counts
+             * @description Occurrences per value, only for categorical evaluations.
+             */
+            value_counts?: {
+                [key: string]: number;
+            } | null;
+        };
+        /**
          * EvaluationTaskDetails
          * @description Evaluation task details.
          */
@@ -4523,6 +4656,27 @@ export interface components {
              * @description Evaluator plugin to load.
              */
             plugin: components["schemas"]["ScriptPluginSpec"] | components["schemas"]["PackagePluginSpec"];
+        };
+        /**
+         * EvaluationValue
+         * @description Evaluation value.
+         */
+        EvaluationValue: {
+            /**
+             * Passed
+             * @description Pass or fail verdict.
+             */
+            passed?: boolean | null;
+            /**
+             * Score
+             * @description Numeric or boolean score.
+             */
+            score?: number | boolean | null;
+            /**
+             * Value
+             * @description Label or string value.
+             */
+            value?: string | null;
         };
         /**
          * EvaluatorConfig
@@ -5341,11 +5495,6 @@ export interface components {
              */
             name: string;
             /**
-             * Questions
-             * @description Questions asked about each session.
-             */
-            questions: components["schemas"]["QuestionItem"][];
-            /**
              * Sessions
              * @description Sessions to investigate, in presentation order.
              */
@@ -5364,7 +5513,7 @@ export interface components {
             agent_id: string;
             /**
              * Completed Sessions
-             * @description Number of linked sessions marked completed or skipped.
+             * @description Number of linked sessions with a verdict.
              */
             completed_sessions: number;
             /**
@@ -5408,11 +5557,6 @@ export interface components {
              */
             owner_id: string;
             /**
-             * Questions
-             * @description Questions asked about each session.
-             */
-            questions: components["schemas"]["QuestionItem"][];
-            /**
              * Started At
              * @description Time the first answer was recorded.
              */
@@ -5431,18 +5575,55 @@ export interface components {
             updated: string;
         };
         /**
+         * InvestigationSessionHighlight
+         * @description Investigation session highlight.
+         */
+        InvestigationSessionHighlight: {
+            /**
+             * Description
+             * @description Prose explaining what the highlight shows.
+             */
+            description: string;
+            /** @description Part of the session highlighted. */
+            selector: components["schemas"]["AnnotationSelector"];
+        };
+        /**
          * InvestigationSessionInput
          * @description Investigation session input.
          */
         InvestigationSessionInput: {
+            /**
+             * Questions
+             * @description Questions to answer about the session.
+             */
+            questions: components["schemas"]["InvestigationSessionQuestion"][];
             /**
              * Session Id
              * Format: uuid
              * @description Session to link.
              */
             session_id: string;
-            /** @description Curated session view. */
-            view?: components["schemas"]["InvestigationSessionView"] | null;
+        };
+        /**
+         * InvestigationSessionQuestion
+         * @description Investigation session question.
+         */
+        InvestigationSessionQuestion: {
+            /**
+             * Highlights
+             * @description Curated highlights for the question.
+             */
+            highlights?: components["schemas"]["InvestigationSessionHighlight"][];
+            /**
+             * Key
+             * @description Question key, unique within the session.
+             */
+            key: string;
+            /**
+             * Question
+             * @description Question to answer about the session.
+             */
+            question: string;
         };
         /**
          * InvestigationSessionResponse
@@ -5473,78 +5654,39 @@ export interface components {
              */
             position: number;
             /**
+             * Questions
+             * @description Questions to answer about the session.
+             */
+            questions: components["schemas"]["InvestigationSessionQuestion"][];
+            /**
              * Session Id
              * Format: uuid
              * @description Session being investigated.
              */
             session_id: string;
-            status: components["schemas"]["InvestigationSessionStatus"];
             /**
              * Updated
              * Format: date-time
              * @description Last modification time.
              */
             updated: string;
-            /** @description Curated session view. */
-            view: components["schemas"]["InvestigationSessionView"] | null;
+            /** @description Investigation session verdict. */
+            verdict: components["schemas"]["InvestigationSessionVerdict"] | null;
         };
-        /**
-         * InvestigationSessionStatus
-         * @description Investigation session status.
-         * @enum {string}
-         */
-        InvestigationSessionStatus: "pending" | "completed" | "skipped";
         /**
          * InvestigationSessionUpdateRequest
          * @description Investigation session update request.
          */
         InvestigationSessionUpdateRequest: {
-            /** @description New investigation session status. */
-            status: components["schemas"]["InvestigationSessionStatus"];
+            /** @description New investigation session verdict, None clears it. */
+            verdict: components["schemas"]["InvestigationSessionVerdict"] | null;
         };
         /**
-         * InvestigationSessionView
-         * @description Investigation session view.
+         * InvestigationSessionVerdict
+         * @description Investigation session verdict.
+         * @enum {string}
          */
-        InvestigationSessionView: {
-            /**
-             * Items
-             * @description Curated findings for the session.
-             */
-            items?: components["schemas"]["InvestigationSessionViewItem"][];
-            /**
-             * Summary
-             * @description Summary shown above the trace.
-             */
-            summary: string;
-            /**
-             * Version
-             * @description Format version.
-             * @default 1
-             */
-            version: number;
-        };
-        /**
-         * InvestigationSessionViewItem
-         * @description Investigation session view item.
-         */
-        InvestigationSessionViewItem: {
-            /**
-             * Description
-             * @description Prose explaining what the curator saw.
-             */
-            description: string;
-            /**
-             * Label
-             * @description Short title for the item.
-             */
-            label: string;
-            /**
-             * Selectors
-             * @description References the item covers.
-             */
-            selectors?: components["schemas"]["AnnotationSelector"][];
-        };
+        InvestigationSessionVerdict: "acceptable" | "problematic" | "uncertain";
         /**
          * InvestigationStatus
          * @description Investigation status.
@@ -5566,6 +5708,8 @@ export interface components {
              * @description New investigation name.
              */
             name?: string | null;
+            /** @description New investigation status. */
+            status?: components["schemas"]["InvestigationStatus"] | null;
         };
         /**
          * JobKind
@@ -6056,6 +6200,19 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** Page[SessionWithEvaluationsResponse] */
+        Page_SessionWithEvaluationsResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["SessionWithEvaluationsResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
         /** Page[TagResponse] */
         Page_TagResponse_: {
             /**
@@ -6124,22 +6281,6 @@ export interface components {
             sha256: string;
         };
         /**
-         * QuestionItem
-         * @description Question item.
-         */
-        QuestionItem: {
-            /**
-             * Key
-             * @description Key identifying the question within the array.
-             */
-            key: string;
-            /**
-             * Question
-             * @description Question display text.
-             */
-            question: string;
-        };
-        /**
          * ReplayCreateRequest
          * @description Replay create request.
          */
@@ -6170,6 +6311,22 @@ export interface components {
             override?: components["schemas"]["ReplayOverride"] | null;
             /** @description Tool policy to apply. */
             tool_policy?: components["schemas"]["ToolPolicy"] | null;
+        };
+        /**
+         * ReplayEvaluationValues
+         * @description Replay evaluation values.
+         */
+        ReplayEvaluationValues: {
+            /** @description Value from the baseline session. */
+            baseline?: components["schemas"]["EvaluationValue"] | null;
+            /**
+             * Replay Id
+             * Format: uuid
+             * @description Replay id.
+             */
+            replay_id: string;
+            /** @description Value from the result session. */
+            result?: components["schemas"]["EvaluationValue"] | null;
         };
         /**
          * ReplayOverride
@@ -6516,6 +6673,40 @@ export interface components {
              * @description Kitaru version the server runs.
              */
             version: string;
+        };
+        /**
+         * ServiceAccountCreateRequest
+         * @description Service account create request.
+         */
+        ServiceAccountCreateRequest: {
+            /**
+             * Email
+             * @description Contact email.
+             */
+            email?: string | null;
+            /**
+             * Name
+             * @description Account name.
+             */
+            name: string;
+        };
+        /**
+         * ServiceAccountUpdateRequest
+         * @description Service account update request.
+         */
+        ServiceAccountUpdateRequest: {
+            /**
+             * Active
+             * @description New active state.
+             */
+            active?: boolean | null;
+            /**
+             * Metadata
+             * @description New metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
         };
         /**
          * SessionCreateRequest
@@ -7113,6 +7304,19 @@ export interface components {
             status?: components["schemas"]["SessionStatus"] | null;
         };
         /**
+         * SessionWithEvaluationsResponse
+         * @description Session with evaluations response.
+         */
+        SessionWithEvaluationsResponse: {
+            /**
+             * Evaluations
+             * @description Every evaluation of the session, newest first.
+             */
+            evaluations: components["schemas"]["EvaluationResponse"][];
+            /** @description Session. */
+            session: components["schemas"]["SessionResponse"];
+        };
+        /**
          * SessionWithNodesResponse
          * @description Session with nodes response.
          */
@@ -7663,6 +7867,138 @@ export interface components {
          * @enum {string}
          */
         ToolPolicyOnMiss: "fail" | "passthrough" | "error_result";
+        /**
+         * UserActivateRequest
+         * @description User activate request.
+         */
+        UserActivateRequest: {
+            /**
+             * Activation Token
+             * @description Activation token.
+             */
+            activation_token: string;
+            /**
+             * Password
+             * @description Login password to set.
+             */
+            password: string;
+        };
+        /**
+         * UserActivationTokenResponse
+         * @description User response carrying a newly minted activation token.
+         */
+        UserActivationTokenResponse: {
+            /**
+             * Activation Token
+             * @description Plaintext token, shown once.
+             */
+            activation_token: string;
+            /**
+             * Active
+             * @description Whether the account can authenticate.
+             */
+            active: boolean;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Email
+             * @description Contact email.
+             */
+            email: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Account id.
+             */
+            id: string;
+            /**
+             * Is Admin
+             * @description Whether the account has admin rights.
+             */
+            is_admin: boolean;
+            /**
+             * Is Service Account
+             * @description Whether this is a service account.
+             */
+            is_service_account: boolean;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Account name.
+             */
+            name: string;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * UserCreateRequest
+         * @description User create request.
+         */
+        UserCreateRequest: {
+            /**
+             * Email
+             * @description Contact email.
+             */
+            email?: string | null;
+            /**
+             * Is Admin
+             * @description Whether the account has admin rights.
+             * @default false
+             */
+            is_admin: boolean;
+            /**
+             * Name
+             * @description Account name.
+             */
+            name: string;
+            /**
+             * Password
+             * @description Login password.
+             */
+            password?: string | null;
+        };
+        /**
+         * UserUpdateRequest
+         * @description User update request.
+         */
+        UserUpdateRequest: {
+            /**
+             * Is Admin
+             * @description New admin rights state.
+             */
+            is_admin?: boolean | null;
+            /**
+             * Metadata
+             * @description New metadata.
+             */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Old Password
+             * @description Current login password.
+             */
+            old_password?: string | null;
+            /**
+             * Password
+             * @description New login password.
+             */
+            password?: string | null;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -7955,35 +8291,22 @@ export interface operations {
             };
         };
     };
-    create_account_v1_accounts_post: {
+    get_current_account_v1_accounts_me_get: {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountCreateRequest"];
-            };
-        };
+        requestBody?: never;
         responses: {
             /** @description Successful Response */
-            201: {
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["AccountResponse"] | components["schemas"]["AccountActivationTokenResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/json": components["schemas"]["AccountResponse"];
                 };
             };
         };
@@ -8006,107 +8329,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    update_account_v1_accounts__account_id__patch: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                account_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountUpdateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    activate_account_v1_accounts__account_id__activate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                account_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["AccountActivateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    deactivate_account_v1_accounts__account_id__deactivate_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                account_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["AccountActivationTokenResponse"];
                 };
             };
             /** @description Validation Error */
@@ -10825,7 +11047,7 @@ export interface operations {
             };
         };
     };
-    update_investigation_session_status_v1_investigations__investigation_id__sessions__session_id__patch: {
+    update_investigation_session_verdict_v1_investigations__investigation_id__sessions__session_id__patch: {
         parameters: {
             query?: never;
             header?: never;
@@ -11382,6 +11604,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SecretResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_service_account_v1_service_accounts_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServiceAccountCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_service_account_v1_service_accounts__account_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ServiceAccountUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12089,6 +12379,240 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["TaskSpecResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_experiment_run_evaluation_aggregates_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                experiment_run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EvaluationAggregateResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_sessions_with_evaluations_v1_ui_sessions_get: {
+        parameters: {
+            query?: {
+                /** @description Cursor from the previous page. */
+                cursor?: string | null;
+                /** @description Items per page. */
+                size?: number;
+                /** @description Sort field and direction, as field:asc or field:desc. */
+                sort?: string;
+                /** @description Filter expression, JSON-encoded in the query string. */
+                filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Page_SessionWithEvaluationsResponse_"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_session_with_evaluations_v1_ui_sessions__session_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionWithEvaluationsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_user_v1_users_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"] | components["schemas"]["UserActivationTokenResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_user_v1_users__account_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    activate_user_v1_users__account_id__activate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UserActivateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccountResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    deactivate_user_v1_users__account_id__deactivate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                account_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UserActivationTokenResponse"];
                 };
             };
             /** @description Validation Error */

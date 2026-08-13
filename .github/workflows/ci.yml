@@ -70,8 +70,8 @@ jobs:
       - run: pnpm run generate:check
       - run: pnpm run lint
       - run: pnpm run typecheck
-      - run: pnpm run test
-      - run: pnpm run pack:check
+      - run: pnpm run test:built
+      - run: pnpm run pack:check:built
       - run: uv sync --frozen --extra server
       - name: Test compiled TypeScript adapters through Worker
         run: uv run pytest -q tests/typescript

@@ -12,8 +12,11 @@
     "generate:check": "pnpm --filter @zenml-io/kitaru generate:check",
     "lint": "pnpm --filter @zenml-io/kitaru lint && pnpm --filter @zenml-io/kitaru-mastra lint && pnpm --filter @zenml-io/kitaru-vercel-ai lint && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage lint && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage lint",
     "pack:check": "pnpm run build && node scripts/smoke-typescript-packages.mjs",
+    "pack:check:built": "node scripts/smoke-typescript-packages.mjs",
     "pack:release": "pnpm run build:packages && node scripts/smoke-typescript-packages.mjs --output-dir typescript-dist",
+    "pack:release:built": "node scripts/smoke-typescript-packages.mjs --output-dir typescript-dist",
     "test": "pnpm --filter @zenml-io/kitaru test && pnpm --filter @zenml-io/kitaru build && pnpm --filter @zenml-io/kitaru-mastra test && pnpm --filter @zenml-io/kitaru-vercel-ai test",
+    "test:built": "pnpm --filter @zenml-io/kitaru test && pnpm --filter @zenml-io/kitaru-mastra test && pnpm --filter @zenml-io/kitaru-vercel-ai test",
     "typecheck": "pnpm --filter @zenml-io/kitaru typecheck && pnpm --filter @zenml-io/kitaru build && pnpm --filter @zenml-io/kitaru-mastra typecheck && pnpm --filter @zenml-io/kitaru-mastra build && pnpm --filter @zenml-io/kitaru-vercel-ai typecheck && pnpm --filter @zenml-io/kitaru-vercel-ai build && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage typecheck && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage typecheck"
   },
   "devDependencies": {

@@ -2,7 +2,12 @@ import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
 import { createKitaruGenerateText } from "../src/index.js";
-import { projectRecordedInput } from "../src/options.js";
+import {
+  MAX_RECORDED_STRING_CHARS,
+  MAX_WORKER_TASK_INPUT_CHARS,
+  projectRecordedInput,
+  projectRecordedMetadata,
+} from "../src/options.js";
 import { AGENT_ID, FakeClient, textResponse } from "./helpers.js";
 
 describe("recording privacy", () => {
@@ -21,6 +26,16 @@ describe("recording privacy", () => {
     expect(serialized).toContain("kept");
     expect(serialized).not.toContain("FILE_SENTINEL");
     expect(serialized).not.toContain("URL_SENTINEL");
+    expect(serialized).not.toContain("PROVIDER_SENTINEL");
+  });
+
+  it("bounds metadata without making it part of the replay contract", () => {
+    const projected = projectRecordedMetadata({
+      detail: "x".repeat(MAX_RECORDED_STRING_CHARS + 1),
+      secret: "PROVIDER_SENTINEL",
+    });
+    const serialized = JSON.stringify(projected);
+    expect(serialized).toContain("[truncated]");
     expect(serialized).not.toContain("PROVIDER_SENTINEL");
   });
 
@@ -60,5 +75,24 @@ describe("recording privacy", () => {
       .flatMap((batch) => batch.nodes)
       .find((node) => node.node_type === "llm_call");
     expect(llmNode?.inputs).toBeNull();
+  });
+
+  it("rejects a lossy recorded input before model execution", async () => {
+    const client = new FakeClient();
+    const model = new MockLanguageModelV4({ doGenerate: textResponse() });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+
+    await expect(
+      generate({
+        model,
+        prompt: "x".repeat(MAX_WORKER_TASK_INPUT_CHARS + 1),
+      }),
+    ).rejects.toThrow("recorded input exceeds maximum string length");
+    expect(client.created).toHaveLength(0);
+    expect(model.doGenerateCalls).toHaveLength(0);
   });
 });

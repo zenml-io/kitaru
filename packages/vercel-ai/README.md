@@ -30,7 +30,7 @@ History matching is guaranteed only for traces recorded and replayed through thi
 
 ## Data boundary
 
-`KITARU_TASK_INPUTS` must contain a JSON string of at most 16,384 characters. Replay prompt and instruction overrides must also be bounded strings. The adapter records bounded tool values, model settings, usage, response metadata, and result summaries. It never records provider request data and sets LLM-node inputs to `null`. Even so, tool values and result summaries can contain application data. Do not put secrets or unnecessary personal data in recorded values; neither this adapter nor the shared package performs semantic redaction.
+`KITARU_TASK_INPUTS` must contain a JSON prompt string or message array. Prompt strings and strings inside recorded inputs are limited to 4,096 characters. Replay prompt and instruction overrides must also be bounded strings. The adapter records bounded tool values, model settings, usage, response metadata, and result summaries. It never records provider request data and sets LLM-node inputs to `null`. Even so, tool values and result summaries can contain application data. Do not put secrets or unnecessary personal data in recorded values; neither this adapter nor the shared package performs semantic redaction.
 
 ## Current scope
 

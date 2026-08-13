@@ -6,7 +6,7 @@ import {
 } from "@zenml-io/kitaru/adapter";
 import type { ContentPart, StepResult, ToolSet } from "ai";
 
-import { boundedRecorderJson, projectRecordedInput } from "./options.js";
+import { boundedRecorderJson, projectRecordedMetadata } from "./options.js";
 
 function usageTokens(
   usage: StepResult<ToolSet>["usage"],
@@ -91,7 +91,7 @@ export async function recordVercelStep(
   await recordNormalizedStep(state, {
     attributes: {
       finish_reason: step.finishReason,
-      provider_metadata: projectRecordedInput(step.providerMetadata),
+      provider_metadata: projectRecordedMetadata(step.providerMetadata),
     },
     cost: null,
     externalId: step.response.id,
