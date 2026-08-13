@@ -292,30 +292,64 @@ but **not yet written**.
   extras. Added the `otel` extra (OTLP export + FastAPI/httpx/SQLAlchemy
   instrumentation, `server/api/otel.py`), which we had never documented.
 
+### Merge reconciliation (Aug 13)
+
+`develop@6ab4881c` (Kitaru **0.22.0rc0**, adapters **0.1.0rc0**) merged
+in. Code/tests/examples resolved to develop; `docs/book` and README
+resolved to us. The 15 v1-layout pages develop still edits stayed
+deleted. Two develop pages kept and registered in `toc.md`:
+`guides/importing-sessions.md` and `guides/deterministic-evaluations.md`
+— the Aug 7 "reconcile or port at merge" item, now done. **Open:**
+`importing-sessions.md` overlaps our `import-langfuse-traces.md`; the
+split wants a deliberate decision before publish.
+
+### Written this pass (Aug 13)
+
+- **Investigations corrected against code** — the page's model was
+  wrong, not just stale. Questions hang off *linked sessions*, not the
+  investigation (`InvestigationSessionInput.questions`, keys unique per
+  session); highlights attach to a *question* (`selector` + prose
+  `description`); and complete/skipped is gone — sessions settle with an
+  optional **verdict** (`acceptable` / `problematic` / `uncertain`),
+  with `completed_sessions` counting sessions that have one. The
+  investigation's own `status` (`pending` / `in_progress` / `completed`)
+  is a separate axis. CLI corrected to
+  `--session-question SESSION:KEY=QUESTION`,
+  `--session-highlights SESSION:KEY=JSON_ARRAY`, and
+  `kitaru investigation session verdict INVESTIGATION SESSION VERDICT`.
+- **`AnnotationSelector.part` removed (#704)** — the annotations section
+  described a "payload part" that no longer exists. Selector is now
+  `node_id` + `path` (RFC 6901) + `span`, and `span` requires a `path`.
+- **Agent skills documented (#682)** — the Aug 7 "if it ships" item
+  shipped. `agent-native/mcp-server.md` gained a skills section as
+  planned, rather than restoring develop's v1-flavoured
+  `claude-code-skill.md`. Verified: `npx skills add
+  zenml-io/kitaru-skills`, discovery across project/user locations and
+  the Claude marketplace, surfaced in bare-`kitaru` root help and under
+  a `skills` key in machine output.
+- **MCP surface re-verified** — the 11 tool names in our page match
+  `mcp/registry.py` exactly. No drift.
+- **#725 needed no doc change** — `ReplayOverride` already documented
+  `model` / `system_prompt` / `prompt` / `model_params` as four
+  independent knobs. The fix made the code match what we already said.
+
 ### Logged, not yet written
 
-- **Investigations moved under sessions (#713, #716, #726)** — session
-  `status` replaced by an optional **verdict**; questions moved to
-  sessions and gained **highlights** and question **lists**.
-  `concepts/investigations.md` mentions none of `verdict`, `highlights`,
-  or the list surface — its question model predates all three and is now
-  wrong, not merely incomplete. Highest-priority gap.
 - **Service accounts (#705)** — new noun, account endpoints split.
-  `deploy/authentication.md` covers API keys and rotation only.
+  `deploy/authentication.md` covers API keys and rotation only. Biggest
+  remaining gap now that investigations are done.
 - **Namespaced evaluator names in `EvaluatorConfig` (#701)** — check the
   evaluators concept page still matches the accepted forms.
-- **Replay system-prompt overrides are independent of prompt overrides
-  (#725)** — `guides/replay-and-overrides.md` describes them as one
-  mechanism.
 - **Experiment-run session filtering (#727)** and **UI aggregate
   endpoints (#717, #720)** — check `concepts/experiments.md`.
 - **PydanticAI cost tracking (#714)** — `CostCalculator` and
-  `PydanticAIUsageSummary` are exported from `kitaru_pydantic_ai`; the
-  adapter page mentions cost only in passing.
-- **`AnnotationSelector.part` removed (#704)** — grep docs for `part`
-  before publish.
-- **Python package and bundle releases (#724)** — may change the
-  install story again; re-verify before publish.
+  `PydanticAIUsageSummary` are now public exports of
+  `kitaru_pydantic_ai`. The adapter page covers cost and session rollups
+  in prose, which is accurate; decide whether the pricing surface earns
+  its own section or stays an SDK-reference detail.
+- **Python package and bundle releases (#724)** — version is now
+  `0.22.0rc0` and the adapters `0.1.0rc0`. The install story held this
+  pass, but re-verify at the final tag.
 
 ## Claims that need verification before publish
 

@@ -15,33 +15,54 @@ reviewer concluded, and where in the trace they saw it.
 
 An investigation belongs to one agent and carries:
 
-* **Questions** — what the reviewer should answer for each session, as
-  `key` + display text ("Was the refund justified?",
-  "Did the agent verify the order first?").
-* **Linked sessions** — the runs under review. Each link can carry a
-  curated **view**: a summary plus labeled items whose selectors point
-  at the exact places in the trace worth looking at, so the reviewer
-  starts where the curator left off.
-* **Progress** — each linked session is worked through and marked
-  **complete** or **skipped**; the investigation tracks
-  `completed_sessions` against `total_sessions`.
+* **Linked sessions** — the runs under review, each with a `position`
+  that fixes the order the reviewer works through them in.
+* **Questions, per session** — questions hang off each linked session,
+  not off the investigation, so one review can ask different things of
+  different runs. Each is a `key` (unique within that session) plus the
+  display text: `refund_justified="Was the refund justified?"`.
+* **Highlights, per question** — a question can carry highlights that
+  point the reviewer at the exact place in the trace it is about. Each
+  highlight is a **selector** plus a prose `description`, so the reviewer
+  starts where the curator left off instead of re-reading the run.
+* **A verdict, per session** — the reviewer settles each linked session
+  as `acceptable`, `problematic`, or `uncertain`. The verdict is
+  optional until then, and the investigation tracks `completed_sessions`
+  (linked sessions that have one) against `total_sessions`. The
+  investigation's own `status` is separate: `pending`, `in_progress`, or
+  `completed`.
 
 ```bash
 kitaru investigation create refund-complaints --agent support-agent \
   --description "Week-32 refund complaints from the support queue" \
-  --question refund_justified="Was the refund justified?" \
-  --session <id> --session <id>
+  --session <session-id> \
+  --session-question <session-id>:refund_justified="Was the refund justified?"
 
 kitaru investigation session list refund-complaints
-kitaru investigation session complete <investigation-session-id>
+kitaru investigation session verdict <investigation-id> <session-id> problematic
+```
+
+Questions and highlights are addressed by `SESSION:KEY`, and every key
+must name a session you also passed with `--session`. Highlights take a
+JSON array so a selector can be given exactly:
+
+```bash
+kitaru investigation create refund-complaints --agent support-agent \
+  --session <session-id> \
+  --session-question <session-id>:tone="Did the tone stay professional?" \
+  --session-highlights <session-id>:tone='[{"selector": {"node_id": "<node-id>"}, "description": "Reply after the refund was refused"}]'
 ```
 
 ## Annotations: answers with an address
 
 Every answer is an **annotation**: a JSON value attached to a session —
-optionally pinned, through a **selector**, to a specific node, a payload
-part, a JSON pointer within it, even a character range. "The tone turned
-hostile *here*" is recordable, not a vibe in a meeting.
+optionally pinned, through a **selector**, to a specific node
+(`node_id`), an RFC 6901 JSON pointer into it or the session response
+(`path`), and a character range within the resolved string (`span`,
+which requires a `path`). "The tone turned hostile *here*" is
+recordable, not a vibe in a meeting. Highlights on an investigation
+question use the same selector, so a curator points at evidence exactly
+the way a reviewer annotates it.
 
 Annotations come from two places:
 
