@@ -129,7 +129,8 @@ jobs:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
-    environment: pypi
+    environment:
+      name: pypi-${{ needs.build.outputs.distribution }}
     permissions:
       contents: write
       id-token: write

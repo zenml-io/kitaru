@@ -230,6 +230,7 @@ def test_python_release_workflow_resolves_every_tag_from_the_inventory() -> None
     assert "scripts/release_units.py resolve --tag" in workflow
     assert "scripts/release_ui.py --version" in workflow
     assert "uv version" not in workflow
+    assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
 
 
 def test_python_release_workflow_can_resume_after_partial_publication() -> None:
