@@ -21,22 +21,28 @@ replaying are two modes of one wrapper.
 
 ## Available adapters
 
-| Framework | Adapter | Status |
-|---|---|---|
-| [PydanticAI](pydantic-ai.md) | `kitaru.adapters.pydantic_ai.KitaruAgent` | Shipped |
+Each adapter ships as its own distribution, installed alongside Kitaru in
+the agent's environment.
 
-<!-- TODO(v2-launch): confirm the adapter list shipping in v2.0. The v1
-     adapters (OpenAI Agents SDK, Claude Agent SDK, LangGraph, Gemini,
-     Google ADK) have not been ported to the v2 recording API yet.
-     Also confirm packaging: on Aug 6 the PydanticAI adapter moved out
-     of the kitaru wheel into a repo-level plugins/ tree
-     (plugins.adapters.pydantic_ai) and the pydantic-ai extra was
-     dropped — the install story and import path here assume it returns
-     to the published package. -->
+| Framework | Install | Entry point | Records | Replays |
+|---|---|---|---|---|
+| [PydanticAI](pydantic-ai.md) | `kitaru-pydantic-ai` | `kitaru_pydantic_ai.KitaruAgent` | Yes | Yes |
+| [LangGraph](langgraph.md) | `kitaru-langgraph` | `kitaru_langgraph.KitaruGraphRunner` | Yes | Depends on construction |
+| [OpenAI Agents SDK](openai-agents.md) | `kitaru-openai-agents` | `kitaru_openai_agents.KitaruRunner` | Yes | Yes |
 
-More adapters are on the way; the v1 line of Kitaru shipped six, and they
-are being ported to the v2 recording API. If your framework isn't covered
-yet, you have two options today:
+LangChain agents and Deep Agents use the LangGraph adapter — their public
+factories return LangGraph runnables. What the LangGraph adapter can
+replay depends on how the graph was constructed; its
+[capability matrix](langgraph.md#capability-matrix) is the reference.
+
+<!-- TODO(v2-launch): the Claude Agent SDK, Gemini and Google ADK adapters
+     from the v1 line are still unported to the v2 recording API — their
+     pages exist on develop but describe the v1 surface. Confirm whether
+     any of them make v2.0 before publish. -->
+
+More adapters are on the way; the v1 line of Kitaru shipped six, and the
+rest are being ported to the v2 recording API. If your framework isn't
+covered yet, you have two options today:
 
 * **Import** — your framework already emits traces to Langfuse,
   LangSmith, Braintrust, or OpenTelemetry?

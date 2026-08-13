@@ -35,6 +35,8 @@
 
 * [Overview](adapters/README.md)
 * [Pydantic AI](adapters/pydantic-ai.md)
+* [LangGraph](adapters/langgraph.md)
+* [OpenAI Agents SDK](adapters/openai-agents.md)
 
 ## Running the Server
 

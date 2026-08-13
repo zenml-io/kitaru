@@ -42,7 +42,7 @@ for ML pipelines, Kitaru is for agents.
 
 ```python
 from pydantic_ai import Agent
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru_pydantic_ai import KitaruAgent
 
 agent = Agent("openai:gpt-5.4", name="support-agent",
               system_prompt="You resolve support tickets.")

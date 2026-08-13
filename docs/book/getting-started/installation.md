@@ -17,13 +17,13 @@ Kitaru requires **Python 3.11 or newer**.
 {% tabs %}
 {% tab title="uv (recommended)" %}
 ```bash
-uv add "kitaru[cli,worker,pydantic-ai]"
+uv add "kitaru[cli,worker]" kitaru-pydantic-ai
 ```
 {% endtab %}
 
 {% tab title="pip" %}
 ```bash
-pip install "kitaru[cli,worker,pydantic-ai]"
+pip install "kitaru[cli,worker]" kitaru-pydantic-ai
 ```
 {% endtab %}
 {% endtabs %}
@@ -31,13 +31,22 @@ pip install "kitaru[cli,worker,pydantic-ai]"
 | Extra | What it adds |
 |---|---|
 | `cli` | The `kitaru` command — the full loop: import, evaluate, cohorts, experiments, workers, jobs |
-| `pydantic-ai` | The PydanticAI adapter that records your agent's runs |
 | `worker` | Run a worker in this environment (`kitaru worker start`) |
 | `server` | Run the Kitaru server itself from this package |
 | `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/mcp-server.md) |
+| `otel` | OpenTelemetry export from the server |
 
 The plain `kitaru` package is the SDK alone — the async client and the
 API models — which is all a production service needs to record sessions.
+
+Adapters are **not** extras — each ships as its own distribution, so you
+install the one your framework needs alongside Kitaru:
+
+| Framework | Install |
+|---|---|
+| [PydanticAI](../adapters/pydantic-ai.md) | `kitaru-pydantic-ai` |
+| [LangGraph](../adapters/langgraph.md) (also LangChain agents, Deep Agents) | `kitaru-langgraph` |
+| [OpenAI Agents SDK](../adapters/openai-agents.md) | `kitaru-openai-agents` |
 
 ## Start a local server
 

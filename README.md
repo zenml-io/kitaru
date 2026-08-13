@@ -57,7 +57,7 @@ it.
 ## 🔁 The loop
 
 ```bash
-pip install "kitaru[cli,worker,pydantic-ai]"
+pip install "kitaru[cli,worker]" kitaru-pydantic-ai
 kitaru login --local          # provisions a local server (Docker) — or: kitaru login <your-team-url>
 kitaru agent register support-agent --command "python support.py"
 ```
@@ -67,7 +67,7 @@ One wrapper, no rewrite:
 ```python
 # support.py
 from pydantic_ai import Agent
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru_pydantic_ai import KitaruAgent
 
 agent = Agent("openai:gpt-5.4", name="support-agent",
               system_prompt="You resolve support tickets.")
@@ -129,9 +129,11 @@ The full walkthrough — same support agent, same ticket — is the
 ### Works with your agent SDK
 
 Adapters wrap your existing agent — your model, your tools, your
-framework. PydanticAI ships today
-(`kitaru.adapters.pydantic_ai.KitaruAgent`); more adapters are being
-ported to the v2 recording API. Any framework that traces to Langfuse can
+framework. PydanticAI (`kitaru-pydantic-ai`), LangGraph
+(`kitaru-langgraph`, which also covers LangChain agents and Deep Agents)
+and the OpenAI Agents SDK (`kitaru-openai-agents`) ship today; the
+remaining v1 adapters are being ported to the v2 recording API. Any
+framework that traces to Langfuse can
 come in through the
 [import path](https://docs.zenml.io/kitaru/getting-started/import-your-traces)
 today, and the recording API itself is two client calls if you want to

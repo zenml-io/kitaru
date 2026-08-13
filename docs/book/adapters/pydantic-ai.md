@@ -17,7 +17,7 @@ import os
 import uuid
 
 from pydantic_ai import Agent
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru_pydantic_ai import KitaruAgent
 
 agent = Agent("openai:gpt-5.4", name="support-agent",
               system_prompt="You resolve support tickets.")
@@ -29,10 +29,11 @@ result = support.run_sync("Refund order #4821.")
 
 `KitaruAgent` is a transparent `WrapperAgent`: `run`, `run_sync`, `iter`,
 tools, output types, and capabilities all behave exactly as on the
-wrapped agent. Install with the extra:
+wrapped agent. The adapter ships as its own distribution — install it
+alongside Kitaru in the agent's environment:
 
 ```bash
-uv add "kitaru[pydantic-ai]"
+uv add kitaru-pydantic-ai
 ```
 
 ## Constructor
@@ -97,7 +98,7 @@ unrecorded slips through to a live system. Both error types are
 importable from the adapter package:
 
 ```python
-from kitaru.adapters.pydantic_ai import ToolPolicyError, ToolPolicyMissError
+from kitaru_pydantic_ai import ToolPolicyError, ToolPolicyMissError
 ```
 
 ## Notes and limits

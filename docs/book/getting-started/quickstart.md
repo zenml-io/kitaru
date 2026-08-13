@@ -48,7 +48,7 @@ import os
 import uuid
 
 from pydantic_ai import Agent
-from kitaru.adapters.pydantic_ai import KitaruAgent
+from kitaru_pydantic_ai import KitaruAgent
 
 agent = Agent(
     "openai:gpt-5.4",

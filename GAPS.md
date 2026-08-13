@@ -256,6 +256,67 @@ publish.
 - **Adapter packaging blocker unchanged** — #670 did not restore a
   `pydantic-ai` extra; the adapter still lives outside the wheel.
 
+## Aug 13 deltas (docs updated Aug 13)
+
+Six days of `develop` (115 commits, Aug 7 → Aug 13) reviewed. Adapters
+swept this pass; the investigation and account changes below are logged
+but **not yet written**.
+
+- **Adapter packaging blocker RESOLVED — and it resolved against us.**
+  The Aug 8 sequence was "Package PydanticAI adapter with Kitaru" →
+  revert → **"Package PydanticAI adapter separately"**. `src/kitaru/adapters/`
+  no longer exists on `develop` and there is no `pydantic-ai` extra in
+  the root `pyproject.toml` (extras are now `mcp`, `cli`, `examples`,
+  `server`, `worker`, `otel`). Every `from kitaru.adapters.pydantic_ai
+  import …` in our docs — and in the mainline tree's own
+  `adapters/pydantic-ai.md` — was importing a module that does not
+  exist. Swept: adapters overview + PydanticAI page, `docs/book/README.md`,
+  quickstart, installation, root README. Install is now
+  `uv add kitaru-pydantic-ai`, import is `from kitaru_pydantic_ai import
+  KitaruAgent`. Ground truth is the canonical example (#659).
+  **The mainline `adapters/pydantic-ai.md` is still broken** — it keeps
+  the dead import in ~10 code blocks. Fix at merge, or file separately.
+- **Two adapters ported to v2 (#694, #695)** — `kitaru-openai-agents`
+  (`KitaruRunner`) and `kitaru-langgraph` (`KitaruGraphRunner`, which
+  also covers LangChain agents and Deep Agents via their public
+  factories). Pages ported from the mainline tree, links rehomed to our
+  structure, both registered in `toc.md`. The old blanket TODO is
+  narrowed to the three still unported: Claude Agent SDK, Gemini,
+  Google ADK — their mainline pages still describe the v1 surface.
+- **LangGraph replay is conditional** — recording always works, but
+  overrides and tool substitution depend on the construction path
+  (direct wrapper vs `create_agent` vs `create_deep_agent`). The
+  adapters overview now says so and points at the capability matrix
+  rather than implying uniform replay.
+- **Installation page reworked** — adapters are no longer listed as
+  extras. Added the `otel` extra (OTLP export + FastAPI/httpx/SQLAlchemy
+  instrumentation, `server/api/otel.py`), which we had never documented.
+
+### Logged, not yet written
+
+- **Investigations moved under sessions (#713, #716, #726)** — session
+  `status` replaced by an optional **verdict**; questions moved to
+  sessions and gained **highlights** and question **lists**.
+  `concepts/investigations.md` mentions none of `verdict`, `highlights`,
+  or the list surface — its question model predates all three and is now
+  wrong, not merely incomplete. Highest-priority gap.
+- **Service accounts (#705)** — new noun, account endpoints split.
+  `deploy/authentication.md` covers API keys and rotation only.
+- **Namespaced evaluator names in `EvaluatorConfig` (#701)** — check the
+  evaluators concept page still matches the accepted forms.
+- **Replay system-prompt overrides are independent of prompt overrides
+  (#725)** — `guides/replay-and-overrides.md` describes them as one
+  mechanism.
+- **Experiment-run session filtering (#727)** and **UI aggregate
+  endpoints (#717, #720)** — check `concepts/experiments.md`.
+- **PydanticAI cost tracking (#714)** — `CostCalculator` and
+  `PydanticAIUsageSummary` are exported from `kitaru_pydantic_ai`; the
+  adapter page mentions cost only in passing.
+- **`AnnotationSelector.part` removed (#704)** — grep docs for `part`
+  before publish.
+- **Python package and bundle releases (#724)** — may change the
+  install story again; re-verify before publish.
+
 ## Claims that need verification before publish
 
 0. **Dead-until-merge links and commands** (from the Aug 7 neutral
