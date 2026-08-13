@@ -313,11 +313,11 @@ Each distribution needs a PyPI Trusted Publisher. If the PyPI project does not e
 | GitHub owner | `zenml-io` |
 | GitHub repository | `kitaru` |
 | Workflow filename | `release-plugins.yml` |
-| Environment | `pypi` |
+| Environment | `pypi-<distribution>`; for example, `pypi-kitaru-langfuse-importer` |
 
 A pending publisher creates the PyPI project during its first successful upload. It does not reserve the project name before that upload.
 
-The GitHub `pypi` environment should restrict deployment approval to release maintainers. The workflow uses GitHub OIDC and does not require a stored PyPI API token.
+Create one GitHub environment named `pypi-<distribution>` for each distribution. The workflow selects that environment from the release inventory, which gives every PyPI project a distinct OIDC identity while retaining one workflow file. The workflow uses GitHub OIDC and does not require a stored PyPI API token.
 
 ## Run a release dry-run
 
