@@ -5,7 +5,7 @@ icon: vials
 
 # Build a regression suite from production
 
-One replay tells you about one run. A hundred replays tell you whether a
+One replay tells you about one session. A hundred replays tell you whether a
 change is safe to ship. The insight this guide operationalizes: **your
 production traces are your test suite** — every recorded or imported
 session is a test case with real inputs, a real decision path, and a

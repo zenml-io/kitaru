@@ -88,23 +88,38 @@ None of this needs configuration; it's how workers authenticate.
 
 ## Accounts for the team
 
-Accounts are created through the API, by an **admin** — creating and
-deactivating accounts and granting admin rights are the only
-admin-gated operations on the server. An account can't change its own
-admin flag, and service accounts can't be admins. An account created
-without a password returns a one-time **activation token**; hand it to
-the teammate and they set their own password:
+There are two kinds of account, and they are managed separately.
+**Users** are people who log in; **service accounts** are non-human
+identities that carry API keys. `/v1/accounts` reads across both — list
+them, fetch one, or ask who you are with `client.accounts.get_current()`
+— but every change goes through the specific surface.
+
+Creating accounts and granting admin rights are admin-gated. An account
+can't change its own admin flag, and service accounts can't be admins.
+
+A user created without a password returns a one-time **activation
+token**; hand it to the teammate and they set their own password with
+it:
 
 ```python
-from kitaru.api_models.v1.account import AccountCreateRequest
+from kitaru.api_models.v1.account import UserCreateRequest
 
-account = await client.accounts.create(AccountCreateRequest(name="dana"))
+account = await client.users.create(UserCreateRequest(name="dana"))
 print(account.activation_token)   # share once, out of band
 ```
 
-Deactivating an account (`POST /v1/accounts/{id}/deactivate`) locks it
-out and mints a fresh activation token for later reinstatement. There is
-no account deletion — provenance on resources stays intact.
+`client.users.deactivate(account_id)` (`POST /v1/users/{id}/deactivate`)
+locks a person out and returns a fresh activation token, shown once, so
+the same account can be reinstated later with
+`client.users.activate(...)` — the token plus a new password.
+
+Service accounts have no activation dance, because nobody logs into
+them. Create one with `client.service_accounts.create(...)`, then issue
+it an API key; disable it by setting `active=False` through
+`client.service_accounts.update(...)`
+(`PATCH /v1/service-accounts/{id}`).
+
+Neither kind can be deleted — provenance on resources stays intact.
 
 The server bootstraps a `default` account — an admin — on first start;
 `KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD` sets its initial password so

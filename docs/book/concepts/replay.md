@@ -70,6 +70,11 @@ full loop.
 
 ## Forking: the override
 
+There is no separate fork operation in the API — a "fork" is just a
+replay that carries an `override`. The word is shorthand for that, the
+way "baseline" is shorthand for a replay without one. Both are the same
+call.
+
 An override changes one thing about the re-run and leaves everything else
 alone:
 
@@ -116,8 +121,8 @@ history scopes, is in [Tool policies](../guides/tool-policies.md).
 
 ## Scale: cohorts and experiments
 
-One replay answers a question about one run. The same machinery applied to
-a [cohort](cohorts.md) of runs, with the change expressed as an
+One replay answers a question about one session. The same machinery
+applied to a [cohort](cohorts.md) of sessions, with the change expressed as an
 [experiment](experiments.md), answers the question that matters before you
 ship: *what does this change do to last week's production traffic?* That is
 the [regression suite](../guides/regression-suite.md).

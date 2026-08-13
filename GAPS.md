@@ -333,11 +333,34 @@ split wants a deliberate decision before publish.
   `model` / `system_prompt` / `prompt` / `model_params` as four
   independent knobs. The fix made the code match what we already said.
 
+### Review fixes (Aug 13, reported by dev)
+
+- **Accounts section was wrong end to end (#705)** — it documented
+  `POST /v1/accounts/{id}/deactivate` and
+  `client.accounts.create(AccountCreateRequest(...))`. None of that
+  exists. `/v1/accounts` is now **read-only** (list, `/me`, get by id);
+  writes moved to `/v1/users` (create, patch, `/deactivate`,
+  `/activate`) and `/v1/service-accounts` (create, patch).
+  `AccountCreateRequest` is gone — it is `UserCreateRequest` via
+  `client.users.create`. Service accounts have no activation dance and
+  are disabled with `active=False` through
+  `client.service_accounts.update`. Section rewritten around the
+  two-kinds-of-account split.
+- **"fork" read as a feature** — there is no fork operation anywhere in
+  the API, CLI or models; the only `Fork*` symbol is `ForkCoverage`
+  inside the private `_experiments` module. The word is used 37 times
+  across 12 pages as prose, never as a command or field, so rather than
+  strip the vocabulary the concept page now states plainly that a fork
+  *is* a replay carrying an `override` — same call as a baseline.
+  **Open:** if the term should go entirely, that is a positioning call,
+  not a docs one.
+- **Replay's unit is a session, not a "run"** — `concepts/replay.md` and
+  `guides/regression-suite.md` both said "one replay answers a question
+  about one run" and spoke of a "cohort of runs". Cohorts hold sessions.
+
 ### Logged, not yet written
 
-- **Service accounts (#705)** — new noun, account endpoints split.
-  `deploy/authentication.md` covers API keys and rotation only. Biggest
-  remaining gap now that investigations are done.
+- ~~**Service accounts (#705)**~~ — **done**, see below.
 - **Namespaced evaluator names in `EvaluatorConfig` (#701)** — check the
   evaluators concept page still matches the accepted forms.
 - **Experiment-run session filtering (#727)** and **UI aggregate
