@@ -1,700 +1,231 @@
 ---
-name: Release
+name: Release Kitaru bundle
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: Version to release (e.g. 0.22.0 or 0.22.0rc1)
+        description: Bundle version to rehearse, such as 0.22.0-rc.1.
         required: true
         type: string
-      kitaru-ui-tag:
-        description: Kitaru UI release tag (e.g. kitaru-ui-v0.1.0). Defaults to the
-          highest stable kitaru-ui-v* release.
-        required: false
-        type: string
-        default: ''
-      dry-run:
-        description: Dry run (build and test but do not publish or push)
-        required: false
-        type: boolean
-        default: false
   push:
-    tags: [v*]
+    tags:
+      - bundle/kitaru/v*
 permissions: {}
 concurrency:
-  group: release
+  group: release-bundle-${{ github.ref_name }}
   cancel-in-progress: false
-env:
-  KITARU_ANALYTICS_OPT_IN: false
-  ZENML_ANALYTICS_OPT_IN: false
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
-    environment: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' && 'dry-run' || 'pypi' }}
     permissions:
-      contents: write
-      id-token: write
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_PASSWORD: password
-        ports: [5433:5432]
-        options: --health-cmd pg_isready --health-interval 5s --health-timeout 5s
-          --health-retries 10
+      contents: read
+    outputs:
+      bundle-version: ${{ steps.metadata.outputs.bundle-version }}
+      is-prerelease: ${{ steps.metadata.outputs.is-prerelease }}
+      kitaru-version: ${{ steps.metadata.outputs.kitaru-version }}
     steps:
-      # --- Determine version and trigger mode ---
-      - name: Determine and validate version
-        env:
-          DISPATCH_VERSION: ${{ github.event.inputs.version }}
-        run: |
-          set -euo pipefail
-          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
-            VERSION_CANDIDATE="$DISPATCH_VERSION"
-          else
-            VERSION_CANDIDATE="${GITHUB_REF_NAME#v}"
-          fi
-          if ! printf '%s' "$VERSION_CANDIDATE" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+((a|b|rc)[0-9]+)?$'; then
-            echo "::error::Invalid version format: $VERSION_CANDIDATE (expected canonical PEP 440 like 1.2.3 or 1.2.3rc1)"
-            exit 1
-          fi
-          printf 'VERSION=%s\n' "$VERSION_CANDIDATE" >> "$GITHUB_ENV"
-          HELM_VERSION="$VERSION_CANDIDATE"
-          if [[ "$VERSION_CANDIDATE" =~ ^([0-9]+\.[0-9]+\.[0-9]+)(a|b|rc)([0-9]+)$ ]]; then
-            HELM_VERSION="${BASH_REMATCH[1]}-${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
-          fi
-          printf 'HELM_VERSION=%s\n' "$HELM_VERSION" >> "$GITHUB_ENV"
-      # --- Determine checkout ref (dispatch only) ---
-      # Normally checks out `develop`. If v$VERSION already exists on origin,
-      # this is a partial-recovery dispatch and we must check out that tag so
-      # the rest of the workflow runs against the canonical release commit —
-      # otherwise the SHA consistency check would fail, and the error message
-      # telling operators to "check out $TAG_SHA and retry" wouldn't be
-      # actionable from workflow_dispatch. Uses the full repo URL because
-      # `origin` isn't configured until after actions/checkout runs.
-      - name: Determine checkout ref (dispatch only)
-        if: github.event_name == 'workflow_dispatch'
-        id: ref
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          if gh api "repos/${{ github.repository }}/git/ref/tags/v$VERSION" --silent 2>/dev/null; then
-            echo "Tag v$VERSION exists — recovery mode, checking out tag"
-            printf 'ref=refs/tags/v%s\n' "$VERSION" >> "$GITHUB_OUTPUT"
-            printf 'TAG_EXISTS_AT_START=true\n' >> "$GITHUB_ENV"
-          else
-            echo "No existing tag — normal release flow, checking out develop"
-            printf 'ref=develop\n' >> "$GITHUB_OUTPUT"
-            printf 'TAG_EXISTS_AT_START=false\n' >> "$GITHUB_ENV"
-          fi
-
-      # --- Checkout ---
-      - name: Checkout (dispatch)
-        if: github.event_name == 'workflow_dispatch'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
-        with:
-          ref: ${{ steps.ref.outputs.ref }}
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-          persist-credentials: false
-      - name: Checkout tagged commit (tag push)
-        if: github.event_name == 'push'
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
-
-      # --- Configure git ---
-      - name: Configure git identity
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-      - name: Validate protected-branch push token
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        env:
-          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
-        run: |
-          set -euo pipefail
-          if [ -z "$RELEASE_GIT_TOKEN" ]; then
-            echo "::error::secrets.RELEASE_GIT_TOKEN is required for non-dry-run releases."
-            echo "::error::This workflow uses it for protected branch pushes to develop, main, and release/* after publishing."
-            echo "::error::Configure the secret or rerun with dry-run=true."
-            exit 1
-          fi
-      # --- Install uv (needed before version bump to regenerate lockfile) ---
-      - name: Install uv
-        uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           python-version: '3.12'
           enable-cache: false
-      - name: Validate default plugin packages are published
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+      - name: Resolve bundle metadata
+        id: metadata
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = push ]; then
+            bundle_version=${PUSH_TAG#bundle/kitaru/v}
+          else
+            bundle_version="$DISPATCH_VERSION"
+          fi
+          if [[ "$bundle_version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)-rc\.([0-9]+)$ ]]; then
+            kitaru_version="${BASH_REMATCH[1]}rc${BASH_REMATCH[2]}"
+            is_prerelease=true
+          elif [[ "$bundle_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            kitaru_version="$bundle_version"
+            is_prerelease=false
+          else
+            echo "::error::Expected X.Y.Z or X.Y.Z-rc.N, got $bundle_version"
+            exit 1
+          fi
+          manifest_version=$(uv version --short)
+          if [ "$manifest_version" != "$kitaru_version" ]; then
+            echo "::error::Bundle $bundle_version requires kitaru $kitaru_version, but pyproject.toml contains $manifest_version."
+            exit 1
+          fi
+          {
+            printf 'BUNDLE_VERSION=%s\n' "$bundle_version"
+            printf 'IS_PRERELEASE=%s\n' "$is_prerelease"
+            printf 'KITARU_VERSION=%s\n' "$kitaru_version"
+          } >> "$GITHUB_ENV"
+          {
+            printf 'bundle-version=%s\n' "$bundle_version"
+            printf 'is-prerelease=%s\n' "$is_prerelease"
+            printf 'kitaru-version=%s\n' "$kitaru_version"
+          } >> "$GITHUB_OUTPUT"
+      - name: Validate bundle source
+        run: |
+          set -euo pipefail
+          git fetch origin develop
+          release_sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
+            echo "::error::Bundle source $release_sha is not on develop."
+            exit 1
+          fi
+      - name: Confirm Python packages exist on PyPI
+        run: |
+          set -euo pipefail
+          curl -fsS "https://pypi.org/pypi/kitaru/$KITARU_VERSION/json" >/dev/null
           while read -r requirement; do
+            test -z "$requirement" && continue
             package=${requirement%%==*}
             version=${requirement#*==}
             curl -fsS "https://pypi.org/pypi/$package/$version/json" >/dev/null
           done < plugins/default-requirements.txt
-
-      # --- Bump version (dispatch only, skip in recovery mode) ---
-      # In recovery mode (tag already exists) we checked out the tag itself,
-      # so these mutating steps must be skipped. Otherwise `uv lock` can
-      # re-resolve transitive deps to newer versions and create a commit on
-      # top of the tag, making HEAD diverge from the tag SHA — which the
-      # consistency check will then (correctly) reject.
-      - name: Bump version in pyproject.toml
-        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
-          'true'
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      - name: Build and test client image
         run: |
-          sed -i "s/^version = \".*\"/version = \"$VERSION\"/" pyproject.toml
-          echo "Updated pyproject.toml to version $VERSION"
-          grep '^version' pyproject.toml
-      - name: Update CHANGELOG.md
-        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
-          'true'
+          docker build --load -f docker/release-client.Dockerfile \
+            --target client --build-arg KITARU_VERSION="$KITARU_VERSION" \
+            -t kitaru-bundle-client:test .
+          docker run --rm kitaru-bundle-client:test python -c "import kitaru"
+      - name: Build and test server image
         run: |
-          DATE=$(date +%Y-%m-%d)
-          if grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
-            echo "CHANGELOG.md already has a section for $VERSION — skipping"
-          else
-            sed -i "s/^## \[Unreleased\]/## [Unreleased]\n\n## [$VERSION] - $DATE/" CHANGELOG.md
-            echo "Updated CHANGELOG.md for $VERSION ($DATE)"
-          fi
-      - name: Update lockfile
-        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
-          'true'
-        run: uv lock
-      - name: Commit release changes
-        if: github.event_name == 'workflow_dispatch' && env.TAG_EXISTS_AT_START !=
-          'true'
+          docker build --load -f docker/release-server.Dockerfile \
+            --target server --build-arg KITARU_VERSION="$KITARU_VERSION" \
+            -t kitaru-bundle-server:test .
+          docker run --rm kitaru-bundle-server:test python -c "import kitaru"
+      - name: Build and test worker image
         run: |
-          git add pyproject.toml CHANGELOG.md uv.lock
-          if git diff --cached --quiet; then
-            echo "No release changes to commit"
-          else
-            git commit -m "Release $VERSION"
-          fi
-
-      # --- Capture authoritative RELEASE_SHA for this release ---
-      # The v$VERSION tag, if it exists, is the immutable source of truth for
-      # which commit owns this version. A recovery dispatch must run on the
-      # exact same commit; otherwise PyPI, Docker, Helm, and the tag would
-      # diverge (split-brain release).
-      - name: Verify release SHA consistency
-        run: |
-          RELEASE_SHA=$(git rev-parse HEAD)
-          # Dispatch trigger pre-populates $TAG_EXISTS_AT_START. Tag-push trigger
-          # skipped the dispatch-only probe, but by definition the tag exists.
-          if [ -z "${TAG_EXISTS_AT_START:-}" ]; then
-            TAG_EXISTS_AT_START=true
-          fi
-          if [ "$TAG_EXISTS_AT_START" = "true" ]; then
-            git fetch origin "refs/tags/v$VERSION:refs/tags/v$VERSION" --force
-            TAG_SHA=$(git rev-list -n 1 "v$VERSION")
-            if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
-              echo "::error::Tag v$VERSION pins SHA $TAG_SHA but workflow HEAD is $RELEASE_SHA."
-              echo "::error::The workflow must run on the same commit the tag points to."
-              echo "::error::Dispatch a different version, or check out $TAG_SHA and retry."
-              exit 1
-            fi
-            echo "Tag v$VERSION matches HEAD ($RELEASE_SHA) — recovery-safe"
-          else
-            echo "No existing tag for v$VERSION — normal release flow"
-          fi
-          if ! grep -q "^## \[$VERSION\] - " CHANGELOG.md; then
-            echo "::error::CHANGELOG.md is missing a '## [$VERSION] - YYYY-MM-DD' section."
-            echo "::error::The release commit is incomplete — add the changelog entry before retrying."
-            exit 1
-          fi
-          printf 'RELEASE_SHA=%s\n' "$RELEASE_SHA" >> "$GITHUB_ENV"
-
-      # --- Verify version matches (tag push only) ---
-      - name: Verify tag matches pyproject.toml version
-        if: github.event_name == 'push'
-        run: |
-          TOML_VERSION=$(grep '^version = ' pyproject.toml | sed 's/version = "\(.*\)"/\1/')
-          if [ "$TOML_VERSION" != "$VERSION" ]; then
-            echo "::error::Tag version ($VERSION) does not match pyproject.toml ($TOML_VERSION)"
-            exit 1
-          fi
-
-      # --- Run CI checks ---
-      - name: Install dependencies
-        run: >-
-          uv sync --frozen
-          --extra server
-          --extra otel
-          --extra cli
-          --extra mcp
-          --extra worker
-      - name: Install canonical example adapter
-        run: uv pip install --no-deps --editable plugins/packages/pydantic-ai
-      - name: Check typos
-        uses: crate-ci/typos@bee27e3a4fd1ea2111cf90ab89cd076c870fce14  # v1.48.0
-      - name: Lint
-        run: |
-          uv run ruff check .
-          uv run ruff format --check .
-      - name: Type check
-        run: uv run ty check
-      - name: Check MCP schemas
-        run: uv run python scripts/report_mcp_schema.py --check
-      - name: Test base, CLI, and MCP suites
-        run: |
-          uv run pytest --ignore=tests/cli --ignore=tests/mcp
-          uv run pytest tests/cli
-          uv run pytest tests/mcp
-      - name: Test clean CLI wheel and source installations
-        run: uv run --no-sync python scripts/smoke_cli_artifacts.py
-      - name: Check migration consistency
-        run: |
-          uv sync --frozen --extra server --extra otel
-          uv run python scripts/check_migrations.py
-
-      # --- Bundle Kitaru UI ---
-      - name: Download stable Kitaru UI
-        run: bash scripts/download-ui.sh
-        env:
-          TAG: ${{ github.event.inputs.kitaru-ui-tag || '' }}
-          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
-      - name: Record Kitaru UI bundle identity
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-          manifest = json.loads(Path("src/kitaru/_ui/bundle_manifest.json").read_text())
-          values = {
-              "KITARU_UI_REPO": manifest["repo"],
-              "KITARU_UI_TAG": manifest["tag"],
-              "KITARU_UI_CHECKSUM": manifest["checksum"],
-          }
-          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as env_file:
-              for key, value in values.items():
-                  env_file.write(f"{key}={value}\n")
-          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as summary:
-              summary.write("## Kitaru UI bundle\n")
-              summary.write(f"Repo: `{values['KITARU_UI_REPO']}`\n\n")
-              summary.write(f"Tag: `{values['KITARU_UI_TAG']}`\n\n")
-              summary.write(f"Checksum: `{values['KITARU_UI_CHECKSUM']}`\n\n")
-          PY
-
-      # --- Build ---
-      - name: Build package
-        run: uv build
-      - name: Verify Kitaru UI in wheel
-        run: |
-          WHEEL=$(ls dist/*.whl)
-          uv run --no-project scripts/verify-ui-wheel.py "$WHEEL"
-      - name: Build and test candidate plugin wheels
-        run: >-
-          uv run --no-sync python scripts/smoke_plugin_artifacts.py
-          --kitaru-wheel dist
-          --candidate-dir plugins/candidate-wheels
-      - name: Test clean base and MCP wheel installations
-        run: KITARU_TEST_WHEEL=dist uv run pytest tests/mcp/test_installed_contract.py
-      - name: List build artifacts
-        run: ls -lh dist/
-
-      # --- Tag (dispatch only, skip on dry-run) ---
-      # Push the tag BEFORE PyPI so that any later failure leaves a durable
-      # anchor: a subsequent recovery dispatch will find the tag, check out
-      # its SHA, and pass the consistency check. Without this, a mid-workflow
-      # failure after PyPI upload but before tag push would leave PyPI with
-      # artifacts from one commit and no immutable ref to anchor the next run
-      # to the same commit (split-brain release risk).
-      - name: Create and push tag
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          if [ "$TAG_EXISTS_AT_START" = "true" ]; then
-            echo "Tag v$VERSION already exists at RELEASE_SHA $RELEASE_SHA — skipping"
-          else
-            git tag "v$VERSION" "$RELEASE_SHA"
-            git push "$AUTHENTICATED_REMOTE" "v$VERSION"
-          fi
-
-      # --- Publish (skip on dry-run) ---
-      - name: Publish to PyPI
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # v1.14.0
+          docker build --load -f docker/release-worker.Dockerfile \
+            --target worker --build-arg KITARU_VERSION="$KITARU_VERSION" \
+            -t kitaru-bundle-worker:test .
+          docker run --rm kitaru-bundle-worker:test python -c "import kitaru"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
         with:
-          skip-existing: true
-      - name: Wait for PyPI availability
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          version: v3.9.2
+      - name: Build Helm chart
         run: |
-          echo "Waiting for kitaru==$VERSION to appear on PyPI..."
-          for i in $(seq 1 30); do
-            if curl -fsS "https://pypi.org/pypi/kitaru/$VERSION/json" >/dev/null 2>&1; then
-              echo "kitaru==$VERSION is available on PyPI (attempt $i)"
-              exit 0
-            fi
-            echo "Attempt $i/30: not yet available, waiting 10s..."
-            sleep 10
-          done
-          echo "::error::kitaru==$VERSION did not appear on PyPI within 5 minutes"
-          exit 1
-      - name: Verify PyPI artifacts match local build
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        run: |
-          python - <<'PY'
-          import hashlib
-          import json
-          import os
-          import sys
-          import urllib.request
-          from pathlib import Path
-          version = os.environ["VERSION"]
-          metadata_url = f"https://pypi.org/pypi/kitaru/{version}/json"
-          with urllib.request.urlopen(metadata_url, timeout=30) as response:
-              metadata = json.load(response)
-          remote_files = {
-              item["filename"]: item["digests"]["sha256"]
-              for item in metadata.get("urls", [])
-              if "filename" in item and "digests" in item and "sha256" in item["digests"]
-          }
-          # PyPI only lists built distributions (sdist + wheels). The local
-          # dist/ directory also holds files PyPI never serves as separate
-          # downloads: uv writes a dist/.gitignore, and the publish step drops
-          # PEP 740 *.publish.attestation sidecars next to each artifact. Those
-          # must not be treated as missing from PyPI.
-          dist_artifacts = [
-              path
-              for path in sorted(Path("dist").iterdir())
-              if path.is_file() and path.name.endswith((".whl", ".tar.gz"))
-          ]
-          if not dist_artifacts:
-              print("::error::No .whl or .tar.gz artifacts found in dist/ to verify")
-              sys.exit(1)
-          failures = []
-          for artifact in dist_artifacts:
-              expected = remote_files.get(artifact.name)
-              if expected is None:
-                  failures.append(f"{artifact.name} is missing from PyPI metadata")
-                  continue
-              actual = hashlib.sha256(artifact.read_bytes()).hexdigest()
-              if actual != expected:
-                  failures.append(
-                      f"{artifact.name} hash mismatch: local={actual} pypi={expected}"
-                  )
-          if failures:
-              for failure in failures:
-                  print(f"::error::{failure}")
-              print(
-                  "::error::Local dist artifacts differ from PyPI. This prevents "
-                  "a recovery run from publishing GitHub/Docker/Helm artifacts "
-                  "built with a different UI bundle than the already-published package."
-              )
-              sys.exit(1)
-          print("PyPI artifacts match local dist/ build outputs.")
-          PY
-
-      # --- Push release commit to develop (dispatch only, skip on dry-run) ---
-      - name: Push release commit to develop
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run != 'true' }}
-        env:
-          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
-        run: |
-          set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${RELEASE_GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          REMOTE_DEVELOP=$(git ls-remote origin refs/heads/develop | awk '{print $1}')
-          if [ "$REMOTE_DEVELOP" = "$RELEASE_SHA" ]; then
-            echo "origin/develop is at RELEASE_SHA $RELEASE_SHA — skipping push"
-          else
-            # Distinguish "not ancestor" (exit 1) from fatal git errors (exit 128).
-            set +e
-            git merge-base --is-ancestor "$RELEASE_SHA" "$REMOTE_DEVELOP"
-            ancestor_status=$?
-            set -e
-            case "$ancestor_status" in
-              0)
-                echo "origin/develop ($REMOTE_DEVELOP) already contains RELEASE_SHA $RELEASE_SHA — skipping push"
-                ;;
-              1)
-                git push "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/develop"
-                ;;
-              *)
-                echo "::error::Ancestry check failed (exit $ancestor_status) for origin/develop ($REMOTE_DEVELOP) vs RELEASE_SHA $RELEASE_SHA"
-                exit 1
-                ;;
-            esac
-          fi
-
-      # --- Create release branch and update main (skip on dry-run) ---
-      # Both guards are identity-based: we only touch refs if they're missing
-      # or already at RELEASE_SHA. Divergent state triggers a hard error rather
-      # than silently overwriting an archival branch or rewinding main.
-      - name: Create release branch
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        env:
-          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
-        run: |
-          set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${RELEASE_GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/release/$VERSION" | awk '{print $1}')
-          if [ -z "$REMOTE_SHA" ]; then
-            git push "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/release/$VERSION"
-            echo "Created release/$VERSION at $RELEASE_SHA"
-          elif [ "$REMOTE_SHA" = "$RELEASE_SHA" ]; then
-            echo "release/$VERSION is already at RELEASE_SHA $RELEASE_SHA — skipping"
-          else
-            echo "::error::release/$VERSION exists at $REMOTE_SHA but expected $RELEASE_SHA."
-            echo "::error::Archival release branches are immutable; manual intervention required."
-            exit 1
-          fi
-      - name: Update main to release
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        env:
-          RELEASE_GIT_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
-        run: |
-          set -euo pipefail
-          AUTHENTICATED_REMOTE="https://x-access-token:${RELEASE_GIT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-          REMOTE_MAIN=$(git ls-remote origin refs/heads/main | awk '{print $1}')
-          if [ "$REMOTE_MAIN" = "$RELEASE_SHA" ]; then
-            echo "origin/main is already at RELEASE_SHA $RELEASE_SHA — skipping"
-          else
-            set +e
-            git merge-base --is-ancestor "$REMOTE_MAIN" "$RELEASE_SHA"
-            ancestor_status=$?
-            set -e
-            case "$ancestor_status" in
-              0)
-                git push --force-with-lease=refs/heads/main:"$REMOTE_MAIN" "$AUTHENTICATED_REMOTE" "$RELEASE_SHA:refs/heads/main"
-                echo "Fast-forwarded main to $RELEASE_SHA"
-                ;;
-              1)
-                echo "::error::origin/main ($REMOTE_MAIN) is not an ancestor of RELEASE_SHA $RELEASE_SHA."
-                echo "::error::Force-pushing would rewind main to an older release. Manual intervention required."
-                exit 1
-                ;;
-              *)
-                echo "::error::Ancestry check failed (exit $ancestor_status) for origin/main ($REMOTE_MAIN) vs RELEASE_SHA $RELEASE_SHA"
-                exit 1
-                ;;
-            esac
-          fi
-
-      # --- GitHub Release (skip on dry-run) ---
-      # If the release already exists, verify it's attached to v$VERSION, then
-      # check each expected dist/* asset. Reproducible assets (wheel, sdist) are
-      # SHA256-compared against the local build; matching assets are skipped,
-      # mismatched assets fail loudly (never silently overwrite), and missing
-      # assets get uploaded. Signature/attestation assets are regenerated on
-      # every publish run and are never byte-identical, so they are uploaded when
-      # missing and left as-is otherwise rather than SHA256-compared.
-      - name: Create GitHub Release
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          release_json=$(gh release view "v$VERSION" --json tagName,assets 2>/dev/null) || release_json=""
-          if [ -z "$release_json" ]; then
-            gh release create "v$VERSION" dist/* \
-              --title "v$VERSION" \
-              --generate-notes
-            exit 0
-          fi
-          existing_tag=$(echo "$release_json" | jq -r '.tagName')
-          if [ "$existing_tag" != "v$VERSION" ]; then
-            echo "::error::Release v$VERSION is attached to tag $existing_tag, expected v$VERSION"
-            exit 1
-          fi
-          echo "Release v$VERSION exists — reconciling dist/* assets by SHA256"
-          mkdir -p existing-assets
-          existing_assets=$(echo "$release_json" | jq -r '.assets[].name')
-          for f in dist/*; do
-            name=$(basename "$f")
-            case "$name" in
-              *.attestation|*.sigstore|*.sig|*.asc)
-                # Signatures/attestations are regenerated on every publish run and
-                # are never byte-identical, so they cannot be SHA256-reconciled.
-                # Upload if the release is missing one; otherwise keep the existing
-                # signature. A signature is verified by validating it against the
-                # artifact, never by expecting two signatures to match byte-for-byte.
-                if echo "$existing_assets" | grep -Fxq "$name"; then
-                  echo "  keeping existing signature asset (not reproducible): $name"
-                else
-                  echo "  uploading missing signature asset: $name"
-                  gh release upload "v$VERSION" "$f"
-                fi
-                continue
-                ;;
-            esac
-            if echo "$existing_assets" | grep -Fxq "$name"; then
-              gh release download "v$VERSION" --pattern "$name" --dir existing-assets --clobber
-              local_hash=$(sha256sum "$f" | awk '{print $1}')
-              remote_hash=$(sha256sum "existing-assets/$name" | awk '{print $1}')
-              if [ "$local_hash" = "$remote_hash" ]; then
-                echo "  asset matches local build: $name"
-              else
-                echo "::error::Release asset $name hash mismatch (remote=$remote_hash local=$local_hash)."
-                echo "::error::The existing asset was built from a different commit. Manual intervention required."
-                exit 1
-              fi
-            else
-              echo "  uploading missing asset: $name"
-              gh release upload "v$VERSION" "$f"
-            fi
-          done
-
-      # --- Docker image ---
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
-      - name: Log in to Docker Hub
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
-        uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
+          sed -i "s/^version: .*/version: \"$BUNDLE_VERSION\"/" helm/Chart.yaml
+          helm lint ./helm
+          mkdir bundle-dist
+          helm package ./helm --destination bundle-dist
+          sha256sum -- bundle-dist/* > bundle-dist/SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: bundle-candidate
+          path: bundle-dist/
+          if-no-files-found: error
+          retention-days: 90
+  publish:
+    if: github.event_name == 'push'
+    needs: prepare
+    runs-on: ubuntu-latest
+    environment: bundle-publish
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: bundle-candidate
+          path: bundle-dist
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build candidate Docker images from local wheels (dry run)
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
-        run: |
-          docker build \
-            -f plugins/candidate.Dockerfile \
-            --target client \
-            --build-arg KITARU_VERSION="$VERSION" \
-            -t kitaru-candidate-client .
-          docker build \
-            -f plugins/candidate.Dockerfile \
-            --target server \
-            --build-arg KITARU_VERSION="$VERSION" \
-            --build-arg "KITARU_EXTRAS=--extra server --extra otel" \
-            -t kitaru-candidate-server .
-          docker build \
-            -f plugins/candidate.Dockerfile \
-            --target worker \
-            --build-arg KITARU_VERSION="$VERSION" \
-            --build-arg "KITARU_EXTRAS=--extra worker" \
-            -t kitaru-candidate-worker .
-          docker run --rm kitaru-candidate-client \
-            python -c "import kitaru"
-          docker run --rm kitaru-candidate-server \
-            python -c "from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; assert DEFAULT_PLUGIN_DEFINITIONS"
-          docker run --rm kitaru-candidate-worker \
-            python -c "import kitaru"
-      - name: Build and publish public client Docker image
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+      - name: Publish client image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: .
           file: docker/release-client.Dockerfile
           target: client
           push: true
-          build-args: |
-            KITARU_VERSION=${{ env.VERSION }}
-          tags: |
-            zenmldocker/kitaru:${{ env.VERSION }}
-            zenmldocker/kitaru:latest
-          labels: |
-            org.opencontainers.image.title=kitaru
-            org.opencontainers.image.description=Kitaru client
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
-            org.opencontainers.image.licenses=Apache-2.0
-      - name: Build and publish public worker Docker image
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          build-args: KITARU_VERSION=${{ needs.prepare.outputs.kitaru-version }}
+          tags: zenmldocker/kitaru:${{ needs.prepare.outputs.bundle-version }}
+      - name: Publish worker image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: .
           file: docker/release-worker.Dockerfile
           target: worker
           push: true
-          build-args: |
-            KITARU_VERSION=${{ env.VERSION }}
-          tags: |
-            zenmldocker/kitaru-worker:${{ env.VERSION }}
-            zenmldocker/kitaru-worker:latest
-          labels: |
-            org.opencontainers.image.title=kitaru-worker
-            org.opencontainers.image.description=Kitaru worker
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
-            org.opencontainers.image.licenses=Apache-2.0
-      - name: Build and publish public server Docker image
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+          build-args: KITARU_VERSION=${{ needs.prepare.outputs.kitaru-version }}
+          tags: zenmldocker/kitaru-worker:${{ needs.prepare.outputs.bundle-version }}
+      - name: Publish server image
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
         with:
           context: .
           file: docker/release-server.Dockerfile
           target: server
           push: true
-          build-args: |
-            KITARU_VERSION=${{ env.VERSION }}
-          tags: |
-            zenmldocker/kitaru-server:${{ env.VERSION }}
-            zenmldocker/kitaru-server:latest
-          labels: |
-            org.opencontainers.image.title=kitaru-server
-            org.opencontainers.image.description=Kitaru server
-            org.opencontainers.image.version=${{ env.VERSION }}
-            org.opencontainers.image.source=https://github.com/zenml-io/kitaru
-            org.opencontainers.image.licenses=Apache-2.0
-      - name: Build and publish managed ECR image
+          build-args: KITARU_VERSION=${{ needs.prepare.outputs.kitaru-version }}
+          tags: zenmldocker/kitaru-server:${{ needs.prepare.outputs.bundle-version }}
+      - name: Publish managed image
         uses: ./.github/actions/publish-managed-image
         with:
-          version: ${{ env.VERSION }}
-          dry-run: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
+          package-version: ${{ needs.prepare.outputs.kitaru-version }}
+          image-tag: ${{ needs.prepare.outputs.bundle-version }}
           aws-role-arn: ${{ vars.KITARU_ECR_ROLE_ARN }}
-
-      # --- Helm chart ---
-      - name: Install Helm
-        uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
-        with:
-          version: v3.9.2
-      - name: Set Chart.yaml version
-        run: |
-          sed -i "s/^version: .*/version: \"$HELM_VERSION\"/" helm/Chart.yaml
-          grep -E '^version:' helm/Chart.yaml
-      - name: Helm lint
-        run: helm lint ./helm
-      - name: Configure AWS credentials (Helm / ECR)
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+      - name: Configure AWS credentials for Helm
         uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
         with:
           role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
           aws-region: us-east-1
-      - name: Login to Amazon ECR Public (Helm)
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+      - name: Login to Amazon ECR Public
         id: login-ecr-public
         uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64  # v2.1.6
         with:
           mask-password: 'true'
           registry-type: public
-      - name: Package Helm chart
-        run: helm package ./helm
-      - name: Push Helm chart to Amazon ECR Public
-        if: ${{ !(github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true') }}
+      - name: Publish Helm chart
         env:
+          BUNDLE_VERSION: ${{ needs.prepare.outputs.bundle-version }}
           REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
-          REGISTRY_ALIAS: zenml
-          REPOSITORY: kitaru
-        run: |-
-          helm push "${REPOSITORY}-${HELM_VERSION}.tgz" \
-            "oci://${REGISTRY}/${REGISTRY_ALIAS}"
-
-      # --- Dry-run summary ---
-      - name: Dry-run summary
-        if: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.dry-run == 'true' }}
-        run: |-
-          {
-            echo "## Dry-run complete"
-            echo "Version: $VERSION"
-            echo ""
-            echo "### Python package"
-            ls dist/
-            echo ""
-            echo "### Docker image"
-            echo "Built from local wheels: kitaru-candidate-client"
-            echo "Built from local wheels: kitaru-candidate-server"
-            echo "Built from local wheels: kitaru-candidate-worker"
-            echo "Kitaru UI bundle: $KITARU_UI_REPO@$KITARU_UI_TAG"
-            echo "Kitaru UI checksum: $KITARU_UI_CHECKSUM"
-            echo ""
-            echo "### Helm chart"
-            echo "Built (not pushed): kitaru-${HELM_VERSION}.tgz"
-            echo ""
-            echo "No changes were pushed, published, or tagged."
-          } >> "$GITHUB_STEP_SUMMARY"
+        run: helm push "bundle-dist/kitaru-$BUNDLE_VERSION.tgz" "oci://$REGISTRY/zenml"
+      - name: Create bundle GitHub Release
+        env:
+          BUNDLE_VERSION: ${{ needs.prepare.outputs.bundle-version }}
+          GH_TOKEN: ${{ github.token }}
+          IS_PRERELEASE: ${{ needs.prepare.outputs.is-prerelease }}
+        run: |
+          prerelease=()
+          if [ "$IS_PRERELEASE" = true ]; then
+            prerelease+=(--prerelease)
+          fi
+          gh release create "$GITHUB_REF_NAME" bundle-dist/* \
+            "${prerelease[@]}" \
+            --verify-tag \
+            --latest=false \
+            --title "Kitaru $BUNDLE_VERSION" \
+            --generate-notes
+  promote-latest:
+    if: github.event_name == 'push' && needs.prepare.outputs.is-prerelease == 'false'
+    needs: [prepare, publish]
+    runs-on: ubuntu-latest
+    environment: bundle-promotion
+    permissions: {}
+    steps:
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Move Docker latest aliases
+        env:
+          BUNDLE_VERSION: ${{ needs.prepare.outputs.bundle-version }}
+        run: |
+          docker buildx imagetools create --tag zenmldocker/kitaru:latest "zenmldocker/kitaru:$BUNDLE_VERSION"
+          docker buildx imagetools create --tag zenmldocker/kitaru-worker:latest "zenmldocker/kitaru-worker:$BUNDLE_VERSION"
+          docker buildx imagetools create --tag zenmldocker/kitaru-server:latest "zenmldocker/kitaru-server:$BUNDLE_VERSION"

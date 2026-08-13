@@ -1,5 +1,4 @@
 import json
-import re
 import shutil
 import subprocess
 import sys
@@ -103,11 +102,12 @@ def test_local_python_versions_are_rejected_for_pypi() -> None:
         validate_version("1.0+build.1")
 
 
-def test_legacy_release_workflow_accepts_canonical_python_rc_versions() -> None:
+def test_bundle_workflow_maps_semver_rc_to_python_rc() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
 
-    assert "1.2.3rc1" in workflow
-    assert "HELM_VERSION" in workflow
+    assert "bundle/kitaru/v*" in workflow
+    assert 'kitaru_version="${BASH_REMATCH[1]}rc${BASH_REMATCH[2]}"' in workflow
+    assert "promote-latest:" in workflow
 
 
 @pytest.mark.parametrize(
@@ -206,19 +206,13 @@ def test_plugin_matrix_is_generated_from_the_nine_plugin_units() -> None:
     }
 
 
-def test_legacy_plugin_workflow_choices_match_the_inventory() -> None:
+def test_python_release_workflow_resolves_every_tag_from_the_inventory() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
-    match = re.search(
-        r"(?ms)^        options:\n(?P<options>(?:^          - [a-z0-9-]+\n)+)",
-        workflow,
-    )
-    assert match is not None
-    choices = {
-        line.removeprefix("          - ")
-        for line in match.group("options").splitlines()
-    }
 
-    assert choices == {unit.slug for unit in load_inventory().plugin_units}
+    assert "python/**" in workflow
+    assert "scripts/release_units.py resolve --tag" in workflow
+    assert "scripts/release_ui.py --version" in workflow
+    assert "uv version" not in workflow
 
 
 def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
