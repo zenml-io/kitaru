@@ -281,7 +281,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
             links_by_session = {
                 item["session_id"]: item["id"] for item in linked_sessions
             }
-            for ticket_id, (judgment, expected_action) in reviewed_tickets.items():
+            for ticket_id, (verdict, expected_action) in reviewed_tickets.items():
                 session_id = sessions_by_ticket[ticket_id]
                 investigation_session_id = links_by_session[session_id]
                 selector = json.dumps(
@@ -297,13 +297,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     "--selector",
                     selector,
                     "--value",
-                    json.dumps(
-                        {
-                            "judgment": judgment,
-                            "reason": "Reviewed against the automatic refund policy.",
-                        },
-                        separators=(",", ":"),
-                    ),
+                    json.dumps("Reviewed against the automatic refund policy."),
                 )
                 _cli(
                     "annotation",
@@ -321,7 +315,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                     "verdict",
                     investigation_id,
                     session_id,
-                    judgment,
+                    verdict,
                 )
 
             _cli("investigation", "update", investigation_id, "--status", "completed")
@@ -348,6 +342,11 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
             )
             assert len(annotations) == 10
             assert sum(item["selector"] is not None for item in annotations) == 5
+            assert sum(isinstance(item["value"], str) for item in annotations) == 5
+            assert all(
+                not (isinstance(item["value"], dict) and "judgment" in item["value"])
+                for item in annotations
+            )
 
             evaluator_path = tmp_path / "returns_policy.py"
             _write_documented_evaluator(evaluator_path)
