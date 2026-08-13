@@ -8,6 +8,7 @@ import yaml
 
 REPO_ROOT = Path(__file__).parents[2]
 SCRIPT_PATH = REPO_ROOT / "scripts" / "typescript-packages.mjs"
+CI_WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 WORKFLOW_PATH = REPO_ROOT / ".github" / "workflows" / "release-typescript.yml"
 
 PACKAGE_PATHS = (
@@ -176,4 +177,21 @@ def test_typescript_release_workflow_contract() -> None:
     )
     assert any(
         step.get("run") == "pnpm run pack:release:built" for step in build_job["steps"]
+    )
+
+
+def test_typescript_ci_owns_cross_language_tests() -> None:
+    workflow = yaml.safe_load(CI_WORKFLOW_PATH.read_text())
+    base_jobs = [
+        job
+        for job in workflow["jobs"]["test"]["strategy"]["matrix"]["include"]
+        if job["name"].endswith("-base")
+    ]
+    assert base_jobs
+    assert all(
+        "--ignore=tests/typescript" in job["pytest-command"] for job in base_jobs
+    )
+    assert any(
+        step.get("run") == "uv run pytest -q tests/typescript"
+        for step in workflow["jobs"]["typescript"]["steps"]
     )

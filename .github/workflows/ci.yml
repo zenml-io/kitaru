@@ -391,22 +391,22 @@ jobs:
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py
+              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
           - name: py312-base
             python-version: '3.12'
             sync-command: uv sync --frozen --extra server --extra otel
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py
+              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
           - name: py313-base
             python-version: '3.13'
             sync-command: uv sync --frozen --extra server --extra otel
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py
+              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
           - name: py314-base
             python-version: '3.14'
             sync-command: uv sync --frozen --extra server --extra otel
             pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py
+              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
           - name: py311-cli
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli
