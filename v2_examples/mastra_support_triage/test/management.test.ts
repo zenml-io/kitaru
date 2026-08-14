@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   type JobManagementClient,
   runOwnedJob,
+  verifyReplaceableJob,
   WorkerJobError,
 } from "../src/management.js";
 import { RunManifestStore } from "../src/run-state.js";
@@ -283,5 +284,39 @@ describe("runOwnedJob", () => {
 
     expect(runWorker).not.toHaveBeenCalled();
     expect(client.jobs.wait).toHaveBeenCalledWith(JOB_ID);
+  });
+});
+
+describe("verifyReplaceableJob", () => {
+  it("accepts only an exact terminal failed or canceled job", async () => {
+    const client: JobManagementClient = {
+      jobs: {
+        cancel: vi.fn(),
+        get: vi
+          .fn()
+          .mockResolvedValueOnce(job({ status: "failed" }))
+          .mockResolvedValueOnce(job({ status: "completed" })),
+        listTasks: vi.fn().mockResolvedValue({
+          items: [task()],
+          next_cursor: null,
+        }),
+        wait: vi.fn(),
+      },
+    };
+    const options = {
+      client,
+      expectedAgentVersionId: VERSION_ID,
+      expectedKind: "session_run" as const,
+      jobId: JOB_ID,
+      ownerId: OWNER_ID,
+    };
+
+    await expect(verifyReplaceableJob(options)).resolves.toMatchObject({
+      id: JOB_ID,
+      status: "failed",
+    });
+    await expect(verifyReplaceableJob(options)).rejects.toThrow(
+      "must be failed or canceled before replacement",
+    );
   });
 });

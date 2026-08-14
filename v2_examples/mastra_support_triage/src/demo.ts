@@ -21,7 +21,11 @@ import {
   resolveConfigDirectory,
 } from "@zenml-io/kitaru/node";
 
-import { runOwnedJob, verifyOwnedJob } from "./management.js";
+import {
+  runOwnedJob,
+  verifyOwnedJob,
+  verifyReplaceableJob,
+} from "./management.js";
 import {
   AmbiguousOperationError,
   type CreateRemoteOptions,
@@ -50,6 +54,10 @@ const OVERRIDE_SYSTEM =
   "tools and queue one refund review for a delayed duplicate charge. Answer " +
   "with a JSON object only, using exactly the keys decision, evidence, risk, " +
   "and nextAction, and record the queued refund review under evidence.";
+const REPLACEABLE_OPERATIONS = new Set<OperationKind>([
+  "create_initial_job",
+  "create_replay",
+]);
 
 export interface DemoResult {
   evaluations: EvaluationResponse[];
@@ -277,14 +285,11 @@ async function collectResult(
   };
 }
 
-async function getOrCreateStore(
+async function createStore(
   options: RunDemoOptions,
   serverUrl: string,
   ownerId: string,
 ): Promise<RunManifestStore> {
-  if (options.resumeStateDir !== undefined) {
-    return RunManifestStore.open(options.resumeStateDir);
-  }
   return RunManifestStore.create({
     ownerId,
     rootDir: resolve(options.stateRoot ?? resolve(EXAMPLE_DIR, ".state")),
@@ -314,6 +319,16 @@ function assertManifestIdentity(
   ]);
   if (unresolved === undefined) {
     if (requestedKinds.size === 0) return;
+    const requestedKind = [...requestedKinds][0];
+    if (
+      requestedKinds.size === 1 &&
+      requestedKind !== undefined &&
+      REPLACEABLE_OPERATIONS.has(requestedKind) &&
+      options.retries?.has(requestedKind) === true &&
+      options.adoptions?.[requestedKind] === undefined
+    ) {
+      return;
+    }
     const retryAuthorization = manifest.operations.at(-1);
     if (
       requestedKinds.size !== 1 ||
@@ -384,8 +399,35 @@ export async function runDemo(
         : {}),
       environment,
     }));
+  if (options.resumeStateDir !== undefined) {
+    const store = RunManifestStore.open(options.resumeStateDir);
+    return store.withRunLock(async () => {
+      const account = await client.accounts.getCurrent();
+      return runLockedDemo(
+        options,
+        dependencies,
+        serverUrl,
+        client,
+        account,
+        store,
+      );
+    });
+  }
   const account = await client.accounts.getCurrent();
-  const store = await getOrCreateStore(options, serverUrl, account.id);
+  const store = await createStore(options, serverUrl, account.id);
+  return store.withRunLock(() =>
+    runLockedDemo(options, dependencies, serverUrl, client, account, store),
+  );
+}
+
+async function runLockedDemo(
+  options: RunDemoOptions,
+  dependencies: DemoDependencies,
+  serverUrl: string,
+  client: KitaruClient,
+  account: Awaited<ReturnType<KitaruClient["accounts"]["getCurrent"]>>,
+  store: RunManifestStore,
+): Promise<DemoResult> {
   let manifest = await store.read();
   assertManifestIdentity(manifest, serverUrl, account.id, options);
   if (manifest.status === "completed") {
@@ -567,16 +609,33 @@ export async function runDemo(
   }
   manifest = await saveStatus(store, "recording");
   const agentVersionId = requireResource(manifest, "agent_version_id");
-  if (manifest.resources.initial_job_id === undefined) {
-    const request = {
-      agent_version_id: agentVersionId,
-      inputs: INITIAL_PROMPT,
-      name: "Mastra support triage baseline",
-    };
+  const initialRequest = {
+    agent_version_id: agentVersionId,
+    inputs: INITIAL_PROMPT,
+    name: "Mastra support triage baseline",
+  };
+  const initialFingerprint = operationFingerprint(initialRequest);
+  const replaceInitialJob = options.retries?.has("create_initial_job") === true;
+  if (manifest.resources.initial_job_id === undefined || replaceInitialJob) {
+    if (manifest.resources.initial_job_id !== undefined) {
+      const oldJobId = manifest.resources.initial_job_id;
+      await verifyReplaceableJob({
+        client,
+        expectedAgentVersionId: agentVersionId,
+        expectedKind: "session_run",
+        jobId: oldJobId,
+        ownerId: account.id,
+      });
+      await store.authorizeReplacement(
+        "create_initial_job",
+        initialFingerprint,
+        [oldJobId],
+      );
+    }
     await store.createRemote(
       "create_initial_job",
-      operationFingerprint(request),
-      () => client.sessionRuns.create(request),
+      initialFingerprint,
+      () => client.sessionRuns.create(initialRequest),
       createRecoveryOptions<JobResponse>(
         options,
         "create_initial_job",
@@ -615,7 +674,11 @@ export async function runDemo(
     manifest.resources.initial_session_id = initialSessionId;
     await store.save(manifest);
   }
-  const initialSession = await client.sessions.get(initialSessionId);
+  const [initialSession, initialNodes, initialOutboxCount] = await Promise.all([
+    client.sessions.get(initialSessionId),
+    listSessionNodes(client, initialSessionId),
+    countOutbox(store.stateDir),
+  ]);
   if (
     initialSession.owner_id !== account.id ||
     initialSession.status !== "completed"
@@ -625,9 +688,7 @@ export async function runDemo(
     );
   }
   requireNonemptyText(initialSession.outputs);
-  const initialNodes = await listSessionNodes(client, initialSessionId);
   assertRecordedShape(initialNodes);
-  const initialOutboxCount = await countOutbox(store.stateDir);
   if (initialOutboxCount !== 1) {
     throw new Error(
       `Baseline run wrote ${initialOutboxCount} outbox lines, expected exactly one`,
@@ -635,32 +696,58 @@ export async function runDemo(
   }
 
   manifest = await saveStatus(store, "replaying");
-  if (manifest.resources.replay_id === undefined) {
-    const request = {
-      agent_version_id: agentVersionId,
-      baseline_session_id: initialSessionId,
-      evaluate_baselines: false,
-      evaluators: [{ evaluator: `mastra-support-triage-${suffix}` }],
-      override: {
-        model_params: { maxOutputTokens: 3000 },
-        prompt: OVERRIDE_PROMPT,
-        system_prompt: OVERRIDE_SYSTEM,
-      },
-      tool_policy: {
-        default: { type: "passthrough" as const },
-        tools: {
-          queueRefundReview: {
-            on_miss: "fail" as const,
-            scope: "baseline" as const,
-            type: "history" as const,
-          },
+  const replayRequest = {
+    agent_version_id: agentVersionId,
+    baseline_session_id: initialSessionId,
+    evaluate_baselines: false,
+    evaluators: [{ evaluator: `mastra-support-triage-${suffix}` }],
+    override: {
+      model_params: { maxOutputTokens: 3000 },
+      prompt: OVERRIDE_PROMPT,
+      system_prompt: OVERRIDE_SYSTEM,
+    },
+    tool_policy: {
+      default: { type: "passthrough" as const },
+      tools: {
+        queueRefundReview: {
+          on_miss: "fail" as const,
+          scope: "baseline" as const,
+          type: "history" as const,
         },
       },
-    };
+    },
+  };
+  const replayFingerprint = operationFingerprint(replayRequest);
+  const replaceReplay = options.retries?.has("create_replay") === true;
+  if (manifest.resources.replay_id === undefined || replaceReplay) {
+    if (manifest.resources.replay_id !== undefined) {
+      const oldReplayId = manifest.resources.replay_id;
+      const oldReplayJobId = requireResource(manifest, "replay_job_id");
+      const oldReplay = await client.replays.get(oldReplayId);
+      if (
+        oldReplay.job_id !== oldReplayJobId ||
+        oldReplay.baseline_session_id !== initialSessionId
+      ) {
+        throw new Error(
+          `Replay ${oldReplayId} does not match this run manifest`,
+        );
+      }
+      await verifyReplaceableJob({
+        client,
+        expectedAgentVersionId: agentVersionId,
+        expectedKind: "replay",
+        jobId: oldReplayJobId,
+        ownerId: account.id,
+      });
+      await store.authorizeReplacement("create_replay", replayFingerprint, [
+        oldReplayId,
+        oldReplayJobId,
+      ]);
+    }
     await store.createRemote(
       "create_replay",
-      operationFingerprint(request),
-      () => client.replays.create(request),
+      replayFingerprint,
+      () => client.replays.create(replayRequest),
       createRecoveryOptions<ReplayResponse>(
         options,
         "create_replay",
@@ -668,7 +755,7 @@ export async function runDemo(
         async (replay) => {
           if (
             replay.baseline_session_id !== initialSessionId ||
-            replay.evaluate_baselines !== request.evaluate_baselines
+            replay.evaluate_baselines !== replayRequest.evaluate_baselines
           ) {
             throw new Error("Adopted replay does not match this run");
           }
@@ -713,13 +800,18 @@ export async function runDemo(
       `Replay ${replayId} did not produce a completed result session`,
     );
   }
-  const replayOutboxCount = await countOutbox(store.stateDir);
+  const [replayOutboxCount, resultSession, replayNodes, evaluations] =
+    await Promise.all([
+      countOutbox(store.stateDir),
+      client.sessions.get(replayResultSessionId),
+      listSessionNodes(client, replayResultSessionId),
+      listEvaluationsForSession(client, replayResultSessionId),
+    ]);
   if (replayOutboxCount !== 1) {
     throw new Error(
       `History replay wrote ${replayOutboxCount} outbox lines, expected one`,
     );
   }
-  const resultSession = await client.sessions.get(replayResultSessionId);
   if (
     resultSession.owner_id !== account.id ||
     resultSession.status !== "completed" ||
@@ -734,7 +826,6 @@ export async function runDemo(
       "Replay result session does not match the requested override",
     );
   }
-  const replayNodes = await listSessionNodes(client, replayResultSessionId);
   assertRecordedShape(replayNodes);
   const replayAction = replayNodes.filter(
     (node) =>
@@ -766,10 +857,6 @@ export async function runDemo(
   ) {
     throw new Error("Replay LLM nodes do not preserve model and cost evidence");
   }
-  const evaluations = await listEvaluationsForSession(
-    client,
-    replayResultSessionId,
-  );
   const expectedEvaluations = new Set([
     "decision_structure",
     "side_effect_safety",
@@ -825,6 +912,9 @@ export function parseArguments(args: readonly string[]): CliArguments {
   };
   for (let index = 0; index < args.length; index += 1) {
     const argument = args[index];
+    if (argument === "--") {
+      continue;
+    }
     if (argument === "--test-model") {
       parsed.testModel = true;
     } else if (argument === "--unauthenticated") {

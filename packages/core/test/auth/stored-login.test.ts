@@ -453,11 +453,14 @@ describe("stored CLI login", () => {
       .mockImplementationOnce(
         (_input, init): Promise<Response> =>
           new Promise((_resolve, reject) => {
-            init?.signal?.addEventListener(
-              "abort",
-              () => reject(init.signal?.reason),
-              { once: true },
-            );
+            const signal = init?.signal;
+            if (signal?.aborted) {
+              reject(signal.reason);
+              return;
+            }
+            signal?.addEventListener("abort", () => reject(signal.reason), {
+              once: true,
+            });
           }),
       )
       .mockResolvedValueOnce(

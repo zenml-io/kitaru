@@ -18,6 +18,7 @@ import type {
   InvestigationResponse,
   JobResponse,
   KitaruClient,
+  KitaruEnvironmentVariables,
   ReplayResponse,
 } from "@zenml-io/kitaru";
 import {
@@ -185,8 +186,13 @@ async function readSourceMaterial() {
   };
 }
 
+export interface WorkflowDependencies {
+  createClient?: typeof createKitaruClient;
+  readSourceMaterial?: typeof readSourceMaterial;
+}
+
 async function resolveApiUrl(
-  environment: Readonly<Record<string, string | undefined>>,
+  environment: KitaruEnvironmentVariables,
 ): Promise<string> {
   const selected =
     environment.KITARU_API_URL ??
@@ -210,8 +216,12 @@ export async function runJournaledMutation<T>(
   input: MutationInput<T>,
   recovery: Pick<WorkflowArguments, "adoptions" | "retries">,
 ): Promise<T> {
-  const commitRecovered = async (value: T): Promise<T> => {
+  const commitValue = async (
+    value: T,
+    afterValidation?: (value: T) => Promise<void>,
+  ): Promise<T> => {
     input.validate(value);
+    await afterValidation?.(value);
     input.commit(input.manifest, value);
     input.manifest.pending_operation = null;
     input.manifest.stages[input.stage].status = "committed";
@@ -238,16 +248,35 @@ export async function runJournaledMutation<T>(
         throw new Error(`Operation ${input.key} does not support adoption`);
       }
       const adopted = await input.adopt(adoptedId);
-      return commitRecovered(adopted);
+      return commitValue(adopted);
     }
-    if (input.reconcile !== undefined) {
+
+    const retryRequested = recovery.retries.has(input.key);
+    const retryAuthorized = existing.status === "retry_authorized";
+    const retrySubmitted = existing.status === "retry_submitted";
+    if (!retryAuthorized && !retrySubmitted && input.reconcile !== undefined) {
       const candidates = await input.reconcile();
       if (candidates.length === 1) {
         const reconciled = candidates[0] as T;
-        return commitRecovered(reconciled);
+        return commitValue(reconciled);
+      }
+      if (candidates.length > 1) {
+        existing.status = "ambiguous";
+        input.manifest.stages[input.stage].status = "ambiguous";
+        await input.store.save(input.manifest);
+        throw new Error(
+          `Operation ${input.key} is ambiguous. Inspect the exact remote object, then pass --adopt ${input.key}=ID.`,
+        );
       }
     }
-    if (!recovery.retries.has(input.key)) {
+    if (retryRequested) {
+      existing.status = "retry_authorized";
+      input.manifest.stages[input.stage].status = "planned";
+      await input.store.save(input.manifest);
+    }
+    if (retryRequested || retryAuthorized) {
+      pending.status = "retry_submitted";
+    } else {
       existing.status = "ambiguous";
       input.manifest.stages[input.stage].status = "ambiguous";
       await input.store.save(input.manifest);
@@ -255,22 +284,13 @@ export async function runJournaledMutation<T>(
         `Operation ${input.key} is ambiguous. Inspect the exact remote object, then pass --adopt ${input.key}=ID or --retry ${input.key}.`,
       );
     }
-    input.manifest.pending_operation = null;
-    input.manifest.stages[input.stage].status = "planned";
-    await input.store.save(input.manifest);
   }
 
   input.manifest.pending_operation = pending;
   setStage(input.manifest, input.stage, "submitted");
   await input.store.save(input.manifest);
   const created = await input.create();
-  input.validate(created);
-  await input.afterRemoteCommit?.(created);
-  input.commit(input.manifest, created);
-  input.manifest.pending_operation = null;
-  input.manifest.stages[input.stage].status = "committed";
-  await input.store.save(input.manifest);
-  return created;
+  return commitValue(created, input.afterRemoteCommit);
 }
 
 function createNamedFilter(name: string) {
@@ -278,6 +298,39 @@ function createNamedFilter(name: string) {
     filter: { field: "name", op: "eq" as const, value: name },
     size: 100,
   };
+}
+
+interface InvestigationReconciliationClient<
+  T extends Pick<InvestigationResponse, "name">,
+> {
+  investigations: {
+    iter(params: {
+      filter: { field: "agent_id"; op: "eq"; value: string };
+      size: number;
+    }): AsyncIterable<T>;
+  };
+}
+
+export async function findInvestigationsByName<
+  T extends Pick<InvestigationResponse, "name">,
+>(
+  client: InvestigationReconciliationClient<T>,
+  agentId: string,
+  name: string,
+): Promise<T[]> {
+  const matches: T[] = [];
+  for await (const investigation of client.investigations.iter({
+    filter: { field: "agent_id", op: "eq", value: agentId },
+    size: 100,
+  })) {
+    if (investigation.name === name) {
+      matches.push(investigation);
+      if (matches.length === 2) {
+        break;
+      }
+    }
+  }
+  return matches;
 }
 
 async function ensureAgent(
@@ -576,8 +629,7 @@ async function ensureReview(
         kind: "investigation",
         manifest,
         parentIds: { agent_id: agentId, session_id: sessionId },
-        reconcile: async () =>
-          (await client.investigations.list(createNamedFilter(name))).items,
+        reconcile: () => findInvestigationsByName(client, agentId, name),
         stage: "review",
         store,
         validate: (value) => {
@@ -628,8 +680,8 @@ async function ensureReview(
       },
     },
   ];
-  for (const answer of answers) {
-    if (manifest.ids.annotation_ids.length >= answers.indexOf(answer) + 1) {
+  for (const [index, answer] of answers.entries()) {
+    if (manifest.ids.annotation_ids.length > index) {
       continue;
     }
     const annotationRequest = {
@@ -1308,15 +1360,21 @@ async function initializeManifest(
   return manifest;
 }
 
-export async function runWorkflow(
+async function runWorkflowUnlocked(
   args: WorkflowArguments,
-  environment: Readonly<Record<string, string | undefined>> = process.env,
+  environment: Readonly<Record<string, string | undefined>>,
+  dependencies: WorkflowDependencies,
+  store: WorkflowManifestStore,
 ) {
   validateWorkflowEnvironment(args.provider, environment);
-  const material = await readSourceMaterial();
+  const material = await (
+    dependencies.readSourceMaterial ?? readSourceMaterial
+  )();
   const apiUrl = await resolveApiUrl(environment);
-  const client = await createKitaruClient({ apiUrl, environment });
-  const store = new WorkflowManifestStore(args.stateDirectory);
+  const client = await (dependencies.createClient ?? createKitaruClient)({
+    apiUrl,
+    environment,
+  });
   const manifest = await initializeManifest(
     client,
     apiUrl,
@@ -1481,6 +1539,20 @@ export async function runWorkflow(
   manifest.phase = "completed";
   await store.save(manifest);
   return createCompletedEvent(manifest.evidence_set_id, COMPLETION_COUNTS);
+}
+
+export async function runWorkflow(
+  args: WorkflowArguments,
+  environment: Readonly<Record<string, string | undefined>> = process.env,
+  dependencies: WorkflowDependencies = {},
+) {
+  const store = new WorkflowManifestStore(args.stateDirectory);
+  const runLock = await store.acquireRunLock();
+  try {
+    return await runWorkflowUnlocked(args, environment, dependencies, store);
+  } finally {
+    await runLock.release();
+  }
 }
 
 export function parseWorkflowArguments(

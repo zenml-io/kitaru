@@ -5,12 +5,17 @@ import {
   lstat,
   mkdir,
   open,
+  readFile,
   rename,
+  rm,
   writeFile,
 } from "node:fs/promises";
+import { hostname } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 
 export const MANIFEST_NAME = "run-manifest.json";
+const RUN_LOCK_DIRECTORY_NAME = "run.lock";
+const RUN_LOCK_OWNER_NAME = "owner.json";
 const MAX_MANIFEST_BYTES = 1024 * 1024;
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -99,6 +104,17 @@ export interface CreateRunManifestOptions {
   rootDir: string;
   runId?: string;
   serverUrl: string;
+}
+
+interface RunLockOwner {
+  hostname: string;
+  pid: number;
+  started_at: string;
+  token: string;
+}
+
+export interface RunLock {
+  release(): Promise<void>;
 }
 
 export class AmbiguousOperationError extends Error {
@@ -227,6 +243,57 @@ function getRemoteIds(value: unknown): string[] {
   );
 }
 
+function parseLockOwner(value: unknown): RunLockOwner | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.hostname !== "string" ||
+    !Number.isInteger(value.pid) ||
+    typeof value.started_at !== "string" ||
+    typeof value.token !== "string"
+  ) {
+    return undefined;
+  }
+  return value as unknown as RunLockOwner;
+}
+
+async function readLockOwner(
+  lockDirectory: string,
+): Promise<RunLockOwner | undefined> {
+  try {
+    return parseLockOwner(
+      JSON.parse(
+        await readFile(join(lockDirectory, RUN_LOCK_OWNER_NAME), "utf8"),
+      ) as unknown,
+    );
+  } catch (error) {
+    if (
+      error instanceof Error &&
+      (("code" in error &&
+        (error as NodeJS.ErrnoException).code === "ENOENT") ||
+        error instanceof SyntaxError)
+    ) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
+function processIsRunning(owner: RunLockOwner): boolean {
+  if (owner.hostname !== hostname()) {
+    return true;
+  }
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ESRCH"
+    );
+  }
+}
+
 async function writeAtomically(
   path: string,
   value: RunManifest,
@@ -332,6 +399,124 @@ export class RunManifestStore {
     manifest.updated_at = new Date().toISOString();
     await mkdir(dirname(this.path), { mode: 0o700, recursive: true });
     await writeAtomically(this.path, manifest);
+  }
+
+  async acquireRunLock(): Promise<RunLock> {
+    const lockDirectory = join(this.stateDir, RUN_LOCK_DIRECTORY_NAME);
+    const owner: RunLockOwner = {
+      hostname: hostname(),
+      pid: process.pid,
+      started_at: new Date().toISOString(),
+      token: randomUUID(),
+    };
+
+    while (true) {
+      const candidate = `${lockDirectory}.${owner.token}.tmp`;
+      await mkdir(candidate, { mode: 0o700 });
+      await writeFile(
+        join(candidate, RUN_LOCK_OWNER_NAME),
+        `${JSON.stringify(owner)}\n`,
+        { encoding: "utf8", flag: "wx", mode: 0o600 },
+      );
+      try {
+        await rename(candidate, lockDirectory);
+        break;
+      } catch (error) {
+        await rm(candidate, { force: true, recursive: true });
+        if (
+          !(
+            error instanceof Error &&
+            "code" in error &&
+            ["EEXIST", "ENOTEMPTY"].includes(
+              String((error as NodeJS.ErrnoException).code),
+            )
+          )
+        ) {
+          throw error;
+        }
+      }
+
+      const existing = await readLockOwner(lockDirectory);
+      if (existing !== undefined && processIsRunning(existing)) {
+        throw new Error(
+          `Run ${basename(this.stateDir)} is already active in process ${existing.pid}`,
+        );
+      }
+      const stale = `${lockDirectory}.stale.${randomUUID()}`;
+      try {
+        await rename(lockDirectory, stale);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error as NodeJS.ErrnoException).code === "ENOENT"
+        ) {
+          continue;
+        }
+        throw error;
+      }
+      await rm(stale, { force: true, recursive: true });
+    }
+
+    let released = false;
+    return {
+      release: async () => {
+        if (released) return;
+        const current = await readLockOwner(lockDirectory);
+        if (current?.token !== owner.token) {
+          throw new Error("Run lock ownership changed before release");
+        }
+        await rm(lockDirectory, { recursive: true });
+        released = true;
+      },
+    };
+  }
+
+  async withRunLock<T>(action: () => Promise<T>): Promise<T> {
+    const lock = await this.acquireRunLock();
+    try {
+      return await action();
+    } finally {
+      await lock.release();
+    }
+  }
+
+  async authorizeReplacement(
+    kind: "create_initial_job" | "create_replay",
+    fingerprint: string,
+    remoteIds: readonly string[],
+  ): Promise<void> {
+    const manifest = await this.read();
+    const lastOperation = manifest.operations.at(-1);
+    const previousOperation = manifest.operations.at(-2);
+    const matchesReplacement = (operation: OperationRecord | undefined) =>
+      operation?.kind === kind &&
+      operation.fingerprint === fingerprint &&
+      operation.remote_ids.length === remoteIds.length &&
+      operation.remote_ids.every((id, index) => id === remoteIds[index]);
+    if (
+      (lastOperation?.state === "retried" &&
+        matchesReplacement(lastOperation)) ||
+      ((lastOperation?.state === "planned" ||
+        lastOperation?.state === "ambiguous") &&
+        lastOperation.kind === kind &&
+        lastOperation.fingerprint === fingerprint &&
+        previousOperation?.state === "retried" &&
+        matchesReplacement(previousOperation))
+    ) {
+      return;
+    }
+    if (
+      lastOperation?.state !== "committed" ||
+      !matchesReplacement(lastOperation)
+    ) {
+      throw new Error(
+        `No exact committed ${kind} operation is available to replace`,
+      );
+    }
+    lastOperation.completed_at = new Date().toISOString();
+    lastOperation.state = "retried";
+    await this.save(manifest);
   }
 
   async createRemote<T>(

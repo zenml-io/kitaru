@@ -9,6 +9,7 @@ import type {
   ResolvedCredential,
 } from "../auth/index.js";
 import { KitaruCredentialError } from "../auth/index.js";
+import type { KitaruEnvironmentVariables } from "../environment.js";
 import { normalizeApiUrl } from "../transport.js";
 import { isRecord, isUuid } from "../validation.js";
 
@@ -16,9 +17,7 @@ const MAX_STORE_BYTES = 1024 * 1024;
 const DEVICE_GRANT = "urn:ietf:params:oauth:grant-type:device_code";
 const DISABLED_VALUES = new Set(["1", "true", "yes"]);
 
-export type StoredLoginEnvironment = Readonly<
-  Record<string, string | undefined>
->;
+export type StoredLoginEnvironment = KitaruEnvironmentVariables;
 
 export interface StoredLoginOptions {
   apiUrl: string;
@@ -434,18 +433,16 @@ export class StoredLoginCredentialProvider
     if (this.#current !== undefined) {
       return this.#current;
     }
-    this.#initial ??= this.#initialize(
-      AbortSignal.timeout(this.#exchangeTimeoutMs),
-    ).finally(() => {
+    this.#initial ??= this.#initialize().finally(() => {
       this.#initial = undefined;
     });
     return awaitWithSignal(this.#initial, signal);
   }
 
-  async #initialize(signal: AbortSignal): Promise<ResolvedCredential> {
+  async #initialize(): Promise<ResolvedCredential> {
     const snapshot = await loadSnapshot(this.#configDirectory, this.#apiUrl);
     this.#identity = snapshot.identity;
-    const token = await this.#getInitialToken(snapshot, signal);
+    const token = await this.#getInitialToken(snapshot);
     this.#current = { generation: 0, identity: snapshot.identity, token };
     return this.#current;
   }
@@ -460,32 +457,23 @@ export class StoredLoginCredentialProvider
     ) {
       return this.#current;
     }
-    this.#renewal ??= this.#renew(
-      rejected,
-      AbortSignal.timeout(this.#exchangeTimeoutMs),
-    ).finally(() => {
+    this.#renewal ??= this.#renew(rejected).finally(() => {
       this.#renewal = undefined;
     });
     return awaitWithSignal(this.#renewal, signal);
   }
 
-  async #getInitialToken(
-    snapshot: StoreSnapshot,
-    signal: AbortSignal,
-  ): Promise<string> {
+  async #getInitialToken(snapshot: StoreSnapshot): Promise<string> {
     if (snapshot.selected.apiKey?.startsWith("KITKEY_")) {
       return snapshot.selected.apiKey;
     }
     if (tokenIsValid(snapshot.selected.token)) {
       return snapshot.selected.token.accessToken;
     }
-    return (await this.#exchangeSnapshot(snapshot, signal)).accessToken;
+    return (await this.#exchangeSnapshot(snapshot)).accessToken;
   }
 
-  async #renew(
-    rejected: ResolvedCredential,
-    signal: AbortSignal,
-  ): Promise<ResolvedCredential> {
+  async #renew(rejected: ResolvedCredential): Promise<ResolvedCredential> {
     const snapshot = await loadSnapshot(this.#configDirectory, this.#apiUrl);
     if (
       snapshot.identity !== this.#identity ||
@@ -495,7 +483,7 @@ export class StoredLoginCredentialProvider
         "Stored Kitaru identity changed; create a new client",
       );
     }
-    const token = await this.#exchangeSnapshot(snapshot, signal);
+    const token = await this.#exchangeSnapshot(snapshot);
     const next = {
       generation: rejected.generation + 1,
       identity: rejected.identity,
@@ -505,10 +493,8 @@ export class StoredLoginCredentialProvider
     return next;
   }
 
-  async #exchangeSnapshot(
-    snapshot: StoreSnapshot,
-    signal: AbortSignal,
-  ): Promise<StoredToken> {
+  async #exchangeSnapshot(snapshot: StoreSnapshot): Promise<StoredToken> {
+    const signal = AbortSignal.timeout(this.#exchangeTimeoutMs);
     const selected = snapshot.selected;
     if (selected.deviceId !== undefined && selected.deviceCode !== undefined) {
       return exchange(

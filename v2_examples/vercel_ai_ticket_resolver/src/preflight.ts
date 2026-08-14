@@ -1,3 +1,5 @@
+import type { KitaruEnvironmentVariables } from "@zenml-io/kitaru";
+
 export type ModelProvider = "deterministic" | "openai";
 
 const SUPPORTED_NODE = "Node >=22.22.0 <23 is required";
@@ -13,7 +15,7 @@ export function assertSupportedNodeVersion(
 
 export function validateWorkflowEnvironment(
   provider: ModelProvider,
-  environment: Readonly<Record<string, string | undefined>>,
+  environment: KitaruEnvironmentVariables,
 ): void {
   if (provider === "deterministic") {
     return;

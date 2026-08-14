@@ -49,6 +49,21 @@ describe("tool cache keys", () => {
       { q: "del\u007f\u001f\u0080end" },
       "236d4613c418242045937ed89feaea74b05981c5981557b4efee958fd28058aa",
     ],
+    [
+      "search",
+      { q: "a".repeat(40) },
+      "86d9e35cd7e4206f3a82c5bf7a31854b537b71aa211ba62204ce171dfdcc601d",
+    ],
+    [
+      "search",
+      { q: "a".repeat(41) },
+      "7e8501b1b2c2aa50780294bdaa528dbe00f3258d4ff76e1686c9a5e14525fc80",
+    ],
+    [
+      "search",
+      { q: "a".repeat(1_000) },
+      "1058bea7e33529ee71f995f537af67485cd4d4364622eb1c15bb298c4b640952",
+    ],
   ])("matches the Python key for %s", (toolName, inputs, expected) => {
     expect(computeToolCacheKey(toolName, inputs)).toBe(expected);
   });

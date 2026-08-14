@@ -31,6 +31,9 @@ describe("runDemo recovery", () => {
     expect(parseArguments(["--retry", "create_replay"]).retries).toEqual(
       new Set(["create_replay"]),
     );
+    expect(parseArguments(["--", "--resume", "/tmp/run"]).resumeStateDir).toBe(
+      "/tmp/run",
+    );
     expect(() =>
       parseArguments(["--adopt", "create_agent=not-a-uuid"]),
     ).toThrow("operation=UUID");
@@ -42,6 +45,43 @@ describe("runDemo recovery", () => {
         "create_agent",
       ]),
     ).toThrow("more than once");
+  });
+
+  it("rejects a concurrent resume before calling the server", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kitaru-mastra-concurrent-"));
+    const store = await RunManifestStore.create({
+      ownerId: OWNER_ID,
+      rootDir: root,
+      runId: RUN_ID,
+      serverUrl: "https://kitaru.example.test",
+    });
+    let releaseFirst!: () => void;
+    const firstRun = store.withRunLock(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        }),
+    );
+    await vi.waitFor(() => expect(releaseFirst).toBeTypeOf("function"));
+    const getCurrent = vi.fn();
+    const fakeClient = {
+      accounts: { getCurrent },
+    } as unknown as KitaruClient;
+
+    await expect(
+      runDemo(
+        {
+          apiUrl: "https://kitaru.example.test",
+          resumeStateDir: store.stateDir,
+          testModel: true,
+        },
+        { client: fakeClient },
+      ),
+    ).rejects.toThrow("already active");
+    expect(getCurrent).not.toHaveBeenCalled();
+
+    releaseFirst();
+    await firstRun;
   });
 
   it("returns a completed manifest without creating or executing paid work again", async () => {

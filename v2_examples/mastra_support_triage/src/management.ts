@@ -85,6 +85,18 @@ export async function verifyOwnedJob(
   return job;
 }
 
+export async function verifyReplaceableJob(
+  options: VerifyOwnedJobOptions,
+): Promise<JobResponse> {
+  const job = await verifyOwnedJob(options);
+  if (job.status !== "failed" && job.status !== "canceled") {
+    throw new Error(
+      `Job ${job.id} must be failed or canceled before replacement`,
+    );
+  }
+  return job;
+}
+
 async function recordCancellation(
   store: RunManifestStore,
   cancellation: CancellationRecord,

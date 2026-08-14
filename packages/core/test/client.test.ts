@@ -37,10 +37,23 @@ function jsonResponse(value: unknown, status = 200): Response {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("KitaruClient", () => {
+  it("accepts explicit configuration when process is unavailable", () => {
+    vi.stubGlobal("process", undefined);
+
+    expect(
+      () =>
+        new KitaruClient({
+          apiKey: "explicit-secret",
+          apiUrl: "https://api.example",
+        }),
+    ).not.toThrow();
+  });
+
   it("prefers explicit configuration, normalizes the URL, and authenticates", async () => {
     vi.stubEnv("KITARU_API_URL", "https://environment.example");
     vi.stubEnv("KITARU_API_KEY", "environment-secret");

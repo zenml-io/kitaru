@@ -4,6 +4,7 @@ import { join } from "node:path";
 import type {
   CohortVersionResponse,
   EvaluatorVersionResponse,
+  KitaruClient,
 } from "@zenml-io/kitaru";
 import { describe, expect, it, vi } from "vitest";
 
@@ -24,9 +25,12 @@ import {
 import {
   BASELINE_FAILURE_TICKETS,
   CONTROL_TICKETS,
+  findInvestigationsByName,
   getCohortVersionForAdoption,
   getEvaluatorVersionForAdoption,
+  parseWorkflowArguments,
   runJournaledMutation,
+  runWorkflow,
   TARGET_TICKETS,
   TOOLS,
   verifyCompletedJob,
@@ -36,6 +40,16 @@ import {
 const id = (index: number) =>
   `018f0000-0000-7000-8000-${String(index).padStart(12, "0")}`;
 
+const sourceMaterial = {
+  evaluatorSource: "def evaluate():\n    return True\n",
+  hashes: {
+    baseline_instructions_sha256: "a".repeat(64),
+    evaluator_sha256: "b".repeat(64),
+    fixtures_sha256: "c".repeat(64),
+    strict_instructions_sha256: "d".repeat(64),
+  },
+};
+
 function manifest(): WorkflowManifest {
   return createWorkflowManifest({
     accountId: id(1),
@@ -43,12 +57,7 @@ function manifest(): WorkflowManifest {
     authScheme: "control_plane",
     evidenceSetId: id(2),
     serverVersion: "0.22.0",
-    sourceHashes: {
-      baseline_instructions_sha256: "a".repeat(64),
-      evaluator_sha256: "b".repeat(64),
-      fixtures_sha256: "c".repeat(64),
-      strict_instructions_sha256: "d".repeat(64),
-    },
+    sourceHashes: sourceMaterial.hashes,
   });
 }
 
@@ -131,6 +140,97 @@ describe("canonical workflow manifest", () => {
     ).rejects.toThrow("archive collision");
   });
 
+  it.each([
+    ["api_url", "https://other.example"],
+    ["account_id", id(90)],
+    ["auth_scheme", "local"],
+    ["version", "0.23.0"],
+  ] as const)("rejects a changed server %s before any remote mutation", async (field, value) => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    state.server = { ...state.server, [field]: value };
+    await store.save(state);
+    const createAgent = vi.fn();
+    const client = {
+      accounts: { getCurrent: vi.fn(async () => ({ id: id(1) })) },
+      agents: { create: createAgent },
+      info: {
+        get: vi.fn(async () => ({
+          auth_scheme: "control_plane",
+          version: "0.22.0",
+        })),
+      },
+    } as unknown as KitaruClient;
+
+    await expect(
+      runWorkflow(
+        parseWorkflowArguments(["--state-dir", directory]),
+        { KITARU_API_URL: "https://kitaru.example" },
+        {
+          createClient: async () => client,
+          readSourceMaterial: async () => sourceMaterial,
+        },
+      ),
+    ).rejects.toThrow("belongs to another server or account");
+    expect(createAgent).not.toHaveBeenCalled();
+  });
+
+  it("holds one filesystem lock from before state work through workflow exit", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    let releaseSourceMaterial:
+      | ((value: typeof sourceMaterial) => void)
+      | undefined;
+    let sourceReadStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolveStarted) => {
+      sourceReadStarted = resolveStarted;
+    });
+    const blockedSourceMaterial = new Promise<typeof sourceMaterial>(
+      (resolve) => {
+        releaseSourceMaterial = resolve;
+      },
+    );
+    const readSourceMaterial = vi
+      .fn<() => Promise<typeof sourceMaterial>>()
+      .mockImplementationOnce(async () => {
+        sourceReadStarted?.();
+        return blockedSourceMaterial;
+      })
+      .mockResolvedValue(sourceMaterial);
+    const remoteCalls = vi.fn(async () => {
+      throw new Error("stop after lock verification");
+    });
+    const client = {
+      accounts: { getCurrent: remoteCalls },
+      info: { get: remoteCalls },
+    } as unknown as KitaruClient;
+    const dependencies = {
+      createClient: vi.fn(async () => client),
+      readSourceMaterial,
+    };
+    const args = parseWorkflowArguments(["--state-dir", directory]);
+    const environment = { KITARU_API_URL: "https://kitaru.example" };
+
+    const first = runWorkflow(args, environment, dependencies);
+    await started;
+    await expect(runWorkflow(args, environment, dependencies)).rejects.toThrow(
+      "already running",
+    );
+    expect(dependencies.createClient).not.toHaveBeenCalled();
+    expect(remoteCalls).not.toHaveBeenCalled();
+    expect(readSourceMaterial).toHaveBeenCalledOnce();
+
+    releaseSourceMaterial?.(sourceMaterial);
+    await expect(first).rejects.toThrow("stop after lock verification");
+    expect(dependencies.createClient).toHaveBeenCalledOnce();
+    expect(remoteCalls).toHaveBeenCalledTimes(2);
+
+    await expect(runWorkflow(args, environment, dependencies)).rejects.toThrow(
+      "stop after lock verification",
+    );
+    expect(dependencies.createClient).toHaveBeenCalledTimes(2);
+  });
+
   it("recovers one exact named mutation after a lost response", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
     const store = new WorkflowManifestStore(directory);
@@ -179,6 +279,287 @@ describe("canonical workflow manifest", () => {
     expect(recovered).toEqual(remote);
     expect((await store.load())?.ids.agent_id).toBe(remote.id);
     expect((await store.load())?.pending_operation).toBeNull();
+  });
+
+  it("persists the mutation journal before calling the remote create", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    await store.save(state);
+    const remote = { id: id(60), name: "journal-first" };
+    const create = vi.fn(async () => {
+      expect((await store.load())?.pending_operation).toMatchObject({
+        key: "agent",
+        status: "submitted",
+      });
+      return remote;
+    });
+
+    await runJournaledMutation(
+      {
+        commit: (current, value) => {
+          current.ids.agent_id = value.id;
+        },
+        create,
+        fingerprintInput: { name: remote.name },
+        key: "agent",
+        kind: "agent",
+        manifest: state,
+        stage: "baseline",
+        store,
+        validate: () => {},
+      },
+      { adoptions: {}, retries: new Set() },
+    );
+
+    expect(create).toHaveBeenCalledOnce();
+  });
+
+  it("reconciles one exact candidate before honoring retry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    await store.save(state);
+    const orphan = { id: id(61), name: "retry-precedence" };
+    const create = vi
+      .fn<() => Promise<typeof orphan>>()
+      .mockResolvedValueOnce(orphan);
+    const reconcile = vi.fn(async () => [orphan]);
+    const input = {
+      commit: (current: WorkflowManifest, value: typeof orphan) => {
+        current.ids.agent_id = value.id;
+      },
+      create,
+      fingerprintInput: { name: orphan.name },
+      key: "agent",
+      kind: "agent",
+      manifest: state,
+      reconcile,
+      stage: "baseline" as const,
+      store,
+      validate: () => {},
+    };
+
+    await expect(
+      runJournaledMutation(
+        {
+          ...input,
+          afterRemoteCommit: async () => {
+            throw new Error("lost response");
+          },
+        },
+        { adoptions: {}, retries: new Set() },
+      ),
+    ).rejects.toThrow("lost response");
+
+    await expect(
+      runJournaledMutation(input, {
+        adoptions: {},
+        retries: new Set(["agent"]),
+      }),
+    ).resolves.toEqual(orphan);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledOnce();
+    expect((await store.load())?.ids.agent_id).toBe(orphan.id);
+  });
+
+  it("keeps multiple reconciliation candidates ambiguous despite retry", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    await store.save(state);
+    const first = { id: id(65), name: "ambiguous-retry" };
+    const second = { id: id(66), name: "ambiguous-retry" };
+    const create = vi.fn(async () => first);
+    const input = {
+      commit: (current: WorkflowManifest, value: typeof first) => {
+        current.ids.agent_id = value.id;
+      },
+      create,
+      fingerprintInput: { name: first.name },
+      key: "agent",
+      kind: "agent",
+      manifest: state,
+      reconcile: async () => [first, second],
+      stage: "baseline" as const,
+      store,
+      validate: () => {},
+    };
+
+    await expect(
+      runJournaledMutation(
+        {
+          ...input,
+          afterRemoteCommit: async () => {
+            throw new Error("lost response");
+          },
+        },
+        { adoptions: {}, retries: new Set() },
+      ),
+    ).rejects.toThrow("lost response");
+
+    await expect(
+      runJournaledMutation(input, {
+        adoptions: {},
+        retries: new Set(["agent"]),
+      }),
+    ).rejects.toThrow("ambiguous");
+    expect(create).toHaveBeenCalledOnce();
+    expect((await store.load())?.pending_operation).toMatchObject({
+      status: "ambiguous",
+    });
+  });
+
+  it("resumes a retry interrupted after durable authorization", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    await store.save(state);
+    const orphan = { id: id(63), name: "durable-retry" };
+    const replacement = { id: id(64), name: "durable-retry" };
+    const create = vi
+      .fn<() => Promise<typeof orphan>>()
+      .mockResolvedValueOnce(orphan)
+      .mockResolvedValueOnce(replacement);
+    const reconcile = vi.fn(async () => []);
+    const input = {
+      commit: (current: WorkflowManifest, value: typeof orphan) => {
+        current.ids.agent_id = value.id;
+      },
+      create,
+      fingerprintInput: { name: orphan.name },
+      key: "agent",
+      kind: "agent",
+      manifest: state,
+      reconcile,
+      stage: "baseline" as const,
+      store,
+      validate: () => {},
+    };
+    await expect(
+      runJournaledMutation(
+        {
+          ...input,
+          afterRemoteCommit: async () => {
+            throw new Error("lost response");
+          },
+        },
+        { adoptions: {}, retries: new Set() },
+      ),
+    ).rejects.toThrow("lost response");
+
+    const save = store.save.bind(store);
+    const saveSpy = vi
+      .spyOn(store, "save")
+      .mockImplementation(async (value) => {
+        await save(value);
+        if (
+          (value.pending_operation as { status?: string } | null)?.status ===
+          "retry_authorized"
+        ) {
+          throw new Error("interrupted after retry authorization");
+        }
+      });
+    await expect(
+      runJournaledMutation(input, {
+        adoptions: {},
+        retries: new Set(["agent"]),
+      }),
+    ).rejects.toThrow("interrupted after retry authorization");
+    saveSpy.mockRestore();
+    expect((await store.load())?.pending_operation).toMatchObject({
+      key: "agent",
+      status: "retry_authorized",
+    });
+
+    const resumed = (await store.load()) as WorkflowManifest;
+    await expect(
+      runJournaledMutation(
+        { ...input, manifest: resumed },
+        { adoptions: {}, retries: new Set() },
+      ),
+    ).resolves.toEqual(replacement);
+    expect(reconcile).toHaveBeenCalledOnce();
+    expect(create).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires a new explicit choice after a retry was submitted", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    const orphan = { id: id(67), name: "submitted-retry" };
+    const replacement = { id: id(68), name: "submitted-retry" };
+    const create = vi
+      .fn<() => Promise<typeof orphan>>()
+      .mockResolvedValueOnce(orphan)
+      .mockResolvedValueOnce(replacement);
+    const reconcile = vi.fn(async () => []);
+    const createInput = (current: WorkflowManifest) => ({
+      commit: (current: WorkflowManifest, value: typeof replacement) => {
+        current.ids.agent_id = value.id;
+      },
+      create,
+      fingerprintInput: { name: replacement.name },
+      key: "agent",
+      kind: "agent",
+      manifest: current,
+      reconcile,
+      stage: "baseline" as const,
+      store,
+      validate: () => {},
+    });
+
+    await expect(
+      runJournaledMutation(
+        {
+          ...createInput(state),
+          afterRemoteCommit: async () => {
+            throw new Error("lost response");
+          },
+        },
+        { adoptions: {}, retries: new Set() },
+      ),
+    ).rejects.toThrow("lost response");
+
+    const save = store.save.bind(store);
+    const saveSpy = vi
+      .spyOn(store, "save")
+      .mockImplementation(async (value) => {
+        await save(value);
+        if (value.pending_operation?.status === "retry_submitted") {
+          throw new Error("interrupted after retry submission");
+        }
+      });
+    await expect(
+      runJournaledMutation(createInput(state), {
+        adoptions: {},
+        retries: new Set(["agent"]),
+      }),
+    ).rejects.toThrow("interrupted after retry submission");
+    saveSpy.mockRestore();
+    const retrySubmitted = (await store.load()) as WorkflowManifest;
+    expect(retrySubmitted.pending_operation?.status).toBe("retry_submitted");
+    const explicitRetry = structuredClone(retrySubmitted);
+    reconcile.mockClear();
+
+    await expect(
+      runJournaledMutation(createInput(retrySubmitted), {
+        adoptions: {},
+        retries: new Set(),
+      }),
+    ).rejects.toThrow("ambiguous");
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledOnce();
+
+    await store.save(explicitRetry);
+    await expect(
+      runJournaledMutation(createInput(explicitRetry), {
+        adoptions: {},
+        retries: new Set(["agent"]),
+      }),
+    ).resolves.toEqual(replacement);
+    expect(reconcile).not.toHaveBeenCalled();
+    expect(create).toHaveBeenCalledTimes(2);
   });
 
   it("stops a non-reconcilable response loss as ambiguous", async () => {
@@ -413,6 +794,34 @@ describe("canonical machine events", () => {
       schema_version: 1,
       evidence_set_id: id(2),
     });
+  });
+});
+
+describe("canonical investigation recovery", () => {
+  it("paginates a supported agent filter and matches the exact name locally", async () => {
+    const requested: unknown[] = [];
+    const client = {
+      investigations: {
+        iter: async function* (params: unknown) {
+          requested.push(params);
+          yield { agent_id: id(70), id: id(71), name: "another-run" };
+          yield { agent_id: id(70), id: id(72), name: "exact-run" };
+          yield { agent_id: id(70), id: id(73), name: "exact-run-suffix" };
+        },
+      },
+    };
+
+    await expect(
+      findInvestigationsByName(client, id(70), "exact-run"),
+    ).resolves.toEqual([
+      expect.objectContaining({ id: id(72), name: "exact-run" }),
+    ]);
+    expect(requested).toEqual([
+      {
+        filter: { field: "agent_id", op: "eq", value: id(70) },
+        size: 100,
+      },
+    ]);
   });
 });
 

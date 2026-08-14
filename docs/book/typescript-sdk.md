@@ -71,7 +71,7 @@ Do not copy a developer's stored login into a container or CI secret. Create a s
 | `tasks` | Inspect task status and execution specifications for recovery |
 | `replays` | Create, inspect, list, wait for, and resolve recorded tool results |
 
-List methods accept cursor pagination and JSON filters. Matching `iterate()` methods follow opaque cursors without mutating the caller's parameters.
+List methods accept cursor pagination and JSON filters. Matching `iter()` methods, including specialized methods such as `iterVersions()` and `iterNodes()`, follow opaque cursors without mutating the caller's parameters.
 
 ## Wait and cancellation behavior
 

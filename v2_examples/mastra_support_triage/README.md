@@ -56,7 +56,11 @@ If inspection proves that no resource was created, explicitly accept the duplica
 pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume v2_examples/mastra_support_triage/.state/RUN_ID --retry create_agent
 ```
 
-The driver records the explicit retry decision before issuing another create. It rejects recovery for a different operation, a changed request fingerprint, both actions at once, or a run without an ambiguous operation.
+The driver records the explicit retry decision before issuing another create. It rejects recovery for a different operation, a changed request fingerprint, or both actions at once.
+
+If the exact committed initial job or replay job is terminal `failed` or `canceled`, use `--retry create_initial_job` or `--retry create_replay` to replace it. The driver reads back and verifies the old job and its parent IDs, records the replacement authorization before creating anything, and then updates the manifest with the new exact IDs. It never creates a replacement automatically, because doing so can repeat paid model work.
+
+One process holds an exclusive lock on the run directory from before the first manifest read until the workflow exits. A concurrent resume fails before it can call the server. The owner-only lock records its host, process ID, and unique token. A dead local process's stale lock is replaced atomically, while a live local or remote-host owner remains protected. Normal release removes only the caller's token.
 
 If the dedicated worker fails to start or exits unsuccessfully, the driver verifies the exact job, account, kind, and agent version before sending one cancellation request. A `409` or lost cancellation response triggers one exact job read. Terminal state or `cancel_requested_at` confirms the result; any other result remains ambiguous in the manifest. The original worker failure remains the primary error.
 

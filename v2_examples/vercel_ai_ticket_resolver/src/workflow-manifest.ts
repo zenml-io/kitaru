@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { hostname } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import type { ModelProvider } from "./preflight.js";
@@ -8,6 +16,8 @@ const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 const MANIFEST_NAME = "workflow.json";
+const LOCK_DIRECTORY_NAME = "workflow.lock";
+const LOCK_OWNER_NAME = "owner.json";
 const STAGE_NAMES = [
   "baseline",
   "review",
@@ -40,7 +50,7 @@ export interface PendingOperation {
   key: string;
   kind: string;
   parent_ids: Record<string, string>;
-  status: "submitted" | "ambiguous";
+  status: "submitted" | "ambiguous" | "retry_authorized" | "retry_submitted";
 }
 
 export interface WorkflowIds {
@@ -93,6 +103,17 @@ export interface WorkflowManifest {
     strict_instructions_sha256: string;
   };
   stages: Record<WorkflowStageName, WorkflowStage>;
+}
+
+interface WorkflowLockOwner {
+  hostname: string;
+  pid: number;
+  started_at: string;
+  token: string;
+}
+
+export interface WorkflowRunLock {
+  release(): Promise<void>;
 }
 
 interface CreateWorkflowManifestInput {
@@ -307,7 +328,9 @@ function hasValidPendingOperation(value: unknown): boolean {
     typeof value.kind === "string" &&
     value.kind.length > 0 &&
     isUuidMap(value.parent_ids) &&
-    (value.status === "submitted" || value.status === "ambiguous")
+    ["submitted", "ambiguous", "retry_authorized", "retry_submitted"].includes(
+      String(value.status),
+    )
   );
 }
 
@@ -380,6 +403,47 @@ async function readOptionalFile(path: string): Promise<string | undefined> {
   }
 }
 
+function parseLockOwner(value: unknown): WorkflowLockOwner | undefined {
+  if (
+    !isRecord(value) ||
+    typeof value.hostname !== "string" ||
+    !Number.isInteger(value.pid) ||
+    typeof value.started_at !== "string" ||
+    typeof value.token !== "string"
+  ) {
+    return undefined;
+  }
+  return value as unknown as WorkflowLockOwner;
+}
+
+async function readLockOwner(lockDirectory: string) {
+  const contents = await readOptionalFile(join(lockDirectory, LOCK_OWNER_NAME));
+  if (contents === undefined) {
+    return undefined;
+  }
+  try {
+    return parseLockOwner(JSON.parse(contents) as unknown);
+  } catch {
+    return undefined;
+  }
+}
+
+function processIsRunning(owner: WorkflowLockOwner): boolean {
+  if (owner.hostname !== hostname()) {
+    return true;
+  }
+  try {
+    process.kill(owner.pid, 0);
+    return true;
+  } catch (error) {
+    return !(
+      error instanceof Error &&
+      "code" in error &&
+      (error as NodeJS.ErrnoException).code === "ESRCH"
+    );
+  }
+}
+
 export async function loadWorkflowManifest(
   stateDirectory = resolve(".state"),
 ): Promise<WorkflowManifest | undefined> {
@@ -408,6 +472,81 @@ export class WorkflowManifestStore {
 
   async load(): Promise<WorkflowManifest | undefined> {
     return loadWorkflowManifest(this.#directory);
+  }
+
+  async acquireRunLock(): Promise<WorkflowRunLock> {
+    await mkdir(this.#directory, { recursive: true, mode: 0o700 });
+    await chmod(this.#directory, 0o700);
+    const lockDirectory = join(this.#directory, LOCK_DIRECTORY_NAME);
+    const owner: WorkflowLockOwner = {
+      hostname: hostname(),
+      pid: process.pid,
+      started_at: new Date().toISOString(),
+      token: randomUUID(),
+    };
+
+    while (true) {
+      const candidate = `${lockDirectory}.${owner.token}.tmp`;
+      await mkdir(candidate, { mode: 0o700 });
+      await writeFile(
+        join(candidate, LOCK_OWNER_NAME),
+        `${JSON.stringify(owner)}\n`,
+        { encoding: "utf8", flag: "wx", mode: 0o600 },
+      );
+      try {
+        await rename(candidate, lockDirectory);
+        break;
+      } catch (error) {
+        await rm(candidate, { force: true, recursive: true });
+        if (
+          !(
+            error instanceof Error &&
+            "code" in error &&
+            ["EEXIST", "ENOTEMPTY"].includes(
+              String((error as NodeJS.ErrnoException).code),
+            )
+          )
+        ) {
+          throw error;
+        }
+      }
+
+      const existing = await readLockOwner(lockDirectory);
+      if (existing !== undefined && processIsRunning(existing)) {
+        throw new Error(
+          `Workflow state at ${this.#directory} is already running in process ${existing.pid}`,
+        );
+      }
+      const stale = `${lockDirectory}.stale.${randomUUID()}`;
+      try {
+        await rename(lockDirectory, stale);
+      } catch (error) {
+        if (
+          error instanceof Error &&
+          "code" in error &&
+          (error as NodeJS.ErrnoException).code === "ENOENT"
+        ) {
+          continue;
+        }
+        throw error;
+      }
+      await rm(stale, { force: true, recursive: true });
+    }
+
+    let released = false;
+    return {
+      release: async () => {
+        if (released) {
+          return;
+        }
+        const current = await readLockOwner(lockDirectory);
+        if (current?.token !== owner.token) {
+          throw new Error("Workflow run lock ownership changed before release");
+        }
+        await rm(lockDirectory, { recursive: true });
+        released = true;
+      },
+    };
   }
 
   async save(manifest: WorkflowManifest): Promise<void> {

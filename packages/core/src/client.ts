@@ -22,6 +22,7 @@ import {
   InvestigationsResource,
   JobsResource,
   ReplaysResource,
+  type ResourceRequestOptions,
   SessionRunsResource,
   SessionsResource,
   TasksResource,
@@ -57,9 +58,7 @@ export interface KitaruClientOptions extends KitaruEnvironmentOptions {
   fetch?: typeof globalThis.fetch;
 }
 
-export interface KitaruRequestOptions {
-  signal?: AbortSignal;
-}
+export interface KitaruRequestOptions extends ResourceRequestOptions {}
 
 export class KitaruClient {
   readonly #transport: KitaruTransport;
@@ -82,10 +81,7 @@ export class KitaruClient {
   readonly tasks: TasksResource;
 
   constructor(options: KitaruClientOptions = {}) {
-    const environment = resolveKitaruEnvironment(
-      options,
-      options.environment ?? process.env,
-    );
+    const environment = resolveKitaruEnvironment(options, options.environment);
     const credentialProvider =
       options.apiKey !== undefined
         ? createStaticCredentialProvider(options.apiKey, "explicit")

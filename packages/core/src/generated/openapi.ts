@@ -1900,6 +1900,7 @@ export interface paths {
          *
          *     Args:
          *         settings: Service settings governing auth behavior.
+         *         server_id: Persisted server id.
          *         ui_version: UI version served by this process.
          *
          *     Returns:
