@@ -343,3 +343,58 @@ def test_runtime_files_contain_no_world_readable_secrets(runtime_paths) -> None:
     assert os.stat(runtime_paths.directory).st_mode & 0o777 == 0o700
     assert os.stat(runtime_paths.environment).st_mode & 0o777 == 0o600
     assert os.stat(runtime_paths.state).st_mode & 0o777 == 0o600
+
+
+def _orphan_volume_runner() -> FakeDockerRunner:
+    """Build a runner reporting a leftover volume and no other resources.
+
+    Returns:
+        Runner instance.
+    """
+    runner = FakeDockerRunner()
+    label = f"label=com.docker.compose.project={local_runtime.LOCAL_PROJECT_NAME}"
+    runner.results[("volume", "ls", "--quiet", "--filter", label)] = ProcessResult(
+        0, "kitaru-local_postgres_data\n", ""
+    )
+    return runner
+
+
+async def test_orphaned_resources_name_themselves_and_point_at_the_cleanup(
+    runtime_paths, monkeypatch
+) -> None:
+    """A leftover volume without state reports what blocks the login."""
+    monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
+
+    with pytest.raises(CLIError, match="without CLI ownership state") as raised:
+        await local_runtime.start_local_runtime(
+            package_version="0.21.0",
+            upgrade=False,
+            timeout=30,
+            runner=_orphan_volume_runner(),
+            paths=runtime_paths,
+        )
+
+    assert raised.value.kind == "conflict"
+    assert "kitaru logout --volumes" in str(raised.value.hint)
+    assert raised.value.details == {"volumes": ["kitaru-local_postgres_data"]}
+
+
+async def test_deleting_volumes_removes_orphaned_resources(runtime_paths) -> None:
+    """A stop with data deletion clears resources the state no longer tracks."""
+    runner = _orphan_volume_runner()
+
+    item = await local_runtime.stop_local_runtime(
+        delete_volumes=True, runner=runner, paths=runtime_paths
+    )
+
+    assert item["deployment"] == "deleted"
+    assert item["data_deleted"] is True
+    assert ("volume", "rm", "kitaru-local_postgres_data") in runner.calls
+
+
+async def test_stop_without_resources_reports_no_deployment(runtime_paths) -> None:
+    """A stop finds nothing to delete when no resources carry the label."""
+    with pytest.raises(CLIError, match="No CLI-owned local Kitaru deployment"):
+        await local_runtime.stop_local_runtime(
+            delete_volumes=True, runner=FakeDockerRunner(), paths=runtime_paths
+        )
