@@ -1910,7 +1910,24 @@
       "EvaluationStats": {
         "description": "Evaluation stats.",
         "properties": {
-          "average": {
+          "count": {
+            "description": "Number of aggregated evaluations.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Highest score of float and bool evaluations, null for other data types.",
+            "title": "Max"
+          },
+          "mean": {
             "anyOf": [
               {
                 "type": "number"
@@ -1920,12 +1937,19 @@
               }
             ],
             "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
-            "title": "Average"
+            "title": "Mean"
           },
-          "count": {
-            "description": "Number of aggregated evaluations.",
-            "title": "Count",
-            "type": "integer"
+          "min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lowest score of float and bool evaluations, null for other data types.",
+            "title": "Min"
           },
           "pass_rate": {
             "anyOf": [
