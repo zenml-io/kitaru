@@ -19,6 +19,7 @@ jobs:
     permissions:
       contents: read
     outputs:
+      bundle-version: ${{ steps.metadata.outputs.bundle-version }}
       distribution: ${{ steps.metadata.outputs.distribution }}
       is-prerelease: ${{ steps.metadata.outputs.is-prerelease }}
       package-tag: ${{ steps.metadata.outputs.package-tag }}
@@ -49,9 +50,18 @@ jobs:
           distribution=$(jq -r '.unit.distribution' <<<"$unit")
           project_dir=$(jq -r '.unit.path' <<<"$unit")
           version=$(jq -r '.unit.version' <<<"$unit")
+          bundle_version="$version"
           is_prerelease=false
           if [[ "$version" =~ (a|b|rc|dev)[0-9]+ ]]; then
             is_prerelease=true
+          fi
+          if [ "$distribution" = kitaru ]; then
+            if [[ "$version" =~ ^([0-9]+\.[0-9]+\.[0-9]+)rc([0-9]+)$ ]]; then
+              bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"
+            elif [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              echo "::error::Core deployables require X.Y.Z or X.Y.ZrcN, got $version"
+              exit 1
+            fi
           fi
           {
             printf 'DISTRIBUTION=%s\n' "$distribution"
@@ -61,6 +71,7 @@ jobs:
             printf 'VERSION=%s\n' "$version"
           } >> "$GITHUB_ENV"
           {
+            printf 'bundle-version=%s\n' "$bundle_version"
             printf 'distribution=%s\n' "$distribution"
             printf 'is-prerelease=%s\n' "$is_prerelease"
             printf 'package-tag=%s\n' "$package_tag"
@@ -125,14 +136,13 @@ jobs:
             evidence/*
           if-no-files-found: error
           retention-days: 90
-  publish:
+  publish-python:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi-${{ needs.build.outputs.distribution }}
     permissions:
-      contents: write
       id-token: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -144,7 +154,158 @@ jobs:
         with:
           packages-dir: package-dist
           skip-existing: true
-      - name: Create package GitHub Release
+  publish-deployables:
+    if: needs.build.outputs.distribution == 'kitaru'
+    needs: [build, publish-python]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Confirm Kitaru exists on PyPI
+        env:
+          KITARU_VERSION: ${{ needs.build.outputs.version }}
+        run: curl -fsS "https://pypi.org/pypi/kitaru/$KITARU_VERSION/json" >/dev/null
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      - name: Build and test client image
+        env:
+          KITARU_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          docker build --load -f docker/release-client.Dockerfile \
+            --target client --build-arg KITARU_VERSION="$KITARU_VERSION" \
+            -t kitaru-bundle-client:test .
+          docker run --rm kitaru-bundle-client:test python -c "import kitaru"
+      - name: Build and test server image
+        env:
+          KITARU_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          docker build --load -f docker/release-server.Dockerfile \
+            --target server --build-arg KITARU_VERSION="$KITARU_VERSION" \
+            -t kitaru-bundle-server:test .
+          docker run --rm kitaru-bundle-server:test python -c "import kitaru"
+      - name: Build and test worker image
+        env:
+          KITARU_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          docker build --load -f docker/release-worker.Dockerfile \
+            --target worker --build-arg KITARU_VERSION="$KITARU_VERSION" \
+            -t kitaru-bundle-worker:test .
+          docker run --rm kitaru-bundle-worker:test python -c "import kitaru"
+      - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
+        with:
+          version: v3.9.2
+      - name: Build Helm chart
+        env:
+          BUNDLE_VERSION: ${{ needs.build.outputs.bundle-version }}
+        run: |
+          sed -i "s/^version: .*/version: \"$BUNDLE_VERSION\"/" helm/Chart.yaml
+          helm lint ./helm
+          helm package ./helm --destination bundle-dist
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish client image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: docker/release-client.Dockerfile
+          target: client
+          push: true
+          build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
+          tags: zenmldocker/kitaru:${{ needs.build.outputs.bundle-version }}
+      - name: Publish worker image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: docker/release-worker.Dockerfile
+          target: worker
+          push: true
+          build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
+          tags: zenmldocker/kitaru-worker:${{ needs.build.outputs.bundle-version }}
+      - name: Publish server image
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7.3.0
+        with:
+          context: .
+          file: docker/release-server.Dockerfile
+          target: server
+          push: true
+          build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
+          tags: zenmldocker/kitaru-server:${{ needs.build.outputs.bundle-version }}
+      - name: Publish managed image
+        id: publish-managed-image
+        continue-on-error: true
+        uses: ./.github/actions/publish-managed-image
+        with:
+          package-version: ${{ needs.build.outputs.version }}
+          image-tag: ${{ needs.build.outputs.bundle-version }}
+          aws-role-arn: ${{ vars.KITARU_ECR_ROLE_ARN }}
+      - name: Report managed image failure
+        if: steps.publish-managed-image.outcome == 'failure'
+        run: |
+          echo "::warning::Managed image publication failed; continuing with the public release artifacts."
+          echo "### Managed image publication failed" >> "$GITHUB_STEP_SUMMARY"
+          echo "The private ECR image is unavailable for this release. Public Docker Hub images and the Helm chart continue publishing." >> "$GITHUB_STEP_SUMMARY"
+      - name: Configure AWS credentials for Helm
+        uses: aws-actions/configure-aws-credentials@517a711dbcd0e402f90c77e7e2f81e849156e31d  # v6.2.2
+        with:
+          role-to-assume: arn:aws:iam::715803424590:role/gh-action-role-zenml-helm
+          aws-region: us-east-1
+      - name: Login to Amazon ECR Public
+        id: login-ecr-public
+        uses: aws-actions/amazon-ecr-login@d539f0932e70871a027e9d5a9d8fc38589180a64  # v2.1.6
+        with:
+          mask-password: 'true'
+          registry-type: public
+      - name: Publish Helm chart
+        env:
+          BUNDLE_VERSION: ${{ needs.build.outputs.bundle-version }}
+          REGISTRY: ${{ steps.login-ecr-public.outputs.registry }}
+        run: helm push "bundle-dist/kitaru-$BUNDLE_VERSION.tgz" "oci://$REGISTRY/zenml"
+  promote-latest:
+    if: >-
+      needs.build.outputs.distribution == 'kitaru' &&
+      needs.build.outputs.is-prerelease == 'false'
+    needs: [build, publish-deployables]
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c  # v4.2.0
+      - uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0  # v4.4.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Move Docker latest aliases
+        env:
+          BUNDLE_VERSION: ${{ needs.build.outputs.bundle-version }}
+        run: |-
+          docker buildx imagetools create --tag zenmldocker/kitaru:latest "zenmldocker/kitaru:$BUNDLE_VERSION"
+          docker buildx imagetools create --tag zenmldocker/kitaru-worker:latest "zenmldocker/kitaru-worker:$BUNDLE_VERSION"
+          docker buildx imagetools create --tag zenmldocker/kitaru-server:latest "zenmldocker/kitaru-server:$BUNDLE_VERSION"
+  create-release:
+    if: >-
+      always() &&
+      github.event_name == 'push' &&
+      needs.publish-python.result == 'success' &&
+      (needs.build.outputs.distribution != 'kitaru' ||
+      (needs.publish-deployables.result == 'success' &&
+      (needs.build.outputs.is-prerelease == 'true' ||
+      needs.promote-latest.result == 'success')))
+    needs: [build, publish-python, publish-deployables, promote-latest]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: python-distribution
+          path: .
+      - name: Create immutable GitHub Release
         env:
           DISTRIBUTION: ${{ needs.build.outputs.distribution }}
           GH_TOKEN: ${{ github.token }}
@@ -154,22 +315,17 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |-
           set -euo pipefail
+          if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $PACKAGE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
           prerelease=()
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
           fi
-          if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
-            gh release upload "$PACKAGE_TAG" package-dist/* evidence/* --clobber
-            gh release edit "$PACKAGE_TAG" \
-              --latest=false \
-              --prerelease="$IS_PRERELEASE" \
-              --title "$DISTRIBUTION $VERSION" \
-              --verify-tag
-          else
-            gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
-              "${prerelease[@]}" \
-              --verify-tag \
-              --latest=false \
-              --title "$DISTRIBUTION $VERSION" \
-              --generate-notes
-          fi
+          gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
+            "${prerelease[@]}" \
+            --verify-tag \
+            --latest=false \
+            --title "$DISTRIBUTION $VERSION" \
+            --generate-notes
