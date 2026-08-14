@@ -62,14 +62,14 @@ async def _network_server() -> AsyncIterator[str]:
     )
     task = asyncio.create_task(server.serve())
     try:
-        for _ in range(100):
-            if server.started:
-                break
-            if task.done():
-                task.result()
-            await asyncio.sleep(0.01)
-        else:
-            raise RuntimeError("Timed out starting the Kitaru test server")
+        try:
+            async with asyncio.timeout(10):
+                while not server.started:
+                    if task.done():
+                        task.result()
+                    await asyncio.sleep(0.01)
+        except TimeoutError as exc:
+            raise RuntimeError("Timed out starting the Kitaru test server") from exc
         yield f"http://127.0.0.1:{port}"
     finally:
         server.should_exit = True
