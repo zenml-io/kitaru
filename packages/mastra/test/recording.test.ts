@@ -252,6 +252,69 @@ describe("step recording", () => {
     });
   });
 
+  it("keeps a successful tool call completed when Mastra reports it twice", async () => {
+    const api = installTestApi();
+    const succeededStep = {
+      ...textStep("succeeded-tool"),
+      content: [
+        {
+          input: { orderId: "A-1" },
+          toolCallId: "call-ok",
+          toolName: "lookupOrder",
+          type: "tool-call",
+        },
+        {
+          input: { orderId: "A-1" },
+          output: { status: "delayed" },
+          toolCallId: "call-ok",
+          toolName: "lookupOrder",
+          type: "tool-result",
+        },
+      ],
+      finishReason: "tool-calls",
+      toolCalls: [
+        {
+          payload: {
+            args: { orderId: "A-1" },
+            toolCallId: "call-ok",
+            toolName: "lookupOrder",
+          },
+        },
+      ],
+      toolResults: [
+        {
+          payload: {
+            args: { orderId: "A-1" },
+            result: { status: "delayed" },
+            toolCallId: "call-ok",
+            toolName: "lookupOrder",
+          },
+        },
+      ],
+    } as unknown as RecordedStep;
+    const agent = new FakeAgent(async (_messages, options) => {
+      await options.onStepFinish?.(succeededStep);
+      return { text: "done" };
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+
+    await recorded.generate("run");
+
+    const tool = api
+      .nodeBatches()
+      .flat()
+      .find((node) => node.external_id === "call-ok");
+    expect(tool).toMatchObject({
+      error: null,
+      outputs: { status: "delayed" },
+      status: "completed",
+    });
+  });
+
   it("records the bare provider family and keeps the qualified provider id", async () => {
     const api = installTestApi();
     const step = textStep("qualified");

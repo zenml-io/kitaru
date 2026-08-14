@@ -193,7 +193,13 @@ export async function recordStep(
       callId: call.toolCallId,
       inputs: inputs.value,
       inputsLossy: inputs.lossy,
-      publicError: toolErrorFromContent(step.content, call.toolCallId),
+      // Only a call Mastra left out of toolResults can report its failure
+      // through content, and publicError marks the node failed, so reading it
+      // for a call that did return a result would fail a healthy tool.
+      publicError:
+        result === undefined
+          ? toolErrorFromContent(step.content, call.toolCallId)
+          : undefined,
       result: result
         ? {
             error: result.isError
