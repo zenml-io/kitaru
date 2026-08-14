@@ -1,4 +1,5 @@
-import { createSupportGenerateText } from "./agent.js";
+import { createSupportAgent } from "./agent.js";
+import { BASELINE_PROMPT } from "./prompts.js";
 import { SmokeClient } from "./smoke-client.js";
 
 function requiredEnvironment(name: string): string {
@@ -17,9 +18,9 @@ async function main(): Promise<void> {
   if (process.env.KITARU_VERCEL_AI_TEST_MODEL !== "1") {
     requiredEnvironment("OPENAI_API_KEY");
   }
-  const result = await createSupportGenerateText(
+  const result = await createSupportAgent(
     smoke ? new SmokeClient() : undefined,
-  )();
+  ).generate({ prompt: BASELINE_PROMPT });
   console.log(result.text);
 }
 

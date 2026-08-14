@@ -3,6 +3,7 @@ import {
   isStepCount,
   jsonSchema,
   type ToolExecutionOptions,
+  ToolLoopAgent,
   tool,
 } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
@@ -28,6 +29,191 @@ const EMPTY_INPUT = jsonSchema<Record<string, never>>({
 });
 
 describe("AI SDK 7 compatibility", () => {
+  it("validates call options before prepareCall or provider execution", async () => {
+    const events: string[] = [];
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        events.push("provider");
+        throw new Error("provider should not run");
+      },
+    });
+    const agent = new ToolLoopAgent({
+      callOptionsSchema: jsonSchema<{ tenant: string }>(
+        {
+          additionalProperties: false,
+          properties: { tenant: { type: "string" } },
+          required: ["tenant"],
+          type: "object",
+        },
+        {
+          validate: (value) =>
+            typeof value === "object" &&
+            value !== null &&
+            typeof (value as { tenant?: unknown }).tenant === "string"
+              ? {
+                  success: true,
+                  value: value as { tenant: string },
+                }
+              : {
+                  error: new TypeError("tenant must be a string"),
+                  success: false,
+                },
+        },
+      ),
+      model,
+      prepareCall: ({ options, ...call }) => {
+        events.push(`prepare:${options.tenant}`);
+        return call;
+      },
+    });
+
+    await expect(
+      agent.generate({
+        options: { tenant: 42 as unknown as string },
+        prompt: "go",
+      }),
+    ).rejects.toThrow("tenant must be a string");
+    expect(events).toEqual([]);
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
+  it("applies prepared settings and runs constructor callbacks before call callbacks", async () => {
+    const events: string[] = [];
+    const originalModel = new MockLanguageModelV4();
+    const preparedModel = new MockLanguageModelV4({
+      doGenerate: {
+        content: [{ text: "prepared", type: "text" }],
+        finishReason: { raw: "stop", unified: "stop" },
+        usage: TEST_USAGE,
+        warnings: [],
+      },
+    });
+    const agent = new ToolLoopAgent({
+      callOptionsSchema: jsonSchema<{ tenant: string }>({
+        additionalProperties: false,
+        properties: { tenant: { type: "string" } },
+        required: ["tenant"],
+        type: "object",
+      }),
+      maxRetries: 2,
+      model: originalModel,
+      onEnd: () => {
+        events.push("constructor:end");
+      },
+      onStart: () => {
+        events.push("constructor:start");
+      },
+      onStepEnd: () => {
+        events.push("constructor:step-end");
+      },
+      onStepStart: () => {
+        events.push("constructor:step-start");
+      },
+      prepareCall: ({ maxRetries, options, ...call }) => {
+        events.push(`prepare:${options.tenant}:${maxRetries}`);
+        return {
+          ...call,
+          maxRetries,
+          model: preparedModel,
+          prompt: `Prepared for ${options.tenant}`,
+        };
+      },
+    });
+
+    const result = await agent.generate({
+      onEnd: () => {
+        events.push("call:end");
+      },
+      onStart: () => {
+        events.push("call:start");
+      },
+      onStepEnd: () => {
+        events.push("call:step-end");
+      },
+      onStepStart: () => {
+        events.push("call:step-start");
+      },
+      options: { tenant: "acme" },
+      prompt: "original",
+    });
+
+    expect(events).toEqual([
+      "prepare:acme:2",
+      "constructor:start",
+      "call:start",
+      "constructor:step-start",
+      "call:step-start",
+      "constructor:step-end",
+      "call:step-end",
+      "constructor:end",
+      "call:end",
+    ]);
+    expect(result.text).toBe("prepared");
+    expect(Object.getPrototypeOf(result)).not.toBe(Object.prototype);
+    expect(originalModel.doGenerateCalls).toHaveLength(0);
+    expect(preparedModel.doGenerateCalls).toHaveLength(1);
+  });
+
+  it("preserves provider error identity when retries are disabled", async () => {
+    const providerError = new Error("provider failed");
+    const agent = new ToolLoopAgent({
+      maxRetries: 0,
+      model: new MockLanguageModelV4({
+        doGenerate: async () => {
+          throw providerError;
+        },
+      }),
+    });
+
+    await expect(agent.generate({ prompt: "go" })).rejects.toBe(providerError);
+  });
+
+  it("forwards call cancellation to the provider", async () => {
+    const abortReason = new Error("cancelled by caller");
+    const controller = new AbortController();
+    let providerSignal: AbortSignal | undefined;
+    const agent = new ToolLoopAgent({
+      maxRetries: 0,
+      model: new MockLanguageModelV4({
+        doGenerate: async ({ abortSignal }) => {
+          providerSignal = abortSignal;
+          controller.abort(abortReason);
+          await Promise.resolve();
+          throw abortSignal?.reason;
+        },
+      }),
+    });
+
+    await expect(
+      agent.generate({ abortSignal: controller.signal, prompt: "go" }),
+    ).rejects.toBe(abortReason);
+    expect(providerSignal?.aborted).toBe(true);
+    expect(providerSignal?.reason).toBe(abortReason);
+  });
+
+  it("forwards call timeouts to the provider abort signal", async () => {
+    let providerSignal: AbortSignal | undefined;
+    const agent = new ToolLoopAgent({
+      maxRetries: 0,
+      model: new MockLanguageModelV4({
+        doGenerate: ({ abortSignal }) =>
+          new Promise((_, reject) => {
+            providerSignal = abortSignal;
+            abortSignal?.addEventListener(
+              "abort",
+              () => reject(abortSignal.reason),
+              { once: true },
+            );
+          }),
+      }),
+    });
+
+    await expect(
+      agent.generate({ prompt: "go", timeout: 5 }),
+    ).rejects.toBeDefined();
+    expect(providerSignal?.aborted).toBe(true);
+  });
+
   it("registers ordered parsed calls before serialized local execution", async () => {
     const events: string[] = [];
     const tickets = new ExecutionTickets();

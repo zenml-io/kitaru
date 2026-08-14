@@ -41,10 +41,10 @@
     "@zenml-io/kitaru": "workspace:0.1.0-rc.2"
   },
   "peerDependencies": {
-    "ai": ">=7.0.0 <8.0.0"
+    "ai": ">=7.0.60 <8.0.0"
   },
   "devDependencies": {
-    "ai": "7.0.55"
+    "ai": "7.0.65"
   },
   "scripts": {
     "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.build.json",

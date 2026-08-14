@@ -146,6 +146,7 @@ export async function recordVercelStep(
   state: AdapterRunState,
   step: StepResult<ToolSet>,
   costCalculator?: KitaruCostCalculator,
+  modelSettings?: Record<string, JsonValue>,
 ): Promise<void> {
   const tokens = usageTokens(step.usage);
   const cost = await resolveCost(costCalculator, {
@@ -166,6 +167,7 @@ export async function recordVercelStep(
     failed: step.finishReason === "error",
     inputs: null,
     model: servedModelId(step),
+    modelSettings,
     outputs: stepOutputs(step, tools),
     provider: step.model.provider,
     tokens,
@@ -176,6 +178,7 @@ export async function recordVercelStep(
 export async function recordFailedVercelModelCall(
   state: AdapterRunState,
   call: Pick<LanguageModelCallStartEvent, "callId" | "modelId" | "provider"> & {
+    modelSettings?: Record<string, JsonValue>;
     startedAt: string;
   },
   error: unknown,
@@ -187,6 +190,7 @@ export async function recordFailedVercelModelCall(
     failed: true,
     inputs: null,
     model: call.modelId,
+    modelSettings: call.modelSettings,
     outputs: null,
     provider: call.provider,
     startedAt: call.startedAt,

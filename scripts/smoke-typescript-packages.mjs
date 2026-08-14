@@ -118,7 +118,7 @@ createKitaruGenerateText(vercelOptions);
       join(smokeRoot, "npm-cache"),
       ...tarballs,
       "@mastra/core@1.51.0",
-      "ai@7.0.55",
+      "ai@7.0.65",
     ],
     consumerRoot,
   );

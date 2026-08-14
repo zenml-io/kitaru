@@ -1,11 +1,10 @@
 import { openai } from "@ai-sdk/openai";
 import type { AdapterClient } from "@zenml-io/kitaru/adapter";
 import type { KitaruCostInput } from "@zenml-io/kitaru-vercel-ai";
-import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
+import { createKitaruToolLoopAgent } from "@zenml-io/kitaru-vercel-ai";
 import { type LanguageModel, stepCountIs } from "ai";
 
 import { createDeterministicModel } from "./deterministic-model.js";
-import { BASELINE_PROMPT } from "./prompts.js";
 import { supportTools } from "./tools.js";
 
 export const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
@@ -59,27 +58,27 @@ export function estimateSupportCost({
   return Number(dollars.toFixed(10));
 }
 
-export function createSupportGenerateText(client?: AdapterClient) {
-  const generateText = createKitaruGenerateText({
-    agentId: requiredEnvironment("KITARU_AGENT_ID"),
-    agentVersionId: process.env.KITARU_AGENT_VERSION_ID,
-    allowedReplayModels: [REQUESTED_MODEL_ID],
-    client,
-    costCalculator: estimateSupportCost,
-    requestedModelId: REQUESTED_MODEL_ID,
-    resolveModel,
-    sessionName: "Vercel AI SDK support triage",
-  });
-
-  return () =>
-    generateText({
+export function createSupportAgent(client?: AdapterClient) {
+  return createKitaruToolLoopAgent(
+    {
+      id: "support-triage",
       instructions: SUPPORT_INSTRUCTIONS,
       maxOutputTokens: 2000,
       model: configuredModel(),
-      prompt: BASELINE_PROMPT,
       stopWhen: stepCountIs(5),
       tools: supportTools,
-    });
+    },
+    {
+      agentId: requiredEnvironment("KITARU_AGENT_ID"),
+      agentVersionId: process.env.KITARU_AGENT_VERSION_ID,
+      allowedReplayModels: [REQUESTED_MODEL_ID],
+      client,
+      costCalculator: estimateSupportCost,
+      requestedModelId: REQUESTED_MODEL_ID,
+      resolveModel,
+      sessionName: "Vercel AI SDK support triage",
+    },
+  );
 }
 
 function requiredEnvironment(name: string): string {

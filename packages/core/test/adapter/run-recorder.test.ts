@@ -77,6 +77,24 @@ describe("normalized run lifecycle", () => {
     });
   });
 
+  it("records model settings supplied for one step", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    await recordNormalizedStep(run.state, {
+      attributes: {},
+      failed: false,
+      inputs: null,
+      modelSettings: { temperature: 0.7 },
+      outputs: { text: "done" },
+      tools: [],
+    });
+
+    expect(client.nodes[1]?.nodes[0]?.model_params).toEqual({
+      temperature: 0.7,
+    });
+  });
+
   it("omits the provider id when the adapter reports no provider", async () => {
     const client = fakeClient();
     const run = await recorder(client);

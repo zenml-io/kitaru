@@ -60,10 +60,10 @@ See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior
 
 {% tab title="Vercel AI SDK" %}
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
+pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.65
 ```
 
-See the [Vercel AI SDK adapter](../adapters/vercel-ai.md) for `generateText`, replay behavior, and supported boundary.
+See the [Vercel AI SDK adapter](../adapters/vercel-ai.md) for Agent and `generateText` recording, replay behavior, and the supported boundary.
 {% endtab %}
 
 {% tab title="Build an adapter" %}
