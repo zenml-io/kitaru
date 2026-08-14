@@ -41,6 +41,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_account_service,
     get_api_key_service,
     get_auth_service,
+    get_auth_session,
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
@@ -107,6 +108,7 @@ def build_app(
         control_plane=control_plane,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = lambda: None
     api_key_service = ApiKeyService(repository=api_key_repository)
     app.dependency_overrides[get_api_key_service] = lambda: api_key_service
     account_service = AccountService(

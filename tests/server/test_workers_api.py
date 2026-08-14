@@ -41,6 +41,7 @@ from conftest import (
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
+    get_auth_session,
     get_task_service,
     get_worker_service,
 )
@@ -120,6 +121,7 @@ async def client(
     app.dependency_overrides[get_worker_service] = lambda: service
     app.dependency_overrides[get_task_service] = lambda: task_service
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = lambda: None
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,

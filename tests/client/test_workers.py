@@ -56,6 +56,7 @@ from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
+    get_auth_session,
     get_task_service,
     get_worker_service,
 )
@@ -157,6 +158,7 @@ async def api_client(
     app.dependency_overrides[get_worker_service] = lambda: service
     app.dependency_overrides[get_task_service] = lambda: task_service
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = lambda: None
     client = asgi_api_client(app, api_key=account_token)
     async with client:
         yield client

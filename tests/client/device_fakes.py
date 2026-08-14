@@ -29,6 +29,7 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
+    get_auth_session,
     get_device_service,
 )
 from kitaru.server.api.app import create_app
@@ -286,5 +287,6 @@ def build_device_auth_app(
         device_service=device_service,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = lambda: None
     app.dependency_overrides[get_device_service] = lambda: device_service
     return app
