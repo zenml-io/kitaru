@@ -25,6 +25,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
 from kitaru.api_models.v1.task import TaskKind
@@ -580,3 +581,46 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
     assert options["drain_timeout"] == 15.0
     assert "request_timeout" not in options
     assert captured.err == ""
+
+
+def test_cli_start_network_error_identifies_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A worker connection failure names the server it could not reach."""
+    server = "https://api.example.com/kitaru"
+
+    async def fail_start(target: ResolvedTarget, **options: Any) -> CommandResult:
+        request = httpx.Request("GET", f"{target.server_url}/v1/workers")
+        raise httpx.ConnectError(
+            "All connection attempts failed",
+            request=request,
+        )
+
+    monkeypatch.setattr(workers, "start_worker", fail_start)
+
+    assert (
+        app_module.main(
+            [
+                "worker",
+                "start",
+                "--server",
+                server,
+                "--output",
+                "json",
+            ]
+        )
+        == 6
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"] == {
+        "kind": "network_error",
+        "message": (
+            f"The server at {server} is unavailable: All connection attempts failed"
+        ),
+        "retryable": True,
+        "details": {"server_url": server},
+        "hint": "Check the selected server with `kitaru status`, then retry.",
+    }

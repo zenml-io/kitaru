@@ -235,6 +235,7 @@ class Invocation:
     no_browser: bool
     stdin: TextIO
     _credential_store: CredentialStore | None = None
+    _resolved_target: ResolvedTarget | None = None
 
     @property
     def credential_store(self) -> CredentialStore:
@@ -242,6 +243,13 @@ class Invocation:
         if self._credential_store is None:
             self._credential_store = CredentialStore()
         return self._credential_store
+
+    @property
+    def resolved_server_url(self) -> str | None:
+        """Return the server resolved during this invocation, if any."""
+        if self._resolved_target is None:
+            return None
+        return self._resolved_target.server_url
 
     def resolve_target(self, explicit_server: str | None = None) -> ResolvedTarget:
         """Resolve a server from command and global inputs."""
@@ -254,7 +262,9 @@ class Invocation:
                     "The command SERVER and global --server identify "
                     "different servers.",
                 )
-        return resolve_target(explicit_server=explicit_server or self.server)
+        target = resolve_target(explicit_server=explicit_server or self.server)
+        self._resolved_target = target
+        return target
 
 
 _INVOCATION: ContextVar[Invocation | None] = ContextVar(
@@ -428,7 +438,10 @@ async def _launch(
     except asyncio.CancelledError:
         raise
     except BaseException as exception:
-        error = _convert_error(exception)
+        error = _convert_error(
+            exception,
+            server_url=invocation.resolved_server_url,
+        )
         return emit_error(
             error,
             exception=exception,
@@ -670,7 +683,7 @@ async def login(
     """Authenticate with a server and store its credential when required."""
     invocation = _invocation()
     chosen_server = server or invocation.server
-    if server and invocation.server:
+    if chosen_server and not local:
         invocation.resolve_target(server)
     return await auth_commands.login(
         server=chosen_server,
@@ -3976,7 +3989,9 @@ def _emit_early_error(
         reset_output_context(token)
 
 
-def _convert_error(exception: BaseException) -> CLIError:
+def _convert_error(
+    exception: BaseException, *, server_url: str | None = None
+) -> CLIError:
     """Map SDK, validation, and transport failures to stable CLI errors."""
     if isinstance(exception, CLIError):
         return exception
@@ -4005,21 +4020,72 @@ def _convert_error(exception: BaseException) -> CLIError:
                 "network_error", exception.detail, retryable=True, details=details
             )
         return CLIError("internal_error", str(exception), details=details)
+    if isinstance(exception, httpx.TransportError):
+        server_url = _get_transport_server_url(exception, server_url)
     if isinstance(exception, httpx.TimeoutException):
+        message = (
+            f"The request to {server_url} timed out."
+            if server_url
+            else "The server request timed out."
+        )
         return CLIError(
             "network_error",
-            "The server request timed out.",
+            message,
             retryable=True,
+            details={"server_url": server_url} if server_url else None,
             hint="Check the selected server with `kitaru status`, then retry.",
         )
     if isinstance(exception, httpx.TransportError):
+        location = f" at {server_url}" if server_url else ""
         return CLIError(
             "network_error",
-            f"The server is unavailable: {exception}",
+            f"The server{location} is unavailable: {exception}",
             retryable=True,
+            details={"server_url": server_url} if server_url else None,
             hint="Check the selected server with `kitaru status`, then retry.",
         )
     return CLIError("internal_error", str(exception) or type(exception).__name__)
+
+
+def _get_transport_server_url(
+    exception: httpx.TransportError,
+    selected_server_url: str | None = None,
+) -> str | None:
+    """Return the selected server or a secret-safe failed request origin."""
+    try:
+        request_url = exception.request.url
+    except RuntimeError:
+        request_url = None
+    if selected_server_url:
+        selected_url = httpx.URL(selected_server_url)
+        if request_url is None or (
+            request_url.scheme,
+            request_url.host,
+            request_url.port,
+        ) == (
+            selected_url.scheme,
+            selected_url.host,
+            selected_url.port,
+        ):
+            return str(
+                selected_url.copy_with(
+                    username=None,
+                    password=None,
+                    query=None,
+                    fragment=None,
+                )
+            ).rstrip("/")
+    if request_url is None:
+        return None
+    return str(
+        request_url.copy_with(
+            username=None,
+            password=None,
+            path="/",
+            query=None,
+            fragment=None,
+        )
+    ).rstrip("/")
 
 
 def _parse_bool(value: str) -> bool:

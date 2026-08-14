@@ -29,6 +29,7 @@ from kitaru.client.control_plane_auth import control_plane_login
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
 from kitaru.client.device_auth import device_login
+from kitaru.client.exceptions import NotFoundError
 
 LOCAL_SERVER_URL = "http://localhost:8000"
 
@@ -140,7 +141,18 @@ async def login(
     credential_stored = False
     credential_kind = "none"
     try:
-        info = await client.info.get()
+        try:
+            info = await client.info.get()
+        except NotFoundError as error:
+            raise CLIError(
+                "invalid_configuration",
+                f"Kitaru is not available at {server_url}. "
+                "Check the URL or deployment.",
+                details={
+                    "status_code": error.status_code,
+                    "server_url": server_url,
+                },
+            ) from error
         if info.auth_scheme is AuthScheme.NONE:
             _reject_auth_inputs(
                 username=username,
