@@ -436,10 +436,10 @@ async function runLockedDemo(
   }
 
   const environment = options.environment ?? process.env;
-  if (dependencies.preflightWorker !== undefined) {
-    await dependencies.preflightWorker({ apiUrl: serverUrl });
-  } else if (dependencies.runWorker === undefined) {
-    await preflightDedicatedWorker({ apiUrl: serverUrl }, { environment });
+  if (dependencies.runWorker === undefined) {
+    const preflightWorker =
+      dependencies.preflightWorker ?? preflightDedicatedWorker;
+    await preflightWorker({ apiUrl: serverUrl }, { environment });
   }
   const runWorker =
     dependencies.runWorker ??

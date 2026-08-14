@@ -191,6 +191,58 @@ export interface WorkflowDependencies {
   readSourceMaterial?: typeof readSourceMaterial;
 }
 
+interface ExpectedAnnotationIdentity {
+  investigationSessionId: string;
+  questionKey: string;
+  selector: AnnotationResponse["selector"];
+  sessionId: string;
+  value: AnnotationResponse["value"];
+}
+
+function normalizeAnnotationSelector(selector: AnnotationResponse["selector"]) {
+  if (selector == null) {
+    return null;
+  }
+  return {
+    node_id: selector.node_id ?? null,
+    path: selector.path ?? null,
+    span: selector.span ?? null,
+  };
+}
+
+export function validateAdoptedAnnotation(
+  value: Pick<
+    AnnotationResponse,
+    | "investigation_session_id"
+    | "question_key"
+    | "selector"
+    | "session_id"
+    | "value"
+  >,
+  expected: ExpectedAnnotationIdentity,
+): void {
+  if (value.session_id !== expected.sessionId) {
+    throw new Error("Adopted annotation belongs to another session");
+  }
+  if (
+    value.investigation_session_id !== expected.investigationSessionId ||
+    value.question_key !== expected.questionKey
+  ) {
+    throw new Error(
+      "Adopted annotation does not match the investigation question",
+    );
+  }
+  if (
+    createFingerprint(normalizeAnnotationSelector(value.selector)) !==
+    createFingerprint(normalizeAnnotationSelector(expected.selector))
+  ) {
+    throw new Error("Adopted annotation does not match the answer selector");
+  }
+  if (createFingerprint(value.value) !== createFingerprint(expected.value)) {
+    throw new Error("Adopted annotation does not match the answer value");
+  }
+}
+
 async function resolveApiUrl(
   environment: KitaruEnvironmentVariables,
 ): Promise<string> {
@@ -708,11 +760,14 @@ async function ensureReview(
         },
         stage: "review",
         store,
-        validate: (value) => {
-          if (value.session_id !== sessionId) {
-            throw new Error("Adopted annotation belongs to another session");
-          }
-        },
+        validate: (value) =>
+          validateAdoptedAnnotation(value, {
+            investigationSessionId: investigationSession.id,
+            questionKey: answer.key,
+            selector: answer.selector,
+            sessionId,
+            value: answer.value,
+          }),
       },
       recovery,
     );

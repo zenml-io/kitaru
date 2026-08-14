@@ -22,7 +22,7 @@ pnpm build
 OPENAI_API_KEY='your-openai-key' pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo
 ```
 
-The driver reads the selected server and credential without printing or copying the credential. The dedicated Python worker reads the same stored login. `KITARU_API_KEY` is not required.
+The driver reads the selected server and credential without printing or copying the credential. Before creating remote resources, it verifies that the dedicated worker command is installed and can make an authenticated, read-only request to the selected server. The worker can use the same stored login, or an explicit `KITARU_API_KEY` or `KITARU_API_TOKEN` supplied to the driver.
 
 The command prints the run state directory, session and replay IDs, both outbox counts, the mocked history action, and evaluation scores.
 

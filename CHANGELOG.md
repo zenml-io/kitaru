@@ -69,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Fetching a pending device authorization by id now succeeds when the request carries the device's user code, so the device verification page can render before an account approves it.
 - Fixed TypeScript replay and recording edge cases, aligned credential redaction and provider diagnostics across adapters, and made the adapter examples reproducible, rerunnable, and part of CI.
+- TypeScript cloud examples now reuse CLI logins without exporting a token, verify dedicated-worker access before creating remote resources, isolate exact-job recovery state, and stop when a mutation or cancellation cannot be journaled safely.
 
 ### Added
 - Vercel AI SDK 7 `ToolLoopAgent` support for typed, non-streaming agent generation with Kitaru recording and safe replay boundaries.

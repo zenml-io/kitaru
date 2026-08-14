@@ -8,7 +8,7 @@ icon: robot
 The Kitaru Mastra adapter wraps an existing Mastra `Agent` and records each non-streaming `generate()` call as a Kitaru [session](../concepts/agents-and-sessions.md). Mastra still runs the agent and Kitaru returns the native Mastra result unchanged.
 
 {% hint style="warning" %}
-`@zenml-io/kitaru-mastra` 0.1.0-rc.1 is a pre-1.0 compatibility preview for Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.52.0`. It supports non-streaming `Agent.generate()` only.
+`@zenml-io/kitaru-mastra` 0.1.0-rc.3 is a pre-1.0 compatibility preview for Node `>=22.22.0 <23` and `@mastra/core >=1.51.0 <1.52.0`. It supports non-streaming `Agent.generate()` only.
 {% endhint %}
 
 ## Install
@@ -107,7 +107,7 @@ The Mastra adapter supports these [tool policies](../guides/tool-policies.md) fo
 | `passthrough` | Calls the original tool. Any network request, database write, message, payment, or other side effect happens for real. |
 | `static` | Returns the configured value without calling the tool. |
 | `history` | Looks up a previous result using the tool name and JSON inputs. On a miss, `fail`, `passthrough`, and `error_result` behavior is supported. |
-| `llm` | Rejected before the tool executes; this policy is not supported in 0.1.0-rc.1. |
+| `llm` | Rejected before the tool executes; this policy is not supported in 0.1.0-rc.3. |
 
 History matching is guaranteed only when both the recording and replay use this Mastra adapter. Another framework may apply schema defaults, coercion, or serialization differently, which changes the history key even when the logical tool call looks equivalent.
 
@@ -149,7 +149,7 @@ The same entrypoint records a baseline session and executes replay jobs. Do not 
 
 ## Supported boundary
 
-Version 0.1.0-rc.1 supports:
+Version 0.1.0-rc.3 supports:
 
 - Non-streaming `Agent.generate()` calls.
 - Local function tools, including function-valued tools resolved from the run's `requestContext`.

@@ -33,6 +33,7 @@ import {
   runWorkflow,
   TARGET_TICKETS,
   TOOLS,
+  validateAdoptedAnnotation,
   verifyCompletedJob,
   workflowRequests,
 } from "../src/workflow-runner.js";
@@ -749,6 +750,51 @@ describe("canonical workflow manifest", () => {
     ).rejects.toThrow(`Expected completed ${expectedKind} job`);
     expect((await store.load())?.phase).toBe(stage);
     expect((await store.load())?.stages[stage].status).toBe("failed");
+  });
+});
+
+describe("review annotation recovery", () => {
+  it("accepts only the exact investigation question being adopted", () => {
+    const expected = {
+      investigationSessionId: id(70),
+      questionKey: "outcome",
+      selector: { node_id: id(73), path: "/outputs" },
+      sessionId: id(71),
+      value: { judgment: "problematic" },
+    };
+    const annotation = {
+      investigation_session_id: expected.investigationSessionId,
+      question_key: expected.questionKey,
+      selector: { ...expected.selector, span: null },
+      session_id: expected.sessionId,
+      value: expected.value,
+    };
+
+    expect(() => validateAdoptedAnnotation(annotation, expected)).not.toThrow();
+    expect(() =>
+      validateAdoptedAnnotation(
+        { ...annotation, question_key: "expected" },
+        expected,
+      ),
+    ).toThrow("does not match the investigation question");
+    expect(() =>
+      validateAdoptedAnnotation(
+        { ...annotation, selector: { node_id: id(74), path: "/outputs" } },
+        expected,
+      ),
+    ).toThrow("does not match the answer selector");
+    expect(() =>
+      validateAdoptedAnnotation(
+        { ...annotation, value: { judgment: "acceptable" } },
+        expected,
+      ),
+    ).toThrow("does not match the answer value");
+    expect(() =>
+      validateAdoptedAnnotation(
+        { ...annotation, investigation_session_id: id(72) },
+        expected,
+      ),
+    ).toThrow("does not match the investigation question");
   });
 });
 

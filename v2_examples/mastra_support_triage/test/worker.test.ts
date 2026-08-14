@@ -11,6 +11,7 @@ const JOB_ID = "018f0000-0000-7000-8000-000000000010";
 describe("dedicated worker invocation", () => {
   it("always scopes claims to the exact durable job id", () => {
     const invocation = buildDedicatedWorkerInvocation({
+      apiUrl: "https://kitaru.example.test",
       executable: "kitaru",
       jobId: JOB_ID,
       stateDir: "/tmp/kitaru-mastra-run",
@@ -20,6 +21,8 @@ describe("dedicated worker invocation", () => {
     expect(invocation.args).toEqual([
       "worker",
       "start",
+      "--server",
+      "https://kitaru.example.test",
       "--job-id",
       JOB_ID,
       "--name",
@@ -70,8 +73,11 @@ describe("dedicated worker invocation", () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
-  it("checks the worker CLI authentication before the demo mutates remote state", async () => {
-    const spawn = vi.fn().mockResolvedValue({ code: 3, signal: null });
+  it("checks worker availability and authenticated server access before mutation", async () => {
+    const spawn = vi
+      .fn()
+      .mockResolvedValueOnce({ code: 0, signal: null })
+      .mockResolvedValueOnce({ code: 6, signal: null });
 
     await expect(
       preflightDedicatedWorker(
@@ -81,15 +87,28 @@ describe("dedicated worker invocation", () => {
           spawn,
         },
       ),
-    ).rejects.toThrow(
-      "Dedicated worker authentication preflight exited with code 3",
+    ).rejects.toThrow("Dedicated worker server preflight exited with code 6");
+    expect(spawn).toHaveBeenNthCalledWith(
+      1,
+      "kitaru",
+      ["worker", "start", "--help"],
+      expect.objectContaining({
+        env: {
+          KITARU_API_KEY: "invalid",
+          PATH: "/usr/bin",
+        },
+      }),
     );
-    expect(spawn).toHaveBeenCalledWith(
+    expect(spawn).toHaveBeenNthCalledWith(
+      2,
       "kitaru",
       [
-        "doctor",
+        "agent",
+        "list",
         "--server",
         "https://kitaru.example.test",
+        "--size",
+        "1",
         "--output",
         "json",
         "--machine",
@@ -103,6 +122,15 @@ describe("dedicated worker invocation", () => {
         },
       }),
     );
+  });
+
+  it("reports a missing worker command before checking the server", async () => {
+    const spawn = vi.fn().mockResolvedValue({ code: 2, signal: null });
+
+    await expect(preflightDedicatedWorker({}, { spawn })).rejects.toThrow(
+      "Dedicated worker CLI preflight exited with code 2",
+    );
+    expect(spawn).toHaveBeenCalledTimes(1);
   });
 
   it("reports a non-zero worker exit without starting a second worker", async () => {

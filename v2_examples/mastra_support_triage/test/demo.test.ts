@@ -31,6 +31,7 @@ const INITIAL_REQUEST = {
 describe("runDemo recovery", () => {
   it("fails worker authentication before creating remote resources", async () => {
     const createAgent = vi.fn();
+    const environment = { KITARU_API_KEY: "invalid" };
     const preflightWorker = vi
       .fn()
       .mockRejectedValue(new Error("worker authentication failed"));
@@ -43,6 +44,7 @@ describe("runDemo recovery", () => {
       runDemo(
         {
           apiUrl: "https://kitaru.example.test",
+          environment,
           stateRoot: await mkdtemp(join(tmpdir(), "kitaru-mastra-preflight-")),
           testModel: true,
         },
@@ -50,9 +52,10 @@ describe("runDemo recovery", () => {
       ),
     ).rejects.toThrow("worker authentication failed");
 
-    expect(preflightWorker).toHaveBeenCalledWith({
-      apiUrl: "https://kitaru.example.test",
-    });
+    expect(preflightWorker).toHaveBeenCalledWith(
+      { apiUrl: "https://kitaru.example.test" },
+      { environment },
+    );
     expect(createAgent).not.toHaveBeenCalled();
   });
 

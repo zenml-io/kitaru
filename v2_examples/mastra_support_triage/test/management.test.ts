@@ -170,6 +170,53 @@ describe("runOwnedJob", () => {
     expect(get).toHaveBeenNthCalledWith(2, JOB_ID);
   });
 
+  it("does not cancel when the cancellation journal cannot be written", async () => {
+    const primary = new Error("worker authentication failed");
+    const cancel = vi.fn();
+    const client: JobManagementClient = {
+      jobs: {
+        cancel,
+        get: vi.fn().mockResolvedValue(job()),
+        listTasks: vi.fn().mockResolvedValue({
+          items: [task()],
+          next_cursor: null,
+        }),
+        wait: vi.fn(),
+      },
+    };
+    const store = await setupStore();
+    const manifest = await store.read();
+    const priorCancellation = {
+      attempted_at: "2026-08-13T10:00:00Z",
+      job_id: JOB_ID,
+      reconciled_after_error: false,
+      state: "terminal" as const,
+    };
+    manifest.cancellations.push(priorCancellation);
+    await store.save(manifest);
+    vi.spyOn(store, "save").mockRejectedValueOnce(new Error("disk full"));
+
+    const error = await runOwnedJob({
+      client,
+      expectedAgentVersionId: VERSION_ID,
+      expectedKind: "session_run",
+      jobId: JOB_ID,
+      ownerId: OWNER_ID,
+      runWorker: vi.fn().mockRejectedValue(primary),
+      store,
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(WorkerJobError);
+    expect((error as WorkerJobError).cause).toBe(primary);
+    expect((error as WorkerJobError).cancellation).toMatchObject({
+      error_kind: "cancellation_journal_error",
+      job_id: JOB_ID,
+      state: "ambiguous",
+    });
+    expect(cancel).not.toHaveBeenCalled();
+    expect((await store.read()).cancellations).toEqual([priorCancellation]);
+  });
+
   it("refuses to launch or cancel when the exact job is not owned by this run", async () => {
     const runWorker = vi.fn();
     const cancel = vi.fn();

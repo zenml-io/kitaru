@@ -29,6 +29,7 @@ export type SpawnWorker = (
   options: {
     env: NodeJS.ProcessEnv;
     signal?: AbortSignal;
+    stdio?: "ignore" | "inherit";
   },
 ) => Promise<SpawnResult>;
 
@@ -67,7 +68,7 @@ const spawnWorker: SpawnWorker = (command, args, options) =>
     const child = spawnChild(command, args, {
       env: options.env,
       signal: options.signal,
-      stdio: "inherit",
+      stdio: options.stdio ?? "inherit",
     });
     child.once("error", reject);
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -82,10 +83,13 @@ function getWorkerExitOutcome(result: SpawnResult): string {
 export function buildDedicatedWorkerInvocation(
   options: WorkerInvocationOptions,
 ): WorkerInvocation {
+  const serverArgs =
+    options.apiUrl === undefined ? [] : ["--server", options.apiUrl];
   return {
     args: [
       "worker",
       "start",
+      ...serverArgs,
       "--job-id",
       options.jobId,
       "--name",
@@ -111,28 +115,44 @@ export async function preflightDedicatedWorker(
   options: WorkerPreflightOptions = {},
   dependencies: RunDedicatedWorkerDependencies = {},
 ): Promise<void> {
-  const args = ["doctor"];
-  if (options.apiUrl !== undefined) {
-    args.push("--server", options.apiUrl);
-  }
-  args.push(
-    "--output",
-    "json",
-    "--machine",
-    "--non-interactive",
-    "--no-browser",
+  const spawn = dependencies.spawn ?? spawnWorker;
+  const executable = options.executable ?? "kitaru";
+  const spawnOptions = {
+    env: workerEnvironment(dependencies.environment ?? process.env),
+    signal: dependencies.signal,
+    stdio: "ignore" as const,
+  };
+  const cliResult = await spawn(
+    executable,
+    ["worker", "start", "--help"],
+    spawnOptions,
   );
-  const result = await (dependencies.spawn ?? spawnWorker)(
-    options.executable ?? "kitaru",
-    args,
-    {
-      env: workerEnvironment(dependencies.environment ?? process.env),
-      signal: dependencies.signal,
-    },
-  );
-  if (result.code !== 0) {
+  if (cliResult.code !== 0) {
     throw new Error(
-      `Dedicated worker authentication preflight ${getWorkerExitOutcome(result)}`,
+      `Dedicated worker CLI preflight ${getWorkerExitOutcome(cliResult)}`,
+    );
+  }
+  const serverArgs =
+    options.apiUrl === undefined ? [] : ["--server", options.apiUrl];
+  const serverResult = await spawn(
+    executable,
+    [
+      "agent",
+      "list",
+      ...serverArgs,
+      "--size",
+      "1",
+      "--output",
+      "json",
+      "--machine",
+      "--non-interactive",
+      "--no-browser",
+    ],
+    spawnOptions,
+  );
+  if (serverResult.code !== 0) {
+    throw new Error(
+      `Dedicated worker server preflight ${getWorkerExitOutcome(serverResult)}`,
     );
   }
 }
@@ -145,9 +165,6 @@ export async function runDedicatedWorker(
   const environment = workerEnvironment(
     dependencies.environment ?? process.env,
   );
-  if (options.apiUrl !== undefined) {
-    environment.KITARU_API_URL = options.apiUrl;
-  }
   const result = await (dependencies.spawn ?? spawnWorker)(
     invocation.command,
     invocation.args,

@@ -115,9 +115,13 @@ async function cancelAfterWorkerFailure(
     reconciled_after_error: false,
     state: "requested",
   };
-  await recordCancellation(options.store, cancellation).catch(() => {
+  try {
+    await recordCancellation(options.store, cancellation);
+  } catch {
     cancellation.state = "ambiguous";
-  });
+    cancellation.error_kind = "cancellation_journal_error";
+    return cancellation;
+  }
   try {
     const canceled = await options.client.jobs.cancel(options.jobId);
     cancellation.observed_status = canceled.status;
@@ -147,7 +151,8 @@ async function cancelAfterWorkerFailure(
   try {
     const manifest = await options.store.read();
     const recorded = manifest.cancellations.findLast(
-      ({ job_id }) => job_id === options.jobId,
+      ({ attempted_at, job_id }) =>
+        job_id === options.jobId && attempted_at === cancellation.attempted_at,
     );
     if (recorded !== undefined) {
       Object.assign(recorded, cancellation);
@@ -155,6 +160,8 @@ async function cancelAfterWorkerFailure(
     }
   } catch {
     // Keep the worker failure primary if the cancellation journal cannot update.
+    cancellation.state = "ambiguous";
+    cancellation.error_kind = "cancellation_journal_error";
   }
   return cancellation;
 }
