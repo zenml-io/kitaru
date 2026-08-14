@@ -5,6 +5,7 @@
 * [Welcome to Kitaru](README.md)
 * [Installation](getting-started/installation.md)
 * [Quickstart](getting-started/quickstart.md)
+* [The full loop, end to end](getting-started/end-to-end.md)
 * [Import your traces](getting-started/import-your-traces.md)
 * [Examples](getting-started/examples.md)
 * [Troubleshooting](getting-started/troubleshooting.md)

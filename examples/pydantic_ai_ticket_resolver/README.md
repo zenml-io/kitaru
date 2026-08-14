@@ -208,7 +208,7 @@ Store the support lead's answers and anchor the outcome judgment to the refund n
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
   --question-key outcome \
-  --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\",\"part\":\"output\"}" \
+  --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\"}" \
   --value '{"judgment":"problematic","reason":"The amount exceeds the automatic approval threshold."}'
 
 uv run kitaru annotation create \
@@ -216,9 +216,10 @@ uv run kitaru annotation create \
   --question-key outcome \
   --value '{"action":"escalate","reason":"Human approval is required before a refund."}'
 
-uv run kitaru investigation session complete \
+uv run kitaru investigation session verdict \
   "$INVESTIGATION_ID" \
-  "$TICKET_004_SESSION_ID"
+  "$TICKET_004_SESSION_ID" \
+  problematic
 ```
 
 Kitaru now stores the session question, review progress, answers, and exact trace evidence. The guided path repeats this review over a diverse set that it selects from the sessions.
