@@ -170,7 +170,7 @@ If you approve a change, `kitaru-replay-experiment` requires an exact candidate 
 
 ## 5. Follow the manual route
 
-The example [README on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver#manual-route-operate-the-evidence-loop-yourself) shows the same workflow with CLI commands.
+The example [README on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) shows the same workflow with CLI commands.
 
 The manual route covers:
 

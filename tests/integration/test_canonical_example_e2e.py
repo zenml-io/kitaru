@@ -15,8 +15,10 @@ REPOSITORY_ROOT = Path(__file__).parents[2]
 EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "pydantic_ai_ticket_resolver"
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
 TEST_ASSETS_DIR = EXAMPLE_DIR / "tests"
-AGENT_FIXTURE_PATH = TEST_ASSETS_DIR / "canonical_returns_agent.py"
 EVALUATOR_FIXTURE_PATH = TEST_ASSETS_DIR / "canonical_returns_evaluator.py"
+CANDIDATE_AGENT_COMMAND = (
+    "python -m examples.pydantic_ai_ticket_resolver.tests.canonical_returns_agent"
+)
 CLI = Path(sys.executable).with_name("kitaru")
 
 pytestmark = pytest.mark.skipif(
@@ -417,7 +419,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "register",
                 "returns-resolver",
                 "--command",
-                f"python {AGENT_FIXTURE_PATH.relative_to(REPOSITORY_ROOT)}",
+                CANDIDATE_AGENT_COMMAND,
                 "--description",
                 "Check approval and risk rules before issuing a refund.",
                 "--display-version",
