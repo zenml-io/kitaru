@@ -56,24 +56,6 @@ TASK_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
 }
 
 
-def _expired_import_wait_conditions(now: datetime) -> list[ColumnElement[bool]]:
-    """Build the conditions matching pending import wait tasks past their deadline.
-
-    Args:
-        now: Current time.
-
-    Returns:
-        Conditions to AND into a sweep query.
-    """
-    return [
-        TaskORM.kind == TaskKind.IMPORT_WAIT.value,
-        TaskORM.status == TaskStatus.PENDING.value,
-        TaskORM.created
-        + func.make_interval(0, 0, 0, 0, 0, 0, TaskORM.import_deadline_seconds)
-        < now,
-    ]
-
-
 def _claim_terms(scope: WorkerScope) -> list[ColumnElement[bool]]:
     """Build the claim conditions of a scope, one per bounded index scan.
 
@@ -314,14 +296,11 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         """
         terms = _claim_terms(scope)
         residual = _residual_conditions(scope)
-        # Import wait tasks are completed by the server, never by a worker.
-        claimable = TaskORM.kind != TaskKind.IMPORT_WAIT.value
         if len(terms) == 1:
             statement = (
                 select(TaskORM)
                 .where(
                     TaskORM.status == TaskStatus.PENDING.value,
-                    claimable,
                     terms[0],
                     *residual,
                 )
@@ -333,12 +312,7 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         else:
             peeks = [
                 select(TaskORM.id)
-                .where(
-                    TaskORM.status == TaskStatus.PENDING.value,
-                    claimable,
-                    term,
-                    *residual,
-                )
+                .where(TaskORM.status == TaskStatus.PENDING.value, term, *residual)
                 .order_by(TaskORM.id.asc())
                 .limit(limit)
                 for term in terms
@@ -411,51 +385,6 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
             .limit(limit)
         )
         return list((await self._session.scalars(statement)).all())
-
-    async def list_expired_import_wait_ids(
-        self, now: datetime, limit: int
-    ) -> list[uuid.UUID]:
-        """Read the ids of pending import wait tasks past their import deadline.
-
-        Args:
-            now: Current time.
-            limit: Maximum number of ids to read.
-
-        Returns:
-            Ids of the expired tasks in ascending order.
-        """
-        statement = (
-            select(TaskORM.id)
-            .where(*_expired_import_wait_conditions(now))
-            .order_by(TaskORM.id.asc())
-            .limit(limit)
-        )
-        return list((await self._session.scalars(statement)).all())
-
-    async def claim_expired_import_wait(
-        self, task_id: uuid.UUID, now: datetime
-    ) -> Task | None:
-        """Lock one import wait task by id if it is still pending and expired.
-
-        The row is locked with ``FOR UPDATE SKIP LOCKED``, so concurrent
-        sweeps take disjoint tasks. Expiry is re-checked on the locked row
-        because the candidate read ran unlocked.
-
-        Args:
-            task_id: Id of the candidate task.
-            now: Current time.
-
-        Returns:
-            Locked expired task, or ``None`` when it is contended or no
-            longer pending.
-        """
-        statement = (
-            select(TaskORM)
-            .where(TaskORM.id == task_id, *_expired_import_wait_conditions(now))
-            .with_for_update(skip_locked=True)
-        )
-        row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain() if row is not None else None
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime

@@ -53,7 +53,7 @@ from kitaru.api_models.v1.worker import (
     WorkerClaim,
     WorkerScope,
 )
-from kitaru.server.application.events import EventDispatcher
+from kitaru.server.application.events import EventDispatcher, JobsSettled
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy, TaskUpdate
 from kitaru.server.application.services.server_analytics import ServerAnalytics
@@ -65,7 +65,6 @@ from kitaru.server.domain.task import (
     AgentTask,
     ImportTask,
     ImportTaskDetails,
-    ImportWaitTask,
     Task,
     TaskAttemptMismatch,
     TaskResultSessionMissing,
@@ -210,23 +209,6 @@ async def test_claim_scope_kind_filter(services: JobAndTaskServices) -> None:
     assert len(claimed) == 1
     assert claimed[0].task.id == import_task.id
     assert claimed[0].task.kind is TaskKind.IMPORTER
-
-
-async def test_claim_tasks_never_claims_an_import_wait_task(
-    services: JobAndTaskServices,
-) -> None:
-    """A claim skips pending import wait tasks, immortal until adoption."""
-    job_id = await _pending_job(services)
-    agent_task = await _claimable_agent_task(services, job_id)
-    await services.tasks.create(
-        ImportWaitTask(job_id=job_id, on_failure=TaskOnFailure.ABORT)
-    )
-    worker = await create_worker(services.workers, ACTOR.account.id)
-
-    claimed = await services.task_service.claim_tasks(
-        10, actor=build_worker_actor(ACTOR.account, worker.id)
-    )
-    assert [item.task.id for item in claimed] == [agent_task.id]
 
 
 async def test_claim_scope_job_pin(services: JobAndTaskServices) -> None:
@@ -535,107 +517,6 @@ async def test_sweep_stale_task_abandons_and_settles() -> None:
     assert stored.status is TaskStatus.ABANDONED
     job = await services.jobs.get(job_id)
     assert job.status.value == "failed"
-
-
-async def _function_job_with_completed_agent_task(
-    services: JobAndTaskServices, import_deadline_seconds: int
-) -> tuple[uuid.UUID, ImportWaitTask]:
-    """Drive a job's agent task to completed with a pending-import result session."""
-    job_id = await _pending_job(services)
-    agent_task = await _claimable_agent_task(services, job_id)
-    wait = await services.tasks.create(
-        ImportWaitTask(
-            job_id=job_id,
-            import_deadline_seconds=import_deadline_seconds,
-            on_failure=TaskOnFailure.ABORT,
-        )
-    )
-    worker = await create_worker(services.workers, ACTOR.account.id)
-    await services.task_service.claim_tasks(
-        10, actor=build_worker_actor(ACTOR.account, worker.id)
-    )
-    await services.task_service.update_task(
-        agent_task.id,
-        TaskUpdate(status=TaskStatus.RUNNING),
-        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
-    )
-    session = await create_session(
-        services.sessions,
-        ACTOR.account.id,
-        agent_id=uuid.uuid4(),
-        task_id=agent_task.id,
-        status=SessionStatus.PENDING_IMPORT,
-    )
-    stored_agent_task = await services.tasks.get(agent_task.id)
-    assert isinstance(stored_agent_task, AgentTask)
-    stored_agent_task.result_session_id = session.id
-    await services.tasks.update(stored_agent_task)
-    await services.task_service.update_task(
-        agent_task.id,
-        TaskUpdate(status=TaskStatus.COMPLETED),
-        actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
-    )
-    assert isinstance(wait, ImportWaitTask)
-    return job_id, wait
-
-
-async def test_sweep_expired_import_wait_fails_the_task_and_the_job(
-    services: JobAndTaskServices,
-) -> None:
-    """An expired wait task fails past its deadline and its abort settles the job."""
-    job_id, wait = await _function_job_with_completed_agent_task(
-        services, import_deadline_seconds=60
-    )
-
-    assert wait.created is not None
-    expired_at = wait.created + timedelta(seconds=61)
-    assert await services.task_service.list_expired_import_wait_ids(expired_at) == [
-        wait.id
-    ]
-    await services.task_service.sweep_expired_import_wait(wait.id, expired_at)
-
-    stored_wait = await services.tasks.get(wait.id)
-    assert stored_wait.status is TaskStatus.FAILED
-    assert stored_wait.error == "No import arrived within 60 seconds"
-    job = await services.jobs.get(job_id)
-    assert job.status is JobStatus.FAILED
-    assert job.error == "No import arrived within 60 seconds"
-
-
-async def test_sweep_expired_import_wait_leaves_a_task_within_its_deadline_alone(
-    services: JobAndTaskServices,
-) -> None:
-    """A wait task inside its import deadline is neither listed nor swept."""
-    _, wait = await _function_job_with_completed_agent_task(
-        services, import_deadline_seconds=60
-    )
-
-    assert wait.created is not None
-    within_deadline = wait.created + timedelta(seconds=30)
-    assert (
-        await services.task_service.list_expired_import_wait_ids(within_deadline) == []
-    )
-    await services.task_service.sweep_expired_import_wait(wait.id, within_deadline)
-
-    stored_wait = await services.tasks.get(wait.id)
-    assert stored_wait.status is TaskStatus.PENDING
-
-
-async def test_list_expired_import_wait_ids_returns_only_expired_ones(
-    services: JobAndTaskServices,
-) -> None:
-    """The expired id read only surfaces wait tasks past their own deadline."""
-    job_id = await _pending_job(services)
-    short = await services.tasks.create(
-        ImportWaitTask(job_id=job_id, import_deadline_seconds=60)
-    )
-    await services.tasks.create(
-        ImportWaitTask(job_id=job_id, import_deadline_seconds=6000)
-    )
-
-    assert short.created is not None
-    now = short.created + timedelta(seconds=61)
-    assert await services.task_service.list_expired_import_wait_ids(now) == [short.id]
 
 
 async def test_heartbeat_stamps_owned_reported_tasks(
@@ -1189,3 +1070,147 @@ async def test_apply_status_with_analytics_none_is_safe() -> None:
     completed = await _complete_task(transitions, task, result={"created": 1})
 
     assert completed.status is TaskStatus.COMPLETED
+
+
+async def test_drained_provisional_job_with_completed_tasks_does_not_settle() -> None:
+    """A provisional job whose tasks all completed stays unsettled."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+
+    settled = await transitions.settle_job_if_drained(job.id)
+
+    assert not settled.settled
+
+
+async def test_drained_provisional_job_with_a_hard_failure_settles_failed() -> None:
+    """A provisional job settles failed once a task hard-fails, ignoring the flag."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id,
+            agent_version_id=uuid.uuid4(),
+            status=TaskStatus.FAILED,
+            error="boom",
+        )
+    )
+
+    settled = await transitions.settle_job_if_drained(job.id)
+
+    assert settled.status is JobStatus.FAILED
+    assert settled.error == "boom"
+
+
+async def test_drained_provisional_job_with_a_canceled_task_settles_canceled() -> None:
+    """A provisional job settles canceled once a task cancels, ignoring the flag."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.CANCELED
+        )
+    )
+
+    settled = await transitions.settle_job_if_drained(job.id)
+
+    assert settled.status is JobStatus.CANCELED
+
+
+async def test_drained_provisional_job_with_cancel_requested_settles_canceled() -> None:
+    """A provisional job whose cancel was requested settles canceled once drained."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    job.request_cancel(datetime.now(UTC))
+    await jobs.update(job)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+
+    settled = await transitions.settle_job_if_drained(job.id)
+
+    assert settled.status is JobStatus.CANCELED
+    assert settled.error is None
+
+
+async def test_settle_jobs_if_drained_gates_provisional_completion_in_bulk() -> None:
+    """The bulk settle variant applies the same provisional completion gate."""
+    transitions, tasks, jobs = _build_transitions(None)
+    provisional_job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    plain_job = await create_job(jobs, ACTOR.account.id)
+    await tasks.create(
+        AgentTask(
+            job_id=provisional_job.id,
+            agent_version_id=uuid.uuid4(),
+            status=TaskStatus.COMPLETED,
+        )
+    )
+    await tasks.create(
+        AgentTask(
+            job_id=plain_job.id,
+            agent_version_id=uuid.uuid4(),
+            status=TaskStatus.COMPLETED,
+        )
+    )
+
+    await transitions.settle_jobs_if_drained([provisional_job.id, plain_job.id])
+
+    assert not (await jobs.get(provisional_job.id)).settled
+    assert (await jobs.get(plain_job.id)).status is JobStatus.COMPLETED
+
+
+async def test_finalize_job_settles_a_drained_provisional_job_completed() -> None:
+    """Finalizing a drained provisional job settles it completed."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+    dispatched: list[JobsSettled] = []
+
+    async def record(event: JobsSettled) -> None:
+        dispatched.append(event)
+
+    transitions._dispatcher.register(JobsSettled, record)
+
+    finalized = await transitions.finalize_job(job.id)
+
+    assert finalized.status is JobStatus.COMPLETED
+    assert finalized.provisional is False
+    assert len(dispatched) == 1
+    assert dispatched[0].jobs == [finalized]
+
+
+async def test_fail_job_settles_a_drained_provisional_job_failed() -> None:
+    """Failing a drained provisional job settles it failed with the given error."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+
+    failed = await transitions.fail_job(job.id, "external failure")
+
+    assert failed.status is JobStatus.FAILED
+    assert failed.error == "external failure"
+
+
+async def test_fail_job_on_a_settled_job_is_a_no_op() -> None:
+    """Failing an already settled job leaves it unchanged."""
+    transitions, _tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, status=JobStatus.COMPLETED)
+
+    result = await transitions.fail_job(job.id, "ignored")
+
+    assert result.status is JobStatus.COMPLETED
+    assert result.error is None

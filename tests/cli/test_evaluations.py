@@ -190,6 +190,7 @@ def _job(status: JobStatus = JobStatus.PENDING) -> JobResponse:
         updated=now,
         kind=JobKind.EVALUATION,
         status=status,
+        provisional=False,
         started_at=now if status is not JobStatus.PENDING else None,
         ended_at=now
         if status in {JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELED}

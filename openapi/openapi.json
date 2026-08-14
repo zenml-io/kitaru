@@ -1,154 +1,6 @@
 {
   "components": {
     "schemas": {
-      "AccountActivateRequest": {
-        "additionalProperties": false,
-        "description": "Account activate request.",
-        "properties": {
-          "activation_token": {
-            "description": "Activation token.",
-            "title": "Activation Token",
-            "type": "string"
-          },
-          "password": {
-            "description": "Login password to set.",
-            "title": "Password",
-            "type": "string"
-          }
-        },
-        "required": [
-          "activation_token",
-          "password"
-        ],
-        "title": "AccountActivateRequest",
-        "type": "object"
-      },
-      "AccountActivationTokenResponse": {
-        "description": "Account response carrying a newly minted activation token.",
-        "properties": {
-          "activation_token": {
-            "description": "Plaintext token, shown once.",
-            "title": "Activation Token",
-            "type": "string"
-          },
-          "active": {
-            "description": "Whether the account can authenticate.",
-            "title": "Active",
-            "type": "boolean"
-          },
-          "created": {
-            "description": "Creation time.",
-            "format": "date-time",
-            "title": "Created",
-            "type": "string"
-          },
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Contact email.",
-            "title": "Email"
-          },
-          "id": {
-            "description": "Account id.",
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "is_admin": {
-            "description": "Whether the account has admin rights.",
-            "title": "Is Admin",
-            "type": "boolean"
-          },
-          "is_service_account": {
-            "description": "Whether this is a service account.",
-            "title": "Is Service Account",
-            "type": "boolean"
-          },
-          "metadata": {
-            "additionalProperties": true,
-            "description": "Arbitrary metadata.",
-            "title": "Metadata",
-            "type": "object"
-          },
-          "name": {
-            "description": "Account name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "updated": {
-            "description": "Last modification time.",
-            "format": "date-time",
-            "title": "Updated",
-            "type": "string"
-          }
-        },
-        "required": [
-          "created",
-          "updated",
-          "id",
-          "name",
-          "email",
-          "is_service_account",
-          "is_admin",
-          "active",
-          "metadata",
-          "activation_token"
-        ],
-        "title": "AccountActivationTokenResponse",
-        "type": "object"
-      },
-      "AccountCreateRequest": {
-        "additionalProperties": false,
-        "description": "Account create request.",
-        "properties": {
-          "email": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Contact email.",
-            "title": "Email"
-          },
-          "is_admin": {
-            "default": false,
-            "description": "Whether the account has admin rights.",
-            "title": "Is Admin",
-            "type": "boolean"
-          },
-          "name": {
-            "description": "Account name.",
-            "title": "Name",
-            "type": "string"
-          },
-          "password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Login password.",
-            "title": "Password"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "AccountCreateRequest",
-        "type": "object"
-      },
       "AccountResponse": {
         "description": "Account response.",
         "properties": {
@@ -221,63 +73,6 @@
           "metadata"
         ],
         "title": "AccountResponse",
-        "type": "object"
-      },
-      "AccountUpdateRequest": {
-        "additionalProperties": false,
-        "description": "Account update request.",
-        "properties": {
-          "is_admin": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New admin rights state.",
-            "title": "Is Admin"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New metadata.",
-            "title": "Metadata"
-          },
-          "old_password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Current login password.",
-            "title": "Old Password"
-          },
-          "password": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "New login password.",
-            "title": "Password"
-          }
-        },
-        "title": "AccountUpdateRequest",
         "type": "object"
       },
       "AgentCapabilities": {
@@ -831,17 +626,6 @@
             "description": "Targeted node.",
             "title": "Node Id"
           },
-          "part": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/AnnotationSelectorPart"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Payload of the node targeted."
-          },
           "path": {
             "anyOf": [
               {
@@ -851,7 +635,7 @@
                 "type": "null"
               }
             ],
-            "description": "RFC 6901 JSON Pointer within the targeted payload.",
+            "description": "RFC 6901 JSON Pointer into the targeted node or the session response.",
             "title": "Path"
           },
           "span": {
@@ -868,19 +652,6 @@
         },
         "title": "AnnotationSelector",
         "type": "object"
-      },
-      "AnnotationSelectorPart": {
-        "description": "Payload of a session node an annotation selector targets.",
-        "enum": [
-          "input",
-          "output",
-          "error",
-          "metadata",
-          "attributes",
-          "model_params"
-        ],
-        "title": "AnnotationSelectorPart",
-        "type": "string"
       },
       "AnnotationSpan": {
         "additionalProperties": false,
@@ -1958,6 +1729,45 @@
         "title": "DeviceVerifyRequest",
         "type": "object"
       },
+      "EvaluationAggregateResponse": {
+        "description": "Evaluation aggregate response.",
+        "properties": {
+          "baseline": {
+            "$ref": "#/components/schemas/EvaluationStats",
+            "description": "Stats over the baseline sessions."
+          },
+          "data_type": {
+            "$ref": "#/components/schemas/EvaluationDataType",
+            "description": "Evaluation data type."
+          },
+          "name": {
+            "description": "Evaluation name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "replays": {
+            "description": "Evaluation values of the 50 most recent replays, oldest first.",
+            "items": {
+              "$ref": "#/components/schemas/ReplayEvaluationValues"
+            },
+            "title": "Replays",
+            "type": "array"
+          },
+          "result": {
+            "$ref": "#/components/schemas/EvaluationStats",
+            "description": "Stats over the result sessions."
+          }
+        },
+        "required": [
+          "name",
+          "data_type",
+          "baseline",
+          "result",
+          "replays"
+        ],
+        "title": "EvaluationAggregateResponse",
+        "type": "object"
+      },
       "EvaluationBatchCreateRequest": {
         "additionalProperties": false,
         "description": "Evaluation batch create request.",
@@ -2223,6 +2033,60 @@
         "title": "EvaluationResult",
         "type": "object"
       },
+      "EvaluationStats": {
+        "description": "Evaluation stats.",
+        "properties": {
+          "average": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Mean score of float evaluations, share of true results of bool evaluations, null for other data types.",
+            "title": "Average"
+          },
+          "count": {
+            "description": "Number of aggregated evaluations.",
+            "title": "Count",
+            "type": "integer"
+          },
+          "pass_rate": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Share of passed evaluations among those carrying a passed flag, null when none do.",
+            "title": "Pass Rate"
+          },
+          "value_counts": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "integer"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Occurrences per value, only for categorical evaluations.",
+            "title": "Value Counts"
+          }
+        },
+        "required": [
+          "count"
+        ],
+        "title": "EvaluationStats",
+        "type": "object"
+      },
       "EvaluationTaskDetails": {
         "description": "Evaluation task details.",
         "properties": {
@@ -2276,6 +2140,52 @@
           "input_session_id"
         ],
         "title": "EvaluationTaskDetails",
+        "type": "object"
+      },
+      "EvaluationValue": {
+        "description": "Evaluation value.",
+        "properties": {
+          "passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pass or fail verdict.",
+            "title": "Passed"
+          },
+          "score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Numeric or boolean score.",
+            "title": "Score"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Label or string value.",
+            "title": "Value"
+          }
+        },
+        "title": "EvaluationValue",
         "type": "object"
       },
       "EvaluatorConfig": {
@@ -3787,14 +3697,6 @@
             "title": "Name",
             "type": "string"
           },
-          "questions": {
-            "description": "Questions asked about each session.",
-            "items": {
-              "$ref": "#/components/schemas/QuestionItem"
-            },
-            "title": "Questions",
-            "type": "array"
-          },
           "sessions": {
             "description": "Sessions to investigate, in presentation order.",
             "items": {
@@ -3807,7 +3709,6 @@
         "required": [
           "agent_id",
           "name",
-          "questions",
           "sessions"
         ],
         "title": "InvestigationCreateRequest",
@@ -3823,7 +3724,7 @@
             "type": "string"
           },
           "completed_sessions": {
-            "description": "Number of linked sessions marked completed or skipped.",
+            "description": "Number of linked sessions with a verdict.",
             "title": "Completed Sessions",
             "type": "integer"
           },
@@ -3881,14 +3782,6 @@
             "title": "Owner Id",
             "type": "string"
           },
-          "questions": {
-            "description": "Questions asked about each session.",
-            "items": {
-              "$ref": "#/components/schemas/QuestionItem"
-            },
-            "title": "Questions",
-            "type": "array"
-          },
           "started_at": {
             "anyOf": [
               {
@@ -3926,7 +3819,6 @@
           "name",
           "description",
           "status",
-          "questions",
           "metadata",
           "total_sessions",
           "completed_sessions"
@@ -3934,32 +3826,82 @@
         "title": "InvestigationResponse",
         "type": "object"
       },
+      "InvestigationSessionHighlight": {
+        "additionalProperties": false,
+        "description": "Investigation session highlight.",
+        "properties": {
+          "description": {
+            "description": "Prose explaining what the highlight shows.",
+            "title": "Description",
+            "type": "string"
+          },
+          "selector": {
+            "$ref": "#/components/schemas/AnnotationSelector",
+            "description": "Part of the session highlighted."
+          }
+        },
+        "required": [
+          "selector",
+          "description"
+        ],
+        "title": "InvestigationSessionHighlight",
+        "type": "object"
+      },
       "InvestigationSessionInput": {
         "additionalProperties": false,
         "description": "Investigation session input.",
         "properties": {
+          "questions": {
+            "description": "Questions to answer about the session.",
+            "items": {
+              "$ref": "#/components/schemas/InvestigationSessionQuestion"
+            },
+            "minItems": 1,
+            "title": "Questions",
+            "type": "array"
+          },
           "session_id": {
             "description": "Session to link.",
             "format": "uuid",
             "title": "Session Id",
             "type": "string"
-          },
-          "view": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/InvestigationSessionView"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Curated session view."
           }
         },
         "required": [
-          "session_id"
+          "session_id",
+          "questions"
         ],
         "title": "InvestigationSessionInput",
+        "type": "object"
+      },
+      "InvestigationSessionQuestion": {
+        "additionalProperties": false,
+        "description": "Investigation session question.",
+        "properties": {
+          "highlights": {
+            "description": "Curated highlights for the question.",
+            "items": {
+              "$ref": "#/components/schemas/InvestigationSessionHighlight"
+            },
+            "title": "Highlights",
+            "type": "array"
+          },
+          "key": {
+            "description": "Question key, unique within the session.",
+            "title": "Key",
+            "type": "string"
+          },
+          "question": {
+            "description": "Question to answer about the session.",
+            "title": "Question",
+            "type": "string"
+          }
+        },
+        "required": [
+          "key",
+          "question"
+        ],
+        "title": "InvestigationSessionQuestion",
         "type": "object"
       },
       "InvestigationSessionResponse": {
@@ -3988,14 +3930,19 @@
             "title": "Position",
             "type": "integer"
           },
+          "questions": {
+            "description": "Questions to answer about the session.",
+            "items": {
+              "$ref": "#/components/schemas/InvestigationSessionQuestion"
+            },
+            "title": "Questions",
+            "type": "array"
+          },
           "session_id": {
             "description": "Session being investigated.",
             "format": "uuid",
             "title": "Session Id",
             "type": "string"
-          },
-          "status": {
-            "$ref": "#/components/schemas/InvestigationSessionStatus"
           },
           "updated": {
             "description": "Last modification time.",
@@ -4003,16 +3950,16 @@
             "title": "Updated",
             "type": "string"
           },
-          "view": {
+          "verdict": {
             "anyOf": [
               {
-                "$ref": "#/components/schemas/InvestigationSessionView"
+                "$ref": "#/components/schemas/InvestigationSessionVerdict"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "Curated session view."
+            "description": "Investigation session verdict."
           }
         },
         "required": [
@@ -4022,96 +3969,43 @@
           "investigation_id",
           "session_id",
           "position",
-          "status",
-          "view"
+          "questions",
+          "verdict"
         ],
         "title": "InvestigationSessionResponse",
         "type": "object"
-      },
-      "InvestigationSessionStatus": {
-        "description": "Investigation session status.",
-        "enum": [
-          "pending",
-          "completed",
-          "skipped"
-        ],
-        "title": "InvestigationSessionStatus",
-        "type": "string"
       },
       "InvestigationSessionUpdateRequest": {
         "additionalProperties": false,
         "description": "Investigation session update request.",
         "properties": {
-          "status": {
-            "$ref": "#/components/schemas/InvestigationSessionStatus",
-            "description": "New investigation session status."
+          "verdict": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationSessionVerdict"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New investigation session verdict, None clears it."
           }
         },
         "required": [
-          "status"
+          "verdict"
         ],
         "title": "InvestigationSessionUpdateRequest",
         "type": "object"
       },
-      "InvestigationSessionView": {
-        "additionalProperties": false,
-        "description": "Investigation session view.",
-        "properties": {
-          "items": {
-            "description": "Curated findings for the session.",
-            "items": {
-              "$ref": "#/components/schemas/InvestigationSessionViewItem"
-            },
-            "title": "Items",
-            "type": "array"
-          },
-          "summary": {
-            "description": "Summary shown above the trace.",
-            "title": "Summary",
-            "type": "string"
-          },
-          "version": {
-            "default": 1,
-            "description": "Format version.",
-            "title": "Version",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "summary"
+      "InvestigationSessionVerdict": {
+        "description": "Investigation session verdict.",
+        "enum": [
+          "acceptable",
+          "problematic",
+          "uncertain"
         ],
-        "title": "InvestigationSessionView",
-        "type": "object"
-      },
-      "InvestigationSessionViewItem": {
-        "additionalProperties": false,
-        "description": "Investigation session view item.",
-        "properties": {
-          "description": {
-            "description": "Prose explaining what the curator saw.",
-            "title": "Description",
-            "type": "string"
-          },
-          "label": {
-            "description": "Short title for the item.",
-            "title": "Label",
-            "type": "string"
-          },
-          "selectors": {
-            "description": "References the item covers.",
-            "items": {
-              "$ref": "#/components/schemas/AnnotationSelector"
-            },
-            "title": "Selectors",
-            "type": "array"
-          }
-        },
-        "required": [
-          "label",
-          "description"
-        ],
-        "title": "InvestigationSessionViewItem",
-        "type": "object"
+        "title": "InvestigationSessionVerdict",
+        "type": "string"
       },
       "InvestigationStatus": {
         "description": "Investigation status.",
@@ -4150,6 +4044,17 @@
             ],
             "description": "New investigation name.",
             "title": "Name"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InvestigationStatus"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New investigation status."
           }
         },
         "title": "InvestigationUpdateRequest",
@@ -4229,6 +4134,11 @@
             "title": "Owner Id",
             "type": "string"
           },
+          "provisional": {
+            "description": "Whether the job's task set is not final yet.",
+            "title": "Provisional",
+            "type": "boolean"
+          },
           "started_at": {
             "anyOf": [
               {
@@ -4258,7 +4168,8 @@
           "owner_id",
           "id",
           "kind",
-          "status"
+          "status",
+          "provisional"
         ],
         "title": "JobResponse",
         "type": "object"
@@ -5172,6 +5083,36 @@
         "title": "Page[SessionResponse]",
         "type": "object"
       },
+      "Page_SessionWithEvaluationsResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[SessionWithEvaluationsResponse]",
+        "type": "object"
+      },
       "Page_TagResponse_": {
         "properties": {
           "items": {
@@ -5298,28 +5239,6 @@
         "title": "PayloadSpec",
         "type": "object"
       },
-      "QuestionItem": {
-        "additionalProperties": false,
-        "description": "Question item.",
-        "properties": {
-          "key": {
-            "description": "Key identifying the question within the array.",
-            "title": "Key",
-            "type": "string"
-          },
-          "question": {
-            "description": "Question display text.",
-            "title": "Question",
-            "type": "string"
-          }
-        },
-        "required": [
-          "key",
-          "question"
-        ],
-        "title": "QuestionItem",
-        "type": "object"
-      },
       "ReplayCreateRequest": {
         "additionalProperties": false,
         "description": "Replay create request.",
@@ -5386,6 +5305,44 @@
           "evaluators"
         ],
         "title": "ReplayCreateRequest",
+        "type": "object"
+      },
+      "ReplayEvaluationValues": {
+        "description": "Replay evaluation values.",
+        "properties": {
+          "baseline": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value from the baseline session."
+          },
+          "replay_id": {
+            "description": "Replay id.",
+            "format": "uuid",
+            "title": "Replay Id",
+            "type": "string"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/EvaluationValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value from the result session."
+          }
+        },
+        "required": [
+          "replay_id"
+        ],
+        "title": "ReplayEvaluationValues",
         "type": "object"
       },
       "ReplayOverride": {
@@ -5899,6 +5856,18 @@
             "description": "URL the server API is reachable at.",
             "title": "Server Url"
           },
+          "ui_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Kitaru UI version the server serves.",
+            "title": "Ui Version"
+          },
           "version": {
             "description": "Kitaru version the server runs.",
             "title": "Version",
@@ -5910,6 +5879,67 @@
           "auth_scheme"
         ],
         "title": "ServerInfoResponse",
+        "type": "object"
+      },
+      "ServiceAccountCreateRequest": {
+        "additionalProperties": false,
+        "description": "Service account create request.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ServiceAccountCreateRequest",
+        "type": "object"
+      },
+      "ServiceAccountUpdateRequest": {
+        "additionalProperties": false,
+        "description": "Service account update request.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New active state.",
+            "title": "Active"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New metadata.",
+            "title": "Metadata"
+          }
+        },
+        "title": "ServiceAccountUpdateRequest",
         "type": "object"
       },
       "SessionCreateRequest": {
@@ -7092,6 +7122,29 @@
         "title": "SessionUpdateRequest",
         "type": "object"
       },
+      "SessionWithEvaluationsResponse": {
+        "description": "Session with evaluations response.",
+        "properties": {
+          "evaluations": {
+            "description": "Every evaluation of the session, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationResponse"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "evaluations"
+        ],
+        "title": "SessionWithEvaluationsResponse",
+        "type": "object"
+      },
       "SessionWithNodesResponse": {
         "description": "Session with nodes response.",
         "properties": {
@@ -7384,8 +7437,7 @@
         "enum": [
           "agent",
           "evaluator",
-          "importer",
-          "import_wait"
+          "importer"
         ],
         "title": "TaskKind",
         "type": "string"
@@ -8089,6 +8141,211 @@
         "title": "ToolPolicyOnMiss",
         "type": "string"
       },
+      "UserActivateRequest": {
+        "additionalProperties": false,
+        "description": "User activate request.",
+        "properties": {
+          "activation_token": {
+            "description": "Activation token.",
+            "title": "Activation Token",
+            "type": "string"
+          },
+          "password": {
+            "description": "Login password to set.",
+            "title": "Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "activation_token",
+          "password"
+        ],
+        "title": "UserActivateRequest",
+        "type": "object"
+      },
+      "UserActivationTokenResponse": {
+        "description": "User response carrying a newly minted activation token.",
+        "properties": {
+          "activation_token": {
+            "description": "Plaintext token, shown once.",
+            "title": "Activation Token",
+            "type": "string"
+          },
+          "active": {
+            "description": "Whether the account can authenticate.",
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "id": {
+            "description": "Account id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_admin": {
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "is_service_account": {
+            "description": "Whether this is a service account.",
+            "title": "Is Service Account",
+            "type": "boolean"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "id",
+          "name",
+          "email",
+          "is_service_account",
+          "is_admin",
+          "active",
+          "metadata",
+          "activation_token"
+        ],
+        "title": "UserActivationTokenResponse",
+        "type": "object"
+      },
+      "UserCreateRequest": {
+        "additionalProperties": false,
+        "description": "User create request.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Contact email.",
+            "title": "Email"
+          },
+          "is_admin": {
+            "default": false,
+            "description": "Whether the account has admin rights.",
+            "title": "Is Admin",
+            "type": "boolean"
+          },
+          "name": {
+            "description": "Account name.",
+            "title": "Name",
+            "type": "string"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Login password.",
+            "title": "Password"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "UserCreateRequest",
+        "type": "object"
+      },
+      "UserUpdateRequest": {
+        "additionalProperties": false,
+        "description": "User update request.",
+        "properties": {
+          "is_admin": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New admin rights state.",
+            "title": "Is Admin"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New metadata.",
+            "title": "Metadata"
+          },
+          "old_password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current login password.",
+            "title": "Old Password"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New login password.",
+            "title": "Password"
+          }
+        },
+        "title": "UserUpdateRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -8461,7 +8718,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.21.0"
+    "version": "0.22.0rc7"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -8621,51 +8878,25 @@
         "tags": [
           "accounts"
         ]
-      },
-      "post": {
-        "description": "Create an account.\n\nAn account created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: Account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
-        "operationId": "create_account_v1_accounts_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
+      }
+    },
+    "/v1/accounts/me": {
+      "get": {
+        "description": "Get the calling account.\n\nClients observe HTTP 200 on success.\n\nArgs:\n    actor: Caller context.\n\nReturns:\n    Calling account.",
+        "operationId": "get_current_account_v1_accounts_me_get",
         "responses": {
-          "201": {
+          "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "anyOf": [
-                    {
-                      "$ref": "#/components/schemas/AccountResponse"
-                    },
-                    {
-                      "$ref": "#/components/schemas/AccountActivationTokenResponse"
-                    }
-                  ],
-                  "title": "Response Create Account V1 Accounts Post"
+                  "$ref": "#/components/schemas/AccountResponse"
                 }
               }
             },
             "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
           }
         },
-        "summary": "Create Account",
+        "summary": "Get Current Account",
         "tags": [
           "accounts"
         ]
@@ -8710,156 +8941,6 @@
           }
         },
         "summary": "Get Account",
-        "tags": [
-          "accounts"
-        ]
-      },
-      "patch": {
-        "description": "Partially update an account.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password or the\nadmin flag outside the ``local`` auth scheme, when writing another\naccount's password or metadata, when changing the calling account's own\nadmin flag, when making a service account an admin, and when the\nsupplied current password is missing or wrong, 404 when the account does\nnot exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Updated account.",
-        "operationId": "update_account_v1_accounts__account_id__patch",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "account_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Account Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountUpdateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Update Account",
-        "tags": [
-          "accounts"
-        ]
-      }
-    },
-    "/v1/accounts/{account_id}/activate": {
-      "post": {
-        "description": "Activate an account with its activation token and a new password.\n\nThe route is unauthenticated, because the account it activates cannot log\nin until it holds a password.\n\nClients observe HTTP 200 on success, 403 when the account has no pending\ntoken or the token does not match, 404 when the account does not exist,\nand 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Account activate request.\n    service: Account service.\n\nReturns:\n    Activated account.",
-        "operationId": "activate_account_v1_accounts__account_id__activate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "account_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Account Id",
-              "type": "string"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AccountActivateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Activate Account",
-        "tags": [
-          "accounts"
-        ]
-      }
-    },
-    "/v1/accounts/{account_id}/deactivate": {
-      "post": {
-        "description": "Deactivate an account and return its fresh activation token once.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth scheme\nand when deactivating the calling account, and 404 when the account does\nnot exist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Deactivated account carrying its activation token.",
-        "operationId": "deactivate_account_v1_accounts__account_id__deactivate_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "account_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Account Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AccountActivationTokenResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Deactivate Account",
         "tags": [
           "accounts"
         ]
@@ -9547,7 +9628,7 @@
         ]
       },
       "post": {
-        "description": "Create a manual annotation, or answer an investigation question.\n\nA body carrying session_id creates a manual annotation. A body carrying\ninvestigation_session_id and question_key answers an investigation\nquestion, moving a pending investigation to in_progress on its first\nanswer.\n\nClients observe HTTP 201 on success, 404 when the session or the\ninvestigation session does not exist, and 422 when the question key is\nunknown or the selector names a node outside the session.\n\nArgs:\n    body: Manual annotation or investigation answer create request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Created annotation.",
+        "description": "Create a manual annotation, or answer an investigation session.\n\nA body carrying session_id creates a manual annotation. A body carrying\ninvestigation_session_id answers an investigation session, moving a\npending investigation to in_progress on its first answer.\n\nClients observe HTTP 201 on success, 404 when the session or the\ninvestigation session does not exist, and 422 when the selector names a\nnode outside the session.\n\nArgs:\n    body: Manual annotation or investigation answer create request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Created annotation.",
         "operationId": "create_annotation_v1_annotations_post",
         "requestBody": {
           "content": {
@@ -10980,7 +11061,7 @@
         ]
       },
       "get": {
-        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when the caller owns no device\nwith this id.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Stored device.",
+        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when no device has this id,\nanother account already approved it, or the user code of an unapproved\ndevice is missing or wrong.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n    user_code: User code of a device no account approved yet.\n\nReturns:\n    Stored device.",
         "operationId": "get_device_v1_devices__device_id__get",
         "parameters": [
           {
@@ -10991,6 +11072,22 @@
               "format": "uuid",
               "title": "Device Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Code"
             }
           }
         ],
@@ -13102,7 +13199,7 @@
     },
     "/v1/info": {
       "get": {
-        "description": "Report how this server identifies itself and authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present.\n\nArgs:\n    settings: Service settings governing auth behavior.\n\nReturns:\n    Server info.",
+        "description": "Report how this server identifies itself and authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present.\n\nArgs:\n    settings: Service settings governing auth behavior.\n    server_id: Persisted server id.\n    ui_version: UI version served by this process.\n\nReturns:\n    Server info.",
         "operationId": "get_info_v1_info_get",
         "responses": {
           "200": {
@@ -13228,7 +13325,7 @@
         ]
       },
       "post": {
-        "description": "Create an investigation with its questions and linked sessions in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 when a linked session id repeats, is missing, or belongs to a\ndifferent agent, or the questions contain a duplicate key.\n\nArgs:\n    body: Investigation create request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Created investigation.",
+        "description": "Create an investigation with its linked sessions in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 when a linked session id repeats, is missing, or belongs to a\ndifferent agent.\n\nArgs:\n    body: Investigation create request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Created investigation.",
         "operationId": "create_investigation_v1_investigations_post",
         "requestBody": {
           "content": {
@@ -13347,7 +13444,7 @@
         ]
       },
       "patch": {
-        "description": "Update an investigation's name and description.\n\nClients observe HTTP 200 on success, 404 when no investigation has this\nid, and 422 when the update clears the investigation name.\n\nArgs:\n    investigation_id: Id of the investigation.\n    body: Investigation update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation.",
+        "description": "Update an investigation's name, description, and status.\n\nClients observe HTTP 200 on success, 404 when no investigation has this\nid, 409 when the update moves the status backwards, and 422 when the\nupdate clears the investigation name or status.\n\nArgs:\n    investigation_id: Id of the investigation.\n    body: Investigation update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation.",
         "operationId": "update_investigation_v1_investigations__investigation_id__patch",
         "parameters": [
           {
@@ -13477,8 +13574,8 @@
     },
     "/v1/investigations/{investigation_id}/sessions/{session_id}": {
       "patch": {
-        "description": "Mark a linked session completed or skipped.\n\nCompletes the investigation once no linked session is left pending.\nClients observe HTTP 200 on success, 404 when no investigation has this\nid or no investigation session links this investigation and session, and\n409 when the linked session is not pending.\n\nArgs:\n    investigation_id: Id of the investigation.\n    session_id: Id of the linked session.\n    body: Investigation session update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation session.",
-        "operationId": "update_investigation_session_status_v1_investigations__investigation_id__sessions__session_id__patch",
+        "description": "Set or clear a linked session's verdict.\n\nClients observe HTTP 200 on success and 404 when no investigation has\nthis id or no investigation session links this investigation and\nsession.\n\nArgs:\n    investigation_id: Id of the investigation.\n    session_id: Id of the linked session.\n    body: Investigation session update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation session.",
+        "operationId": "update_investigation_session_verdict_v1_investigations__investigation_id__sessions__session_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -13533,7 +13630,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Update Investigation Session Status",
+        "summary": "Update Investigation Session Verdict",
         "tags": [
           "investigations"
         ]
@@ -14486,6 +14583,102 @@
         "summary": "Update Secret",
         "tags": [
           "secrets"
+        ]
+      }
+    },
+    "/v1/service-accounts": {
+      "post": {
+        "description": "Create a service account, active without credentials.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme and when the caller may not create accounts, 409 when the name is\nalready registered, and 422 on invalid input.\n\nArgs:\n    body: Service account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "operationId": "create_service_account_v1_service_accounts_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Service Account",
+        "tags": [
+          "service-accounts"
+        ]
+      }
+    },
+    "/v1/service-accounts/{account_id}": {
+      "patch": {
+        "description": "Partially update a service account.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth\nscheme and when the caller may not update service accounts, 404 when the\nservice account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Service account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
+        "operationId": "update_service_account_v1_service_accounts__account_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ServiceAccountUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Service Account",
+        "tags": [
+          "service-accounts"
         ]
       }
     },
@@ -15683,6 +15876,406 @@
         "summary": "Get Task Spec",
         "tags": [
           "tasks"
+        ]
+      }
+    },
+    "/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
+      "get": {
+        "description": "Aggregate the evaluations of an experiment run's replays.\n\nBaseline and result sessions are aggregated separately, and each\naggregate carries the per-replay evaluation values of the 50 most\nrecent replays. Clients observe HTTP 200 on success and 404 when no\nexperiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair, sorted by\n    name.",
+        "operationId": "list_experiment_run_evaluation_aggregates_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_run_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Experiment Run Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/EvaluationAggregateResponse"
+                  },
+                  "title": "Response List Experiment Run Evaluation Aggregates V1 Ui Experiment Runs  Experiment Run Id  Evaluation Aggregates Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Experiment Run Evaluation Aggregates",
+        "tags": [
+          "ui"
+        ]
+      }
+    },
+    "/v1/ui/sessions": {
+      "get": {
+        "description": "List sessions, each with every evaluation of the session.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    session_service: Session service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions with their evaluations.",
+        "operationId": "list_sessions_with_evaluations_v1_ui_sessions_get",
+        "parameters": [
+          {
+            "description": "Cursor from the previous page.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Cursor from the previous page.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "description": "Items per page.",
+            "in": "query",
+            "name": "size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Items per page.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Size",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Sort field and direction, as field:asc or field:desc.",
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "created:desc",
+              "description": "Sort field and direction, as field:asc or field:desc.",
+              "pattern": "^[a-z][a-z0-9_]*:(asc|desc)$",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Filter expression, JSON-encoded in the query string.",
+            "in": "query",
+            "name": "filter",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/FilterCondition"
+                },
+                {
+                  "$ref": "#/components/schemas/AndFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/OrFilter"
+                },
+                {
+                  "$ref": "#/components/schemas/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Filter expression, JSON-encoded in the query string.",
+              "title": "Filter"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Page_SessionWithEvaluationsResponse_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sessions With Evaluations",
+        "tags": [
+          "ui"
+        ]
+      }
+    },
+    "/v1/ui/sessions/{session_id}": {
+      "get": {
+        "description": "Get a session by id, with every evaluation of the session.\n\nClients observe HTTP 200 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    session_service: Session service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored session with its evaluations.",
+        "operationId": "get_session_with_evaluations_v1_ui_sessions__session_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "session_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Session With Evaluations",
+        "tags": [
+          "ui"
+        ]
+      }
+    },
+    "/v1/users": {
+      "post": {
+        "description": "Create a user.\n\nA user created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: User create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
+        "operationId": "create_user_v1_users_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/AccountResponse"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UserActivationTokenResponse"
+                    }
+                  ],
+                  "title": "Response Create User V1 Users Post"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{account_id}": {
+      "patch": {
+        "description": "Partially update a user.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password or the\nadmin flag outside the ``local`` auth scheme, when writing another\naccount's password or metadata, when changing the calling account's own\nadmin flag, and when the supplied current password is missing or wrong,\n404 when the user does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: User update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Updated account.",
+        "operationId": "update_user_v1_users__account_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{account_id}/activate": {
+      "post": {
+        "description": "Activate a user with its activation token and a new password.\n\nThe route is unauthenticated, because the account it activates cannot log\nin until it holds a password.\n\nClients observe HTTP 200 on success, 403 when the account has no pending\ntoken or the token does not match, 404 when the user does not exist, and\n422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: User activate request.\n    service: Account service.\n\nReturns:\n    Activated account.",
+        "operationId": "activate_user_v1_users__account_id__activate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UserActivateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Activate User",
+        "tags": [
+          "users"
+        ]
+      }
+    },
+    "/v1/users/{account_id}/deactivate": {
+      "post": {
+        "description": "Deactivate a user and return its fresh activation token once.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth scheme\nand when deactivating the calling account, and 404 when the user does not\nexist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Deactivated account carrying its activation token.",
+        "operationId": "deactivate_user_v1_users__account_id__deactivate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "account_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Account Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserActivationTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Deactivate User",
+        "tags": [
+          "users"
         ]
       }
     },

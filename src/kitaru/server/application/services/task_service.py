@@ -45,7 +45,6 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.task import (
     AgentTask,
     IllegalTaskStatusTransition,
-    ImportWaitTask,
     Task,
     TaskAccessDenied,
     TaskResultSessionMissing,
@@ -338,44 +337,6 @@ class TaskService:
                 "and was abandoned"
             )
             await self._apply_status(task, partial(Task.abandon, error=error, now=now))
-
-    async def list_expired_import_wait_ids(self, now: datetime) -> list[uuid.UUID]:
-        """Read the ids of pending import wait tasks past their import deadline.
-
-        Takes no lock.
-
-        Args:
-            now: Current time.
-
-        Returns:
-            Ids of the expired tasks in ascending order.
-        """
-        return await self._repository.list_expired_import_wait_ids(
-            now, self._policy.sweep_batch_limit
-        )
-
-    async def sweep_expired_import_wait(
-        self, task_id: uuid.UUID, now: datetime
-    ) -> None:
-        """Fail one pending import wait task whose import deadline passed.
-
-        Locks the task row, then the job row. A task another sweep holds, or
-        one that completed in the meantime, is left alone.
-
-        Args:
-            task_id: Id of the candidate task.
-            now: Current time.
-        """
-        task = await self._repository.claim_expired_import_wait(task_id, now)
-        if not isinstance(task, ImportWaitTask):
-            return
-        error = f"No import arrived within {task.import_deadline_seconds} seconds"
-
-        def transition(candidate: Task) -> None:
-            assert isinstance(candidate, ImportWaitTask)
-            candidate.fail_pending(error, now)
-
-        await self._apply_status(task, transition)
 
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.

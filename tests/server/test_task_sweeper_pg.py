@@ -193,3 +193,72 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
         client, f"/api/v1/replays/{replay['id']}", "status", "failed"
     )
     assert replay_after["status"] == "failed"
+
+
+async def test_background_sweep_expires_a_pending_import_session_past_its_deadline(
+    client: httpx.AsyncClient,
+) -> None:
+    """A placeholder past its import deadline is failed by the sweep loop alone.
+
+    No update request runs on the session after its creation, so the only
+    thing that can move it to failed is the background sweeper started from
+    the app lifespan.
+    """
+    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    version = (
+        await client.post(
+            f"/v1/agents/{agent['id']}/versions",
+            json={
+                "run_spec": {
+                    "type": "function",
+                    "entrypoint": "agent:run",
+                    "timeout_seconds": 60,
+                    "import_deadline_seconds": 1,
+                }
+            },
+        )
+    ).json()
+    await client.post(
+        "/v1/session-runs",
+        json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
+    )
+    registration = (
+        await client.post(
+            "/v1/workers",
+            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        )
+    ).json()
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
+    claimed = (
+        await client.post(
+            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+        )
+    ).json()
+    agent_entry = claimed["tasks"][0]
+    agent_task = agent_entry["task"]
+    agent_task_headers = {"Authorization": f"Bearer {agent_entry['token']}"}
+    await client.patch(
+        f"/v1/tasks/{agent_task['id']}",
+        json={"status": "running"},
+        headers=agent_task_headers,
+    )
+
+    placeholder = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "origin": "replay",
+                "status": "pending_import",
+                "external_id": "run-1",
+                "inputs": None,
+                "outputs": None,
+            },
+            headers=agent_task_headers,
+        )
+    ).json()
+    assert placeholder["status"] == "pending_import"
+
+    session_after = await _wait_until(
+        client, f"/v1/sessions/{placeholder['id']}", "status", "failed"
+    )
+    assert session_after["error"] == "Import deadline expired"

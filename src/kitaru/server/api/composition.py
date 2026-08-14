@@ -112,8 +112,10 @@ def register_subscribers(
     dispatcher.register(
         SessionImportFinalized,
         partial(
-            replay_pipeline.complete_import_wait,
+            replay_pipeline.continue_replay_on_import,
             task_repository=task_repository,
+            replay_repository=replay_repository,
+            experiment_repository=experiment_repository,
             transitions=TaskTransitions(
                 task_repository=task_repository,
                 job_repository=job_repository,

@@ -272,6 +272,7 @@ def make_job_response(
         "owner_id": OWNER_ID,
         "kind": kind,
         "status": status,
+        "provisional": False,
         "created": _now(),
         "updated": _now(),
     }

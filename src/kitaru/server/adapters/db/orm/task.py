@@ -45,7 +45,6 @@ from kitaru.server.domain.task import (
     AgentTask,
     EvaluationTask,
     ImportTask,
-    ImportWaitTask,
     Task,
 )
 
@@ -168,7 +167,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     env: Mapped[dict[str, str]] = mapped_column(JSONB)
     worker_id: Mapped[uuid.UUID | None]
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
-    import_deadline_seconds: Mapped[int | None]
     claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
@@ -221,8 +219,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             row.agent_id = task.agent_id
             row.agent_version_id = task.agent_version_id
             row.inputs = task.params
-        elif isinstance(task, ImportWaitTask):
-            row.import_deadline_seconds = task.import_deadline_seconds
         return row
 
     def apply(self, task: Task) -> None:
@@ -298,10 +294,5 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 agent_version_id=self.agent_version_id,
                 params=self.inputs if self.inputs is not None else {},
                 **shared,
-            )
-        if kind is TaskKind.IMPORT_WAIT:
-            assert self.import_deadline_seconds is not None
-            return ImportWaitTask(
-                import_deadline_seconds=self.import_deadline_seconds, **shared
             )
         raise ValueError(f"Unknown task kind '{self.kind}'")

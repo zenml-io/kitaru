@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
@@ -114,6 +115,20 @@ class SessionRepository(Protocol):
 
         Returns:
             Stored sessions keyed by id.
+        """
+        ...
+
+    async def list_expired_import_ids(
+        self, now: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending-import sessions past their import deadline.
+
+        Args:
+            now: Current time.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the expired sessions in ascending order.
         """
         ...
 

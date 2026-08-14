@@ -16,7 +16,15 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, Text, text
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
@@ -61,6 +69,7 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     owner_id: Mapped[uuid.UUID]
     kind: Mapped[str] = mapped_column(String(KIND_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
+    provisional: Mapped[bool] = mapped_column(Boolean)
     cancel_requested_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True)
     )
@@ -83,6 +92,7 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=job.owner_id,
             kind=job.kind.value,
             status=job.status.value,
+            provisional=job.provisional,
             cancel_requested_at=job.cancel_requested_at,
             started_at=job.started_at,
             ended_at=job.ended_at,
@@ -96,6 +106,7 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             job: Job with modified fields.
         """
         self.status = job.status.value
+        self.provisional = job.provisional
         self.cancel_requested_at = job.cancel_requested_at
         self.started_at = job.started_at
         self.ended_at = job.ended_at
@@ -112,6 +123,7 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             owner_id=self.owner_id,
             kind=JobKind(self.kind),
             status=JobStatus(self.status),
+            provisional=self.provisional,
             cancel_requested_at=self.cancel_requested_at,
             started_at=self.started_at,
             ended_at=self.ended_at,

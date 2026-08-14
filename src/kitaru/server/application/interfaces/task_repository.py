@@ -181,39 +181,6 @@ class TaskRepository(Protocol):
         """
         ...
 
-    async def list_expired_import_wait_ids(
-        self, now: datetime, limit: int
-    ) -> list[uuid.UUID]:
-        """Read the ids of pending import wait tasks past their import deadline.
-
-        Args:
-            now: Current time.
-            limit: Maximum number of ids to read.
-
-        Returns:
-            Ids of the expired tasks in ascending order.
-        """
-        ...
-
-    async def claim_expired_import_wait(
-        self, task_id: uuid.UUID, now: datetime
-    ) -> Task | None:
-        """Lock one import wait task by id if it is still pending and expired.
-
-        The row is locked with ``FOR UPDATE SKIP LOCKED``, so concurrent
-        sweeps take disjoint tasks. Expiry is re-checked on the locked row
-        because the candidate read ran unlocked.
-
-        Args:
-            task_id: Id of the candidate task.
-            now: Current time.
-
-        Returns:
-            Locked expired task, or ``None`` when it is contended or no
-            longer pending.
-        """
-        ...
-
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
     ) -> tuple[dict[uuid.UUID, datetime | None], set[uuid.UUID]]:

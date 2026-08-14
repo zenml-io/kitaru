@@ -137,6 +137,22 @@ def _compile_has_evaluation_condition(
     return evaluation_exists.exists() if expected else ~evaluation_exists.exists()
 
 
+def _expired_import_conditions(now: datetime) -> list[ColumnElement[bool]]:
+    """Build the conditions matching pending-import sessions past their deadline.
+
+    Args:
+        now: Current time.
+
+    Returns:
+        Conditions to AND into a sweep query.
+    """
+    return [
+        SessionORM.status == SessionStatus.PENDING_IMPORT.value,
+        SessionORM.import_expires_at.is_not(None),
+        SessionORM.import_expires_at < now,
+    ]
+
+
 SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": SessionORM.id,
     "agent_id": SessionORM.agent_id,
@@ -333,6 +349,26 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         rows = await self._load_by_ids(list(session_ids))
         return {session_id: row.to_domain() for session_id, row in rows.items()}
 
+    async def list_expired_import_ids(
+        self, now: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending-import sessions past their import deadline.
+
+        Args:
+            now: Current time.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the expired sessions in ascending order.
+        """
+        statement = (
+            select(SessionORM.id)
+            .where(*_expired_import_conditions(now))
+            .order_by(SessionORM.id.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
@@ -362,6 +398,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.started_at = session.started_at
         row.ended_at = session.ended_at
         row.external_id = session.external_id
+        row.import_expires_at = session.import_expires_at
         row.metadata_ = session.metadata
         row.imported_from = session.imported_from
         row.framework = session.framework

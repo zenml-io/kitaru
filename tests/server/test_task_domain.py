@@ -22,13 +22,12 @@ import pytest
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
-from kitaru.server.domain.job import IllegalJobStatusTransition, Job
+from kitaru.server.domain.job import IllegalJobStatusTransition, Job, JobAlreadySettled
 from kitaru.server.domain.task import (
     AgentTask,
     EvaluationTask,
     IllegalTaskStatusTransition,
     ImportTask,
-    ImportWaitTask,
     InvalidTaskEnv,
     InvalidTaskResult,
     Task,
@@ -346,63 +345,6 @@ def test_with_staleness_reports_the_effective_status() -> None:
     assert fresh.with_staleness(late, 60, 3).status is TaskStatus.CLAIMED
 
 
-def _wait_task(
-    status: TaskStatus = TaskStatus.PENDING, **overrides: Any
-) -> ImportWaitTask:
-    """Build an import wait task in a given status.
-
-    Args:
-        status: Status the task starts in.
-        overrides: Extra field values.
-
-    Returns:
-        Import wait task.
-    """
-    return ImportWaitTask(job_id=uuid.uuid4(), status=status, **overrides)
-
-
-def test_import_wait_kind() -> None:
-    """An import wait task reports its own wire kind."""
-    assert _wait_task().kind is TaskKind.IMPORT_WAIT
-
-
-def test_import_wait_complete_pending_moves_to_completed() -> None:
-    """A pending wait task completes and stamps its end time."""
-    task = _wait_task()
-    task.complete_pending(NOW)
-    assert task.status is TaskStatus.COMPLETED
-    assert task.ended_at == NOW
-
-
-@pytest.mark.parametrize("status", [status for status in TERMINAL_STATUSES])
-def test_import_wait_complete_pending_rejects_a_terminal_task(
-    status: TaskStatus,
-) -> None:
-    """complete_pending only applies to a pending task."""
-    task = _wait_task(status)
-    with pytest.raises(IllegalTaskStatusTransition):
-        task.complete_pending(NOW)
-    assert task.status is status
-
-
-def test_import_wait_fail_pending_moves_to_failed_with_the_error() -> None:
-    """A pending wait task fails and records the error."""
-    task = _wait_task()
-    task.fail_pending("no import arrived", NOW)
-    assert task.status is TaskStatus.FAILED
-    assert task.error == "no import arrived"
-    assert task.ended_at == NOW
-
-
-@pytest.mark.parametrize("status", [status for status in TERMINAL_STATUSES])
-def test_import_wait_fail_pending_rejects_a_terminal_task(status: TaskStatus) -> None:
-    """fail_pending only applies to a pending task."""
-    task = _wait_task(status)
-    with pytest.raises(IllegalTaskStatusTransition):
-        task.fail_pending("boom", NOW)
-    assert task.status is status
-
-
 def test_job_lifecycle() -> None:
     """A job starts once, settles once, and keeps its first cancel request."""
     job = Job(owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN)
@@ -423,3 +365,18 @@ def test_job_settle_rejects_a_non_terminal_status() -> None:
     job = Job(owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN)
     with pytest.raises(IllegalJobStatusTransition):
         job.settle(JobStatus.RUNNING, None, NOW)
+
+
+def test_finalize_clears_the_provisional_flag() -> None:
+    """Finalizing a provisional job clears its flag."""
+    job = Job(owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN, provisional=True)
+    job.finalize()
+    assert job.provisional is False
+
+
+def test_finalize_rejects_a_settled_job() -> None:
+    """Finalizing a settled job conflicts."""
+    job = Job(owner_id=uuid.uuid4(), kind=JobKind.SESSION_RUN, provisional=True)
+    job.settle(JobStatus.COMPLETED, None, NOW)
+    with pytest.raises(JobAlreadySettled):
+        job.finalize()

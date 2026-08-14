@@ -74,6 +74,7 @@ class Job(DomainModel):
     owner_id: uuid.UUID
     kind: JobKind
     status: JobStatus = JobStatus.PENDING
+    provisional: bool = False
     cancel_requested_at: datetime | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -130,3 +131,13 @@ class Job(DomainModel):
         """
         if self.cancel_requested_at is None:
             self.cancel_requested_at = now
+
+    def finalize(self) -> None:
+        """Clear the provisional flag.
+
+        Raises:
+            JobAlreadySettled: The job already reached a terminal status.
+        """
+        if self.settled:
+            raise JobAlreadySettled(self.id)
+        self.provisional = False

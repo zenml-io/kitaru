@@ -13,7 +13,7 @@ from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionCreateRequest,
-    RunSpec,
+    CommandRunSpec,
 )
 from kitaru.api_models.v1.evaluation import (
     EvaluationListParams,
@@ -234,7 +234,7 @@ async def run_demo(
             AgentVersionCreateRequest(
                 display_version="v1",
                 description="AI SDK 7 OpenAI gpt-5-nano support triage.",
-                run_spec=RunSpec(
+                run_spec=CommandRunSpec(
                     command=RUN_COMMAND,
                     working_dir=str(REPO_ROOT),
                     env={**run_env, "KITARU_AGENT_ID": str(agent.id)},

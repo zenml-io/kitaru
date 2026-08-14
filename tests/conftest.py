@@ -220,7 +220,6 @@ from kitaru.server.domain.task import (
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
-    ImportWaitTask,
     Task,
     TaskNotFound,
 )
@@ -2356,6 +2355,27 @@ class FakeSessionRepository:
             for session_id in session_ids
             if session_id in self._sessions
         }
+
+    async def list_expired_import_ids(
+        self, now: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of pending-import sessions past their import deadline.
+
+        Args:
+            now: Current time.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the expired sessions in ascending order.
+        """
+        expired = sorted(
+            session.id
+            for session in self._sessions.values()
+            if session.status is SessionStatus.PENDING_IMPORT
+            and session.import_expires_at is not None
+            and session.import_expires_at < now
+        )
+        return expired[:limit]
 
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
@@ -5228,7 +5248,6 @@ class FakeTaskRepository:
                 task
                 for task in self._tasks.values()
                 if task.status is TaskStatus.PENDING
-                and task.kind is not TaskKind.IMPORT_WAIT
                 and self._matches_residual(task, scope)
             ),
             key=lambda task: task.id,
@@ -5281,58 +5300,6 @@ class FakeTaskRepository:
             ),
         )
         return stale[:limit]
-
-    def _is_expired_import_wait(self, task: Task, now: datetime) -> bool:
-        """Report whether a task is a pending import wait past its deadline.
-
-        Args:
-            task: Candidate task.
-            now: Current time.
-
-        Returns:
-            Whether the task is expired.
-        """
-        if not isinstance(task, ImportWaitTask):
-            return False
-        if task.status is not TaskStatus.PENDING or task.created is None:
-            return False
-        return now - task.created > timedelta(seconds=task.import_deadline_seconds)
-
-    async def list_expired_import_wait_ids(
-        self, now: datetime, limit: int
-    ) -> list[uuid.UUID]:
-        """Read the ids of pending import wait tasks past their import deadline.
-
-        Args:
-            now: Current time.
-            limit: Maximum number of ids to read.
-
-        Returns:
-            Ids of the expired tasks in ascending order.
-        """
-        expired = sorted(
-            task.id
-            for task in self._tasks.values()
-            if self._is_expired_import_wait(task, now)
-        )
-        return expired[:limit]
-
-    async def claim_expired_import_wait(
-        self, task_id: uuid.UUID, now: datetime
-    ) -> Task | None:
-        """Lock one import wait task by id if it is still pending and expired.
-
-        Args:
-            task_id: Id of the candidate task.
-            now: Current time.
-
-        Returns:
-            Locked expired task, or ``None`` when it is no longer pending.
-        """
-        task = self._tasks.get(task_id)
-        if task is None or not self._is_expired_import_wait(task, now):
-            return None
-        return task.model_copy()
 
     async def stamp_heartbeats(
         self, task_ids: Sequence[uuid.UUID], worker_id: uuid.UUID, now: datetime
@@ -5524,6 +5491,7 @@ async def create_job(
     owner_id: uuid.UUID,
     kind: JobKind = JobKind.SESSION_RUN,
     status: JobStatus = JobStatus.PENDING,
+    provisional: bool = False,
 ) -> Job:
     """Store a job in the fake repository.
 
@@ -5532,11 +5500,14 @@ async def create_job(
         owner_id: Id of the owning account.
         kind: Job kind.
         status: Job status.
+        provisional: Whether the job's task set is not final yet.
 
     Returns:
         Stored job.
     """
-    return await repository.create(Job(owner_id=owner_id, kind=kind, status=status))
+    return await repository.create(
+        Job(owner_id=owner_id, kind=kind, status=status, provisional=provisional)
+    )
 
 
 async def create_agent_task(

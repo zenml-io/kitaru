@@ -3817,8 +3817,7 @@
           "enum": [
             "agent",
             "evaluator",
-            "importer",
-            "import_wait"
+            "importer"
           ],
           "title": "TaskKind",
           "type": "string"
@@ -4358,6 +4357,11 @@
               "title": "Owner Id",
               "type": "string"
             },
+            "provisional": {
+              "description": "Whether the job's task set is not final yet.",
+              "title": "Provisional",
+              "type": "boolean"
+            },
             "started_at": {
               "anyOf": [
                 {
@@ -4388,7 +4392,8 @@
             "owner_id",
             "id",
             "kind",
-            "status"
+            "status",
+            "provisional"
           ],
           "title": "_MCPJob",
           "type": "object"
@@ -7081,6 +7086,11 @@
               "title": "Owner Id",
               "type": "string"
             },
+            "provisional": {
+              "description": "Whether the job's task set is not final yet.",
+              "title": "Provisional",
+              "type": "boolean"
+            },
             "started_at": {
               "anyOf": [
                 {
@@ -7111,7 +7121,8 @@
             "owner_id",
             "id",
             "kind",
-            "status"
+            "status",
+            "provisional"
           ],
           "title": "JobResponse",
           "type": "object"
@@ -8784,6 +8795,11 @@
               "title": "Owner Id",
               "type": "string"
             },
+            "provisional": {
+              "description": "Whether the job's task set is not final yet.",
+              "title": "Provisional",
+              "type": "boolean"
+            },
             "started_at": {
               "anyOf": [
                 {
@@ -8814,7 +8830,8 @@
             "owner_id",
             "id",
             "kind",
-            "status"
+            "status",
+            "provisional"
           ],
           "title": "JobResponse",
           "type": "object"

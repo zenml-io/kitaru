@@ -62,7 +62,9 @@ async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, 
         )
     )
     evaluation_service = EvaluationService(
-        repository=services.evaluations, session_repository=services.sessions
+        repository=services.evaluations,
+        session_repository=services.sessions,
+        task_repository=services.tasks,
     )
     app.dependency_overrides[get_experiment_run_service] = lambda: (
         services.experiment_run_service

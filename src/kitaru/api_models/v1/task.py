@@ -37,7 +37,6 @@ class TaskKind(StrEnum):
     AGENT = "agent"
     EVALUATOR = "evaluator"
     IMPORTER = "importer"
-    IMPORT_WAIT = "import_wait"
 
 
 class TaskOnFailure(StrEnum):

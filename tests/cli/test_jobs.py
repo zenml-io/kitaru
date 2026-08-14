@@ -51,6 +51,7 @@ def _job(
         updated=now + timedelta(seconds=updated_offset),
         kind=JobKind.REPLAY,
         status=status,
+        provisional=False,
         started_at=now if status is not JobStatus.PENDING else None,
         ended_at=(
             now

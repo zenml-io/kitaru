@@ -48,7 +48,6 @@ __all__ = [
     "FunctionAgentTaskDetails",
     "ImportTask",
     "ImportTaskDetails",
-    "ImportWaitTask",
     "InvalidTaskEnv",
     "InvalidTaskResult",
     "PackagePluginSpec",
@@ -682,49 +681,6 @@ class ImportTask(Task):
         """
         if result is None:
             raise InvalidTaskResult(f"Task {self.id} requires a result")
-
-
-class ImportWaitTask(Task):
-    """Import wait task."""
-
-    import_deadline_seconds: int = 86400
-
-    @property
-    def kind(self) -> TaskKind:
-        """Kind of work the task runs.
-
-        Returns:
-            Import wait kind.
-        """
-        return TaskKind.IMPORT_WAIT
-
-    def complete_pending(self, now: datetime) -> None:
-        """Move the pending wait task to completed.
-
-        Args:
-            now: Current time.
-
-        Raises:
-            IllegalTaskStatusTransition: The task is not pending.
-        """
-        self._require_status({TaskStatus.PENDING}, TaskStatus.COMPLETED)
-        self.status = TaskStatus.COMPLETED
-        self.ended_at = now
-
-    def fail_pending(self, error: str | None, now: datetime) -> None:
-        """Move the pending wait task to failed.
-
-        Args:
-            error: Failure reason.
-            now: Current time.
-
-        Raises:
-            IllegalTaskStatusTransition: The task is not pending.
-        """
-        self._require_status({TaskStatus.PENDING}, TaskStatus.FAILED)
-        self.status = TaskStatus.FAILED
-        self.error = error
-        self.ended_at = now
 
 
 class TaskRunSpec(FrozenModel):

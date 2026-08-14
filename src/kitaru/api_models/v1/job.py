@@ -48,6 +48,9 @@ class JobResponse(OwnedResponseModel):
     id: uuid.UUID = Field(description="Job id.")
     kind: JobKind = Field(description="Kind of workflow that created the job.")
     status: JobStatus = Field(description="Job status.")
+    provisional: bool = Field(
+        description="Whether the job's task set is not final yet."
+    )
     cancel_requested_at: datetime | None = Field(
         default=None, description="Time cancellation was requested."
     )

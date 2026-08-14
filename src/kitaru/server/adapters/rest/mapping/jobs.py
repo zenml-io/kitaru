@@ -36,6 +36,7 @@ def job_to_response(job: Job) -> JobResponse:
         owner_id=job.owner_id,
         kind=job.kind,
         status=job.status,
+        provisional=job.provisional,
         cancel_requested_at=job.cancel_requested_at,
         started_at=job.started_at,
         ended_at=job.ended_at,

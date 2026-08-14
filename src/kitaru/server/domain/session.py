@@ -300,6 +300,7 @@ class Session(DomainModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     external_id: str | None = None
+    import_expires_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     imported_from: str | None = None
     framework: str | None = None
@@ -418,3 +419,21 @@ class Session(DomainModel):
         self.outputs = outputs
         self.error = error
         self.ended_at = ended_at
+
+    def fail_import(self, error: str | None, now: datetime) -> None:
+        """Move a pending-import session to failed.
+
+        Args:
+            error: Failure reason.
+            now: Current time.
+
+        Raises:
+            IllegalSessionStatusTransition: The session is not pending import.
+        """
+        if self.status is not SessionStatus.PENDING_IMPORT:
+            raise IllegalSessionStatusTransition(
+                self.id, self.status, SessionStatus.FAILED
+            )
+        self.status = SessionStatus.FAILED
+        self.error = error
+        self.ended_at = now
