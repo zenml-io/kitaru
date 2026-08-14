@@ -57,7 +57,7 @@ class BlobsResource:
         # than a plain form field, so the server sees an UploadFile.
         response = await self._client.request(
             "POST",
-            "/v1/blobs",
+            "/api/v1/blobs",
             files={"file": (filename or "blob", content, media_type)},
         )
         return BlobResponse.model_validate(response.json())
@@ -74,7 +74,7 @@ class BlobsResource:
         Returns:
             Stored blob metadata.
         """
-        response = await self._client.request("GET", f"/v1/blobs/{blob_id}")
+        response = await self._client.request("GET", f"/api/v1/blobs/{blob_id}")
         return BlobResponse.model_validate(response.json())
 
     async def download(self, blob_id: uuid.UUID) -> bytes:
@@ -89,7 +89,7 @@ class BlobsResource:
         Returns:
             Blob content.
         """
-        response = await self._client.request("GET", f"/v1/blobs/{blob_id}/content")
+        response = await self._client.request("GET", f"/api/v1/blobs/{blob_id}/content")
         return response.content
 
     async def delete(self, blob_id: uuid.UUID) -> None:
@@ -102,4 +102,4 @@ class BlobsResource:
             APIError: The request failed, including 404 for a missing blob
                 and 409 when the blob is referenced by a plugin version.
         """
-        await self._client.request("DELETE", f"/v1/blobs/{blob_id}")
+        await self._client.request("DELETE", f"/api/v1/blobs/{blob_id}")

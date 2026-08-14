@@ -71,7 +71,7 @@ async def client(
 async def test_create_agent(client: httpx.AsyncClient) -> None:
     """Create an agent and observe HTTP 201."""
     response = await client.post(
-        "/v1/agents", json={"name": "assistant", "description": "Helps"}
+        "/api/v1/agents", json={"name": "assistant", "description": "Helps"}
     )
     assert response.status_code == 201
     body = response.json()
@@ -86,39 +86,39 @@ async def test_create_agent(client: httpx.AsyncClient) -> None:
 
 async def test_create_agent_duplicate_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a duplicate agent name."""
-    response = await client.post("/v1/agents", json={"name": "assistant"})
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
     assert response.status_code == 201
-    response = await client.post("/v1/agents", json={"name": "assistant"})
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Agent name 'assistant' is already registered"}
 
 
 async def test_create_agent_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid agent name."""
-    response = await client.post("/v1/agents", json={"name": "in valid"})
+    response = await client.post("/api/v1/agents", json={"name": "in valid"})
     assert response.status_code == 422
 
 
 async def test_get_agent(client: httpx.AsyncClient) -> None:
     """Get an agent by id."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    response = await client.get(f"/v1/agents/{created['id']}")
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.get(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_agent_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing agent."""
-    response = await client.get(f"/v1/agents/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/agents/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
 async def test_list_agents(client: httpx.AsyncClient) -> None:
     """List agents newest-first with filters."""
     for name in ["assistant", "reviewer", "triager"]:
-        await client.post("/v1/agents", json={"name": name})
+        await client.post("/api/v1/agents", json={"name": name})
 
-    response = await client.get("/v1/agents")
+    response = await client.get("/api/v1/agents")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -130,7 +130,7 @@ async def test_list_agents(client: httpx.AsyncClient) -> None:
 
     filter_expression = {"field": "name", "op": "eq", "value": "reviewer"}
     response = await client.get(
-        "/v1/agents", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/agents", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "reviewer"
@@ -140,11 +140,11 @@ async def test_update_agent(client: httpx.AsyncClient) -> None:
     """Update an agent's name and description."""
     created = (
         await client.post(
-            "/v1/agents", json={"name": "assistant", "description": "Helps"}
+            "/api/v1/agents", json={"name": "assistant", "description": "Helps"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/agents/{created['id']}",
+        f"/api/v1/agents/{created['id']}",
         json={"name": "renamed", "description": "Reviews"},
     )
     assert response.status_code == 200
@@ -157,11 +157,11 @@ async def test_update_agent_clears_description(client: httpx.AsyncClient) -> Non
     """Clear an agent's description with an explicit null."""
     created = (
         await client.post(
-            "/v1/agents", json={"name": "assistant", "description": "Helps"}
+            "/api/v1/agents", json={"name": "assistant", "description": "Helps"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/agents/{created['id']}", json={"description": None}
+        f"/api/v1/agents/{created['id']}", json={"description": None}
     )
     assert response.status_code == 200
     assert response.json()["description"] is None
@@ -169,31 +169,33 @@ async def test_update_agent_clears_description(client: httpx.AsyncClient) -> Non
 
 async def test_update_agent_cannot_clear_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 when clearing the agent name."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    response = await client.patch(f"/v1/agents/{created['id']}", json={"name": None})
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.patch(
+        f"/api/v1/agents/{created['id']}", json={"name": None}
+    )
     assert response.status_code == 422
 
 
 async def test_update_agent_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing agent."""
     response = await client.patch(
-        f"/v1/agents/{uuid.uuid4()}", json={"description": "x"}
+        f"/api/v1/agents/{uuid.uuid4()}", json={"description": "x"}
     )
     assert response.status_code == 404
 
 
 async def test_delete_agent(client: httpx.AsyncClient) -> None:
     """Delete an agent."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    response = await client.delete(f"/v1/agents/{created['id']}")
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/agents/{created['id']}")
+    response = await client.get(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_agent_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing agent."""
-    response = await client.delete(f"/v1/agents/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/agents/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -201,9 +203,9 @@ async def test_delete_agent_in_use(
     client: httpx.AsyncClient, agent_repository: FakeAgentRepository
 ) -> None:
     """Observe HTTP 409 when the agent has versions."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    await client.post(f"/v1/agents/{created['id']}/versions", json={})
-    response = await client.delete(f"/v1/agents/{created['id']}")
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    await client.post(f"/api/v1/agents/{created['id']}/versions", json={})
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 409
     assert response.json() == {
         "detail": f"Agent {created['id']} has versions and cannot be deleted"
@@ -212,9 +214,9 @@ async def test_delete_agent_in_use(
 
 async def test_create_agent_version(client: httpx.AsyncClient) -> None:
     """Create a version of an agent and observe HTTP 201."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     response = await client.post(
-        f"/v1/agents/{agent['id']}/versions",
+        f"/api/v1/agents/{agent['id']}/versions",
         json={"display_version": "v1", "description": "First cut"},
     )
     assert response.status_code == 201
@@ -229,16 +231,16 @@ async def test_create_agent_version(client: httpx.AsyncClient) -> None:
 
 async def test_create_agent_version_missing_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
-    response = await client.post(f"/v1/agents/{uuid.uuid4()}/versions", json={})
+    response = await client.post(f"/api/v1/agents/{uuid.uuid4()}/versions", json={})
     assert response.status_code == 404
 
 
 async def test_create_agent_version_with_run_spec(client: httpx.AsyncClient) -> None:
     """Create a version carrying a run spec and capabilities."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     secret_id = str(uuid.uuid4())
     response = await client.post(
-        f"/v1/agents/{agent['id']}/versions",
+        f"/api/v1/agents/{agent['id']}/versions",
         json={
             "run_spec": {
                 "command": "run.sh",
@@ -264,13 +266,15 @@ async def test_create_agent_version_with_run_spec(client: httpx.AsyncClient) -> 
 
 async def test_list_agent_versions(client: httpx.AsyncClient) -> None:
     """List the versions of one agent, newest-first."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    other_agent = (await client.post("/v1/agents", json={"name": "reviewer"})).json()
-    await client.post(f"/v1/agents/{agent['id']}/versions", json={})
-    await client.post(f"/v1/agents/{agent['id']}/versions", json={})
-    await client.post(f"/v1/agents/{other_agent['id']}/versions", json={})
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    other_agent = (
+        await client.post("/api/v1/agents", json={"name": "reviewer"})
+    ).json()
+    await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    await client.post(f"/api/v1/agents/{other_agent['id']}/versions", json={})
 
-    response = await client.get(f"/v1/agents/{agent['id']}/versions")
+    response = await client.get(f"/api/v1/agents/{agent['id']}/versions")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None

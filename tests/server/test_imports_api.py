@@ -84,7 +84,7 @@ async def test_create_import(
     agent = await create_agent(services.agents, ACCOUNT.id)
 
     response = await client.post(
-        "/v1/imports",
+        "/api/v1/imports",
         json={
             "importer": "csv",
             "agent_id": str(agent.id),
@@ -120,7 +120,7 @@ async def test_create_import_not_found_for_unknown_importer(
     payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
     agent = await create_agent(services.agents, ACCOUNT.id)
     response = await client.post(
-        "/v1/imports",
+        "/api/v1/imports",
         json={
             "importer": "does-not-exist",
             "agent_id": str(agent.id),
@@ -144,7 +144,7 @@ async def test_create_import_not_found_for_unknown_payload(
     )
     agent = await create_agent(services.agents, ACCOUNT.id)
     response = await client.post(
-        "/v1/imports",
+        "/api/v1/imports",
         json={
             "importer": "csv",
             "agent_id": str(agent.id),

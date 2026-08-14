@@ -76,7 +76,7 @@ async def agent_id(agent_repository: FakeAgentRepository) -> str:
 async def test_create_cohort(client: httpx.AsyncClient, agent_id: str) -> None:
     """Create a cohort and observe HTTP 201."""
     response = await client.post(
-        "/v1/cohorts",
+        "/api/v1/cohorts",
         json={
             "name": "smoke-test",
             "description": "A cohort",
@@ -98,7 +98,7 @@ async def test_create_cohort(client: httpx.AsyncClient, agent_id: str) -> None:
 async def test_create_cohort_missing_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
     response = await client.post(
-        "/v1/cohorts", json={"name": "cohort", "agent_id": str(uuid.uuid4())}
+        "/api/v1/cohorts", json={"name": "cohort", "agent_id": str(uuid.uuid4())}
     )
     assert response.status_code == 404
 
@@ -108,9 +108,9 @@ async def test_create_cohort_duplicate_name(
 ) -> None:
     """Observe HTTP 409 for a duplicate cohort name."""
     body = {"name": "cohort", "agent_id": agent_id}
-    response = await client.post("/v1/cohorts", json=body)
+    response = await client.post("/api/v1/cohorts", json=body)
     assert response.status_code == 201
-    response = await client.post("/v1/cohorts", json=body)
+    response = await client.post("/api/v1/cohorts", json=body)
     assert response.status_code == 409
     assert response.json() == {"detail": "Cohort name 'cohort' is already registered"}
 
@@ -118,25 +118,27 @@ async def test_create_cohort_duplicate_name(
 async def test_get_cohort(client: httpx.AsyncClient, agent_id: str) -> None:
     """Get a cohort by id."""
     created = (
-        await client.post("/v1/cohorts", json={"name": "cohort", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+        )
     ).json()
-    response = await client.get(f"/v1/cohorts/{created['id']}")
+    response = await client.get(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_cohort_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing cohort."""
-    response = await client.get(f"/v1/cohorts/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/cohorts/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
 async def test_list_cohorts(client: httpx.AsyncClient, agent_id: str) -> None:
     """List cohorts newest-first with a name filter."""
     for name in ["alpha", "beta"]:
-        await client.post("/v1/cohorts", json={"name": name, "agent_id": agent_id})
+        await client.post("/api/v1/cohorts", json={"name": name, "agent_id": agent_id})
 
-    response = await client.get("/v1/cohorts")
+    response = await client.get("/api/v1/cohorts")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -144,7 +146,7 @@ async def test_list_cohorts(client: httpx.AsyncClient, agent_id: str) -> None:
 
     filter_expression = {"field": "name", "op": "eq", "value": "alpha"}
     response = await client.get(
-        "/v1/cohorts", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/cohorts", params={"filter": json.dumps(filter_expression)}
     )
     assert response.json()["items"][0]["name"] == "alpha"
 
@@ -153,12 +155,12 @@ async def test_update_cohort(client: httpx.AsyncClient, agent_id: str) -> None:
     """Update a cohort's name, description, and metadata."""
     created = (
         await client.post(
-            "/v1/cohorts",
+            "/api/v1/cohorts",
             json={"name": "cohort", "description": "old", "agent_id": agent_id},
         )
     ).json()
     response = await client.patch(
-        f"/v1/cohorts/{created['id']}",
+        f"/api/v1/cohorts/{created['id']}",
         json={
             "name": "renamed",
             "description": "new",
@@ -177,16 +179,20 @@ async def test_update_cohort_cannot_clear_name(
 ) -> None:
     """Observe HTTP 422 when clearing the cohort name."""
     created = (
-        await client.post("/v1/cohorts", json={"name": "cohort", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+        )
     ).json()
-    response = await client.patch(f"/v1/cohorts/{created['id']}", json={"name": None})
+    response = await client.patch(
+        f"/api/v1/cohorts/{created['id']}", json={"name": None}
+    )
     assert response.status_code == 422
 
 
 async def test_update_cohort_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing cohort."""
     response = await client.patch(
-        f"/v1/cohorts/{uuid.uuid4()}", json={"description": "x"}
+        f"/api/v1/cohorts/{uuid.uuid4()}", json={"description": "x"}
     )
     assert response.status_code == 404
 
@@ -194,15 +200,17 @@ async def test_update_cohort_not_found(client: httpx.AsyncClient) -> None:
 async def test_delete_cohort(client: httpx.AsyncClient, agent_id: str) -> None:
     """Delete a cohort."""
     created = (
-        await client.post("/v1/cohorts", json={"name": "cohort", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+        )
     ).json()
-    response = await client.delete(f"/v1/cohorts/{created['id']}")
+    response = await client.delete(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/cohorts/{created['id']}")
+    response = await client.get(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_cohort_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing cohort."""
-    response = await client.delete(f"/v1/cohorts/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/cohorts/{uuid.uuid4()}")
     assert response.status_code == 404

@@ -58,7 +58,7 @@ class ImportersResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/importers",
+            "/api/v1/importers",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ImporterResponse.model_validate(response.json())
@@ -76,7 +76,7 @@ class ImportersResource:
         Returns:
             Stored importer.
         """
-        response = await self._client.request("GET", f"/v1/importers/{importer_id}")
+        response = await self._client.request("GET", f"/api/v1/importers/{importer_id}")
         return ImporterResponse.model_validate(response.json())
 
     async def list(
@@ -96,7 +96,7 @@ class ImportersResource:
         params = params or ImporterListParams()
         response = await self._client.request(
             "GET",
-            "/v1/importers",
+            "/api/v1/importers",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ImporterResponse].model_validate(response.json())
@@ -136,7 +136,7 @@ class ImportersResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/importers/{importer_id}",
+            f"/api/v1/importers/{importer_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ImporterResponse.model_validate(response.json())
@@ -151,7 +151,7 @@ class ImportersResource:
             APIError: The request failed, including 404 for a missing
                 importer.
         """
-        await self._client.request("DELETE", f"/v1/importers/{importer_id}")
+        await self._client.request("DELETE", f"/api/v1/importers/{importer_id}")
 
     async def create_version(
         self, importer_id: uuid.UUID, request: ImporterVersionCreateRequest
@@ -171,7 +171,7 @@ class ImportersResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/importers/{importer_id}/versions",
+            f"/api/v1/importers/{importer_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ImporterVersionResponse.model_validate(response.json())
@@ -194,7 +194,7 @@ class ImportersResource:
         params = params or ListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/importers/{importer_id}/versions",
+            f"/api/v1/importers/{importer_id}/versions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ImporterVersionResponse].model_validate(response.json())
@@ -237,7 +237,7 @@ class ImportersResource:
             Stored importer version.
         """
         response = await self._client.request(
-            "GET", f"/v1/importers/{importer_id}/versions/{version}"
+            "GET", f"/api/v1/importers/{importer_id}/versions/{version}"
         )
         return ImporterVersionResponse.model_validate(response.json())
 
@@ -264,7 +264,7 @@ class ImportersResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/importers/{importer_id}/versions/{version}",
+            f"/api/v1/importers/{importer_id}/versions/{version}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ImporterVersionResponse.model_validate(response.json())

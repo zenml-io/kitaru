@@ -477,7 +477,7 @@ export class StoredLoginCredentialProvider
     if (selected.deviceId !== undefined && selected.deviceCode !== undefined) {
       return exchange(
         this.#fetch,
-        `${this.#apiUrl}/v1/login`,
+        `${this.#apiUrl}/api/v1/login`,
         form({
           device_code: selected.deviceCode,
           device_id: selected.deviceId,
@@ -512,7 +512,7 @@ export class StoredLoginCredentialProvider
     if (controlPlaneCredential !== undefined) {
       return exchange(
         this.#fetch,
-        `${this.#apiUrl}/v1/login`,
+        `${this.#apiUrl}/api/v1/login`,
         form({ grant_type: "control-plane" }),
         signal,
         controlPlaneCredential,

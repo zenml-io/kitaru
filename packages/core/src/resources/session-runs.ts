@@ -16,7 +16,7 @@ export class SessionRunsResource {
   ): Promise<JobResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/session-runs",
+      path: "/api/v1/session-runs",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateJob,

@@ -30,11 +30,11 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_tags_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
-    response = await client.post("/v1/tags", json={"name": "prod"})
+    response = await client.post("/api/v1/tags", json={"name": "prod"})
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get("/v1/tags")
+    response = await client.get("/api/v1/tags")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -43,22 +43,22 @@ async def test_tags_persist_across_requests(client: httpx.AsyncClient) -> None:
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/tags", json={"name": "prod"})
+    response = await client.post("/api/v1/tags", json={"name": "prod"})
     assert response.status_code == 201
-    response = await client.post("/v1/tags", json={"name": "prod"})
+    response = await client.post("/api/v1/tags", json={"name": "prod"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Tag name 'prod' is already registered"}
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a rename across requests."""
-    created = (await client.post("/v1/tags", json={"name": "prod"})).json()
+    created = (await client.post("/api/v1/tags", json={"name": "prod"})).json()
     response = await client.patch(
-        f"/v1/tags/{created['id']}", json={"name": "production"}
+        f"/api/v1/tags/{created['id']}", json={"name": "production"}
     )
     assert response.status_code == 200
 
-    response = await client.get("/v1/tags")
+    response = await client.get("/api/v1/tags")
     body = response.json()
     assert body["items"][0]["name"] == "production"
     assert body["items"][0]["updated"] > created["updated"]
@@ -68,23 +68,23 @@ async def test_link_and_delete_persist_across_requests(
     client: httpx.AsyncClient,
 ) -> None:
     """Persist a tag link and its deletion across requests."""
-    created = (await client.post("/v1/tags", json={"name": "prod"})).json()
+    created = (await client.post("/api/v1/tags", json={"name": "prod"})).json()
     resource_id = "11111111-1111-1111-1111-111111111111"
     response = await client.post(
-        f"/v1/tags/{created['id']}/links",
+        f"/api/v1/tags/{created['id']}/links",
         json={"resource_type": "session", "resource_id": resource_id},
     )
     assert response.status_code == 201
     link = response.json()
 
     response = await client.post(
-        f"/v1/tags/{created['id']}/links",
+        f"/api/v1/tags/{created['id']}/links",
         json={"resource_type": "session", "resource_id": resource_id},
     )
     assert response.status_code == 409
 
     response = await client.delete(
-        f"/v1/tags/{created['id']}/links/session/{resource_id}"
+        f"/api/v1/tags/{created['id']}/links/session/{resource_id}"
     )
     assert response.status_code == 204
     assert link["tag_id"] == created["id"]
@@ -92,16 +92,16 @@ async def test_link_and_delete_persist_across_requests(
 
 async def test_delete_cascades_links_across_requests(client: httpx.AsyncClient) -> None:
     """Cascade a tag's links when the tag is deleted."""
-    created = (await client.post("/v1/tags", json={"name": "prod"})).json()
+    created = (await client.post("/api/v1/tags", json={"name": "prod"})).json()
     resource_id = "22222222-2222-2222-2222-222222222222"
     await client.post(
-        f"/v1/tags/{created['id']}/links",
+        f"/api/v1/tags/{created['id']}/links",
         json={"resource_type": "session", "resource_id": resource_id},
     )
-    response = await client.delete(f"/v1/tags/{created['id']}")
+    response = await client.delete(f"/api/v1/tags/{created['id']}")
     assert response.status_code == 204
 
     response = await client.delete(
-        f"/v1/tags/{created['id']}/links/session/{resource_id}"
+        f"/api/v1/tags/{created['id']}/links/session/{resource_id}"
     )
     assert response.status_code == 404

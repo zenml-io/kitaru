@@ -31,7 +31,7 @@ export class ReplaysResource {
   ): Promise<ReplayResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/replays",
+      path: "/api/v1/replays",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateReplay,
@@ -44,7 +44,7 @@ export class ReplaysResource {
   ): Promise<ReplayResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/replays/${encodeURIComponent(replayId)}`,
+      path: `/api/v1/replays/${encodeURIComponent(replayId)}`,
       signal: options.signal,
       validate: validateReplay,
     });
@@ -56,7 +56,7 @@ export class ReplaysResource {
   ): Promise<Page<ReplayResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/replays",
+      path: "/api/v1/replays",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateReplayPage,
@@ -77,7 +77,7 @@ export class ReplaysResource {
   ): Promise<ToolLookupResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/replays/${encodeURIComponent(replayId)}/tool-lookup`,
+      path: `/api/v1/replays/${encodeURIComponent(replayId)}/tool-lookup`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateToolLookup,

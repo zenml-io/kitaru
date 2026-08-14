@@ -33,17 +33,17 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_api_keys_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 201
     created = response.json()
     assert created["key"].startswith(API_KEY_PREFIX)
 
-    response = await client.get(f"/v1/api-keys/{created['id']}")
+    response = await client.get(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 200
     expected = {field: value for field, value in created.items() if field != "key"}
     assert response.json() == expected
 
-    response = await client.get("/v1/api-keys")
+    response = await client.get("/api/v1/api-keys")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -52,22 +52,22 @@ async def test_api_keys_persist_across_requests(client: httpx.AsyncClient) -> No
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 201
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 409
     assert response.json() == {"detail": "API key name 'ci' is already registered"}
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist an update across requests."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
     response = await client.patch(
-        f"/v1/api-keys/{created['id']}", json={"active": False}
+        f"/api/v1/api-keys/{created['id']}", json={"active": False}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/api-keys/{created['id']}")
+    response = await client.get(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["active"] is False
@@ -76,15 +76,15 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
 
 async def test_rotate_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a rotation across requests."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
     response = await client.post(
-        f"/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": 5}
+        f"/api/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": 5}
     )
     assert response.status_code == 200
     rotated = response.json()
     assert rotated["key"] != created["key"]
 
-    response = await client.get(f"/v1/api-keys/{created['id']}")
+    response = await client.get(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["last_rotated"] == rotated["last_rotated"]
@@ -92,9 +92,9 @@ async def test_rotate_persists_across_requests(client: httpx.AsyncClient) -> Non
 
 async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a deletion across requests."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
-    response = await client.delete(f"/v1/api-keys/{created['id']}")
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.delete(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/api-keys/{created['id']}")
+    response = await client.get(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 404

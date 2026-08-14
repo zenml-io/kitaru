@@ -14,7 +14,7 @@ export class InfoResource {
     return this.#transport.request({
       authenticate: false,
       method: "GET",
-      path: "/v1/info",
+      path: "/api/v1/info",
       signal: options.signal,
       validate: validateInfo,
     });

@@ -199,7 +199,7 @@ async def ingest_session_nodes(
     """Ingest a batch of session nodes.
 
     An index already stored is replaced whole, matching the upsert
-    semantics of ``POST /v1/workers``. Clients observe HTTP 200 on success,
+    semantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,
     404 when no session has this id, 409 when the session does not
     currently accept node ingestion, and 422 when a parent_index does not
     resolve.

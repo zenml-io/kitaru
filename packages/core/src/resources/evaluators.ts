@@ -39,7 +39,7 @@ export class EvaluatorsResource {
   ): Promise<EvaluatorResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/evaluators",
+      path: "/api/v1/evaluators",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateEvaluator,
@@ -52,7 +52,7 @@ export class EvaluatorsResource {
   ): Promise<EvaluatorResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}`,
       signal: options.signal,
       validate: validateEvaluator,
     });
@@ -65,7 +65,7 @@ export class EvaluatorsResource {
   ): Promise<EvaluatorResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateEvaluator,
@@ -78,7 +78,7 @@ export class EvaluatorsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -90,7 +90,7 @@ export class EvaluatorsResource {
   ): Promise<Page<EvaluatorResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/evaluators",
+      path: "/api/v1/evaluators",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateEvaluatorPage,
@@ -111,7 +111,7 @@ export class EvaluatorsResource {
   ): Promise<EvaluatorVersionResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateEvaluatorVersion,
@@ -125,7 +125,7 @@ export class EvaluatorsResource {
   ): Promise<EvaluatorVersionResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions/${encodeURIComponent(String(version))}`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions/${encodeURIComponent(String(version))}`,
       signal: options.signal,
       validate: validateEvaluatorVersion,
     });
@@ -139,7 +139,7 @@ export class EvaluatorsResource {
   ): Promise<EvaluatorVersionResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions/${encodeURIComponent(String(version))}`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions/${encodeURIComponent(String(version))}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateEvaluatorVersion,
@@ -153,7 +153,7 @@ export class EvaluatorsResource {
   ): Promise<Page<EvaluatorVersionResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions`,
+      path: `/api/v1/evaluators/${encodeURIComponent(evaluatorId)}/versions`,
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateEvaluatorVersionPage,

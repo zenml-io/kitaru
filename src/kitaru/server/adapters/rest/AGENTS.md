@@ -1,7 +1,7 @@
 # REST adapter rules
 
 - One router module per resource under `routers/`, registered in
-  `server/api/app.py` with a `/v1/<resource>` prefix and matching tag.
+  `server/api/app.py` with a `/api/v1/<resource>` prefix and matching tag.
 - Every router is built with `APIRouter(route_class=CommitRoute)` from
   `commit_route.py`. `CommitRoute` commits the request's database session,
   attached to `request.state` by `get_session`, before the response is

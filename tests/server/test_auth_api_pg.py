@@ -50,17 +50,17 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_login_and_api_key_flow(client: httpx.AsyncClient) -> None:
     """Log in as the default account and authenticate with an API key."""
-    response = await client.get("/v1/api-keys")
+    response = await client.get("/api/v1/api-keys")
     assert response.status_code == 401
 
     response = await client.post(
-        "/v1/login", data={"username": "default", "password": "secret"}
+        "/api/v1/login", data={"username": "default", "password": "secret"}
     )
     assert response.status_code == 200
     user_headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
 
     response = await client.post(
-        "/v1/api-keys", json={"name": "ci"}, headers=user_headers
+        "/api/v1/api-keys", json={"name": "ci"}, headers=user_headers
     )
     assert response.status_code == 201
     created = response.json()
@@ -68,26 +68,26 @@ async def test_login_and_api_key_flow(client: httpx.AsyncClient) -> None:
 
     # The raw API key works directly as a bearer token and records its use.
     key_headers = {"Authorization": f"Bearer {key}"}
-    response = await client.get("/v1/api-keys", headers=key_headers)
+    response = await client.get("/api/v1/api-keys", headers=key_headers)
     assert response.status_code == 200
     assert response.json()["items"][0]["last_used"] is not None
 
     # Revoking the key invalidates it immediately.
     response = await client.patch(
-        f"/v1/api-keys/{created['id']}",
+        f"/api/v1/api-keys/{created['id']}",
         json={"active": False},
         headers=user_headers,
     )
     assert response.status_code == 200
 
-    response = await client.get("/v1/api-keys", headers=key_headers)
+    response = await client.get("/api/v1/api-keys", headers=key_headers)
     assert response.status_code == 401
 
 
 async def test_login_wrong_password(client: httpx.AsyncClient) -> None:
     """Observe HTTP 401 for a wrong default account password."""
     response = await client.post(
-        "/v1/login", data={"username": "default", "password": "wrong"}
+        "/api/v1/login", data={"username": "default", "password": "wrong"}
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid username or password."}

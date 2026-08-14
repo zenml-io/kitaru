@@ -61,7 +61,7 @@ class ExperimentsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/experiments",
+            "/api/v1/experiments",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ExperimentResponse.model_validate(response.json())
@@ -79,7 +79,9 @@ class ExperimentsResource:
         Returns:
             Stored experiment.
         """
-        response = await self._client.request("GET", f"/v1/experiments/{experiment_id}")
+        response = await self._client.request(
+            "GET", f"/api/v1/experiments/{experiment_id}"
+        )
         return ExperimentResponse.model_validate(response.json())
 
     async def list(
@@ -99,7 +101,7 @@ class ExperimentsResource:
         params = params or ExperimentListParams()
         response = await self._client.request(
             "GET",
-            "/v1/experiments",
+            "/api/v1/experiments",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ExperimentResponse].model_validate(response.json())
@@ -139,7 +141,7 @@ class ExperimentsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/experiments/{experiment_id}",
+            f"/api/v1/experiments/{experiment_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ExperimentResponse.model_validate(response.json())
@@ -154,7 +156,7 @@ class ExperimentsResource:
             APIError: The request failed, including 404 for a missing
                 experiment.
         """
-        await self._client.request("DELETE", f"/v1/experiments/{experiment_id}")
+        await self._client.request("DELETE", f"/api/v1/experiments/{experiment_id}")
 
     async def start_run(
         self, experiment_id: uuid.UUID, request: ExperimentRunCreateRequest
@@ -176,7 +178,7 @@ class ExperimentsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/experiments/{experiment_id}/runs",
+            f"/api/v1/experiments/{experiment_id}/runs",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ExperimentRunResponse.model_validate(response.json())

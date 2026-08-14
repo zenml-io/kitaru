@@ -59,7 +59,7 @@ async def test_retries_transport_error() -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    response = await client.request("GET", "/v1/accounts")
+    response = await client.request("GET", "/api/v1/accounts")
     assert response.status_code == 200
     assert len(requests) == 2
 
@@ -75,7 +75,7 @@ async def test_retries_retryable_status_with_same_idempotency_key() -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    response = await client.request("POST", "/v1/users", json={"name": "alice"})
+    response = await client.request("POST", "/api/v1/users", json={"name": "alice"})
     assert response.status_code == 200
     assert len(requests) == 2
     keys = {request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests}
@@ -92,7 +92,7 @@ async def test_no_retry_on_client_error() -> None:
 
     client = mock_api_client(handler)
     with pytest.raises(NotFoundError):
-        await client.request("GET", "/v1/accounts")
+        await client.request("GET", "/api/v1/accounts")
     assert len(requests) == 1
 
 
@@ -106,7 +106,7 @@ async def test_raises_after_retries_exhausted() -> None:
 
     client = mock_api_client(handler, retries=2)
     with pytest.raises(ServerError) as exc_info:
-        await client.request("GET", "/v1/accounts")
+        await client.request("GET", "/api/v1/accounts")
     assert exc_info.value.status_code == 503
     assert len(requests) == 3
 
@@ -121,7 +121,7 @@ async def test_raises_transport_error_after_retries_exhausted() -> None:
 
     client = mock_api_client(handler, retries=2)
     with pytest.raises(httpx.ConnectError):
-        await client.request("GET", "/v1/accounts")
+        await client.request("GET", "/api/v1/accounts")
     assert len(requests) == 3
 
 
@@ -134,8 +134,8 @@ async def test_fresh_idempotency_key_per_request() -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    await client.request("POST", "/v1/users", json={"name": "alice"})
-    await client.request("POST", "/v1/users", json={"name": "bob"})
+    await client.request("POST", "/api/v1/users", json={"name": "alice"})
+    await client.request("POST", "/api/v1/users", json={"name": "bob"})
     keys = {request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests}
     assert len(keys) == 2
 
@@ -155,7 +155,7 @@ async def test_no_retry_for_streaming_request_body() -> None:
         transport=RetryTransport(httpx.MockTransport(handler), backoff=0.0),
         base_url="http://test",
     ) as http:
-        response = await http.post("/v1/blobs", content=body())
+        response = await http.post("/api/v1/blobs", content=body())
     assert response.status_code == 503
     assert len(requests) == 1
 
@@ -210,7 +210,7 @@ async def test_closing_a_view_keeps_the_shared_transport_open() -> None:
 
     async with view:
         pass
-    response = await client.request("GET", "/v1/accounts")
+    response = await client.request("GET", "/api/v1/accounts")
 
     assert response.status_code == 200
     await client.close()
@@ -228,8 +228,8 @@ async def test_view_authenticates_with_its_own_token() -> None:
     client = mock_api_client(handler)
     view = client.with_token("view-token")
 
-    await client.request("GET", "/v1/accounts")
-    await view.request("GET", "/v1/accounts")
+    await client.request("GET", "/api/v1/accounts")
+    await view.request("GET", "/api/v1/accounts")
 
     assert tokens == [None, "view-token"]
 
@@ -249,7 +249,7 @@ async def test_streaming_response_is_not_consumed() -> None:
             transport=RetryTransport(httpx.MockTransport(handler), backoff=0.0),
             base_url="http://test",
         ) as http,
-        http.stream("GET", "/v1/events") as response,
+        http.stream("GET", "/api/v1/events") as response,
     ):
         collected = [chunk async for chunk in response.aiter_bytes()]
     assert collected == [b"first", b"second"]

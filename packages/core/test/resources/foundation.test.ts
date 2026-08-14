@@ -105,10 +105,10 @@ describe("foundation resources", () => {
     await client.agents.getVersion(ID);
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/agents", "POST"],
-      [`https://api.example/v1/agents/${ID}`, "GET"],
-      [`https://api.example/v1/agents/${ID}/versions`, "POST"],
-      [`https://api.example/v1/agent-versions/${ID}`, "GET"],
+      ["https://api.example/api/v1/agents", "POST"],
+      [`https://api.example/api/v1/agents/${ID}`, "GET"],
+      [`https://api.example/api/v1/agents/${ID}/versions`, "POST"],
+      [`https://api.example/api/v1/agent-versions/${ID}`, "GET"],
     ]);
     expect(await (fetch.mock.calls[0]?.[1]?.body as string)).toBe(
       JSON.stringify(agentRequest),
@@ -132,10 +132,10 @@ describe("foundation resources", () => {
     await expect(client.agents.delete(ID)).resolves.toBeUndefined();
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      [`https://api.example/v1/agents/${ID}`, "PATCH"],
-      [`https://api.example/v1/agent-versions/${ID}`, "PATCH"],
-      [`https://api.example/v1/agent-versions/${ID}`, "DELETE"],
-      [`https://api.example/v1/agents/${ID}`, "DELETE"],
+      [`https://api.example/api/v1/agents/${ID}`, "PATCH"],
+      [`https://api.example/api/v1/agent-versions/${ID}`, "PATCH"],
+      [`https://api.example/api/v1/agent-versions/${ID}`, "DELETE"],
+      [`https://api.example/api/v1/agents/${ID}`, "DELETE"],
     ]);
   });
 
@@ -253,13 +253,13 @@ describe("foundation resources", () => {
     await expect(client.sessions.delete(ID)).resolves.toBeUndefined();
 
     expect(fetch.mock.calls.map(([url]) => url)).toEqual([
-      "https://api.example/v1/sessions",
-      `https://api.example/v1/sessions/${ID}`,
-      `https://api.example/v1/sessions/${ID}`,
-      `https://api.example/v1/sessions/${ID}/full`,
-      `https://api.example/v1/sessions/${ID}/nodes?include_payloads=true`,
-      `https://api.example/v1/sessions/${ID}/nodes`,
-      `https://api.example/v1/sessions/${ID}`,
+      "https://api.example/api/v1/sessions",
+      `https://api.example/api/v1/sessions/${ID}`,
+      `https://api.example/api/v1/sessions/${ID}`,
+      `https://api.example/api/v1/sessions/${ID}/full`,
+      `https://api.example/api/v1/sessions/${ID}/nodes?include_payloads=true`,
+      `https://api.example/api/v1/sessions/${ID}/nodes`,
+      `https://api.example/api/v1/sessions/${ID}`,
     ]);
   });
 
@@ -284,7 +284,7 @@ describe("foundation resources", () => {
       }),
     ).resolves.toEqual(job);
     expect(fetch).toHaveBeenCalledWith(
-      "https://api.example/v1/session-runs",
+      "https://api.example/api/v1/session-runs",
       expect.objectContaining({ method: "POST" }),
     );
   });

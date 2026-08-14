@@ -33,7 +33,7 @@ export class ExperimentRunsResource {
   ): Promise<ExperimentRunResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/experiment-runs/${encodeURIComponent(experimentRunId)}`,
+      path: `/api/v1/experiment-runs/${encodeURIComponent(experimentRunId)}`,
       signal: options.signal,
       validate: validateExperimentRun,
     });
@@ -45,7 +45,7 @@ export class ExperimentRunsResource {
   ): Promise<Page<ExperimentRunResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/experiment-runs",
+      path: "/api/v1/experiment-runs",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateRunPage,
@@ -66,7 +66,7 @@ export class ExperimentRunsResource {
   ): Promise<Page<JobResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/experiment-runs/${encodeURIComponent(experimentRunId)}/jobs`,
+      path: `/api/v1/experiment-runs/${encodeURIComponent(experimentRunId)}/jobs`,
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateJobPage,
@@ -89,7 +89,7 @@ export class ExperimentRunsResource {
   ): Promise<ExperimentRunResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/experiment-runs/${encodeURIComponent(experimentRunId)}/cancel`,
+      path: `/api/v1/experiment-runs/${encodeURIComponent(experimentRunId)}/cancel`,
       signal: options.signal,
       validate: validateExperimentRun,
     });
@@ -101,7 +101,7 @@ export class ExperimentRunsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/experiment-runs/${encodeURIComponent(experimentRunId)}`,
+      path: `/api/v1/experiment-runs/${encodeURIComponent(experimentRunId)}`,
       responseType: "empty",
       signal: options.signal,
     });

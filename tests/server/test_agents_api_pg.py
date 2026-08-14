@@ -33,16 +33,16 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_agents_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/agents", json={"name": "assistant", "description": "Helps"}
+        "/api/v1/agents", json={"name": "assistant", "description": "Helps"}
     )
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/agents/{created['id']}")
+    response = await client.get(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/agents")
+    response = await client.get("/api/v1/agents")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -51,22 +51,22 @@ async def test_agents_persist_across_requests(client: httpx.AsyncClient) -> None
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/agents", json={"name": "assistant"})
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
     assert response.status_code == 201
-    response = await client.post("/v1/agents", json={"name": "assistant"})
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Agent name 'assistant' is already registered"}
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist an update across requests."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     response = await client.patch(
-        f"/v1/agents/{created['id']}", json={"description": "Reviews"}
+        f"/api/v1/agents/{created['id']}", json={"description": "Reviews"}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/agents/{created['id']}")
+    response = await client.get(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["description"] == "Reviews"
@@ -75,11 +75,11 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
 
 async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a deletion across requests."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    response = await client.delete(f"/v1/agents/{created['id']}")
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/agents/{created['id']}")
+    response = await client.get(f"/api/v1/agents/{created['id']}")
     assert response.status_code == 404
 
 
@@ -87,29 +87,33 @@ async def test_create_version_persists_across_requests(
     client: httpx.AsyncClient,
 ) -> None:
     """Prove a created version is visible from a separate request."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     response = await client.post(
-        f"/v1/agents/{agent['id']}/versions",
+        f"/api/v1/agents/{agent['id']}/versions",
         json={"display_version": "v1", "description": "First cut"},
     )
     assert response.status_code == 201
     created = response.json()
     assert created["version"] == 1
 
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get(f"/v1/agents/{agent['id']}")
+    response = await client.get(f"/api/v1/agents/{agent['id']}")
     assert response.status_code == 200
     assert response.json()["latest_version"] == 1
 
 
 async def test_version_numbering_sequence(client: httpx.AsyncClient) -> None:
     """Assign consecutive version numbers per agent across requests."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    first = (await client.post(f"/v1/agents/{agent['id']}/versions", json={})).json()
-    second = (await client.post(f"/v1/agents/{agent['id']}/versions", json={})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    first = (
+        await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    ).json()
+    second = (
+        await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    ).json()
     assert first["version"] == 1
     assert second["version"] == 2
 
@@ -118,20 +122,20 @@ async def test_create_version_with_secrets_round_trips(
     client: httpx.AsyncClient,
 ) -> None:
     """Round-trip a run spec whose secret ids reference real secrets."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     secret_a = (
         await client.post(
-            "/v1/secrets", json={"name": "secret-a", "values": {"k": "v"}}
+            "/api/v1/secrets", json={"name": "secret-a", "values": {"k": "v"}}
         )
     ).json()
     secret_b = (
         await client.post(
-            "/v1/secrets", json={"name": "secret-b", "values": {"k": "v"}}
+            "/api/v1/secrets", json={"name": "secret-b", "values": {"k": "v"}}
         )
     ).json()
 
     response = await client.post(
-        f"/v1/agents/{agent['id']}/versions",
+        f"/api/v1/agents/{agent['id']}/versions",
         json={
             "run_spec": {
                 "command": "run.sh",
@@ -142,7 +146,7 @@ async def test_create_version_with_secrets_round_trips(
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 200
     assert response.json()["run_spec"]["secret_ids"] == [
         secret_a["id"],
@@ -152,10 +156,10 @@ async def test_create_version_with_secrets_round_trips(
 
 async def test_delete_agent_restricted_by_versions(client: httpx.AsyncClient) -> None:
     """Translate the FK restriction into HTTP 409 when versions exist."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
-    await client.post(f"/v1/agents/{agent['id']}/versions", json={})
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
 
-    response = await client.delete(f"/v1/agents/{agent['id']}")
+    response = await client.delete(f"/api/v1/agents/{agent['id']}")
     assert response.status_code == 409
     assert response.json() == {
         "detail": f"Agent {agent['id']} has versions and cannot be deleted"

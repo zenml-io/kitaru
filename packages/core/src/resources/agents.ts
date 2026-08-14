@@ -36,7 +36,7 @@ export class AgentsResource {
   ): Promise<AgentResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/agents",
+      path: "/api/v1/agents",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateAgent,
@@ -49,7 +49,7 @@ export class AgentsResource {
   ): Promise<AgentResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/agents/${encodeURIComponent(agentId)}`,
+      path: `/api/v1/agents/${encodeURIComponent(agentId)}`,
       signal: options.signal,
       validate: validateAgent,
     });
@@ -62,7 +62,7 @@ export class AgentsResource {
   ): Promise<AgentResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/agents/${encodeURIComponent(agentId)}`,
+      path: `/api/v1/agents/${encodeURIComponent(agentId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateAgent,
@@ -75,7 +75,7 @@ export class AgentsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/agents/${encodeURIComponent(agentId)}`,
+      path: `/api/v1/agents/${encodeURIComponent(agentId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -87,7 +87,7 @@ export class AgentsResource {
   ): Promise<Page<AgentResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/agents",
+      path: "/api/v1/agents",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateAgentPage,
@@ -108,7 +108,7 @@ export class AgentsResource {
   ): Promise<AgentVersionResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/agents/${encodeURIComponent(agentId)}/versions`,
+      path: `/api/v1/agents/${encodeURIComponent(agentId)}/versions`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateAgentVersion,
@@ -121,7 +121,7 @@ export class AgentsResource {
   ): Promise<AgentVersionResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/agent-versions/${encodeURIComponent(agentVersionId)}`,
+      path: `/api/v1/agent-versions/${encodeURIComponent(agentVersionId)}`,
       signal: options.signal,
       validate: validateAgentVersion,
     });
@@ -134,7 +134,7 @@ export class AgentsResource {
   ): Promise<AgentVersionResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/agent-versions/${encodeURIComponent(agentVersionId)}`,
+      path: `/api/v1/agent-versions/${encodeURIComponent(agentVersionId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateAgentVersion,
@@ -147,7 +147,7 @@ export class AgentsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/agent-versions/${encodeURIComponent(agentVersionId)}`,
+      path: `/api/v1/agent-versions/${encodeURIComponent(agentVersionId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -160,7 +160,7 @@ export class AgentsResource {
   ): Promise<Page<AgentVersionResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/agents/${encodeURIComponent(agentId)}/versions`,
+      path: `/api/v1/agents/${encodeURIComponent(agentId)}/versions`,
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateAgentVersionPage,

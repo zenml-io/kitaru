@@ -32,7 +32,7 @@ export class EvaluationsResource {
   ): Promise<JobResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/evaluations",
+      path: "/api/v1/evaluations",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateJob,
@@ -45,7 +45,7 @@ export class EvaluationsResource {
   ): Promise<EvaluationResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/evaluations/${encodeURIComponent(evaluationId)}`,
+      path: `/api/v1/evaluations/${encodeURIComponent(evaluationId)}`,
       signal: options.signal,
       validate: validateEvaluation,
     });
@@ -57,7 +57,7 @@ export class EvaluationsResource {
   ): Promise<Page<EvaluationResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/evaluations",
+      path: "/api/v1/evaluations",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateEvaluationPage,

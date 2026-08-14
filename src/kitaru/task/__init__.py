@@ -58,7 +58,7 @@ def get_task_inputs() -> Any:
     token = os.environ.get("KITARU_API_TOKEN")
     if token:
         headers["Authorization"] = f"Bearer {token}"
-    response = httpx.get(f"{base_url}/v1/tasks/{task_id}/spec", headers=headers)
+    response = httpx.get(f"{base_url}/api/v1/tasks/{task_id}/spec", headers=headers)
     response.raise_for_status()
     spec = TaskSpecResponse.model_validate(response.json())
     if not isinstance(spec.details, AgentTaskDetails):

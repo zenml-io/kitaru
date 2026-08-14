@@ -54,7 +54,7 @@ class ExperimentRunsResource:
             Stored experiment run.
         """
         response = await self._client.request(
-            "GET", f"/v1/experiment-runs/{experiment_run_id}"
+            "GET", f"/api/v1/experiment-runs/{experiment_run_id}"
         )
         return ExperimentRunResponse.model_validate(response.json())
 
@@ -75,7 +75,7 @@ class ExperimentRunsResource:
         params = params or ExperimentRunListParams()
         response = await self._client.request(
             "GET",
-            "/v1/experiment-runs",
+            "/api/v1/experiment-runs",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ExperimentRunResponse].model_validate(response.json())
@@ -106,7 +106,9 @@ class ExperimentRunsResource:
         Raises:
             APIError: The request failed, including 404 for a missing run.
         """
-        await self._client.request("DELETE", f"/v1/experiment-runs/{experiment_run_id}")
+        await self._client.request(
+            "DELETE", f"/api/v1/experiment-runs/{experiment_run_id}"
+        )
 
     async def list_jobs(
         self,
@@ -128,7 +130,7 @@ class ExperimentRunsResource:
         params = params or ExperimentRunJobsListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/experiment-runs/{experiment_run_id}/jobs",
+            f"/api/v1/experiment-runs/{experiment_run_id}/jobs",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[JobResponse].model_validate(response.json())
@@ -170,6 +172,6 @@ class ExperimentRunsResource:
             Run carrying the cancel request.
         """
         response = await self._client.request(
-            "POST", f"/v1/experiment-runs/{experiment_run_id}/cancel"
+            "POST", f"/api/v1/experiment-runs/{experiment_run_id}/cancel"
         )
         return ExperimentRunResponse.model_validate(response.json())

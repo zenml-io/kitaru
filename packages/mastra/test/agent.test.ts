@@ -78,11 +78,11 @@ describe("KitaruAgent", () => {
     expect(result).toBe(expected);
     expect(agent.calls[0]?.messages).toBe("hello");
     expect(api.calls.map((call) => `${call.method} ${call.path}`)).toEqual([
-      "POST /v1/sessions",
-      expect.stringMatching(/^POST \/v1\/sessions\/.+\/nodes$/),
-      expect.stringMatching(/^POST \/v1\/sessions\/.+\/nodes$/),
-      expect.stringMatching(/^POST \/v1\/sessions\/.+\/nodes$/),
-      expect.stringMatching(/^PATCH \/v1\/sessions\/.+$/),
+      "POST /api/v1/sessions",
+      expect.stringMatching(/^POST \/api\/v1\/sessions\/.+\/nodes$/),
+      expect.stringMatching(/^POST \/api\/v1\/sessions\/.+\/nodes$/),
+      expect.stringMatching(/^POST \/api\/v1\/sessions\/.+\/nodes$/),
+      expect.stringMatching(/^PATCH \/api\/v1\/sessions\/.+$/),
     ]);
     const rootBatches = api.nodeBatches();
     expect(rootBatches[0]?.[0]).toMatchObject({

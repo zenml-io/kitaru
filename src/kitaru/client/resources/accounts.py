@@ -48,7 +48,7 @@ class AccountsResource:
         Returns:
             Calling account.
         """
-        response = await self._client.request("GET", "/v1/accounts/me")
+        response = await self._client.request("GET", "/api/v1/accounts/me")
         return AccountResponse.model_validate(response.json())
 
     async def get(self, account_id: uuid.UUID) -> AccountResponse:
@@ -63,7 +63,7 @@ class AccountsResource:
         Returns:
             Stored account.
         """
-        response = await self._client.request("GET", f"/v1/accounts/{account_id}")
+        response = await self._client.request("GET", f"/api/v1/accounts/{account_id}")
         return AccountResponse.model_validate(response.json())
 
     async def list(
@@ -84,7 +84,7 @@ class AccountsResource:
         params = params or AccountListParams()
         response = await self._client.request(
             "GET",
-            "/v1/accounts",
+            "/api/v1/accounts",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[AccountResponse].model_validate(response.json())

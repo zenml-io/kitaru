@@ -70,7 +70,7 @@ describe("KitaruClient", () => {
 
     expect(fetch).toHaveBeenCalledOnce();
     const [url, init] = fetch.mock.calls[0] ?? [];
-    expect(url).toBe("https://explicit.example/v1/sessions");
+    expect(url).toBe("https://explicit.example/api/v1/sessions");
     expect(init?.headers).toMatchObject({
       Authorization: "Bearer explicit-secret",
       "X-Kitaru-Client": "kitaru-typescript",
@@ -104,7 +104,7 @@ describe("KitaruClient", () => {
     expect(error).toBeInstanceOf(KitaruApiError);
     expect(error).toMatchObject({
       method: "POST",
-      path: "/v1/sessions",
+      path: "/api/v1/sessions",
       status: 422,
     });
     expect((error as Error).message).toContain(
@@ -137,7 +137,7 @@ describe("KitaruClient", () => {
     const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
 
     await expect(client.createSession(createRequest)).rejects.toMatchObject({
-      message: expect.stringContaining("POST /v1/sessions"),
+      message: expect.stringContaining("POST /api/v1/sessions"),
       status: 404,
     });
   });
@@ -214,7 +214,7 @@ describe("KitaruClient", () => {
 
     await expect(client.createSession(createRequest)).rejects.toMatchObject({
       method: "POST",
-      path: "/v1/sessions",
+      path: "/api/v1/sessions",
       status: 201,
       message: expect.stringContaining("missing id"),
     });
@@ -242,7 +242,7 @@ describe("KitaruClient", () => {
 
     await expect(client.getTaskSpec(TASK_ID)).resolves.toEqual(taskSpec);
     expect(fetch).toHaveBeenCalledWith(
-      `https://api.example/v1/tasks/${TASK_ID}/spec`,
+      `https://api.example/api/v1/tasks/${TASK_ID}/spec`,
       expect.objectContaining({ method: "GET" }),
     );
   });
@@ -450,42 +450,42 @@ describe("KitaruClient", () => {
         body: JSON.stringify(createRequest),
         contentType: "application/json",
         method: "POST",
-        url: "https://api.example/v1/sessions",
+        url: "https://api.example/api/v1/sessions",
       },
       {
         authorization: "Bearer secret",
         body: JSON.stringify(update),
         contentType: "application/json",
         method: "PATCH",
-        url: `https://api.example/v1/sessions/${SESSION_ID}`,
+        url: `https://api.example/api/v1/sessions/${SESSION_ID}`,
       },
       {
         authorization: "Bearer secret",
         body: JSON.stringify(nodes),
         contentType: "application/json",
         method: "POST",
-        url: `https://api.example/v1/sessions/${SESSION_ID}/nodes`,
+        url: `https://api.example/api/v1/sessions/${SESSION_ID}/nodes`,
       },
       {
         authorization: "Bearer secret",
         body: undefined,
         contentType: undefined,
         method: "GET",
-        url: `https://api.example/v1/replays/${REPLAY_ID}`,
+        url: `https://api.example/api/v1/replays/${REPLAY_ID}`,
       },
       {
         authorization: "Bearer secret",
         body: undefined,
         contentType: undefined,
         method: "GET",
-        url: `https://api.example/v1/tasks/${TASK_ID}/spec`,
+        url: `https://api.example/api/v1/tasks/${TASK_ID}/spec`,
       },
       {
         authorization: "Bearer secret",
         body: JSON.stringify(lookup),
         contentType: "application/json",
         method: "POST",
-        url: `https://api.example/v1/replays/${REPLAY_ID}/tool-lookup`,
+        url: `https://api.example/api/v1/replays/${REPLAY_ID}/tool-lookup`,
       },
     ]);
   });

@@ -34,14 +34,14 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent for experiments to belong to."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
 async def _create_evaluator(client: httpx.AsyncClient, name: str = "accuracy") -> None:
-    evaluator = (await client.post("/v1/evaluators", json={"name": name})).json()
+    evaluator = (await client.post("/api/v1/evaluators", json={"name": name})).json()
     await client.post(
-        f"/v1/evaluators/{evaluator['id']}/versions",
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
         json={
             "source": {
                 "type": "package",
@@ -58,7 +58,7 @@ async def test_experiments_persist_across_requests(
     """Prove the per-request commit through separate requests."""
     await _create_evaluator(client)
     response = await client.post(
-        "/v1/experiments",
+        "/api/v1/experiments",
         json={
             "name": "exp1",
             "agent_id": agent_id,
@@ -68,11 +68,11 @@ async def test_experiments_persist_across_requests(
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/experiments/{created['id']}")
+    response = await client.get(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/experiments")
+    response = await client.get("/api/v1/experiments")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -89,9 +89,9 @@ async def test_duplicate_name_conflict(
         "agent_id": agent_id,
         "evaluators": [{"evaluator": "accuracy"}],
     }
-    response = await client.post("/v1/experiments", json=body)
+    response = await client.post("/api/v1/experiments", json=body)
     assert response.status_code == 201
-    response = await client.post("/v1/experiments", json=body)
+    response = await client.post("/api/v1/experiments", json=body)
     assert response.status_code == 409
     assert response.json() == {"detail": "Experiment name 'exp1' is already registered"}
 
@@ -103,7 +103,7 @@ async def test_update_persists_across_requests(
     await _create_evaluator(client)
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -112,11 +112,11 @@ async def test_update_persists_across_requests(
         )
     ).json()
     response = await client.patch(
-        f"/v1/experiments/{created['id']}", json={"description": "Reviews"}
+        f"/api/v1/experiments/{created['id']}", json={"description": "Reviews"}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/experiments/{created['id']}")
+    response = await client.get(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["description"] == "Reviews"
@@ -131,7 +131,7 @@ async def test_update_new_evaluators_replaces_config_across_requests(
     await _create_evaluator(client, name="relevance")
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -141,12 +141,12 @@ async def test_update_new_evaluators_replaces_config_across_requests(
     ).json()
 
     response = await client.patch(
-        f"/v1/experiments/{created['id']}",
+        f"/api/v1/experiments/{created['id']}",
         json={"evaluators": [{"evaluator": "relevance"}]},
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/experiments/{created['id']}")
+    response = await client.get(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["evaluators"] == [
@@ -161,7 +161,7 @@ async def test_delete_persists_across_requests(
     await _create_evaluator(client)
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -169,10 +169,10 @@ async def test_delete_persists_across_requests(
             },
         )
     ).json()
-    response = await client.delete(f"/v1/experiments/{created['id']}")
+    response = await client.delete(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/experiments/{created['id']}")
+    response = await client.get(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 404
 
 
@@ -181,7 +181,7 @@ async def test_query_by_tag(client: httpx.AsyncClient, agent_id: str) -> None:
     await _create_evaluator(client)
     tagged = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "tagged-exp",
                 "agent_id": agent_id,
@@ -190,7 +190,7 @@ async def test_query_by_tag(client: httpx.AsyncClient, agent_id: str) -> None:
         )
     ).json()
     await client.post(
-        "/v1/experiments",
+        "/api/v1/experiments",
         json={
             "name": "untagged-exp",
             "agent_id": agent_id,
@@ -198,15 +198,15 @@ async def test_query_by_tag(client: httpx.AsyncClient, agent_id: str) -> None:
         },
     )
 
-    tag = (await client.post("/v1/tags", json={"name": "smoke"})).json()
+    tag = (await client.post("/api/v1/tags", json={"name": "smoke"})).json()
     await client.post(
-        f"/v1/tags/{tag['id']}/links",
+        f"/api/v1/tags/{tag['id']}/links",
         json={"resource_type": "experiment", "resource_id": tagged["id"]},
     )
 
     filter_expression = {"field": "tag", "op": "eq", "value": "smoke"}
     response = await client.get(
-        "/v1/experiments", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/experiments", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()

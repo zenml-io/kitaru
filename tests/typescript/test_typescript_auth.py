@@ -53,7 +53,7 @@ def test_typescript_reads_cli_credentials_read_only(
     script = """
 import { createKitaruClient } from './packages/core/dist/node/index.js';
 globalThis.fetch = async (input, init) => {
-  if (String(input) !== 'https://stored.example/base/v1/replays/probe') {
+  if (String(input) !== 'https://stored.example/base/api/v1/replays/probe') {
     throw new Error(`unexpected URL ${input}`);
   }
   if (init.headers.Authorization !== 'Bearer KITKEY_cross_runtime') {

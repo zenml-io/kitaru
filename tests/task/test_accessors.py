@@ -84,7 +84,7 @@ def test_get_task_inputs_spec_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr(httpx, "get", _fake_get)
     assert get_task_inputs() == {"prompt": "hi"}
-    assert seen["url"] == f"http://server.test/v1/tasks/{task_id}/spec"
+    assert seen["url"] == f"http://server.test/api/v1/tasks/{task_id}/spec"
     assert seen["headers"] == {"Authorization": "Bearer secret-key"}
 
 

@@ -32,14 +32,14 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to investigate sessions of."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
 async def _create_session(client: httpx.AsyncClient, agent_id: str) -> str:
     """Store a session on the given agent and return its id."""
     response = await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json={
             "agent_id": agent_id,
             "origin": "recorded",
@@ -69,7 +69,7 @@ async def _create_investigation(
     The first session carries a question with highlights.
     """
     response = await client.post(
-        "/v1/investigations",
+        "/api/v1/investigations",
         json={
             "agent_id": agent_id,
             "name": "payment-failures",
@@ -111,13 +111,13 @@ async def test_investigation_persists_across_requests(
     assert created["total_sessions"] == 2
     assert created["completed_sessions"] == 0
 
-    response = await client.get(f"/v1/investigations/{created['id']}")
+    response = await client.get(f"/api/v1/investigations/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
     filter_expression = {"field": "agent_id", "op": "eq", "value": agent_id}
     response = await client.get(
-        "/v1/investigations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/investigations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -133,12 +133,12 @@ async def test_update_persists_across_requests(
     created = await _create_investigation(client, agent_id, session_ids)
 
     response = await client.patch(
-        f"/v1/investigations/{created['id']}",
+        f"/api/v1/investigations/{created['id']}",
         json={"name": "renamed", "description": "updated rationale"},
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/investigations/{created['id']}")
+    response = await client.get(f"/api/v1/investigations/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["name"] == "renamed"
@@ -153,7 +153,7 @@ async def test_list_sessions_ordered_by_position(
     session_ids = [await _create_session(client, agent_id) for _ in range(2)]
     created = await _create_investigation(client, agent_id, session_ids)
 
-    response = await client.get(f"/v1/investigations/{created['id']}/sessions")
+    response = await client.get(f"/api/v1/investigations/{created['id']}/sessions")
     assert response.status_code == 200
     body = response.json()
     items = body["items"]
@@ -173,7 +173,7 @@ async def test_verdict_update_leaves_questions_untouched(
     created = await _create_investigation(client, agent_id, session_ids)
 
     response = await client.patch(
-        f"/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
+        f"/api/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
         json={"verdict": "acceptable"},
     )
     assert response.status_code == 200
@@ -181,7 +181,7 @@ async def test_verdict_update_leaves_questions_untouched(
     assert body["verdict"] == "acceptable"
     assert body["questions"][0]["highlights"] == _highlights()
 
-    response = await client.get(f"/v1/investigations/{created['id']}/sessions")
+    response = await client.get(f"/api/v1/investigations/{created['id']}/sessions")
     assert response.status_code == 200
     loaded = response.json()["items"][0]
     assert loaded["verdict"] == "acceptable"
@@ -196,30 +196,30 @@ async def test_manual_completion_after_verdicts(
     created = await _create_investigation(client, agent_id, session_ids)
 
     response = await client.patch(
-        f"/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
+        f"/api/v1/investigations/{created['id']}/sessions/{session_ids[0]}",
         json={"verdict": "acceptable"},
     )
     assert response.status_code == 200
     assert response.json()["verdict"] == "acceptable"
 
     response = await client.patch(
-        f"/v1/investigations/{created['id']}/sessions/{session_ids[1]}",
+        f"/api/v1/investigations/{created['id']}/sessions/{session_ids[1]}",
         json={"verdict": "problematic"},
     )
     assert response.status_code == 200
     assert response.json()["verdict"] == "problematic"
 
     # Verdicts alone never complete the investigation.
-    response = await client.get(f"/v1/investigations/{created['id']}")
+    response = await client.get(f"/api/v1/investigations/{created['id']}")
     assert response.json()["status"] == "pending"
     assert response.json()["completed_sessions"] == 2
 
     response = await client.patch(
-        f"/v1/investigations/{created['id']}", json={"status": "completed"}
+        f"/api/v1/investigations/{created['id']}", json={"status": "completed"}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/investigations/{created['id']}")
+    response = await client.get(f"/api/v1/investigations/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
@@ -230,7 +230,7 @@ async def test_manual_completion_after_verdicts(
 async def test_create_investigation_missing_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
     response = await client.post(
-        "/v1/investigations",
+        "/api/v1/investigations",
         json={
             "agent_id": "00000000-0000-0000-0000-000000000000",
             "name": "investigation",
