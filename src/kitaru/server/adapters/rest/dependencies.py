@@ -197,10 +197,10 @@ async def get_auth_session(
     On most routes this is the shared request session, committed by
     ``CommitRoute`` like any other write. A ``read_only`` route binds the
     request session to the read-replica engine, so the auth path instead
-    gets its own session on the writer engine here, committed after the
-    request completes. Only the throttled auth writes go through it, and a
-    session does not connect until its first statement, so requests without
-    a stale ``last_used`` or ``last_login`` never touch the writer.
+    opens its own session on the writer engine here and commits it after the
+    request completes, letting auth writes such as an API key's
+    ``last_used`` timestamp persist even though the rest of the request only
+    reads.
 
     Args:
         request: Incoming request.
@@ -813,10 +813,7 @@ def get_annotation_service(
 
 
 def _build_device_service(
-    session: AsyncSession,
-    engine: AsyncEngine,
-    settings: APISettings,
-    writer_session: AsyncSession | None = None,
+    session: AsyncSession, engine: AsyncEngine, settings: APISettings
 ) -> DeviceService:
     """Build a device service bound to the given session.
 
@@ -824,19 +821,12 @@ def _build_device_service(
         session: Database session backing the device repository.
         engine: Application database engine.
         settings: API settings for this process.
-        writer_session: Session the ``last_login`` write goes through,
-            defaults to the given session.
 
     Returns:
         Device service bound to the SQL repository.
     """
     return DeviceService(
         repository=SQLDeviceRepository(session, engine),
-        writer_repository=(
-            None
-            if writer_session is None
-            else SQLDeviceRepository(writer_session, engine)
-        ),
         policy=DevicePolicy(
             auth_timeout_seconds=settings.DEVICE_AUTH_TIMEOUT_SECONDS,
             polling_interval_seconds=settings.DEVICE_AUTH_POLLING_INTERVAL_SECONDS,
@@ -915,21 +905,18 @@ def get_idempotency_key_repository(
 
 def get_auth_service(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
     auth_session: Annotated[AsyncSession, Depends(get_auth_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AuthService:
     """Return an authentication service for the current request.
 
-    Auth reads use the request session, so a ``read_only`` route serves
-    them from the read replica. The throttled authentication writes, such
-    as an API key's ``last_used`` timestamp, go through writer-bound
-    repositories on the auth session.
+    Repositories are bound to the auth session so a ``read_only`` route
+    still writes authentication side effects, such as an API key's
+    ``last_used`` timestamp, to the writer engine.
 
     Args:
         request: Incoming request.
-        session: Request-scoped database session.
         auth_session: Database session the auth path writes through.
         engine: Application database engine.
         analytics: Analytics tracker for the current request.
@@ -938,7 +925,7 @@ def get_auth_service(
         Authentication service bound to the SQL repositories.
     """
     settings = get_app_settings(request)
-    account_repository = SQLAccountRepository(session)
+    account_repository = SQLAccountRepository(auth_session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
     if client is not None:
@@ -950,18 +937,14 @@ def get_auth_service(
             account_repository=account_repository,
             server_id=settings.SERVER_ID,
             analytics=analytics,
-            account_writer_repository=SQLAccountRepository(auth_session),
         )
     return AuthService(
         settings=settings,
         account_repository=account_repository,
-        api_key_repository=SQLApiKeyRepository(session),
+        api_key_repository=SQLApiKeyRepository(auth_session),
         password_hasher=BcryptPasswordHasher(),
-        device_service=_build_device_service(
-            session, engine, settings, writer_session=auth_session
-        ),
+        device_service=_build_device_service(auth_session, engine, settings),
         control_plane=control_plane,
-        api_key_writer_repository=SQLApiKeyRepository(auth_session),
     )
 
 

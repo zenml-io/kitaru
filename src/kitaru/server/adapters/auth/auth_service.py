@@ -92,7 +92,6 @@ class AuthService:
         password_hasher: PasswordHasher,
         device_service: DeviceService | None = None,
         control_plane: ControlPlaneAuthenticator | None = None,
-        api_key_writer_repository: ApiKeyRepository | None = None,
     ) -> None:
         """Create an authentication service.
 
@@ -105,15 +104,10 @@ class AuthService:
                 grant.
             control_plane: Control plane authenticator, set when the server
                 runs the control plane auth scheme.
-            api_key_writer_repository: Repository the ``last_used`` write
-                goes through, defaults to the API key repository.
         """
         self._settings = settings
         self._account_repository = account_repository
         self._api_key_repository = api_key_repository
-        self._api_key_writer_repository = (
-            api_key_writer_repository or api_key_repository
-        )
         self._password_hasher = password_hasher
         self._device_service = device_service
         self._control_plane = control_plane
@@ -432,7 +426,7 @@ class AuthService:
         if not is_stale(api_key.last_used, LAST_USED_UPDATE_INTERVAL_SECONDS, now):
             return
         api_key.mark_used(now)
-        await self._api_key_writer_repository.update(api_key)
+        await self._api_key_repository.update(api_key)
 
     async def _resolve_token(self, token: JWTToken) -> AuthContext:
         if isinstance(token.subject, WorkerSubject):

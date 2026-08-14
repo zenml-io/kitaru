@@ -49,22 +49,14 @@ LAST_LOGIN_UPDATE_INTERVAL_SECONDS = 60
 class DeviceService:
     """Device authorization use cases."""
 
-    def __init__(
-        self,
-        repository: DeviceRepository,
-        policy: DevicePolicy,
-        writer_repository: DeviceRepository | None = None,
-    ) -> None:
+    def __init__(self, repository: DeviceRepository, policy: DevicePolicy) -> None:
         """Initialize the service.
 
         Args:
             repository: Device repository.
             policy: Device authorization policy.
-            writer_repository: Repository the ``last_login`` write goes
-                through, defaults to the device repository.
         """
         self._repository = repository
-        self._writer_repository = writer_repository or repository
         self._policy = policy
 
     @property
@@ -354,4 +346,4 @@ class DeviceService:
         if not is_stale(device.last_login, LAST_LOGIN_UPDATE_INTERVAL_SECONDS, now):
             return
         device.mark_used(now)
-        await self._writer_repository.update(device)
+        await self._repository.update(device)
