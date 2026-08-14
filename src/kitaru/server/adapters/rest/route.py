@@ -27,9 +27,11 @@ from kitaru.server.adapters.rest.idempotency import (
 from kitaru.server.adapters.rest.request_state import (
     get_idempotency_key_handle,
     get_request_session,
+    mark_request_read_only,
 )
 
 _IDEMPOTENT_ENDPOINT_ATTR = "_kitaru_idempotent"
+_READ_ONLY_ENDPOINT_ATTR = "_kitaru_read_only"
 
 F = TypeVar("F", bound=Callable[..., Any])
 
@@ -92,6 +94,31 @@ def is_idempotent(endpoint: Callable[..., Any]) -> bool:
     return get_idempotency_options(endpoint) is not None
 
 
+def read_only(endpoint: F) -> F:
+    """Mark an endpoint's database session for routing to the read engine.
+
+    Args:
+        endpoint: Route handler function.
+
+    Returns:
+        The endpoint, unchanged.
+    """
+    setattr(endpoint, _READ_ONLY_ENDPOINT_ATTR, True)
+    return endpoint
+
+
+def is_read_only(endpoint: Callable[..., Any]) -> bool:
+    """Whether a route handler carries the read-only marker.
+
+    Args:
+        endpoint: Route handler to check.
+
+    Returns:
+        Whether ``endpoint`` was decorated with ``read_only``.
+    """
+    return getattr(endpoint, _READ_ONLY_ENDPOINT_ATTR, False)
+
+
 class KitaruAPIRoute(APIRoute):
     """API route that commits the request database session before responding."""
 
@@ -124,8 +151,13 @@ class KitaruAPIRoute(APIRoute):
         """
         original_route_handler = super().get_route_handler()
         options = get_idempotency_options(self.endpoint)
+        read_only_endpoint = is_read_only(self.endpoint)
 
         async def route_handler(request: Request) -> Response:
+            if read_only_endpoint:
+                # Set before calling the original handler because dependency
+                # resolution, including get_session, runs inside that call.
+                mark_request_read_only(request)
             try:
                 response = await original_route_handler(request)
             except IdempotencyKeyReused as reused:
@@ -152,6 +184,12 @@ class KitaruAPIRoute(APIRoute):
                 )
             session = get_request_session(request)
             if session is not None:
+                if read_only_endpoint and (
+                    session.new or session.dirty or session.deleted
+                ):
+                    raise RuntimeError(
+                        "A read-only route produced pending database writes."
+                    )
                 await session.commit()
             return response
 

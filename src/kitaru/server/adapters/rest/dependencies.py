@@ -95,7 +95,10 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
-from kitaru.server.adapters.rest.request_state import attach_request_session
+from kitaru.server.adapters.rest.request_state import (
+    attach_request_session,
+    request_uses_read_engine,
+)
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.idempotency_key_repository import (
@@ -169,7 +172,8 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
 
     The session is attached to the request for ``KitaruAPIRoute`` to commit
     before the response is returned. Any exception skips the commit and
-    pending writes roll back when the session closes.
+    pending writes roll back when the session closes. Routes marked with
+    ``read_only`` bind the session to the read-replica engine.
 
     Args:
         request: Incoming request.
@@ -178,7 +182,8 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
         Session bound to the application database engine.
     """
     database: DatabaseService = request.app.state.database
-    async for session in database.get_async_session():
+    read_only = request_uses_read_engine(request)
+    async for session in database.get_async_session(read_only=read_only):
         attach_request_session(request, session)
         yield session
 
