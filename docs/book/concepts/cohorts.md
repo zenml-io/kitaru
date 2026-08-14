@@ -5,18 +5,11 @@ icon: layer-group
 
 # Cohorts
 
-One session answers "what happened on this run." A **cohort** answers
-questions about a population: last week's production traffic, every run
-that touched refunds, the twelve sessions where the agent got it wrong. A
-cohort is a named set of sessions belonging to one agent — and it is the
-unit an [experiment](experiments.md) replays.
+One session answers "what happened on this run." A **cohort** answers questions about a population: last week's production traffic, every run that touched refunds, the twelve sessions where the agent got it wrong. A cohort is a named set of sessions belonging to one agent — and it is the unit an [experiment](experiments.md) replays.
 
 ## Versions are immutable
 
-A cohort itself is just a namespace. Membership lives on **cohort
-versions**, and a version's member list never changes after creation. To
-add or remove sessions you create a new version as a delta on the latest
-one:
+A cohort itself is just a namespace. Membership lives on **cohort versions**, and a version's member list never changes after creation. To add or remove sessions you create a new version as a delta on the latest one:
 
 ```python
 import asyncio
@@ -42,9 +35,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-On the CLI, `cohort create` can snapshot a selection into version 1 in
-the same breath — by explicit IDs, a tag, a filter, or another cohort
-version:
+On the CLI, `cohort create` can snapshot a selection into version 1 in the same breath — by explicit IDs, a tag, a filter, or another cohort version:
 
 ```bash
 kitaru cohort create refund-regression --agent support-agent \
@@ -58,32 +49,16 @@ kitaru cohort version create refund-regression \
   --add-session <id> --remove-session <id> --display-version week-33
 ```
 
-The first version starts from an empty list; each later version is the
-previous list minus `remove_session_ids` plus `add_session_ids`. The
-delta applies to the latest version by default — pass `baseline_id` to
-branch from an earlier one. Versions are server-numbered,
-`display_version` carries whatever you call the snapshot, and versions
-can be tagged and filtered by tag like sessions.
+The first version starts from an empty list; each later version is the previous list minus `remove_session_ids` plus `add_session_ids`. The delta applies to the latest version by default — pass `baseline_id` to branch from an earlier one. Versions are server-numbered, `display_version` carries whatever you call the snapshot, and versions can be tagged and filtered by tag like sessions.
 
-Immutability is the point. When an experiment run reports "12 of 14
-sessions improved," that claim stays checkable forever, because cohort
-version 3 will always contain exactly those 14 sessions. Re-running the
-experiment on the same version is an apples-to-apples comparison; adding
-this week's failures is a new version, and the numbers say which version
-they came from.
+Immutability is the point. When an experiment run reports "12 of 14 sessions improved," that claim stays checkable forever, because cohort version 3 will always contain exactly those 14 sessions. Re-running the experiment on the same version is an apples-to-apples comparison; adding this week's failures is a new version, and the numbers say which version they came from.
 
 ## The lifecycle of a good cohort
 
 The pattern that pays off:
 
-1. **Triage** — a bad run surfaces (a complaint, an alert, an eyeball).
-   You [replay it](replay.md), understand it, fix it.
-2. **Collect the population** — collect the runs like it into a cohort
-   version. `client.sessions.list(...)` with filters, or tags you've been
-   applying along the way, gives you the ids.
-3. **Gate on it** — the [experiment](experiments.md) that verified your fix
-   against that cohort becomes the regression suite that keeps the failure
-   fixed. The cohort that caught the bug is the gate that keeps it caught.
+1. **Triage** — a bad run surfaces (a complaint, an alert, an eyeball). You [replay it](replay.md), understand it, fix it.
+2. **Collect the population** — collect the runs like it into a cohort version. `client.sessions.list(...)` with filters, or tags you've been applying along the way, gives you the ids.
+3. **Gate on it** — the [experiment](experiments.md) that verified your fix against that cohort becomes the regression suite that keeps the failure fixed. The cohort that caught the bug is the gate that keeps it caught.
 
-The full workflow, including CI wiring, is in
-[Build a regression suite from production](../guides/regression-suite.md).
+The full workflow, including CI wiring, is in [Build a regression suite from production](../guides/regression-suite.md).

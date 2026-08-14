@@ -5,20 +5,13 @@ icon: plug
 
 # Drive it from your coding agent
 
-Everything in the Kitaru loop is scriptable: the CLI covers the whole
-record → replay → improve journey, a typed async Python client sits over
-a plain REST API, and an MCP server exposes the same loop as typed
-tools. Which means the agent you already code with can drive it —
-inspect a failing session, write the evaluator, start the experiment,
-and read the diff back, while you review.
+Everything in the Kitaru loop is scriptable: the CLI covers the whole record → replay → improve journey, and a typed async Python client sits over a plain REST API. The MCP server exposes a bounded set of typed tools for inspecting sessions and replays, importing sessions from existing blobs, managing evaluators and investigations, and starting evaluations or experiment runs. Single-session replay creation and blob upload remain CLI or Python-client operations.
 
-The division of labor: **Kitaru observes your production agents; your
-coding assistant is how you talk to Kitaru.**
+The division of labor: **Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.**
 
 ## The MCP server
 
-Kitaru ships an MCP server, so assistants that speak MCP — Claude Code,
-Cursor, and friends — get typed, bounded tools instead of shelling out:
+Kitaru ships an MCP server, so assistants that speak MCP — Claude Code, Cursor, and friends — get typed, bounded tools instead of shelling out:
 
 ```bash
 pip install "kitaru[mcp]"
@@ -37,20 +30,12 @@ Then register it with your assistant (`.mcp.json` for Claude Code):
 }
 ```
 
-The server needs an explicit target — `--server URL`,
-`KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails
-if none selects a server. Credentials come from `KITARU_API_KEY` or the
-stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is
-deliberately ignored). Both are fixed for the life of the process —
-restart `kitaru-mcp` after changing either.
+The server needs an explicit target — `--server URL`, `KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails if none selects a server. Credentials come from `KITARU_API_KEY` or the stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is deliberately ignored). The target and credential source are selected at startup. A stored credential may be refreshed or updated while the process runs; restart `kitaru-mcp` after changing the target or an environment-provided API key.
 
-Tools are gated by a **capability mode** — `read-only` (the default),
-`standard`, or `destructive` — set with `--mode` or `KITARU_MCP_MODE`.
-Tools above the current mode aren't just blocked; they're never
-registered, so the assistant doesn't even see them:
+Tools are gated by a **capability mode** — `read-only` (the default), `standard`, or `destructive` — set with `--mode` or `KITARU_MCP_MODE`. Tools above the current mode aren't just blocked; they're never registered, so the assistant doesn't even see them:
 
 | Tool | Mode | What it does |
-|---|---|---|
+| --- | --- | --- |
 | `kitaru_registry_read` | read-only | Read agents, cohorts, experiments, importers, evaluators, and their versions |
 | `kitaru_activity_read` | read-only | Read sessions, replays, evaluations, runs, jobs, and their children |
 | `kitaru_review_read` | read-only | Read [investigations and annotations](../concepts/investigations.md) |
@@ -63,9 +48,7 @@ registered, so the assistant doesn't even see them:
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
 | `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, or run |
 
-Start assistants in `read-only`, move to `standard` when you want them
-building cohorts and starting runs, and reserve `destructive` for
-sessions where you're watching.
+Start assistants in `read-only`, move to `standard` when you want them building cohorts and starting runs, and reserve `destructive` for sessions where you're watching.
 
 ## The other surfaces
 
@@ -76,68 +59,38 @@ export KITARU_API_URL="http://localhost:8000"
 export KITARU_API_KEY="KITKEY_..."
 ```
 
-* **CLI** — the full journey has commands: `kitaru session import`,
-  `kitaru session evaluate`, `kitaru cohort create`,
-  `kitaru experiment run start`, plus registration, workers, and jobs.
-  Commands take `--output json`, so assistant-driven invocations parse
-  cleanly.
-* **Python client** — `KitaruAPIClient()` reaches everything,
-  including single-session replays. Your assistant writes the same
-  snippets these docs show.
-* **REST** — the server's OpenAPI schema at `/docs` on your server, when
-  the assistant wants the raw contract.
+- **CLI** — the full journey has commands: `kitaru session import`, `kitaru session evaluate`, `kitaru cohort create`, `kitaru experiment run start`, plus registration, workers, and jobs. Commands take `--output json`, so assistant-driven invocations parse cleanly.
+- **Python client** — `KitaruAPIClient()` reaches everything, including single-session replays. Your assistant writes the same snippets these docs show.
+- **REST** — the server's OpenAPI schema at `/docs` on your server, when the assistant wants the raw contract.
 
 ## Prompts that work
 
-The loop compresses well into assistant tasks. Some starting points, ready
-to paste:
+The loop compresses well into assistant tasks. Some starting points, ready to paste:
 
-> The last run of support-agent failed. Fetch the most recent failed
-> session and its nodes with the Kitaru client, and tell me which tool
-> call went wrong.
+> The last run of support-agent failed. Fetch the most recent failed session and its nodes with the Kitaru client, and tell me which tool call went wrong.
 
-> Replay session `<id>` unchanged with the refund-check evaluator and a
-> baseline history tool policy. When it completes, compare evaluations
-> and cost against the baseline and summarize.
+> Replay session `<id>` unchanged with the refund-check evaluator and a baseline history tool policy. When it completes, compare evaluations and cost against the baseline and summarize.
 
-> Here are five things our support lead says a good refund reply does:
-> `<criteria>`. Write a Kitaru evaluator that checks them, test it
-> offline with `kitaru evaluator test`, and register it as
-> refund-quality.
+> Here are five things our support lead says a good refund reply does: `<criteria>`. Write a Kitaru evaluator that checks them, test it offline with `kitaru evaluator test`, and register it as refund-quality.
 
-> Take every session where refund-quality failed, freeze them into a
-> cohort called refund-hard-cases, and start an experiment that replays
-> them with the system prompt in `prompts/support_v2.txt`.
+> Take every session where refund-quality failed, freeze them into a cohort called refund-hard-cases, and start an experiment that replays them with the system prompt in `prompts/support_v2.txt`.
 
-Each is a bounded task with a verifiable artifact at the end — a
-session, an evaluator version, an experiment run — which is exactly the
-shape coding assistants are good at.
+Each is a bounded task with a verifiable artifact at the end — a session, an evaluator version, an experiment run — which is exactly the shape coding assistants are good at.
 
 ## Guardrails worth setting
 
-* Give the assistant a **read-mostly posture**: creating replays and
-  evaluators is cheap and reversible; deleting sessions or cohorts is
-  not. Over MCP that's the capability mode; review deletes yourself.
-* Keep a worker running under *your* control. The assistant creating a
-  replay doesn't execute anything — your worker does, in the environment
-  you configured. That separation is the safety property; preserve it.
-* Watch tool policies in assistant-written replays: insist on
-  `history` + `on_miss="fail"` defaults for anything with side effects,
-  same as you would in review. See [Tool policies](../guides/tool-policies.md).
+- Give the assistant a **read-mostly posture**: creating evaluators and starting evaluations is cheap and reversible; deleting cohorts or experiments is not. Over MCP that's the capability mode; review deletes yourself.
+- Keep a worker running under _your_ control. The assistant creating a replay doesn't execute anything — your worker does, in the environment you configured. That separation is the safety property; preserve it.
+- Watch tool policies in assistant-written replays: insist on `history` + `on_miss="fail"` defaults for anything with side effects, same as you would in review. See [Tool policies](../guides/tool-policies.md).
 
 ## Agent skills
 
-MCP gives an assistant the *interface*; [agent skills](skills.md) give
-it the *judgment* — which sessions are worth reviewing, when a behavior
-is real enough to freeze into a cohort, what a replay result does and
-does not prove. They ship separately, as Markdown procedures in
-[`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills):
+MCP gives an assistant the _interface_; [agent skills](skills.md) give it the _judgment_ — which sessions are worth reviewing, when a behavior is real enough to freeze into a cohort, and what a replay result does and does not prove. They ship separately, as Markdown procedures in [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills):
 
 ```bash
 npx skills add zenml-io/kitaru-skills
 ```
 
-Skills and MCP are complementary, not alternatives: the skills say how
-to work, the server bounds what can be touched. Start with
-`kitaru-investigation`, the front door — see [Agent skills](skills.md)
-for what each one is for.
+The CLI knows whether they are present. `kitaru` with no arguments discovers installed Kitaru skills — in project and user locations, and those installed through the Claude marketplace — and, when it finds none, offers the install command as a next action. The machine-readable output reports the same under a `skills` key, so an assistant can check its own footing before it starts.
+
+Skills and MCP are complementary, not alternatives: the skills say how to work, the server bounds what can be touched. Start with `kitaru-investigation`, the front door. See [Agent skills](skills.md) for what each one is for.
