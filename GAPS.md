@@ -96,8 +96,8 @@ publish.
 ## Resolved since Aug 3 (docs updated Aug 4)
 
 - ~~Langfuse importer packaging~~ — **resolved, mechanism in flux**: the
-  separate `kitaru-importer-langfuse` PyPI package is gone. `langfuse`,
-  `braintrust`, and `otlp` importers plus `cost`/`latency`/
+  separate `kitaru-importer-langfuse` PyPI package is gone. `langfuse`
+  and `braintrust` importers plus `cost`/`latency`/
   `tool-call-patterns` evaluators are bundled in the `kitaru` package.
   Docs use `--importer langfuse@latest` with no code to write. **But
   see the Aug 5 seeding note below** — startup auto-seeding was removed
@@ -209,8 +209,7 @@ publish.
 - **Perf hardening** (#683 lock contention, #686 node-read batching) —
   no docs impact. Agent-guidance refresh merged.
 - **In-flight branches to watch**: `feat/built-in-deterministic-evaluators`
-  (likely grows the built-in evaluator set), `codex/surface-session-prompts`,
-  and `codex/v2-importer-braintrust-otlp` (still cooking).
+  (likely grows the built-in evaluator set) and `codex/surface-session-prompts`.
 
 ## Aug 7 afternoon deltas (docs updated Aug 7)
 
@@ -233,11 +232,11 @@ publish.
 - **Plugin story settled (#670)** — plugins are now proper packages
   under `plugins/packages/` (`kitaru-langfuse-importer`,
   `kitaru-langsmith-importer`, `kitaru-braintrust-importer`,
-  `kitaru-opentelemetry-importer`, `kitaru-jsonl-importer`,
+  `kitaru-jsonl-importer`,
   `kitaru-evaluator`) with their own release workflow
   (`release-plugins.yml`) and candidate wheels baked into the server
   image. **Startup seeding is real now**: `DEFAULT_PLUGIN_DEFINITIONS`
-  is populated — five importers and thirteen evaluators register at
+  is populated — four importers and thirteen evaluators register at
   server startup under the **`kitaru/` namespace**
   (`--importer kitaru/langfuse@latest`, `--evaluator
   kitaru/cost@latest`). New built-ins: the **LangSmith** importer, a
