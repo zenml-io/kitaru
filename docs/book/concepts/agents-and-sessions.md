@@ -36,7 +36,7 @@ Register a new version when the code changes; an [experiment](experiments.md) is
 
 ## What a session records
 
-A session carries its top-level `inputs`, `outputs`, `status` (`in_progress` / `completed` / `failed`), timing, and rolled-up totals: `cost`, `tokens` (input / output / cached / reasoning), `llm_call_count`, and `tool_call_count`. An optional `expected` field holds a reference answer for evaluators to compare against.
+A session carries its top-level `inputs`, `outputs`, `status` (`in_progress` / `completed` / `failed`), timing, and rolled-up totals: `cost`, `tokens` (input / output / cached / reasoning), `llm_call_count`, and `tool_call_count`.
 
 The step-by-step recording lives in the session's **nodes** — an ordered tree with one node per event:
 
@@ -48,6 +48,24 @@ The step-by-step recording lives in the session's **nodes** — an ordered tree 
 | `span` | Any other grouping the adapter or importer wants to preserve |
 
 Adapters record nodes automatically. The [PydanticAI adapter](../adapters/pydantic-ai.md) batches them to the server as the run progresses; importers write the same structure from your existing traces. There is one shape, so replay and evaluators never care where a session came from.
+
+## One session is one end-to-end run
+
+This is the single most important thing to get right when you bring your own traces, and the easiest to get wrong.
+
+A session is **the whole run, from the request that started it to the answer that ended it** — every model call, tool call and sub-agent hop in between. It is not one model call, and it is not one span. Replay re-executes a session from the top, so a session that holds half a run can only ever reproduce half a run, and a cohort of them measures nothing you care about.
+
+Adapters get this for free: the wrapper opens the session when your agent is invoked and closes it when the call returns. Importing is where it needs a decision from you, because observability tools do not agree on what a trace is:
+
+- Some emit **one trace per run**, which maps to one session directly. Nothing to do.
+- Many emit **one trace per conversation turn**, so a five-turn support conversation arrives as five traces. If that is one run in your product, those five traces are one session.
+- Some emit **one trace per model call**, which almost never matches a session on its own.
+
+You do not have to reshape the export yourself. Importers group related traces into one session using the provider's own conversation or session identifier, and `--join-on` names the field to group on when the identity lives somewhere else — see [Join provider traces into sessions](../guides/importing-sessions.md). When no identifier is present, each trace becomes its own session, which is the safe default but rarely the one you want for multi-turn agents.
+
+So the question to answer before importing is not "what does my tool call a trace" but **"what does my product call one run"** — and then make the import produce that. If the answer is "it depends on how we configured tracing", it is worth resolving that upstream: consistent session identity in your traces is what makes everything downstream — cohorts, experiments, regression suites — mean the same thing every time.
+
+If you are joining a format no importer understands, do the joining in your [custom importer](../guides/importing-sessions.md) rather than after the fact. Sessions are not merged once they land.
 
 ## Reading sessions back
 
