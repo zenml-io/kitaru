@@ -1,3 +1,5 @@
+import { awaitWithSignal } from "../abort.js";
+
 /** A bearer credential bound to one immutable authentication identity. */
 export interface ResolvedCredential {
   token: string;
@@ -68,21 +70,60 @@ export function bindCredentialProvider(
   provider: CredentialProvider,
 ): AsyncCredentialProvider | RenewableCredentialProvider {
   if (typeof provider === "function") {
-    let resolved: Promise<ResolvedCredential | undefined> | undefined;
+    interface Resolution {
+      controller: AbortController;
+      pending: Promise<ResolvedCredential | undefined>;
+      settled: boolean;
+      waiters: number;
+    }
+    let resolution: Resolution | undefined;
     return {
-      getCredential: (signal) => {
-        resolved ??= Promise.resolve()
-          .then(() => provider(signal))
-          .then((token) =>
-            token === undefined
-              ? undefined
-              : { generation: 0, identity: "custom", token },
-          )
-          .catch((error: unknown) => {
-            resolved = undefined;
-            throw error;
-          });
-        return resolved;
+      getCredential: async (signal) => {
+        if (signal.aborted) {
+          throw signal.reason;
+        }
+        let current = resolution;
+        if (current === undefined) {
+          const controller = new AbortController();
+          const created: Resolution = {
+            controller,
+            pending: Promise.resolve(undefined),
+            settled: false,
+            waiters: 0,
+          };
+          current = created;
+          resolution = created;
+          created.pending = Promise.resolve()
+            .then(() => provider(controller.signal))
+            .then((token) =>
+              token === undefined
+                ? undefined
+                : { generation: 0, identity: "custom", token },
+            )
+            .catch((error: unknown) => {
+              if (resolution === created) {
+                resolution = undefined;
+              }
+              throw error;
+            })
+            .finally(() => {
+              created.settled = true;
+            });
+        }
+        current.waiters += 1;
+        try {
+          return await awaitWithSignal(current.pending, signal);
+        } finally {
+          current.waiters -= 1;
+          if (
+            !current.settled &&
+            current.waiters === 0 &&
+            resolution === current
+          ) {
+            resolution = undefined;
+            current.controller.abort(signal.reason);
+          }
+        }
       },
     };
   }

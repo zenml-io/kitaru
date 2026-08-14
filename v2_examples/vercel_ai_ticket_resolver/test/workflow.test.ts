@@ -1,7 +1,9 @@
 import { mkdtemp, readFile, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import type {
+  AgentVersionResponse,
   CohortVersionResponse,
   EvaluatorVersionResponse,
   KitaruClient,
@@ -40,6 +42,7 @@ import {
 
 const id = (index: number) =>
   `018f0000-0000-7000-8000-${String(index).padStart(12, "0")}`;
+const exampleDirectory = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 
 const sourceMaterial = {
   evaluatorSource: "def evaluate():\n    return True\n",
@@ -175,6 +178,68 @@ describe("canonical workflow manifest", () => {
       ),
     ).rejects.toThrow("belongs to another server or account");
     expect(createAgent).not.toHaveBeenCalled();
+  });
+
+  it("rejects a changed stored agent version before resuming work", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    state.ids.agent_id = id(3);
+    state.ids.agent_versions.baseline = id(4);
+    await store.save(state);
+    const storedVersion: AgentVersionResponse = {
+      agent_id: state.ids.agent_id,
+      capabilities: {
+        mcp_servers: [],
+        skills: [],
+        tools: [...TOOLS],
+      },
+      created: "2026-08-14T00:00:00Z",
+      description: "Deterministic baseline returns policy.",
+      display_version: "baseline-v1",
+      id: state.ids.agent_versions.baseline,
+      owner_id: id(1),
+      run_spec: {
+        command: "node changed-entrypoint.js",
+        env: {
+          KITARU_AGENT_ID: state.ids.agent_id,
+          RETURNS_MODEL_PROVIDER: "deterministic",
+          RETURNS_POLICY_MODE: "baseline",
+        },
+        secret_ids: [],
+        timeout_seconds: 180,
+        working_dir: exampleDirectory,
+      },
+      updated: "2026-08-14T00:00:00Z",
+      version: 1,
+    };
+    const client = {
+      accounts: { getCurrent: vi.fn(async () => ({ id: id(1) })) },
+      agents: {
+        get: vi.fn(async () => ({ id: state.ids.agent_id })),
+        getVersion: vi.fn(async () => storedVersion),
+      },
+      info: {
+        get: vi.fn(async () => ({
+          auth_scheme: "control_plane",
+          version: "0.22.0",
+        })),
+      },
+    } as unknown as KitaruClient;
+
+    await expect(
+      runWorkflow(
+        parseWorkflowArguments(["--state-dir", directory]),
+        { KITARU_API_URL: "https://kitaru.example" },
+        {
+          createClient: async () => client,
+          readSourceMaterial: async () => sourceMaterial,
+        },
+      ),
+    ).rejects.toThrow("Agent version does not match the workflow definition");
+    expect(client.agents.getVersion).toHaveBeenCalledWith(
+      state.ids.agent_versions.baseline,
+    );
   });
 
   it("holds one filesystem lock from before state work through workflow exit", async () => {

@@ -4,6 +4,7 @@ import { lstat, open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import { awaitWithSignal } from "../abort.js";
 import type {
   RenewableCredentialProvider,
   ResolvedCredential,
@@ -169,29 +170,6 @@ function tokenIsValid(token: StoredToken | undefined): token is StoredToken {
     (token.expiresAt === undefined ||
       Date.now() < token.expiresAt - token.leewaySeconds * 1_000)
   );
-}
-
-async function awaitWithSignal<T>(
-  pending: Promise<T>,
-  signal: AbortSignal,
-): Promise<T> {
-  if (signal.aborted) {
-    throw signal.reason;
-  }
-  return new Promise<T>((resolve, reject) => {
-    const abort = () => reject(signal.reason);
-    signal.addEventListener("abort", abort, { once: true });
-    pending.then(
-      (value) => {
-        signal.removeEventListener("abort", abort);
-        resolve(value);
-      },
-      (error: unknown) => {
-        signal.removeEventListener("abort", abort);
-        reject(error);
-      },
-    );
-  });
 }
 
 async function readBoundedJson(

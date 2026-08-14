@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  bindCredentialProvider,
   createStaticCredentialProvider,
   type RenewableCredentialProvider,
 } from "../../src/auth/index.js";
@@ -172,5 +173,72 @@ describe("credential providers", () => {
     expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
       Authorization: "Bearer recovered",
     });
+  });
+
+  it("isolates callback credential cancellation between concurrent callers", async () => {
+    let providerSignal: AbortSignal | undefined;
+    let resolveCredential: ((token: string) => void) | undefined;
+    const callback = vi.fn(
+      (signal: AbortSignal) =>
+        new Promise<string>((resolve) => {
+          providerSignal = signal;
+          resolveCredential = resolve;
+        }),
+    );
+    const provider = bindCredentialProvider(callback);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+
+    const first = provider.getCredential(firstController.signal);
+    const second = provider.getCredential(secondController.signal);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledOnce());
+
+    const firstCancelled = expect(first).rejects.toThrow("first cancelled");
+    firstController.abort(new Error("first cancelled"));
+    await firstCancelled;
+    expect(providerSignal?.aborted).toBe(false);
+
+    resolveCredential?.("shared");
+    await expect(second).resolves.toEqual({
+      generation: 0,
+      identity: "custom",
+      token: "shared",
+    });
+    expect(callback).toHaveBeenCalledOnce();
+  });
+
+  it("abandons a callback credential lookup when its only caller cancels", async () => {
+    const providerSignals: AbortSignal[] = [];
+    const callback = vi.fn(
+      (signal: AbortSignal) =>
+        new Promise<string>((resolve, reject) => {
+          providerSignals.push(signal);
+          if (providerSignals.length === 2) {
+            resolve("recovered");
+            return;
+          }
+          signal.addEventListener("abort", () => reject(signal.reason), {
+            once: true,
+          });
+        }),
+    );
+    const provider = bindCredentialProvider(callback);
+    const controller = new AbortController();
+
+    const first = provider.getCredential(controller.signal);
+    await vi.waitFor(() => expect(callback).toHaveBeenCalledOnce());
+    const firstCancelled = expect(first).rejects.toThrow("request cancelled");
+    controller.abort(new Error("request cancelled"));
+    await firstCancelled;
+    expect(providerSignals[0]?.aborted).toBe(true);
+
+    await expect(
+      provider.getCredential(new AbortController().signal),
+    ).resolves.toEqual({
+      generation: 0,
+      identity: "custom",
+      token: "recovered",
+    });
+    expect(callback).toHaveBeenCalledTimes(2);
   });
 });

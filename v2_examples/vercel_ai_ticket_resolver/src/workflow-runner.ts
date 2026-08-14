@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 
 import type {
   AgentResponse,
+  AgentVersionCreateRequest,
   AgentVersionResponse,
   AnnotationResponse,
   BlobResponse,
@@ -424,6 +425,35 @@ async function ensureAgent(
   );
 }
 
+function normalizeAgentVersion(
+  value: Pick<
+    AgentVersionCreateRequest,
+    "capabilities" | "description" | "display_version" | "run_spec"
+  >,
+) {
+  const capabilities = value.capabilities ?? {};
+  const runSpec = value.run_spec;
+  return {
+    capabilities: {
+      mcp_servers: capabilities.mcp_servers ?? [],
+      skills: capabilities.skills ?? [],
+      tools: capabilities.tools ?? [],
+    },
+    description: value.description ?? null,
+    display_version: value.display_version ?? null,
+    run_spec:
+      runSpec == null
+        ? null
+        : {
+            command: runSpec.command,
+            env: runSpec.env ?? {},
+            secret_ids: runSpec.secret_ids ?? [],
+            timeout_seconds: runSpec.timeout_seconds,
+            working_dir: runSpec.working_dir ?? null,
+          },
+  };
+}
+
 async function ensureAgentVersion(
   client: KitaruClient,
   manifest: WorkflowManifest,
@@ -431,14 +461,10 @@ async function ensureAgentVersion(
   recovery: WorkflowArguments,
   mode: "baseline" | "strict",
 ): Promise<AgentVersionResponse> {
-  const existing = manifest.ids.agent_versions[mode];
-  if (existing !== null) {
-    return client.agents.getVersion(existing);
-  }
   const agentId = assertId(manifest.ids.agent_id, "agent_id");
   const displayVersion =
     mode === "baseline" ? "baseline-v1" : "strict-policy-v2";
-  const request = {
+  const request: AgentVersionCreateRequest = {
     display_version: displayVersion,
     description:
       mode === "baseline"
@@ -456,6 +482,21 @@ async function ensureAgentVersion(
     },
     capabilities: { tools: [...TOOLS] },
   };
+  const validate = (value: AgentVersionResponse) => {
+    if (
+      value.agent_id !== agentId ||
+      createFingerprint(normalizeAgentVersion(value)) !==
+        createFingerprint(normalizeAgentVersion(request))
+    ) {
+      throw new Error("Agent version does not match the workflow definition");
+    }
+  };
+  const existing = manifest.ids.agent_versions[mode];
+  if (existing !== null) {
+    const version = await client.agents.getVersion(existing);
+    validate(version);
+    return version;
+  }
   return runJournaledMutation(
     {
       adopt: (id) => client.agents.getVersion(id),
@@ -474,14 +515,7 @@ async function ensureAgentVersion(
         ),
       stage: mode === "baseline" ? "baseline" : "cohorts",
       store,
-      validate: (value) => {
-        if (
-          value.agent_id !== agentId ||
-          value.display_version !== displayVersion
-        ) {
-          throw new Error("Adopted agent version does not match the workflow");
-        }
-      },
+      validate,
     },
     recovery,
   );
