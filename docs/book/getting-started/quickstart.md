@@ -259,8 +259,83 @@ If `refund_issued` still passes and the recorded cost is lower, this session sup
 
 One replay tells you about one ticket. To test the change across more cases, freeze a set of recorded sessions into a [cohort](../concepts/cohorts.md), define the model swap as an [experiment](../concepts/experiments.md), and replay every session in the cohort. [Build a regression suite from production](../guides/regression-suite.md) covers that process.
 
+## Scale it to a population
+
+One replay answers a question about one session. The same machinery over a *population* answers the question that decides whether you ship, and the steps are the same ones you just did — only the unit changes.
+
+Start from traffic rather than a single run. Import what you already collect, and tag it while you can:
+
+```bash
+kitaru session import traces/langfuse-traces.jsonl \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@1 \
+  --tag returns-baseline \
+  --media-type application/x-ndjson --wait
+```
+
+Run the built-in descriptive evaluators over the tag first. They do not know what *good* means for your business, but they show where cost, latency and tool behavior are unusual, which is where to look:
+
+```bash
+kitaru session evaluate --tag returns-baseline \
+  --evaluator kitaru/cost@latest \
+  --evaluator kitaru/latency@latest \
+  --evaluator kitaru/tool-call-patterns@latest --wait
+```
+
+Then review what actually happened. Open an [investigation](../concepts/investigations.md), answer a question per session with the evidence pinned to the node that shows it, and settle each session with a verdict:
+
+```bash
+kitaru annotation create --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key outcome --value '{"judgment":"problematic"}'
+kitaru investigation session verdict "$INVESTIGATION_ID" "$SESSION_ID" problematic
+```
+
+Resist naming the failure category before you have looked — a taxonomy invented up front is the most common way to review fifty sessions and learn nothing.
+
+Freeze the reviewed sessions into two [cohorts](../concepts/cohorts.md), because a change that fixes the broken cases while wrecking the healthy ones is not a fix:
+
+```bash
+kitaru cohort create unsafe-refund-baseline --agent support-agent \
+  --session "$TICKET_004" --session "$TICKET_007"
+kitaru cohort create safe-refund-control --agent support-agent \
+  --session "$TICKET_001" --session "$TICKET_002"
+```
+
+Cohort versions are immutable: `unsafe-refund-baseline@1` means the same sessions next month as today, which is the point. Register the fix as a new agent version, then make the change an [experiment](../concepts/experiments.md) and replay both cohorts:
+
+```bash
+kitaru agent version register support-agent \
+  --command "python support.py" --env RETURNS_POLICY_MODE=strict
+
+kitaru experiment create improve-returns-policy --agent support-agent \
+  --evaluator refund-check@1 --evaluator kitaru/cost@latest \
+  --tool-policy '{"default":{"type":"passthrough"},"tools":{}}'
+
+kitaru experiment run start improve-returns-policy \
+  --cohort-version "$TARGET_COHORT_VERSION_ID" \
+  --agent support-agent@2 --evaluate-baselines --wait
+```
+
+`--evaluate-baselines` scores the original sessions too; without it you have new numbers and nothing to compare them against. Read the result with `kitaru experiment run get "$RUN_ID"`, and read it honestly: improved, regressed, traded off (better on one evaluator, worse on another), or inconclusive. Inconclusive is a real result on a small cohort — the answer is more evidence, not a rounder number.
+
+The cohort that caught this failure is now a regression suite. Replay it against the next change too; that is how the loop compounds.
+
+## Run the whole thing
+
+Everything above is checked into the repository as a working example — a returns agent that sometimes refunds when it should escalate, with traces, an evaluator, and the full journey from import to experiment:
+
+```bash
+cd examples/pydantic_ai_ticket_resolver
+```
+
+Its [README](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) walks all fifteen steps, and CI runs it, so the commands there are the ones that actually work. The [MCP example](https://github.com/zenml-io/kitaru/tree/develop/examples/v2/mcp) shows the same loop driven from a coding assistant.
+
+Prefer to be walked through it? `kitaru-investigation` is an [agent skill](../agent-native/skills.md) that runs this journey conversationally — it picks the review batch, keeps the labels yours, and stops at checkpoints you can resume from:
+
+```bash
+npx skills add zenml-io/kitaru-skills
+```
+
 ## Where to go next
 
-[The full loop, end to end](end-to-end.md) applies the same process to a population of imported sessions: review the sessions, create a cohort, and test a change against it.
-
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>The full loop, end to end</strong></td><td>Import, investigate, create a cohort, and run an experiment on real traffic.</td><td><a href="end-to-end.md">end-to-end.md</a></td></tr><tr><td><strong>Import your traces</strong></td><td>Your existing Langfuse history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Examples</strong></td><td>The canonical returns agent, end to end.</td><td><a href="examples.md">examples.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Import your traces</strong></td><td>Your existing history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Agent skills</strong></td><td>Let your coding assistant run the loop with you.</td><td><a href="../agent-native/skills.md">../agent-native/skills.md</a></td></tr><tr><td><strong>Deploy Kitaru</strong></td><td>Self-host for your team.</td><td><a href="../deploy/README.md">../deploy/README.md</a></td></tr></tbody></table>

@@ -5,9 +5,12 @@
 - [Welcome to Kitaru](README.md)
 - [Installation](getting-started/installation.md)
 - [Quickstart](getting-started/quickstart.md)
-- [The full loop, end to end](getting-started/end-to-end.md)
 - [Import your traces](getting-started/import-your-traces.md)
-- [Examples](getting-started/examples.md)
+- [Drive it from your coding agent](agent-native/mcp-server.md)
+- [Agent skills](agent-native/skills.md)
+- [Deploy Kitaru](deploy/README.md)
+  - [Docker](deploy/docker.md)
+  - [Helm](deploy/helm.md)
 - [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Core Concepts
@@ -32,8 +35,6 @@
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
-- [Drive it from your coding agent](agent-native/mcp-server.md)
-- [Agent skills](agent-native/skills.md)
 
 ## Adapters
 
@@ -43,11 +44,8 @@
 - [OpenAI Agents SDK](adapters/openai-agents.md)
 - [No adapter for your framework](adapters/custom.md)
 
-## Running the Server
+## Running in production
 
-- [Run the Server](deploy/README.md)
-  - [Docker](deploy/docker.md)
-  - [Helm](deploy/helm.md)
 - [Workers in production](deploy/workers.md)
 - [Authentication & API keys](deploy/authentication.md)
 - [Secrets](deploy/secrets.md)

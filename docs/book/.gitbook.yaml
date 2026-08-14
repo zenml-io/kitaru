@@ -23,6 +23,8 @@ redirects:
   concepts/harness-runtime-platform: concepts/under-the-hood.md
   getting-started/deploy: deploy/README.md
   agent-native/claude-code-skill: agent-native/mcp-server.md
+  getting-started/end-to-end: getting-started/quickstart.md
+  getting-started/examples: getting-started/quickstart.md
   guides/secrets-and-model-registration: deploy/secrets.md
   # v2 restructure: retired v1 runtime pages and moved operations pages.
   concepts/executions: concepts/agents-and-sessions.md

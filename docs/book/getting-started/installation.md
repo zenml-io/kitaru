@@ -86,7 +86,7 @@ kitaru logout                # stop the containers; the database persists
 kitaru logout --volumes      # stop and delete the database — a clean reset
 ```
 
-After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade` — a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Run the Server](../deploy/README.md).
+After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade` — a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
 
 ## Connect
 

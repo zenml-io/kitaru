@@ -182,12 +182,12 @@ leave your systems. Apache 2.0, no mandatory SaaS control plane.
 | Resource | Description |
 |---|---|
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
-| [The full loop, end to end](https://docs.zenml.io/kitaru/getting-started/end-to-end) | Import, review, cohort, experiment — on real traffic |
+| [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | Record, replay, fork — then cohorts and experiments on real traffic |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Start from the history you already have |
 | [No adapter for your framework](https://docs.zenml.io/kitaru/adapters/custom) | Import, build an adapter, or let Kitaru call your agent |
 | [Agent skills](https://docs.zenml.io/kitaru/agent-native/skills) | Teach your coding assistant the loop |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Production traffic as your test suite, gated in CI |
-| [Run the Server](https://docs.zenml.io/kitaru/deploy) | Self-host for your team |
+| [Deploy Kitaru](https://docs.zenml.io/kitaru/deploy) | Self-host for your team |
 
 ## 🤝 Contributing
 
