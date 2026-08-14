@@ -76,7 +76,7 @@ The tool policy decides what happens when the re-running agent calls a tool. The
 | `history` | The recorded result for the same call, matched by tool name and arguments, from the baseline (or a wider scope). `on_miss` decides what an unrecorded call does: `fail`, `passthrough`, or `error_result`. |
 | `static` | A canned result you define per case — exact or subset argument matching. |
 | `passthrough` | The real tool, live. This is the default when you set no policy. |
-| `llm` | A model answers the tool call in-distribution. Accepted by the API but not yet supported by the adapter — treat it as roadmap. |
+| `llm` | A model answers the tool call in-distribution. The API accepts it, but adapter support varies; PydanticAI, Mastra, and Vercel AI SDK currently reject it. |
 
 For the "nothing touches real systems" guarantee, set `default=HistoryConfig(scope="baseline", on_miss="fail")` — recorded calls are answered from the recording and anything novel stops the replay instead of hitting production. The full matrix, including per-tool overrides and history scopes, is in [Tool policies](../guides/tool-policies.md).
 

@@ -330,6 +330,8 @@ cd examples/pydantic_ai_ticket_resolver
 
 Its [README](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) walks all fifteen steps, and CI runs it, so the commands there are the ones that actually work. The [MCP example](https://github.com/zenml-io/kitaru/tree/develop/examples/v2/mcp) shows the same loop driven from a coding assistant.
 
+For TypeScript, start with the focused [Mastra support-triage](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage) or [Vercel AI SDK support-triage](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage) examples. The [Vercel AI SDK ticket resolver](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver) is the complete recording, review, cohort, evaluator, worker, and replay walkthrough.
+
 Prefer to be walked through it? `kitaru-investigation` is an [agent skill](../agent-native/skills.md) that runs this journey conversationally — it picks the review batch, keeps the labels yours, and stops at checkpoints you can resume from:
 
 ```bash

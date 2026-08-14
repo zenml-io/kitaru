@@ -217,7 +217,7 @@ You have two ways in, and neither requires waiting for us to ship an importer.
 Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedSession | ImportFailure]]
 ```
 
-That is the whole interface. You receive the uploaded bytes and the `--params` object, and yield one `ImportedSession` per session you recognise — or an `ImportFailure` for a record you cannot parse, which isolates that record instead of failing the whole import:
+That is the whole interface. You receive the uploaded bytes and the `--params` object, and yield one `ImportedSession` per session you recognize — or an `ImportFailure` for a record you cannot parse, which isolates that record instead of failing the whole import:
 
 ```python
 from kitaru.api_models.v1.imports import ImportFailure

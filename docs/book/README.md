@@ -38,8 +38,8 @@ Every run is now a session you can replay — the [Quickstart](getting-started/q
 
 - **Self-hosted, open source (Apache 2.0).** One FastAPI + Postgres server on your infrastructure. Replays, imports, and evaluations execute on [workers](concepts/workers.md) in _your_ environment — your traces and credentials don't leave your systems.
 - **Beside your observability, not instead of it.** Langfuse, LangSmith, and Braintrust remain where you watch production. Kitaru is where you re-run it.
-- **Framework-agnostic by design.** Adapters wrap your existing agent — [PydanticAI today](adapters/README.md), more on the way — and the [import path](getting-started/import-your-traces.md) works regardless of framework.
-- **Three ways to drive it:** the `kitaru` CLI and Python SDK, and your [coding agent](agent-native/mcp-server.md) — Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
+- **Framework-agnostic by design.** Shipped adapters cover PydanticAI, LangGraph, OpenAI Agents SDK, Mastra, and the Vercel AI SDK; the [adapter overview](adapters/README.md) states each integration's boundary. The [import path](getting-started/import-your-traces.md) works regardless of framework.
+- **Four ways to drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/mcp-server.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
 
 ## Next steps
 

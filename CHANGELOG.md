@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Prepared the first Kitaru 0.22 release candidate with a selected frontend release and independently versioned plugin packages.
 ## [Unreleased]
 
+### Changed
+
+- Added public installation, adapter, replay-boundary, and runnable-example documentation for the TypeScript SDK, Mastra adapter, and Vercel AI SDK adapter.
+
 ### Fixed
 
 - Fixed TypeScript replay and recording edge cases, aligned credential redaction and provider diagnostics across adapters, and made the adapter examples reproducible, rerunnable, and part of CI.

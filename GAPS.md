@@ -503,9 +503,6 @@ d. **`wait()` / HITL** — unchanged: zero v2 mention in code; docs treat
   population scale replay is `experiment run start`; single-session
   replay is the client's `replays.create`. Docs are consistent with
   this; keep it that way.
-- `GETTING_STARTED.md` at the repo root still documents the deleted v1
-  CLI (`kitaru init`, stacks, executions); refresh or delete before
-  launch.
 - Old v1 doc content (durable experiments, `kitaru.Score`,
   `@kitaru.scorer`, `kitaru.diff`, verdicts, `client.executions.*`) was
   removed wholesale on Aug 3 — none of it exists in v2.

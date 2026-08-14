@@ -7,9 +7,9 @@ icon: download
 
 Kitaru is three installable pieces: the **SDK + CLI** in your project, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. For a first session on one machine, all three run locally.
 
-Kitaru requires **Python 3.11 or newer**.
+The Kitaru CLI, server, and workers require **Python 3.11 or newer**. TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server.
 
-## Install the SDK and CLI
+## Install the Python SDK and CLI
 
 {% tabs %} {% tab title="uv (recommended)" %}
 
@@ -44,6 +44,38 @@ Adapters are **not** extras — each ships as its own distribution, so you insta
 | [PydanticAI](../adapters/pydantic-ai.md) | `kitaru-pydantic-ai` |
 | [LangGraph](../adapters/langgraph.md) (also LangChain agents, Deep Agents) | `kitaru-langgraph` |
 | [OpenAI Agents SDK](../adapters/openai-agents.md) | `kitaru-openai-agents` |
+
+## Install a TypeScript adapter
+
+Install the adapter in the Node project that runs your agent. The packages are currently release candidates, so use the `rc` tag:
+
+{% tabs %}
+{% tab title="Mastra" %}
+```bash
+pnpm add @zenml-io/kitaru-mastra@rc @mastra/core@1.51.0
+```
+
+See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior, and supported boundary.
+{% endtab %}
+
+{% tab title="Vercel AI SDK" %}
+```bash
+pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
+```
+
+See the [Vercel AI SDK adapter](../adapters/vercel-ai.md) for `generateText`, replay behavior, and supported boundary.
+{% endtab %}
+
+{% tab title="Build an adapter" %}
+```bash
+pnpm add @zenml-io/kitaru@rc
+```
+
+The core package provides the TypeScript client and adapter primitives. It does not provide a framework-neutral agent or streaming abstraction.
+{% endtab %}
+{% endtabs %}
+
+The Node agent still needs a reachable Kitaru server. Install the Python CLI and worker separately when you want to run the full loop locally, or connect the agent to your team's deployed server and workers.
 
 No adapter for your framework? You are not blocked — [import your traces instead, build a project-local adapter, or have Kitaru call your agent](../adapters/custom.md).
 

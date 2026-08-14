@@ -18,7 +18,10 @@ explicit_exclusions:
 examples:
   - id: canonical-returns
     path: examples/pydantic_ai_ticket_resolver
-    public_docs: [examples/README.md, docs/book/getting-started/examples.md]
+    public_docs:
+      - examples/README.md
+      - docs/book/getting-started/quickstart.md
+      - docs/book/adapters/pydantic-ai.md
     owner_area: trace import, evaluation, investigation, cohorts, and experiment replay
     coverage:
       deterministic_pytest:
@@ -48,11 +51,97 @@ examples:
           reviewer_action: Regenerate the traces manually when the agent or trace export changes.
     release_policy:
       required_when_changed: true
+  - id: mastra-support-triage
+    path: v2_examples/mastra_support_triage
+    public_docs:
+      - docs/book/getting-started/quickstart.md
+      - docs/book/adapters/mastra.md
+      - packages/mastra/README.md
+    owner_area: TypeScript Mastra recording, worker replay, tool history, and evaluation
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/typescript/test_mastra_adapter.py
+        notes: Compiles and runs the real Mastra agent through a local API and worker with a deterministic model.
+      local_smoke:
+        status: not_applicable
+        notes: The provider-free path is the worker-backed deterministic pytest above.
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [OPENAI_API_KEY, KITARU_API_URL]
+        timeout_seconds: 300
+        cost_class: low
+        command: uv run python -m v2_examples.mastra_support_triage.demo
+        waiver:
+          reason: The documented live path calls a paid OpenAI model and writes sessions to a selected Kitaru server.
+          reviewer_action: Run the command manually after changes to the real-provider path and inspect the baseline and replay sessions.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: vercel-ai-support-triage
+    path: v2_examples/vercel_ai_support_triage
+    public_docs:
+      - docs/book/getting-started/quickstart.md
+      - docs/book/adapters/vercel-ai.md
+    owner_area: TypeScript Vercel AI SDK recording, worker replay, tool history, and evaluation
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/typescript/test_vercel_ai_adapter.py
+        notes: Compiles and runs the real AI SDK agent through a local API and worker with a deterministic model.
+      local_smoke:
+        status: not_applicable
+        notes: The provider-free path is the worker-backed deterministic pytest above; the README also documents an optional compiled-artifact smoke command.
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [OPENAI_API_KEY, KITARU_API_URL]
+        timeout_seconds: 300
+        cost_class: low
+        command: uv run python -m v2_examples.vercel_ai_support_triage.demo
+        waiver:
+          reason: The documented live path calls a paid OpenAI model and writes sessions to a selected Kitaru server.
+          reviewer_action: Run the command manually after changes to the real-provider path and inspect the baseline and replay sessions.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
+  - id: vercel-ai-ticket-resolver
+    path: v2_examples/vercel_ai_ticket_resolver
+    public_docs:
+      - docs/book/getting-started/quickstart.md
+      - docs/book/adapters/vercel-ai.md
+      - packages/core/README.md
+      - packages/vercel-ai/README.md
+    owner_area: standalone TypeScript returns-agent walkthrough from recording through replayed experiment
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: v2_examples/vercel_ai_ticket_resolver/test/test_e2e.py
+        notes: Exercises the provider-free API, evaluator, cohort, and replay workflow with PostgreSQL.
+      local_smoke:
+        status: covered
+        command: cd v2_examples/vercel_ai_ticket_resolver && pnpm build && pnpm test && pnpm test:evaluator && pnpm typecheck && pnpm lint && pnpm test:e2e
+        requires_server: true
+        timeout_seconds: 600
+        notes: The canonical example end-to-end CI job runs this complete standalone validation.
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [OPENAI_API_KEY, KITARU_API_URL, KITARU_AGENT_ID]
+        timeout_seconds: 900
+        cost_class: low
+        command: cd v2_examples/vercel_ai_ticket_resolver && pnpm baseline --provider openai --fresh
+        waiver:
+          reason: The optional live baseline makes paid model calls and records a new evidence set.
+          reviewer_action: Run the documented provider path manually when provider behavior or the live walkthrough changes.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: openai-agents-v2
     path: examples/integrations/openai_agents_v2/agent.py
     public_docs:
       - examples/README.md
-      - docs/book/getting-started/examples.md
       - docs/book/adapters/openai-agents.md
     owner_area: separately packaged OpenAI Agents SDK v2 adapter
     coverage:
@@ -86,7 +175,6 @@ examples:
     public_docs:
       - examples/integrations/langgraph_v2/README.md
       - examples/README.md
-      - docs/book/getting-started/examples.md
       - docs/book/adapters/langgraph.md
     owner_area: LangGraph v2 deterministic invocation recording
     coverage:

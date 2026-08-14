@@ -135,6 +135,8 @@ and the OpenAI Agents SDK (`kitaru-openai-agents`). In TypeScript: the
 Vercel AI SDK (`@zenml-io/kitaru-vercel-ai`) and Mastra
 (`@zenml-io/kitaru-mastra`).
 
+TypeScript packages require Node 22.22 or later in the Node 22 release line. Start with the [Mastra adapter](https://docs.zenml.io/kitaru/adapters/mastra) or [Vercel AI SDK adapter](https://docs.zenml.io/kitaru/adapters/vercel-ai), then run the focused examples under [`v2_examples/`](https://github.com/zenml-io/kitaru/tree/develop/v2_examples).
+
 **Framework not on that list? You are not blocked.** Import the traces
 you already collect — Langfuse, LangSmith, Braintrust and OpenTelemetry
 importers are built in, and any other format converts to Kitaru JSONL or

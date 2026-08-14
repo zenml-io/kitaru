@@ -13,6 +13,12 @@ Release candidates use npm's `rc` tag and remain pre-1.0 compatibility previews.
 pnpm add @zenml-io/kitaru@rc
 ```
 
+## Links
+
+- [TypeScript SDK and adapter overview](https://docs.zenml.io/kitaru/adapters)
+- [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
+- [Run the TypeScript returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver)
+
 ## Public API
 
 The package exports the Kitaru API client and JSON-safe recorder utilities from its root. Dedicated subpaths expose the client, environment resolution, errors, and the low-level adapter-building API:

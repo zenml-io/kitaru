@@ -73,4 +73,5 @@ from kitaru_pydantic_ai import ToolPolicyError, ToolPolicyMissError
 - **Multi-turn conversations** — the recorded inputs preserve the conversation shape (prompt plus message history), and replay projects them back the same way, so multi-turn sessions replay faithfully.
 - **The `llm` tool policy** is not yet supported by this adapter — a replay that reaches one fails with `ToolPolicyError`. See [Tool policies](../guides/tool-policies.md).
 - **Recording overhead** is one async client and batched node uploads per run — off the hot path of model calls. If the Kitaru server is unreachable your run fails fast at session creation rather than running unrecorded; treat server availability accordingly in production.
-- **Alongside other tracing** — the adapter composes with PydanticAI's OpenTelemetry instrumentation, so recording to Kitaru and tracing to Langfuse from the same run works; see `examples/integrations/pydantic_ai_v2` in the repository.
+- **Alongside other tracing** — the adapter composes with PydanticAI's OpenTelemetry instrumentation, so recording to Kitaru and tracing to Langfuse from the same run works.
+- **Import-first alternative** — the [ticket-resolver example](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) traces PydanticAI runs to Langfuse, then imports them into Kitaru as replayable sessions.
