@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc6]
+
+### Changed
+
+- Prepared the sixth Kitaru 0.22 release candidate with the local prerelease image-tag fix and `kitaru-ui-v0.2.0-rc.3`.
+
 ## [0.22.0rc5]
 
 ### Changed
