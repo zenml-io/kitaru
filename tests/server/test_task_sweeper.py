@@ -108,8 +108,10 @@ async def test_sweep_once_propagates_before_rescuing(
     async def record_propagate(self: TaskService, job_id: uuid.UUID) -> None:
         calls.append("propagate")
 
-    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        return [task_id], [job_id]
+    async def candidates(
+        *args: Any,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+        return [task_id], [job_id], []
 
     monkeypatch.setattr(TaskService, "sweep_stale_task", record_sweep)
     monkeypatch.setattr(TaskService, "propagate_job_cancel", record_propagate)
@@ -140,8 +142,10 @@ async def test_sweep_once_continues_after_a_failing_item(
         if task_id == first:
             raise RuntimeError("boom")
 
-    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        return [first, second], []
+    async def candidates(
+        *args: Any,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+        return [first, second], [], []
 
     monkeypatch.setattr(TaskService, "sweep_stale_task", failing_sweep)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
@@ -172,8 +176,10 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
         if job_id == held:
             raise _lock_not_available_error()
 
-    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-        return [], [held, free]
+    async def candidates(
+        *args: Any,
+    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+        return [], [held, free], []
 
     monkeypatch.setattr(TaskService, "propagate_job_cancel", failing_propagate)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)

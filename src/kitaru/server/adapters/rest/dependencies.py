@@ -70,6 +70,9 @@ from kitaru.server.adapters.db.repositories.investigation_repository import (
     SQLInvestigationRepository,
 )
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.job_settlement_queue import (
+    SQLJobSettlementQueue,
+)
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
@@ -463,6 +466,8 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
         heartbeat_timeout_seconds=settings.TASK_HEARTBEAT_TIMEOUT_SECONDS,
         retry_limit=settings.TASK_RETRY_LIMIT,
         sweep_batch_limit=settings.TASK_SWEEP_BATCH_LIMIT,
+        settlement_batch_limit=settings.JOB_SETTLEMENT_BATCH_LIMIT,
+        settlement_grace_seconds=settings.JOB_SETTLEMENT_GRACE_SECONDS,
         evaluator_timeout_seconds=settings.EVALUATOR_TASK_TIMEOUT_SECONDS,
         importer_timeout_seconds=settings.IMPORTER_TASK_TIMEOUT_SECONDS,
         max_result_bytes=settings.MAX_TASK_RESULT_BYTES,
@@ -470,7 +475,7 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
     )
 
 
-def _build_task_transitions(
+def get_task_transitions(
     session: AsyncSession, analytics: ServerAnalytics
 ) -> TaskTransitions:
     """Build the request-scoped task transition dispatch.
@@ -485,6 +490,7 @@ def _build_task_transitions(
     return TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
+        settlement_queue=SQLJobSettlementQueue(session),
         dispatcher=build_event_dispatcher(session, analytics),
         analytics=analytics,
     )
@@ -515,7 +521,7 @@ def get_job_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
-        transitions=_build_task_transitions(session, analytics),
+        transitions=get_task_transitions(session, analytics),
         policy=get_task_policy(settings),
     )
 
@@ -554,7 +560,7 @@ def get_task_service(
         session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
         spec_builder=spec_builder,
-        transitions=_build_task_transitions(session, analytics),
+        transitions=get_task_transitions(session, analytics),
         policy=policy,
     )
 
@@ -655,7 +661,7 @@ def get_experiment_run_service(
         repository=SQLExperimentRunRepository(session),
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
-        transitions=_build_task_transitions(session, analytics),
+        transitions=get_task_transitions(session, analytics),
         analytics=analytics,
     )
 

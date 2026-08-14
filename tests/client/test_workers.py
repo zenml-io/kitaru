@@ -26,6 +26,7 @@ from conftest import (
     FakeApiKeyRepository,
     FakeBlobRepository,
     FakeJobRepository,
+    FakeJobSettlementQueue,
     FakePasswordHasher,
     FakePluginRepository,
     FakeReplayRepository,
@@ -131,6 +132,7 @@ async def api_client(
     transitions = TaskTransitions(
         task_repository=task_repository,
         job_repository=job_repository,
+        settlement_queue=FakeJobSettlementQueue(),
         dispatcher=EventDispatcher(),
     )
     task_policy = TaskPolicy()

@@ -14,7 +14,6 @@
 """Background stale-task and cancel-propagation sweep loop."""
 
 import asyncio
-import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
@@ -28,6 +27,10 @@ from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.rest.dependencies import (
     get_server_analytics,
     get_task_service,
+)
+from kitaru.server.api.background_loop import (
+    start_background_loop,
+    stop_background_loop,
 )
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.services.task_service import TaskService
@@ -76,8 +79,8 @@ async def _read_candidates(
     settings: APISettings,
     analytics: AnalyticsClient,
     now: datetime,
-) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
-    """Read the stale task ids and the canceling job ids without locking.
+) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
+    """Read the sweep candidate ids without locking.
 
     Args:
         database: Database service the read opens a session against.
@@ -86,7 +89,8 @@ async def _read_candidates(
         now: Current time.
 
     Returns:
-        Stale task ids and job ids owing a cancel propagation.
+        Stale task ids, job ids owing a cancel propagation, and drained job
+        ids owing a settlement.
     """
     async for session in database.get_async_session():
         try:
@@ -94,10 +98,11 @@ async def _read_candidates(
             service = get_task_service(session, database.engine, settings, tracker)
             task_ids = await service.list_stale_task_ids(now)
             job_ids = await service.list_unpropagated_cancel_job_ids()
-            return task_ids, job_ids
+            drained_ids = await service.list_drained_unsettled_job_ids(now)
+            return task_ids, job_ids, drained_ids
         finally:
             await session.rollback()
-    return [], []
+    return [], [], []
 
 
 async def sweep_once(
@@ -116,7 +121,9 @@ async def sweep_once(
         analytics: Analytics client for this process.
     """
     now = datetime.now(UTC)
-    task_ids, job_ids = await _read_candidates(database, settings, analytics, now)
+    task_ids, job_ids, drained_ids = await _read_candidates(
+        database, settings, analytics, now
+    )
     # Propagate first. The rescue chooses between canceling and requeuing by
     # reading the task's own cancel_requested_at, so a stale task of a
     # canceling job whose stamp has not landed yet is requeued instead of
@@ -138,43 +145,14 @@ async def sweep_once(
             partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
             f"stale task {task_id}",
         )
-
-
-async def _run_sweep_loop(
-    database: DatabaseService,
-    settings: APISettings,
-    analytics: AnalyticsClient,
-    interval_seconds: int,
-) -> None:
-    """Run sweep_once on a fixed interval, logging and continuing on failure.
-
-    Args:
-        database: Database service the sweep opens sessions against.
-        settings: API settings for this process.
-        analytics: Analytics client for this process.
-        interval_seconds: Delay between sweeps.
-    """
-    while True:
-        try:
-            await sweep_once(database, settings, analytics)
-        except Exception as exc:
-            logger.warning("Stale task sweep tick failed: %s", exc)
-        await asyncio.sleep(interval_seconds)
-
-
-def _log_sweeper_exit(task: asyncio.Task[None]) -> None:
-    """Log a sweep loop that stopped running.
-
-    Args:
-        task: Finished sweep task.
-    """
-    if task.cancelled():
-        return
-    exception = task.exception()
-    if exception is None:
-        logger.error("Stale task sweep loop exited without an error.")
-    else:
-        logger.error("Stale task sweep loop died: %s", exception, exc_info=exception)
+    for drained_id in drained_ids:
+        await _run_unit(
+            database,
+            settings,
+            analytics,
+            partial(TaskService.sweep_drained_job, job_id=drained_id),
+            f"drained job {drained_id}",
+        )
 
 
 def start_task_sweeper(
@@ -192,15 +170,11 @@ def start_task_sweeper(
     Returns:
         Running sweep task, or ``None`` when the interval setting is zero.
     """
-    if settings.TASK_SWEEP_INTERVAL_SECONDS <= 0:
-        return None
-    task = asyncio.create_task(
-        _run_sweep_loop(
-            database, settings, analytics, settings.TASK_SWEEP_INTERVAL_SECONDS
-        )
+    return start_background_loop(
+        partial(sweep_once, database, settings, analytics),
+        settings.TASK_SWEEP_INTERVAL_SECONDS,
+        "Stale task sweep",
     )
-    task.add_done_callback(_log_sweeper_exit)
-    return task
 
 
 async def stop_task_sweeper(task: asyncio.Task[None] | None) -> None:
@@ -209,8 +183,4 @@ async def stop_task_sweeper(task: asyncio.Task[None] | None) -> None:
     Args:
         task: Running sweep task, or ``None`` when the sweeper was disabled.
     """
-    if task is None:
-        return
-    task.cancel()
-    with contextlib.suppress(asyncio.CancelledError):
-        await task
+    await stop_background_loop(task)

@@ -26,7 +26,7 @@ from kitaru.server.adapters.db.orm.base import (
     UUIDPrimaryKeyMixin,
 )
 from kitaru.server.adapters.db.orm.orm_utils import foreign_key_name, index_name
-from kitaru.server.domain.job import Job
+from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job
 
 KIND_LENGTH = 32
 STATUS_LENGTH = 32
@@ -39,6 +39,15 @@ JOB_STATUS_INDEX = index_name("job", ["status"])
 JOB_CANCEL_REQUESTED_AT_INDEX = index_name("job", ["cancel_requested_at"])
 
 CANCEL_REQUESTED_PREDICATE = "cancel_requested_at IS NOT NULL"
+
+NON_TERMINAL_JOB_STATUS_VALUES = [
+    status.value for status in JobStatus if status not in TERMINAL_JOB_STATUSES
+]
+
+JOB_SETTLEMENT_CHECK_JOB_ID_FOREIGN_KEY = foreign_key_name(
+    "job_settlement_check", ["job_id"]
+)
+JOB_SETTLEMENT_CHECK_JOB_ID_INDEX = index_name("job_settlement_check", ["job_id"])
 
 
 class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -119,3 +128,20 @@ class JobORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             created=self.created,
             updated=self.updated,
         )
+
+
+class JobSettlementCheckORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
+    """Job settlement check table."""
+
+    __tablename__ = "job_settlement_check"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["job_id"],
+            ["job.id"],
+            name=JOB_SETTLEMENT_CHECK_JOB_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        Index(JOB_SETTLEMENT_CHECK_JOB_ID_INDEX, "job_id"),
+    )
+
+    job_id: Mapped[uuid.UUID]

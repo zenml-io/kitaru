@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import db_settings, lifespan_client
+from conftest import db_settings, lifespan_client, wait_until
 
 RUNTIME = {"platform": "bare"}
 
@@ -110,9 +110,9 @@ async def test_session_run_lifecycle_completes_the_job(
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/jobs/{job['id']}")
-    body = response.json()
-    assert body["status"] == "completed"
+    # The job settles through the background settlement loop now, so poll
+    # for it instead of reading it inline.
+    body = await wait_until(client, f"/v1/jobs/{job['id']}", "status", "completed")
     assert body["ended_at"] is not None
 
     response = await client.get(f"/v1/tasks/{task['id']}")

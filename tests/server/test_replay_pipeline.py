@@ -34,6 +34,7 @@ from conftest import (
     create_replay,
     create_session,
     create_worker,
+    drain_settlements,
 )
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
@@ -229,6 +230,8 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert evaluations[0].evaluation.task_id == eval_task.id
     assert evaluations[0].evaluation.evaluator_version_id == evaluator.id
 
+    await drain_settlements(services.task_service)
+
     job_after = await services.jobs.get(bundle.replay.job_id)
     assert job_after.status is JobStatus.COMPLETED
 
@@ -358,6 +361,8 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
         actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
+    await drain_settlements(services.task_service)
+
     job_after = await services.jobs.get(bundle.replay.job_id)
     assert job_after.cancel_requested_at is not None
     await services.task_service.propagate_job_cancel(bundle.replay.job_id)
@@ -371,6 +376,8 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
         TaskUpdate(status=TaskStatus.CANCELED),
         actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
+
+    await drain_settlements(services.task_service)
 
     job_after = await services.jobs.get(bundle.replay.job_id)
     assert job_after.status is JobStatus.FAILED
@@ -428,6 +435,8 @@ async def test_baseline_evaluator_failure_fails_the_replay(
         TaskUpdate(status=TaskStatus.CANCELED),
         actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
+
+    await drain_settlements(services.task_service)
 
     job_after = await services.jobs.get(bundle.replay.job_id)
     assert job_after.status is JobStatus.FAILED
@@ -956,6 +965,8 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
         actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
+    await drain_settlements(services.task_service)
+
     final_run, counts = await services.experiment_run_service.get_run(
         run.id, actor=ACTOR
     )
@@ -1030,6 +1041,8 @@ async def test_finalize_precedence_canceling_beats_failure(
         TaskUpdate(status=TaskStatus.CANCELED),
         actor=build_task_actor(ACTOR.account, task_b.id, 1, worker.id),
     )
+
+    await drain_settlements(services.task_service)
 
     final_run, counts = await services.experiment_run_service.get_run(
         run.id, actor=ACTOR

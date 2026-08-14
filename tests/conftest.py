@@ -98,7 +98,11 @@ from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.application.models.tag import TagFilter
-from kitaru.server.application.models.task import TaskFilter, TaskPolicy
+from kitaru.server.application.models.task import (
+    TaskFilter,
+    TaskPolicy,
+    TaskSettlementStats,
+)
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
 from kitaru.server.application.services.experiment_run_service import (
@@ -457,6 +461,31 @@ async def lifespan_client(
                 yield client
     finally:
         await drop_test_database(settings)
+
+
+async def wait_until(
+    poll: httpx.AsyncClient, url: str, field: str, value: str, timeout: float = 10.0
+) -> dict[str, object]:
+    """Poll a resource until a field reaches a value, or fail after a timeout.
+
+    Args:
+        poll: HTTP client to poll with.
+        url: Resource URL.
+        field: Response field to check.
+        value: Expected value.
+        timeout: Seconds to poll before failing.
+
+    Returns:
+        The resource body once the field matches.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout
+    body: dict[str, object] = {}
+    while asyncio.get_running_loop().time() < deadline:
+        body = (await poll.get(url)).json()
+        if body[field] == value:
+            return body
+        await asyncio.sleep(0.05)
+    raise AssertionError(f"{url} never reached {field}={value!r}, last body: {body}")
 
 
 @asynccontextmanager
@@ -4830,6 +4859,48 @@ class FakeJobRepository:
         """
         return await self.get_many(job_ids)
 
+    async def get_owner_id(self, job_id: uuid.UUID) -> uuid.UUID:
+        """Read a job's owner id without loading the row.
+
+        Args:
+            job_id: Id of the job.
+
+        Raises:
+            JobNotFound: No job has this id.
+
+        Returns:
+            Owner id of the job.
+        """
+        job = self._jobs.get(job_id)
+        if job is None:
+            raise JobNotFound(job_id)
+        return job.owner_id
+
+    async def list_drained_unsettled_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        Args:
+            cutoff: Latest job update time still considered.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
+        """
+        assert self._tasks is not None
+        drained: list[uuid.UUID] = []
+        for job in self._jobs.values():
+            if job.settled:
+                continue
+            if job.updated is not None and job.updated >= cutoff:
+                continue
+            tasks = await self._tasks.list_by_job(job.id)
+            if not tasks or not all(task.terminal for task in tasks):
+                continue
+            drained.append(job.id)
+        return sorted(drained)[:limit]
+
     async def list_unpropagated_cancel_ids(self, limit: int) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
 
@@ -4944,6 +5015,35 @@ class FakeJobRepository:
         """
         for job_id in sorted(job_ids):
             await self.delete(job_id)
+
+
+class FakeJobSettlementQueue:
+    """In-memory job settlement queue."""
+
+    def __init__(self) -> None:
+        """Initialize the queue."""
+        self._checks: list[uuid.UUID] = []
+
+    async def enqueue(self, job_id: uuid.UUID) -> None:
+        """Queue a settlement check for a job.
+
+        Args:
+            job_id: Id of the job.
+        """
+        self._checks.append(job_id)
+
+    async def claim(self, limit: int) -> list[uuid.UUID]:
+        """Claim queued settlement checks and drop them from the queue.
+
+        Args:
+            limit: Maximum number of queued checks to claim.
+
+        Returns:
+            Distinct job ids of the claimed checks, oldest first.
+        """
+        claimed = self._checks[:limit]
+        self._checks = self._checks[limit:]
+        return list(dict.fromkeys(claimed))
 
 
 class FakeTaskRepository:
@@ -5126,6 +5226,35 @@ class FakeTaskRepository:
             if task.job_id in job_id_set:
                 tasks_by_job.setdefault(task.job_id, []).append(task.model_copy())
         return tasks_by_job
+
+    async def count_settlement_stats(self, job_id: uuid.UUID) -> TaskSettlementStats:
+        """Count a job's tasks into the stats driving its settlement.
+
+        Args:
+            job_id: Id the tasks belong to.
+
+        Returns:
+            Task settlement stats, zero counts when the job has no tasks.
+        """
+        stats = await self.count_settlement_stats_many([job_id])
+        return stats.get(job_id, TaskSettlementStats())
+
+    async def count_settlement_stats_many(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, TaskSettlementStats]:
+        """Bulk-count many jobs' tasks into the stats driving their settlement.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Task settlement stats keyed by job id, jobs without tasks
+            omitted.
+        """
+        return {
+            job_id: TaskSettlementStats.from_tasks(tasks)
+            for job_id, tasks in (await self.list_by_jobs(job_ids)).items()
+        }
 
     async def update(self, task: Task) -> Task:
         """Persist changes to an existing task.
@@ -5559,6 +5688,7 @@ class TaskSubstrate(NamedTuple):
     workers: FakeWorkerRepository
     tasks: FakeTaskRepository
     jobs: FakeJobRepository
+    settlements: FakeJobSettlementQueue
 
 
 def _build_task_substrate() -> TaskSubstrate:
@@ -5577,6 +5707,7 @@ def _build_task_substrate() -> TaskSubstrate:
     tasks = FakeTaskRepository(sessions=sessions)
     jobs = FakeJobRepository(tasks=tasks)
     tasks.jobs = jobs
+    settlements = FakeJobSettlementQueue()
     return TaskSubstrate(
         sessions=sessions,
         agents=agents,
@@ -5587,6 +5718,7 @@ def _build_task_substrate() -> TaskSubstrate:
         workers=workers,
         tasks=tasks,
         jobs=jobs,
+        settlements=settlements,
     )
 
 
@@ -5625,6 +5757,7 @@ def build_job_and_task_services(
     transitions = TaskTransitions(
         task_repository=substrate.tasks,
         job_repository=substrate.jobs,
+        settlement_queue=substrate.settlements,
         dispatcher=EventDispatcher(),
     )
     task_policy = policy if policy is not None else TaskPolicy()
@@ -5752,7 +5885,10 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluation_repository=evaluations,
     )
     transitions = TaskTransitions(
-        task_repository=tasks, job_repository=jobs, dispatcher=dispatcher
+        task_repository=tasks,
+        job_repository=jobs,
+        settlement_queue=FakeJobSettlementQueue(),
+        dispatcher=dispatcher,
     )
     task_policy = policy if policy is not None else TaskPolicy()
     spec_builder = TaskSpecBuilder(
@@ -5836,6 +5972,12 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluations=evaluations,
         tags=tags,
     )
+
+
+async def drain_settlements(task_service: TaskService) -> None:
+    """Drain the settlement check queue until no job advances."""
+    while await task_service.settle_queued_jobs():
+        pass
 
 
 def build_worker_actor(account: Account, worker_id: uuid.UUID) -> WorkerAuthContext:

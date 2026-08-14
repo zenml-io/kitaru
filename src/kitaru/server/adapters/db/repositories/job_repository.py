@@ -15,26 +15,25 @@
 
 import uuid
 from collections.abc import Mapping, Sequence
+from datetime import datetime
 
-from sqlalchemy import not_, or_, select
+from sqlalchemy import exists, not_, or_, select
 
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
-from kitaru.server.adapters.db.orm.job import JobORM
+from kitaru.server.adapters.db.orm.job import NON_TERMINAL_JOB_STATUS_VALUES, JobORM
 from kitaru.server.adapters.db.orm.task import TERMINAL_STATUS_VALUES, TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.job import JobFilter
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job, JobNotFound
+from kitaru.server.domain.job import Job, JobNotFound
 
 JOB_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": JobORM.id,
     "kind": JobORM.kind,
     "status": JobORM.status,
 }
-
-TERMINAL_JOB_STATUS_VALUES = [status.value for status in TERMINAL_JOB_STATUSES]
 
 
 class SQLJobRepository(BaseSQLRepository[JobORM]):
@@ -152,8 +151,61 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
             select(JobORM.id)
             .where(
                 JobORM.cancel_requested_at.is_not(None),
-                not_(JobORM.status.in_(TERMINAL_JOB_STATUS_VALUES)),
+                JobORM.status.in_(NON_TERMINAL_JOB_STATUS_VALUES),
                 owing.exists(),
+            )
+            .order_by(JobORM.id.asc())
+            .limit(limit)
+        )
+        return list((await self._session.scalars(statement)).all())
+
+    async def get_owner_id(self, job_id: uuid.UUID) -> uuid.UUID:
+        """Read a job's owner id without loading the row.
+
+        Args:
+            job_id: Id of the job.
+
+        Raises:
+            JobNotFound: No job has this id.
+
+        Returns:
+            Owner id of the job.
+        """
+        statement = select(JobORM.owner_id).where(JobORM.id == job_id)
+        owner_id = (await self._session.execute(statement)).scalar_one_or_none()
+        if owner_id is None:
+            raise JobNotFound(job_id)
+        return owner_id
+
+    async def list_drained_unsettled_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        A job without tasks, or one updated after the cutoff, is skipped.
+        Rows are read without locking.
+
+        Args:
+            cutoff: Latest job update time still considered.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
+        """
+        has_task = exists(select(TaskORM.id).where(TaskORM.job_id == JobORM.id))
+        has_live_task = exists(
+            select(TaskORM.id).where(
+                TaskORM.job_id == JobORM.id,
+                not_(TaskORM.status.in_(TERMINAL_STATUS_VALUES)),
+            )
+        )
+        statement = (
+            select(JobORM.id)
+            .where(
+                JobORM.status.in_(NON_TERMINAL_JOB_STATUS_VALUES),
+                JobORM.updated < cutoff,
+                has_task,
+                not_(has_live_task),
             )
             .order_by(JobORM.id.asc())
             .limit(limit)

@@ -38,6 +38,9 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
 )
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.job_settlement_queue import (
+    SQLJobSettlementQueue,
+)
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
@@ -96,6 +99,7 @@ def _build_task_service(
     transitions = TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
+        settlement_queue=SQLJobSettlementQueue(session),
         dispatcher=dispatcher,
     )
     return TaskService(
@@ -114,6 +118,7 @@ def _build_transitions(session: AsyncSession) -> TaskTransitions:
     return TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
+        settlement_queue=SQLJobSettlementQueue(session),
         dispatcher=EventDispatcher(),
     )
 

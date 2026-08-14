@@ -338,6 +338,46 @@ class TaskService:
             )
             await self._apply_status(task, partial(Task.abandon, error=error, now=now))
 
+    async def settle_queued_jobs(self) -> int:
+        """Claim queued settlement checks and advance the checked jobs.
+
+        Locks the claimed check rows, then the job rows.
+
+        Returns:
+            Number of jobs advanced.
+        """
+        return await self._transitions.settle_queued_jobs(
+            self._policy.settlement_batch_limit
+        )
+
+    async def list_drained_unsettled_job_ids(self, now: datetime) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        Skips jobs updated within the settlement grace period, so live
+        transitions keep their queued check as the only settlement path.
+        Takes no lock.
+
+        Args:
+            now: Current time.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
+        """
+        cutoff = now - timedelta(seconds=self._policy.settlement_grace_seconds)
+        return await self._jobs.list_drained_unsettled_ids(
+            cutoff, self._policy.sweep_batch_limit
+        )
+
+    async def sweep_drained_job(self, job_id: uuid.UUID) -> None:
+        """Settle one drained job whose settlement check got lost.
+
+        Locks the job row and no task row.
+
+        Args:
+            job_id: Id of the job.
+        """
+        await self._transitions.advance_jobs([job_id])
+
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
 
@@ -363,7 +403,7 @@ class TaskService:
             DBAPIError: Another transaction holds one of the task rows.
         """
         await self._transitions.request_jobs_cancel([job_id], nowait=True)
-        await self._transitions.settle_job_if_drained(job_id)
+        await self._transitions.advance_jobs([job_id])
 
     async def _apply_status(
         self, task: Task, transition: Callable[[Task], None]

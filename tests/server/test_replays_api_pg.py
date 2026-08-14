@@ -20,7 +20,7 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import db_settings, lifespan_client
+from conftest import db_settings, lifespan_client, wait_until
 from kitaru.cache_keys import compute_tool_cache_key
 
 RUNTIME = {"platform": "bare"}
@@ -236,8 +236,9 @@ async def test_replay_pipeline_completes_through_the_api(
         headers=eval_task_headers,
     )
 
-    replay_final = (await client.get(f"/v1/replays/{replay['id']}")).json()
-    assert replay_final["status"] == "completed"
+    # The job settles through the background settlement loop now, so poll
+    # for the replay to follow it instead of reading it inline.
+    await wait_until(client, f"/v1/replays/{replay['id']}", "status", "completed")
 
     filter_expression = {
         "field": "session_id",

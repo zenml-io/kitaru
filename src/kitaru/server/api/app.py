@@ -81,6 +81,7 @@ from kitaru.server.api.bootstrap import (
     register_default_plugins,
 )
 from kitaru.server.api.config import APISettings
+from kitaru.server.api.job_settler import start_job_settler, stop_job_settler
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
 from kitaru.server.api.ui import get_ui_version, register_ui
@@ -278,9 +279,11 @@ def create_app(settings: APISettings) -> FastAPI:
             await register_default_plugins(SQLPluginRepository(session))
             await session.commit()
         sweep_task = start_task_sweeper(database, settings, analytics)
+        settle_task = start_job_settler(database, settings, analytics)
         try:
             yield
         finally:
+            await stop_job_settler(settle_task)
             await stop_task_sweeper(sweep_task)
             await analytics.aclose()
             if app.state.control_plane_client is not None:

@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.job import JobFilter
@@ -100,6 +101,37 @@ class JobRepository(Protocol):
 
         Returns:
             Ids of the canceling jobs in ascending order.
+        """
+        ...
+
+    async def get_owner_id(self, job_id: uuid.UUID) -> uuid.UUID:
+        """Read a job's owner id without loading the row.
+
+        Args:
+            job_id: Id of the job.
+
+        Raises:
+            JobNotFound: No job has this id.
+
+        Returns:
+            Owner id of the job.
+        """
+        ...
+
+    async def list_drained_unsettled_ids(
+        self, cutoff: datetime, limit: int
+    ) -> list[uuid.UUID]:
+        """Read the ids of unsettled jobs whose tasks have all drained.
+
+        A job without tasks, or one updated after the cutoff, is skipped.
+        Rows are read without locking.
+
+        Args:
+            cutoff: Latest job update time still considered.
+            limit: Maximum number of ids to read.
+
+        Returns:
+            Ids of the drained jobs in ascending order.
         """
         ...
 

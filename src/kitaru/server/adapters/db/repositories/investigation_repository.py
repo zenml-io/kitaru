@@ -22,7 +22,10 @@ from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_ex
 from kitaru.server.adapters.db.orm.investigation import InvestigationORM
 from kitaru.server.adapters.db.orm.investigation_session import InvestigationSessionORM
 from kitaru.server.adapters.db.pagination import paginate, paginate_by_index
-from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
+from kitaru.server.adapters.db.repositories.base import (
+    EXCLUSIVE_ROW_LOCK,
+    BaseSQLRepository,
+)
 from kitaru.server.application.models.investigation import (
     InvestigationFilter,
     InvestigationSessionFilter,
@@ -123,7 +126,9 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             Stored investigation session row.
         """
         row = await self._session.get(
-            InvestigationSessionORM, investigation_session_id, with_for_update=exclusive
+            InvestigationSessionORM,
+            investigation_session_id,
+            with_for_update=dict(EXCLUSIVE_ROW_LOCK) if exclusive else False,
         )
         if row is None:
             raise InvestigationSessionNotFound(investigation_session_id)
@@ -274,7 +279,7 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             InvestigationSessionORM.session_id == session_id,
         )
         if exclusive:
-            statement = statement.with_for_update()
+            statement = statement.with_for_update(**EXCLUSIVE_ROW_LOCK)
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
             raise InvestigationSessionNotFound(session_id)

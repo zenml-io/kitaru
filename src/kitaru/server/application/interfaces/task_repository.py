@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import Protocol
 
 from kitaru.api_models.v1.worker import WorkerScope
-from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.models.task import TaskFilter, TaskSettlementStats
 from kitaru.server.domain.task import Task
 
 
@@ -114,6 +114,31 @@ class TaskRepository(Protocol):
 
         Returns:
             Tasks keyed by job id in creation order, jobs without tasks
+            omitted.
+        """
+        ...
+
+    async def count_settlement_stats(self, job_id: uuid.UUID) -> TaskSettlementStats:
+        """Count a job's tasks into the stats driving its settlement.
+
+        Args:
+            job_id: Id the tasks belong to.
+
+        Returns:
+            Task settlement stats, zero counts when the job has no tasks.
+        """
+        ...
+
+    async def count_settlement_stats_many(
+        self, job_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, TaskSettlementStats]:
+        """Bulk-count many jobs' tasks into the stats driving their settlement.
+
+        Args:
+            job_ids: Ids the tasks belong to.
+
+        Returns:
+            Task settlement stats keyed by job id, jobs without tasks
             omitted.
         """
         ...

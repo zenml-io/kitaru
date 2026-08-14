@@ -33,6 +33,9 @@ from kitaru.server.adapters.db.repositories.agent_version_repository import (
     SQLAgentVersionRepository,
 )
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
+from kitaru.server.adapters.db.repositories.job_settlement_queue import (
+    SQLJobSettlementQueue,
+)
 from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
@@ -47,29 +50,43 @@ from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, Task
 
 
-async def _complete_and_advance(session: AsyncSession, task_id: uuid.UUID) -> None:
-    """Complete one task and advance its job within the same session."""
-    task_repository = SQLTaskRepository(session)
-    transitions = TaskTransitions(
-        task_repository=task_repository,
+def _build_transitions(session: AsyncSession) -> TaskTransitions:
+    """Build task transitions on the SQL repositories of one session."""
+    return TaskTransitions(
+        task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
+        settlement_queue=SQLJobSettlementQueue(session),
         dispatcher=EventDispatcher(),
     )
+
+
+async def _complete_task(session: AsyncSession, task_id: uuid.UUID) -> None:
+    """Complete one task, enqueuing its job's settlement check."""
+    task_repository = SQLTaskRepository(session)
     task = await task_repository.get(task_id)
-    await transitions.apply_status(
+    await _build_transitions(session).apply_status(
         task, partial(Task.complete, result=None, now=datetime.now(UTC))
     )
 
 
-async def test_advance_job_serializes_concurrent_task_completions() -> None:
-    """Two tasks of one job completing in overlapping transactions still settle it.
+async def _settle_once(session_factory: async_sessionmaker[AsyncSession]) -> int:
+    """Run one settlement pass in its own transaction and return jobs advanced."""
+    async with session_factory() as session:
+        advanced = await _build_transitions(session).settle_queued_jobs(100)
+        await session.commit()
+        return advanced
 
-    Regression test for a race in job settlement: it used to list the job's
-    tasks before locking the job row, so two tasks completing concurrently
-    could each read the other's still-uncommitted terminal status as live and
-    both skip settlement, leaving the job running forever. Locking the job row
-    first forces the second completion to wait for the first to commit, so its
-    relist sees accurate, post-commit data.
+
+async def test_concurrent_task_completions_settle_the_job_exactly_once() -> None:
+    """Two tasks of one job completing concurrently still settle it exactly once.
+
+    Regression test for a race in job settlement: advancing the job used to
+    run inside the completing transaction, so two tasks completing
+    concurrently contended for the job row's lock. Completion now only
+    enqueues a settlement check and never touches the job row, so the second
+    completion below must not block on the first one being left open. A
+    settlement pass afterward claims both checks, deduped to the one job, and
+    settles it exactly once.
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -114,25 +131,27 @@ async def test_advance_job_serializes_concurrent_task_completions() -> None:
         session_a = session_factory()
         session_b = session_factory()
         try:
-            # Complete and advance the first task, but do not commit yet:
-            # with the fix this holds the job row's FOR UPDATE lock open,
-            # exactly mirroring the first of two task completions still being
-            # mid-transaction when the second one lands.
-            await _complete_and_advance(session_a, task_ids[0])
+            # Complete the first task but do not commit yet. Completion no
+            # longer touches the job row, so the second completion below
+            # must not block on this transaction staying open.
+            await _complete_task(session_a, task_ids[0])
 
-            task_b = asyncio.create_task(_complete_and_advance(session_b, task_ids[1]))
+            task_b = asyncio.create_task(_complete_task(session_b, task_ids[1]))
             await asyncio.sleep(0.2)
-            assert not task_b.done(), (
-                "second completion did not block on the job row lock, "
-                "settlement is not serialized"
+            assert task_b.done(), (
+                "second completion blocked on the first one's open "
+                "transaction, completion is locking the job row again"
             )
+            await task_b
 
             await session_a.commit()
-            await asyncio.wait_for(task_b, timeout=5.0)
             await session_b.commit()
         finally:
             await session_a.close()
             await session_b.close()
+
+        assert await _settle_once(session_factory) == 1
+        assert await _settle_once(session_factory) == 0
 
         async with session_factory() as verify_session:
             settled = await SQLJobRepository(verify_session).get(job.id)
