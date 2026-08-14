@@ -37,6 +37,7 @@ from kitaru.server.domain.keys import (
     generate_secret,
     generate_user_code,
     hash_secret,
+    verify_secret,
 )
 from kitaru.server.utils import is_stale
 
@@ -189,20 +190,38 @@ class DeviceService:
         await self._touch(device, now)
         return device
 
-    async def get_device(self, device_id: uuid.UUID, actor: AuthContext) -> Device:
+    async def get_device(
+        self,
+        device_id: uuid.UUID,
+        actor: AuthContext,
+        user_code: str | None = None,
+    ) -> Device:
         """Get a device of the caller by id.
 
         Args:
             device_id: Id of the device.
             actor: Caller context.
+            user_code: Plaintext user code, required for a device no account
+                approved yet.
 
         Raises:
-            DeviceNotFound: No device of the caller has this id.
+            DeviceNotFound: No device has this id, another account already
+                approved it, or the user code of an unapproved device is
+                missing or wrong.
 
         Returns:
             Stored device.
         """
-        return await self._get_owned_device(device_id, actor.account.id)
+        device = await self._repository.get(device_id)
+        if device.account_id == actor.account.id:
+            return device
+        if (
+            device.account_id is None
+            and user_code is not None
+            and verify_secret(user_code, device.user_code_hash)
+        ):
+            return device
+        raise DeviceNotFound(device_id)
 
     async def list_devices(
         self, device_filter: DeviceFilter, actor: AuthContext
@@ -242,7 +261,7 @@ class DeviceService:
         Returns:
             Updated device.
         """
-        device = await self.get_device(device_id, actor=actor)
+        device = await self._get_owned_device(device_id, actor.account.id)
         if locked is not None:
             device.update_locked(locked)
         if trusted is not None:
@@ -259,7 +278,7 @@ class DeviceService:
         Raises:
             DeviceNotFound: No device of the caller has this id.
         """
-        await self.get_device(device_id, actor=actor)
+        await self._get_owned_device(device_id, actor.account.id)
         await self._repository.delete(device_id)
 
     async def _get_owned_device(

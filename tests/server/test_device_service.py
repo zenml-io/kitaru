@@ -255,6 +255,60 @@ async def test_authorize_session_accepts_active_device(
     assert session_device.last_login is not None
 
 
+async def test_get_device_returns_unclaimed_device_for_valid_user_code(
+    service: DeviceService,
+) -> None:
+    """Return a pending device no account approved yet for a valid user code."""
+    device, user_code, _ = await service.request_authorization(DeviceFingerprint())
+    stored = await service.get_device(device.id, actor=ACTOR, user_code=user_code)
+    assert stored.id == device.id
+    assert stored.account_id is None
+
+
+async def test_get_device_rejects_unclaimed_device_without_valid_user_code(
+    service: DeviceService,
+) -> None:
+    """Raise not found for an unapproved device without its user code."""
+    device, _, _ = await service.request_authorization(DeviceFingerprint())
+    with pytest.raises(DeviceNotFound):
+        await service.get_device(device.id, actor=ACTOR)
+    with pytest.raises(DeviceNotFound):
+        await service.get_device(device.id, actor=ACTOR, user_code="WRONG-CODE")
+
+
+async def test_get_device_returns_owned_device_without_user_code(
+    service: DeviceService, repository: FakeDeviceRepository
+) -> None:
+    """Return a device of the caller without requiring a user code."""
+    device, _, _ = await create_device(
+        repository, account_id=ACTOR.account.id, status=DeviceStatus.ACTIVE
+    )
+    stored = await service.get_device(device.id, actor=ACTOR)
+    assert stored.id == device.id
+
+
+async def test_get_device_rejects_foreign_account(
+    service: DeviceService, repository: FakeDeviceRepository
+) -> None:
+    """Raise not found for a device another account already approved."""
+    device, _, _ = await create_device(
+        repository, account_id=FOREIGN_ACTOR.account.id, status=DeviceStatus.VERIFIED
+    )
+    with pytest.raises(DeviceNotFound):
+        await service.get_device(device.id, actor=ACTOR)
+
+
+async def test_update_and_delete_reject_unclaimed_device(
+    service: DeviceService,
+) -> None:
+    """Raise not found when updating or deleting a device no account approved."""
+    device, _, _ = await service.request_authorization(DeviceFingerprint())
+    with pytest.raises(DeviceNotFound):
+        await service.update_device(device.id, actor=ACTOR, locked=True)
+    with pytest.raises(DeviceNotFound):
+        await service.delete_device(device.id, actor=ACTOR)
+
+
 async def test_delete_expired_removes_claimed_and_unclaimed(
     repository: FakeDeviceRepository,
 ) -> None:

@@ -87,11 +87,11 @@ Read `FRONTEND-TESTING.md` before changing UI bundle, frontend smoke, Docker das
 just ui-bundle                           # Download latest stable UI bundle
 just UI_TAG=kitaru-ui-v0.2.0 ui-bundle  # Pin a stable UI bundle
 just UI_TAG=kitaru-ui-v0.3.0-rc.1 ui-bundle-prerelease
+docker compose up -d db
+just ui-serve                            # Serve the downloaded bundle from source
 ```
 
-The inherited `just ui-login` recipe calls `kitaru login` without the required `SERVER` argument or `--local`, so do not advertise it as a working v2 command. After preparing a bundle, set the printed `KITARU_UI_DIST_PATH` and use `uv run kitaru login SERVER` or `uv run kitaru login --local` against an already-running server.
-
-Do not advertise `just ui-smoke` or `just release-smoke` as working v2 checks while they still call the removed `scripts/smoke-test.sh`.
+`just ui-serve` runs the API server from source against the local compose database and serves the bundle at `http://localhost:8000`.
 
 The v2 Dockerfiles are `docker/dev-client.Dockerfile`, `docker/dev-server.Dockerfile`, `docker/release-client.Dockerfile`, and `docker/release-server.Dockerfile`. Follow `docker/CLAUDE.md`; do not use inherited v1 `server-image` recipes as v2 release evidence.
 
