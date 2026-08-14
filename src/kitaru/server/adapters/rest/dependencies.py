@@ -158,6 +158,8 @@ from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
 
+_AUTH_SESSION_STATE_ATTR = "auth_db_session"
+
 
 class RequestCredential(NamedTuple):
     """Credential read off an incoming request."""
@@ -192,15 +194,15 @@ async def get_auth_session(
     request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> AsyncGenerator[AsyncSession, None]:
-    """Provide the database session the auth path writes through.
+    """Provide the database session the auth path runs on.
 
     On most routes this is the shared request session, committed by
     ``CommitRoute`` like any other write. A ``read_only`` route binds the
     request session to the read-replica engine, so the auth path instead
-    opens its own session on the writer engine here and commits it after the
-    request completes, letting auth writes such as an API key's
-    ``last_used`` timestamp persist even though the rest of the request only
-    reads.
+    gets its own session on the writer engine here, letting auth writes
+    such as an API key's ``last_used`` timestamp persist even though the
+    rest of the request only reads. ``_resolve_auth_context`` commits and
+    closes that session once authentication resolves.
 
     Args:
         request: Incoming request.
@@ -215,8 +217,8 @@ async def get_auth_session(
         return
     database: DatabaseService = request.app.state.database
     async for auth_session in database.get_async_session():
+        setattr(request.state, _AUTH_SESSION_STATE_ATTR, auth_session)
         yield auth_session
-        await auth_session.commit()
 
 
 def get_engine(request: Request) -> AsyncEngine:
@@ -1010,6 +1012,7 @@ def require_local_account_management(
 
 
 async def _resolve_auth_context(
+    request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
         RequestCredential | None, Depends(get_optional_bearer_credential)
@@ -1022,6 +1025,7 @@ async def _resolve_auth_context(
     the request.
 
     Args:
+        request: Incoming request.
         settings: Service settings governing auth behavior.
         credential: Bearer token plus optional CSRF token.
         auth_service: Authentication service for the current request.
@@ -1034,6 +1038,15 @@ async def _resolve_auth_context(
         Resolved account and principal for use-case calls.
     """
     context = await _authenticate(settings, credential, auth_service)
+    auth_session: AsyncSession | None = getattr(
+        request.state, _AUTH_SESSION_STATE_ATTR, None
+    )
+    if auth_session is not None:
+        # Nothing after authentication uses the writer-bound auth session.
+        # Commit and close it here so its connection frees before the
+        # handler runs.
+        await auth_session.commit()
+        await auth_session.close()
     token = current_actor.set(context.account)
     try:
         yield context

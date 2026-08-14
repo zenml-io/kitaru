@@ -13,10 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for read-replica session routing in FastAPI dependencies."""
 
-from typing import Any, cast
-
 from fastapi import FastAPI, Request
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from conftest import base_asgi_scope, local_settings
 from kitaru.server.adapters.rest.dependencies import get_auth_session, get_session
@@ -41,22 +38,6 @@ def _request(database: DatabaseService, read_only: bool = False) -> Request:
     if read_only:
         mark_request_read_only(request)
     return request
-
-
-def _spy_commit(session: AsyncSession, calls: list[int]) -> None:
-    """Wrap a session's commit method to append to calls on every commit.
-
-    Args:
-        session: Session whose commit calls to record.
-        calls: List appended to on each commit call.
-    """
-    original_commit = session.commit
-
-    async def recording_commit() -> None:
-        calls.append(1)
-        await original_commit()
-
-    cast(Any, session).commit = recording_commit
 
 
 async def test_get_session_binds_to_the_read_engine_for_a_read_only_request() -> None:
@@ -93,17 +74,14 @@ async def test_get_auth_session_reuses_the_request_session_when_not_read_only() 
         await database.cleanup()
 
 
-async def test_get_auth_session_commits_a_writer_session_when_read_only() -> None:
-    """get_auth_session writes through a separate writer session on read-only routes."""
+async def test_get_auth_session_opens_a_writer_session_when_read_only() -> None:
+    """get_auth_session yields a separate writer session on read-only routes."""
     database = DatabaseService(local_settings(DB_READ_HOST="replica-host"))
     try:
         request = _request(database, read_only=True)
-        commit_calls: list[int] = []
         async for read_session in database.get_async_session(read_only=True):
             async for auth_session in get_auth_session(request, read_session):
                 assert auth_session is not read_session
                 assert auth_session.get_bind() is database.engine.sync_engine
-                _spy_commit(auth_session, commit_calls)
-        assert commit_calls == [1]
     finally:
         await database.cleanup()
