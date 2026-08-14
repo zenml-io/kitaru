@@ -2,6 +2,7 @@
 
 import json
 import runpy
+import tomllib
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -281,9 +282,9 @@ def test_trace_generator_uses_real_model_and_langfuse_credentials() -> None:
     script = (EXAMPLE_DIR / "generate.sh").read_text()
     generator = (EXAMPLE_DIR / "generate_traces.py").read_text()
 
-    assert "--with-editable" in script
-    assert "plugins/packages/pydantic-ai[openai]" in script
-    assert "--extra examples" in script
+    assert '--project "${example_dir}"' in script
+    assert "--with-editable" not in script
+    assert "--extra" not in script
     assert "langfuse-traces.jsonl" in script
     assert "Agent.instrument_all()" in generator
     assert 'trace_name=f"Returns ticket: {ticket.ticket_id}"' in generator
@@ -309,12 +310,13 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
     assert "kitaru investigation session verdict" in readme
     assert '"judgment":"problematic"' not in readme
     assert "The investigation-session verdict is the classification." in readme
-    assert (
-        "uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'"
-        in readme
-    )
-    assert "scripts/smoke_plugin_artifacts.py" in readme
-    assert "UV_FIND_LINKS" in readme
+    assert "uv sync" in readme
+    assert "uv pip install" not in readme
+    assert "kitaru login --local" in readme
+    assert "kitaru login https://your-kitaru-workspace.example.com" in readme
+    assert "plugins/packages/pydantic-ai" not in readme
+    assert "scripts/smoke_plugin_artifacts.py" not in readme
+    assert "UV_FIND_LINKS" not in readme
 
     for command in (
         "kitaru login --local",
@@ -368,6 +370,48 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
     assert "accepted terminal tool call" in readme
     assert "Which agent outcome matters most?" in readme
     assert "Which successful cases must remain correct?" in readme
+
+
+def test_example_declares_its_pypi_dependencies() -> None:
+    """Keep the example isolated from the repository development environment."""
+    project = tomllib.loads((EXAMPLE_DIR / "pyproject.toml").read_text())
+    dependencies = project["project"]["dependencies"]
+    uv_config = project["tool"]["uv"]
+
+    assert uv_config["package"] is False
+    assert uv_config["exclude-newer"] == "3 days"
+    assert {
+        name
+        for name, cutoff in uv_config["exclude-newer-package"].items()
+        if cutoff is False
+    } == {
+        "kitaru",
+        "kitaru-braintrust-importer",
+        "kitaru-evaluator",
+        "kitaru-jsonl-importer",
+        "kitaru-langfuse-importer",
+        "kitaru-langgraph",
+        "kitaru-langsmith-importer",
+        "kitaru-openai-agents",
+        "kitaru-pydantic-ai",
+    }
+    assert any(
+        requirement.startswith("kitaru[cli,mcp,worker]") for requirement in dependencies
+    )
+    assert any(
+        requirement.startswith("kitaru-pydantic-ai[openai]")
+        for requirement in dependencies
+    )
+    assert any(requirement.startswith("langfuse") for requirement in dependencies)
+    assert (EXAMPLE_DIR / "uv.lock").is_file()
+
+
+def test_example_environment_does_not_override_the_login_target() -> None:
+    """Let stored local or remote workspace login select the connection."""
+    environment = (EXAMPLE_DIR / ".env.example").read_text()
+
+    assert "KITARU_API_URL" not in environment
+    assert "KITARU_API_KEY" not in environment
 
 
 def test_coding_agent_readme_delegates_evaluator_authoring() -> None:
