@@ -7,7 +7,7 @@ icon: file-import
 
 Kitaru importers convert exported trace data into one session graph. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
 
-Use a provider importer for Langfuse, LangSmith, Braintrust, or OpenTelemetry data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
+Use a provider importer for Langfuse, LangSmith, or Braintrust data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
 
 ## The portable session contract
 
@@ -145,9 +145,8 @@ The pointer root depends on the importer:
 | Braintrust | Each raw trace-root record | `/metadata/customer~1case_id` |
 | Langfuse | Observation records belonging to one trace; every selected value must agree | `/metadata/customer/case_id` |
 | LangSmith | Each raw trace-root run | `/extra/metadata/thread_id` |
-| OpenTelemetry | Each normalized span, with decoded `attributes` and `resource_attributes` objects | `/attributes/gen_ai.conversation.id` |
 
-The selected value must be a non-empty string, number, or boolean. A missing, conflicting, object, or array value produces an isolated failure for that trace. Kitaru does not silently place the trace into a fallback session. Imported metadata records explicit grouping provenance under `braintrust.join_on`, `langfuse.join_paths`, `langsmith.join_paths`, or `otlp.join_on`.
+The selected value must be a non-empty string, number, or boolean. A missing, conflicting, object, or array value produces an isolated failure for that trace. Kitaru does not silently place the trace into a fallback session. Imported metadata records explicit grouping provenance under `braintrust.join_on`, `langfuse.join_paths`, or `langsmith.join_paths`.
 
 ### SDK and REST
 
@@ -194,7 +193,6 @@ Provider importers apply the same output contract to different source formats:
 | Langfuse | Trace, observation, and ingestion-event JSON or JSONL | `sessionId`, then `traceId` |
 | LangSmith | Run-query and bulk-export JSON or JSONL | Known thread metadata paths, then `trace_id` |
 | Braintrust | Project-log and UI JSON exports | Known session or conversation fields, then trace ID |
-| OpenTelemetry | OTLP collector envelopes, flattened OTLP JSONL, Arize JSONL, and Logfire JSONL | Standard conversation attributes, then trace ID |
 | Kitaru | One portable Kitaru session per JSONL line | No grouping; each line is one session |
 
 Normalization includes source identity, parent-child graph reconstruction, deterministic ordering, status and error mapping, model fields, token counts, cost, tool arguments and results, text selectors, visible `reasoning`, and framework detection. Source payloads remain in `inputs` and `outputs`. Session metadata reports normalization warnings and source completeness.
