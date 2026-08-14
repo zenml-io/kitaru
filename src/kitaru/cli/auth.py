@@ -132,10 +132,7 @@ async def login(
         return CommandResult(
             item=item,
             warnings=warnings,
-            links={
-                "dashboard": local_runtime.LOCAL_DASHBOARD_URL,
-                "cloud": "https://cloud.zenml.io/",
-            },
+            links={"dashboard": local_runtime.LOCAL_DASHBOARD_URL},
             next_actions=["Run `kitaru status` to inspect the local server."],
         )
     server_url = validate_server_url(LOCAL_SERVER_URL if local else str(server))
