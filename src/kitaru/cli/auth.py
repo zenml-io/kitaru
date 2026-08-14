@@ -91,10 +91,16 @@ async def login(
             scheme=AuthScheme.NONE,
         )
         if not non_interactive:
-            write_interaction(
-                "Checking the local Docker Compose deployment. "
-                "The first run may download images."
-            )
+            if upgrade:
+                write_interaction(
+                    "Upgrading the local Kitaru server. Docker may download a "
+                    "new image. Your local database will be kept."
+                )
+            else:
+                write_interaction(
+                    "Starting the local Kitaru server. Docker may download "
+                    "images during first-time setup."
+                )
         item, warnings = await local_runtime.start_local_runtime(
             package_version=package_version,
             upgrade=upgrade,
