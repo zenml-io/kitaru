@@ -1,20 +1,21 @@
 ---
-description: Investigations turn "someone should look at these" into a structured review — questions asked, sessions worked through, answers stored as annotations you can calibrate against.
+description: Organize a session review, record answers as annotations, and use those labels to calibrate evaluators.
 icon: magnifying-glass-chart
 ---
 
-# Investigations & Annotations
+# Investigations and annotations
 
-Somewhere between "a complaint came in" and "we fixed it" sits the least structured part of the loop: a human staring at traces. An **investigation** gives that work a shape the rest of Kitaru can use — which sessions were reviewed, what questions were asked, what the reviewer concluded, and where in the trace they saw it.
+An **investigation** organizes a review of recorded sessions. It keeps the sessions in review order, the questions asked about each session, and the reviewer's answers and verdicts. Reviewers can attach their answers to the exact part of a session that supports them.
 
-## The shape of an investigation
+## What an investigation contains
 
-An investigation belongs to one agent and carries:
+An investigation belongs to one agent. It contains linked sessions, each with a `position` that determines the review order.
 
-- **Linked sessions** — the runs under review, each with a `position` that fixes the order the reviewer works through them in.
-- **Questions, per session** — questions hang off each linked session, not off the investigation, so one review can ask different things of different runs. Each is a `key` (unique within that session) plus the display text: `refund_justified="Was the refund justified?"`.
-- **Highlights, per question** — a question can carry highlights that point the reviewer at the exact place in the trace it is about. Each highlight is a **selector** plus a prose `description`, so the reviewer starts where the curator left off instead of re-reading the run.
-- **A verdict, per session** — the reviewer settles each linked session as `acceptable`, `problematic`, or `uncertain`. The verdict is optional until then, and the investigation tracks `completed_sessions` (linked sessions that have one) against `total_sessions`. The investigation's own `status` is separate: `pending`, `in_progress`, or `completed`.
+Questions belong to individual linked sessions rather than to the investigation as a whole. This allows the review to ask different questions about different runs. Each question has a `key`, unique within its session, and display text such as `refund_justified="Was the refund justified?"`.
+
+A question can also include highlights. Each highlight has a selector and a description that point the reviewer to relevant evidence in the session.
+
+The reviewer can give each linked session a verdict of `acceptable`, `problematic`, or `uncertain`. A session remains incomplete until it has a verdict. The investigation reports this through `completed_sessions` and `total_sessions`. Its overall `status` is tracked separately as `pending`, `in_progress`, or `completed`.
 
 ```bash
 kitaru investigation create refund-complaints --agent support-agent \
@@ -26,7 +27,7 @@ kitaru investigation session list <investigation-id>
 kitaru investigation session verdict <investigation-id> <session-id> problematic
 ```
 
-Questions and highlights are addressed by `SESSION:KEY`, and every key must name a session you also passed with `--session`. Highlights take a JSON array so a selector can be given exactly:
+Questions and highlights use the form `SESSION:KEY`. The session must also be present in a `--session` argument. Highlights accept a JSON array so you can provide the selector directly:
 
 ```bash
 kitaru investigation create refund-complaints --agent support-agent \
@@ -37,14 +38,11 @@ kitaru investigation create refund-complaints --agent support-agent \
 
 ## Annotations: answers with an address
 
-Every answer is an **annotation**: a JSON value attached to a session — optionally pinned, through a **selector**, to a specific node (`node_id`), an RFC 6901 JSON pointer into it or the session response (`path`), and a character range within the resolved string (`span`, which requires a `path`). "The tone turned hostile _here_" is recordable, not a vibe in a meeting. Highlights on an investigation question use the same selector, so a curator points at evidence exactly the way a reviewer annotates it.
+Every answer is an **annotation**, which stores a JSON value against a session. A **selector** can attach the annotation to more specific evidence: a node (`node_id`), an RFC 6901 JSON pointer into the node or session response (`path`), or a character range within the resolved string (`span`, which requires a `path`). Investigation highlights use the same selector format.
 
-Annotations come from two places, and the difference is which fields the create request carries:
+An answer to an investigation question uses `investigation_session_id` and `question_key`. Kitaru stores both fields on the resulting annotation. A manual annotation uses only `session_id` and can be added to any session, whether or not it belongs to an investigation.
 
-- **Answering an investigation question** — addressed by `investigation_session_id` + `question_key`. The stored annotation keeps both, so an investigation's output is a labeled dataset: every session, every question, one value each.
-- **Manual annotation** — addressed by `session_id` alone, on any session, investigation or not, for ad-hoc labels.
-
-Both land in the same place. `AnnotationResponse` always has `session_id`, `selector` and `value`; `investigation_session_id` and `question_key` are populated only for answers. That is what lets you query one surface and still tell curated review apart from a passing note.
+Both operations create an `AnnotationResponse` with `session_id`, `selector`, and `value`. Only answers to investigation questions populate `investigation_session_id` and `question_key`, so queries can distinguish them from manual annotations.
 
 ```bash
 # an answer to a question
@@ -57,11 +55,11 @@ kitaru annotation create --session <id> \
   --value '{"issue": "tone", "severity": "high"}'
 ```
 
-`value` is arbitrary JSON — a boolean for a yes/no question, a rubric object, a rating. Kitaru does not impose a schema, which means the shape is yours to keep consistent; that consistency is what makes the answers usable as evaluator calibration data later. Annotations can be listed, fetched, updated (`--value` only) and deleted.
+`value` can contain any JSON, such as a boolean answer, a rating, or a rubric object. Kitaru does not impose a schema. Use a consistent shape if you plan to compare annotations or use them to calibrate an evaluator. Annotations can be listed, fetched, updated (`--value` only), and deleted.
 
 ## Working through a review
 
-The reviewer's loop is three calls, whoever makes them:
+A review normally uses three operations:
 
 ```bash
 kitaru investigation session list <investigation-id>  # what's queued, in position order
@@ -70,14 +68,14 @@ kitaru annotation create --investigation-session <id> \
 kitaru investigation session verdict <investigation-id> <session-id> problematic
 ```
 
-Answers and the verdict are deliberately separate. The answers are the data — per question, per session, comparable across the investigation. The verdict is the reviewer's disposition of the session as a whole, and it is what `completed_sessions` counts. A session can carry answers and still be unsettled; that is the queue telling you the review is not finished.
+Answers and verdicts are separate. Answers record a value for each question. The verdict records the reviewer's conclusion about the session as a whole, and `completed_sessions` counts sessions with a verdict. A session can therefore have answers but remain incomplete until the reviewer sets its verdict.
 
-## Why this feeds everything else
+## Using investigation results
 
-Investigations are how human judgment enters the system in a form the rest of the loop can consume:
+Investigation answers can serve as human labels for [evaluator calibration](../guides/write-an-evaluator.md#calibrate-against-human-judgment). Run the evaluator over the same sessions, then compare its evaluations with the annotations for each question.
 
-- **Calibration.** An investigation's answers are exactly the human labels that [evaluator calibration](../guides/write-an-evaluator.md#calibrate-against-human-judgment) needs: run the evaluator over the same sessions and compare its evaluations to the annotations, question by question.
-- **Cohorts.** The sessions an investigation confirmed as failures are the natural seed for a [cohort](cohorts.md) — the complaint that triggered the review becomes a regression suite that outlives it.
-- **Assistant-driven review.** Over [MCP](../agent-native/mcp-server.md), `kitaru_review_read` and `kitaru_review_manage` let a coding assistant work through an investigation — read the curated views, answer the questions, annotate what it finds — with a human curating the queue.
+Sessions confirmed as failures can also be collected in a [cohort](cohorts.md) and included in later regression experiments.
+
+Over [MCP](../agent-native/mcp-server.md), `kitaru_review_read` and `kitaru_review_manage` let a coding assistant read the review queue, answer questions, and create annotations. A human still decides which sessions to review and what verdict to assign.
 
 The client mirrors the surface: `client.investigations.*` and `client.annotations.*`.

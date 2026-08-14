@@ -1,11 +1,11 @@
 ---
-description: What a replayed tool call gets — the recorded answer, a canned result, the live tool, or a hard stop.
+description: Choose whether replayed tool calls use recorded results, static results, live tools, or model-generated responses.
 icon: shield-halved
 ---
 
 # Tool policies
 
-When a [replay](../concepts/replay.md) re-runs your agent and the agent calls a tool, something has to answer. The **tool policy** decides what: per tool name, with a default for everything else. It's the difference between a replay that's a safe, sealed experiment and one that refunds a card twice.
+When a [replay](../concepts/replay.md) reaches a tool call, the **tool policy** determines how the adapter responds. You can configure individual tools and set a default for all others. Without a suitable policy, a replay can call a live tool and repeat its side effects.
 
 ```python
 from kitaru.api_models.v1.replay_config import (
@@ -29,7 +29,7 @@ policy = ToolPolicy(
 )
 ```
 
-A policy travels with a replay or an [experiment](../concepts/experiments.md); the adapter enforces it inside your re-running agent at the tool boundary. On the CLI, the same structure goes to `kitaru experiment create --tool-policy` as JSON:
+A policy belongs to a replay or an [experiment](../concepts/experiments.md). The adapter applies it when the re-running agent calls a tool. On the CLI, pass the same structure to `kitaru experiment create --tool-policy` as JSON:
 
 ```bash
 --tool-policy '{"default": {"type": "history", "scope": "baseline", "on_miss": "fail"},
@@ -38,47 +38,47 @@ A policy travels with a replay or an [experiment](../concepts/experiments.md); t
 
 ## The four policies
 
-### `history` — answered from the recording
+### `history`: use a recorded result
 
-The workhorse. The call is matched against recorded tool calls — same tool name, same arguments — and gets the recorded result. Your agent believes it called the tool; nothing outside the process happened.
+The adapter looks for a recorded call with the same tool name and arguments. If it finds one, it returns the recorded result without executing the live tool.
 
 `scope` says which recordings answer:
 
 | Scope | Answers come from |
 | --- | --- |
-| `baseline` | Only the session being replayed — the strictest, most faithful choice |
-| `cohort_version` | Any session in the experiment's cohort — useful when runs share tool traffic (only valid inside experiments) |
-| `agent` | Any of the agent's sessions — the widest net |
+| `baseline` | Only the session being replayed. This is the narrowest scope. |
+| `cohort_version` | Any session in the experiment's cohort. This scope is valid only inside experiments. |
+| `agent` | Any session belonging to the agent. |
 
-`on_miss` says what an _unrecorded_ call does — and this is where the safety posture lives:
+`on_miss` controls what happens when no recorded call matches:
 
-- `fail` — stop the replay. Nothing unrecorded ever executes. Use this for anything with side effects.
-- `error_result` — hand the agent a tool error and let it cope. The replay continues, and how the agent handles the miss is itself signal.
-- `passthrough` — fall through to the live tool. Only for tools that are safe to re-execute.
+- `fail`: stop the replay without executing the tool. Use this for tools with side effects.
+- `error_result`: return a tool error to the agent and continue the replay.
+- `passthrough`: execute the live tool. Use this only when repeating the call is safe.
 
-A fork that changes the model or prompt _will_ sometimes take new paths and call tools the baseline never called. A miss isn't noise — it's the fork diverging. `fail` tells you loudly; `error_result` lets the run finish so the evaluator can assess the recovery.
+A model or prompt change may cause the agent to call a tool that does not appear in the baseline. With `fail`, that call stops the replay. With `error_result`, the agent receives an error and the evaluator can assess its response.
 
-### `static` — a canned answer
+### `static`: return a configured result
 
-You script the world. Each `StaticCase` matches arguments (`match_mode="exact"` or `"subset"`) and returns your `result` — ideal for injecting the counterfactual ("what if the refund had already succeeded?") or for stubbing a tool that didn't exist when the baseline was recorded. `on_miss` works as above.
+Each `StaticCase` matches arguments with `match_mode="exact"` or `"subset"` and returns the configured `result`. Use it to test a specific condition, such as a refund that has already succeeded, or to stub a tool that was absent from the baseline. `on_miss` controls unmatched arguments as described above.
 
-### `passthrough` — the live tool
+### `passthrough`: execute the live tool
 
-The real thing, live. **This is the default when you set no policy at all** — a deliberate choice for read-only tools (clocks, retrieval, search), and a footgun for anything that writes. If a replay must touch a live system, prefer scoping `passthrough` to the specific safe tools and keeping a `history` default, rather than the reverse.
+**This is the default when you set no policy.** The adapter executes the live tool and returns its result. This may be appropriate for safe read-only calls such as clocks or search. It is unsafe for calls that write data or trigger external actions. Prefer a `history` default and configure `passthrough` only for specific tools that are safe to repeat.
 
-### `llm` — a model plays the tool
+### `llm`: generate a result with a model
 
-`LLMConfig(model=..., instructions=...)` asks a model to answer the tool call in-distribution — for simulating tools whose recordings you don't have.
+`LLMConfig(model=..., instructions=...)` asks a model to generate a response to the tool call. This can simulate a tool when no recorded result is available.
 
-{% hint style="warning" %} The `llm` policy is accepted and stored by the API but **not yet supported by the PydanticAI adapter** — a replay that reaches an `llm`-configured tool fails with a policy error. Treat it as roadmap; use `static` for scripted worlds today. {% endhint %}
+{% hint style="warning" %} The API accepts and stores the `llm` policy, but the PydanticAI adapter does not yet support it. A replay that reaches an `llm`-configured tool fails with a policy error. Use `static` when you need to provide a simulated result with this adapter. {% endhint %}
 
 ## How matching works
 
-A recorded `tool_call` node carries a cache key: a hash of the tool name and its canonical JSON arguments. The replaying adapter computes the same key for the live call and asks the server for a match within the policy's scope. Exact-argument matching is the point — a call with different arguments is a different call, and pretending otherwise would corrupt the world your fork runs in.
+A recorded `tool_call` node has a cache key derived from the tool name and its canonical JSON arguments. During replay, the adapter computes the same key for the attempted call and asks the server for a match within the policy's scope. Calls with different arguments have different keys and do not match.
 
-One edge case: a tool call whose arguments can't be serialized to canonical JSON gets no cache key at all. No lookup can match it, so on replay it always takes the `on_miss` path — one more reason to keep tool arguments JSON-clean.
+If a tool call's arguments cannot be serialized to canonical JSON, the call has no cache key. A history lookup cannot match it, so replay follows the configured `on_miss` behavior. Keep tool arguments JSON-serializable if you plan to replay them from history.
 
-## Choosing a posture
+## Choosing a policy
 
 | Situation | Policy |
 | --- | --- |

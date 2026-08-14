@@ -1,17 +1,17 @@
 ---
-description: Freeze a cohort of real runs, replay it against every change, and gate your CI on what production already taught you.
+description: Freeze a cohort of recorded runs, replay it against a change, and use the results in CI.
 icon: vials
 ---
 
 # Build a regression suite from production
 
-One replay tells you about one session. A hundred replays tell you whether a change is safe to ship. The insight this guide operationalizes: **your production traces are your test suite** — every recorded or imported session is a test case with real inputs, a real decision path, and a known outcome. You never have to write synthetic fixtures again; you have to _select_ well.
+Replaying a change against one session shows how it affects that case. A regression suite repeats the comparison across a fixed set of recorded or imported sessions. These sessions complement synthetic fixtures: they preserve inputs and behavior seen in real runs, while synthetic cases can cover conditions that have not occurred in production.
 
-The loop: select a cohort → freeze it → make the change an experiment → replay and score → keep the winner → gate on it.
+This guide selects a population, freezes it as a cohort version, defines a change as an experiment, and runs that experiment in CI.
 
 ## 1. Select the population
 
-Pick the sessions that represent what you can't afford to break. List and filter by agent, status, or time; or start from the sessions a specific failure taught you about:
+Pick sessions that cover important behavior and known failures. You can filter by agent, status, or time, or start with sessions linked to a specific incident:
 
 ```python
 import asyncio
@@ -30,18 +30,18 @@ async def main() -> None:
     ][:50]
 ```
 
-A good starting population is one week of traffic plus every session that ever triggered an incident. [Imported sessions](import-langfuse-traces.md) qualify exactly like recorded ones — your Langfuse history from before Kitaru existed is admissible evidence, and if you imported it with `--tag`, the tag _is_ your selection (`kitaru session list --tag imported-baseline`). Recorded live rather than imported? Select by `--agent` or a `--filter` instead — any selection works.
+A useful starting point is a recent sample of traffic plus sessions linked to past incidents. [Imported sessions](import-langfuse-traces.md) work like recorded sessions. If you tagged an import, use that tag to select it (`kitaru session list --tag imported-baseline`). You can select directly recorded sessions with `--agent` or `--filter`.
 
 ## 2. Freeze it into a cohort version
 
-From the CLI, one command — `cohort create` takes a session selection (`--tag`, `--session`, `--sessions-file`, `--filter` — the same surface `session evaluate` offers) and freezes the match into version 1. `--agent` is not a selector here; it names the agent the cohort belongs to:
+`cohort create` accepts a session selection through `--tag`, `--session`, `--sessions-file`, or `--filter`. It stores the matching sessions as version 1. Here, `--agent` names the agent that owns the cohort; it does not select sessions:
 
 ```bash
 kitaru cohort create refund-regression --agent support-agent \
   --tag imported-baseline --display-version week-32
 ```
 
-Or from the client, straight from the selection above:
+The client can create the cohort and its first version from the selection above:
 
 ```python
 from kitaru.api_models.v1.cohort import CohortCreateRequest
@@ -56,7 +56,7 @@ version = await client.cohorts.create_version(
 )
 ```
 
-[Cohort versions are immutable](../concepts/cohorts.md). That's what makes week-over-week numbers comparable: version 1 is always the same 50 sessions, and "the suite got harder" is an explicit new version, not a silent drift.
+[Cohort versions are immutable](../concepts/cohorts.md). Version 1 therefore keeps the same 50 sessions. To add or remove sessions, create a new version so later comparisons show that the population changed.
 
 ## 3. Make the change an experiment
 
@@ -87,9 +87,9 @@ experiment = await client.experiments.create(
 )
 ```
 
-Both evaluators must already be registered — `tone-judge` stands in for whatever second lens you've written; [Write an evaluator](write-an-evaluator.md) is the recipe.
+Both evaluators must already be registered. In this example, `tone-judge` represents a second evaluator written for your application. See [Write an evaluator](write-an-evaluator.md).
 
-Testing a **code** change instead? Leave `override` out entirely and register your branch as a new agent version — the run supplies it next. The `history` policy scoped to `cohort_version` answers tool calls from any recording in the cohort, and `on_miss="fail"` keeps 50 replays from touching a single live system.
+To test a code change, omit `override` and register the branch as a new agent version. The experiment run selects that version. The `history` policy with `scope="cohort_version"` can answer tool calls from any recording in the cohort. With `on_miss="fail"`, an unmatched call stops its replay instead of reaching the live tool.
 
 The CLI form takes the override and tool policy as JSON:
 
@@ -103,7 +103,7 @@ kitaru experiment create cheaper-model \
 
 ## 4. Run it and read it
 
-Register the candidate first if it doesn't exist yet — `kitaru agent version register` is what mints `support-agent@2`:
+If the candidate version does not exist yet, register it with `kitaru agent version register`. The following example uses `support-agent@2`:
 
 ```bash
 kitaru experiment run start cheaper-model \
@@ -128,7 +128,7 @@ run = await client.experiments.start_run(
 )
 ```
 
-Workers fan out one replay per session; `run.progress` counts them through. When the run settles, every replay has a result session and both sides carry evaluations. Aggregate them the way the data types suggest — numbers average, booleans count into pass rates, labels diff as transitions:
+Workers create one replay task per session, and `run.progress` reports how many have finished. When the run settles, each replay has a result session. If `evaluate_baselines=True`, the baseline and result sessions both have evaluations. The example below compares boolean pass results:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationListParams
@@ -156,11 +156,11 @@ print(f"baseline: {sum(filter(None, baseline_pass))}/{len(replays)}")
 print(f"fork:     {sum(filter(None, fork_pass))}/{len(replays)}")
 ```
 
-Add cost from the result sessions' rollups and the headline writes itself: _"gpt-5-nano held on 47 of 50 refund tickets and cut cost 41%; the 3 misses are sessions #…, #…, #… — read those."_ The misses are the point: each one is a concrete recorded run you can [replay and step through](replay-and-overrides.md), not a percentage.
+You can also aggregate cost from the result sessions' rollups. Report both the summary and the underlying failures, for example: _"gpt-5-nano passed 47 of 50 refund tickets and reduced recorded cost by 41%. The failed cases were sessions 12, 19, and 44."_ You can then [replay and inspect](replay-and-overrides.md) each failed session.
 
 ## 5. Gate on it
 
-The cohort that caught a failure becomes the gate that keeps it caught. In CI: register the PR's code as an agent version, start a run against the frozen cohort version, and fail the build on the result:
+To use the experiment in CI, register the pull request's code as an agent version and start a run against the frozen cohort version:
 
 ```bash
 kitaru agent version register support-agent --command "python support.py"
@@ -170,6 +170,6 @@ kitaru experiment run start cheaper-model \
   --evaluate-baselines --wait --timeout 1800
 ```
 
-`--wait` blocks until the run settles and exits nonzero on failure, so the command doubles as the CI gate; `--output jsonl` streams progress in a form your pipeline can parse. A worker executes the suite — either a long-running pool, or one started in the CI job itself (`kitaru worker start`).
+`--wait` blocks until the run settles and exits nonzero if it fails, so the CI job can use the command as a gate. `--output jsonl` streams progress in a machine-readable format. A long-running worker pool can execute the suite, or the CI job can start a worker with `kitaru worker start`.
 
-Keep two shapes: a small cohort per PR (the incidents plus a dozen representative runs), and the wide week-of-traffic sweep nightly. When a new failure ships anyway, the postmortem's last step is one line: add its session to the cohort — that's a new version — and it can never ship again unnoticed.
+A practical setup uses a small cohort for pull requests and a larger traffic sample for scheduled runs. When you find a new failure, add its session to a new cohort version. Future runs will then include that case, although the evaluator still needs to detect the behavior for the CI gate to catch it.
