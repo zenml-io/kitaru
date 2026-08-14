@@ -83,6 +83,7 @@ from kitaru.server.api.bootstrap import (
 from kitaru.server.api.config import APISettings
 from kitaru.server.api.otel import configure_otel, instrument_engine, shutdown_otel
 from kitaru.server.api.task_sweeper import start_task_sweeper, stop_task_sweeper
+from kitaru.server.api.ui import get_ui_version, register_ui
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
     build_analytics_context,
@@ -367,4 +368,7 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(ui.router, prefix="/v1/ui", tags=["ui"])
     app.include_router(users.router, prefix="/v1/users", tags=["users"])
     app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
+    app.state.ui_version = None if settings.EXTERNAL_UI else get_ui_version()
+    # Register last so the UI catch-all only sees paths no API route matched.
+    register_ui(app, settings)
     return app

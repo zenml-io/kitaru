@@ -79,6 +79,7 @@ class APISettings(Settings):
     AUTH_COOKIE_SECURE: bool | None = None
 
     DASHBOARD_URL: str = ""
+    EXTERNAL_UI: bool = False
     DEVICE_AUTH_TIMEOUT_SECONDS: int = 300
     DEVICE_AUTH_POLLING_INTERVAL_SECONDS: int = 5
     MAX_FAILED_DEVICE_AUTH_ATTEMPTS: int = 3
@@ -166,4 +167,18 @@ class APISettings(Settings):
                 raise ValueError("Set KITARU_SERVER_SERVER_ID")
         if not self.SECRET_ENCRYPTION_KEY:
             raise ValueError("Set KITARU_SERVER_SECRET_ENCRYPTION_KEY")
+        return self
+
+    @model_validator(mode="after")
+    def validate_ui_settings(self) -> Self:
+        """Validate UI serving settings.
+
+        Raises:
+            ValueError: A required setting is not set.
+
+        Returns:
+            The validated settings object.
+        """
+        if self.EXTERNAL_UI and not self.DASHBOARD_URL:
+            raise ValueError("Set KITARU_SERVER_DASHBOARD_URL")
         return self
