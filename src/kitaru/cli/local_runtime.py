@@ -398,8 +398,11 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
         )
     image_version = package_version
-    if parsed_version.pre is not None and parsed_version.pre[0] == "rc":
-        image_version = f"{parsed_version.base_version}-rc.{parsed_version.pre[1]}"
+    if parsed_version.pre is not None:
+        prerelease_type, prerelease_number = parsed_version.pre
+        image_version = (
+            f"{parsed_version.base_version}-{prerelease_type}.{prerelease_number}"
+        )
     return f"zenmldocker/kitaru-server:{image_version}", False
 
 
