@@ -152,6 +152,7 @@ def test_typescript_release_workflow_contract() -> None:
     assert "permissions:\n      contents: write" in verify_source
     assert "--provenance" in publish_source
     assert "preflight_package" in publish_source
+    assert publish_source.count('"./typescript-dist/zenml-io-kitaru') == 3
     assert "NPM_CONFIG_USERCONFIG" in publish_source
     assert "else\n                view_status=$?" in publish_source
     assert "fi\n              view_status=$?" not in publish_source

@@ -32,6 +32,7 @@ def test_format_client_header() -> None:
 def test_parse_client_header() -> None:
     """Parse the source from well-formed header values."""
     assert parse_client_header("kitaru-python/0.21.0") is AnalyticsSource.PYTHON
+    assert parse_client_header("kitaru-typescript") is AnalyticsSource.TYPESCRIPT
     assert parse_client_header("kitaru-ui/1.2.3") is AnalyticsSource.UI
     assert parse_client_header("kitaru-cli") is AnalyticsSource.CLI
 
