@@ -31,6 +31,8 @@ The shared code creates and completes Kitaru sessions, allocates node indexes, w
 
 History matching is guaranteed only within the same adapter contract. Frameworks can validate, default, or serialize tool inputs differently, so a history key recorded by one adapter is not guaranteed to match a replay through another adapter.
 
+The current history lookup response uses `null` both for a recorded tool failure and for a legitimate successful `null` result. TypeScript adapters therefore reject a found `null` history result instead of treating a previous failure as a successful replay or executing the tool. This fail-closed rule applies regardless of `on_miss` until the API can distinguish those states.
+
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll that effect back. Use application-level idempotency keys for side-effecting tools, or choose static/history policies when replay must suppress execution.
 
 ## Data and ordering limits

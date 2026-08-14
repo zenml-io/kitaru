@@ -1,4 +1,4 @@
-import { jsonSchema, tool } from "ai";
+import { jsonSchema, Output, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
 
@@ -46,6 +46,122 @@ describe("createKitaruGenerateText", () => {
       status: "completed",
     });
     expect(llmNode?.attributes).toMatchObject({ provider_metadata: null });
+  });
+
+  it("preserves deprecated callbacks and gives stable names precedence", async () => {
+    const client = new FakeClient();
+    const stableStart = vi.fn();
+    const deprecatedStart = vi.fn();
+    const stableEnd = vi.fn();
+    const deprecatedEnd = vi.fn();
+    const stableStep = vi.fn();
+    const deprecatedStep = vi.fn();
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+
+    await generate({
+      experimental_onLanguageModelCallEnd: deprecatedEnd,
+      experimental_onLanguageModelCallStart: deprecatedStart,
+      model: new MockLanguageModelV4({ doGenerate: textResponse() }),
+      onLanguageModelCallEnd: stableEnd,
+      onLanguageModelCallStart: stableStart,
+      onStepEnd: stableStep,
+      onStepFinish: deprecatedStep,
+      prompt: "go",
+    });
+
+    expect(stableStart).toHaveBeenCalledOnce();
+    expect(stableEnd).toHaveBeenCalledOnce();
+    expect(stableStep).toHaveBeenCalledOnce();
+    expect(deprecatedStart).not.toHaveBeenCalled();
+    expect(deprecatedEnd).not.toHaveBeenCalled();
+    expect(deprecatedStep).not.toHaveBeenCalled();
+
+    const aliasStart = vi.fn();
+    const aliasEnd = vi.fn();
+    const aliasStep = vi.fn();
+    await generate({
+      experimental_onLanguageModelCallEnd: aliasEnd,
+      experimental_onLanguageModelCallStart: aliasStart,
+      model: new MockLanguageModelV4({ doGenerate: textResponse() }),
+      onStepFinish: aliasStep,
+      prompt: "go",
+    });
+
+    expect(aliasStart).toHaveBeenCalledOnce();
+    expect(aliasEnd).toHaveBeenCalledOnce();
+    expect(aliasStep).toHaveBeenCalledOnce();
+  });
+
+  it("records configured structured output in the run summary", async () => {
+    const client = new FakeClient();
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+    const answerSchema = jsonSchema<{ answer: string }>(
+      {
+        additionalProperties: false,
+        properties: { answer: { type: "string" } },
+        required: ["answer"],
+        type: "object",
+      },
+      {
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          typeof (value as { answer?: unknown }).answer === "string"
+            ? { success: true, value: value as { answer: string } }
+            : { success: false, error: new TypeError("invalid answer") },
+      },
+    );
+
+    const result = await generate({
+      model: new MockLanguageModelV4({
+        doGenerate: textResponse('{"answer":"yes"}'),
+      }),
+      output: Output.object({ schema: answerSchema }),
+      prompt: "go",
+    });
+
+    expect(result.output).toEqual({ answer: "yes" });
+    expect(client.updated.at(-1)?.outputs).toMatchObject({
+      object: { answer: "yes" },
+    });
+  });
+
+  it("does not fail a non-stop generation whose structured output is unavailable", async () => {
+    const client = new FakeClient();
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+    const answerSchema = jsonSchema<{ answer: string }>({
+      additionalProperties: false,
+      properties: { answer: { type: "string" } },
+      required: ["answer"],
+      type: "object",
+    });
+
+    const result = await generate({
+      model: new MockLanguageModelV4({
+        doGenerate: {
+          ...textResponse('{"answer":"unfinished"}'),
+          finishReason: { raw: "length", unified: "length" },
+        },
+      }),
+      output: Output.object({ schema: answerSchema }),
+      prompt: "go",
+    });
+
+    expect(result.finishReason).toBe("length");
+    expect(client.updated.at(-1)).toMatchObject({ status: "completed" });
+    expect(client.updated.at(-1)?.outputs).not.toHaveProperty("object");
   });
 
   it("records bounded provider metadata without the whole SDK result", async () => {

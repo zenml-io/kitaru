@@ -22,6 +22,10 @@ type ModelResult = {
   warnings: unknown[];
 };
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
 function toolResult(
   suffix: string,
   calls: Array<{ input: string; toolCallId: string; toolName: string }>,
@@ -102,6 +106,15 @@ export function createDeterministicModel(replay = false): unknown {
       }
       if (replay && !serializedOptions.includes(REPLAY_INSTRUCTIONS)) {
         throw new Error("Expected replay instructions were not applied");
+      }
+      const expectedMaxOutputTokens = replay ? 3000 : 2000;
+      if (
+        !isRecord(options) ||
+        options.maxOutputTokens !== expectedMaxOutputTokens
+      ) {
+        throw new Error(
+          `Expected maxOutputTokens=${expectedMaxOutputTokens} was not applied`,
+        );
       }
       const result = results[index++];
       if (!result) {

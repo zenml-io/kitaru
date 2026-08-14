@@ -7,7 +7,9 @@ This demo records and replays a real Mastra `Agent` using OpenAI `gpt-5-nano`. T
 
 The Python driver registers the agent command and evaluator with the current Kitaru API, creates a session-run job, and executes the compiled Node command through a job-scoped `Worker`. It then creates and runs a replay job. During replay, Kitaru returns the original `queueRefundReview` result from history, so the append-only outbox stays at one line. The replay also replaces the input, system instructions, and `maxOutputTokens`, then runs three Python evaluations against the result session.
 
-Every LLM node records `openai/gpt-5-nano` as the requested model and whatever model id the provider served, which is not the same string. Kitaru never prices a call itself, so `agent.ts` passes a `costCalculator` that turns recorded token usage into dollars; without it the session would total `$0`.
+Every LLM node records `openai/gpt-5-nano` as the requested model and whatever model id the provider served, which is not the same string. Kitaru never prices a call itself, so `agent.ts` passes a `costCalculator` that turns recorded token usage into dollars; without it cost would be unavailable rather than zero.
+
+The baseline allows 2,000 output tokens and the replay raises that limit to 3,000. The larger baseline budget gives `gpt-5-nano` enough room for reasoning and a non-empty final answer; the driver refuses to replay a baseline whose recorded text is missing or blank.
 
 ## Run
 
@@ -15,8 +17,7 @@ Use Node 22 and a running Kitaru API backed by PostgreSQL. Export `KITARU_API_UR
 
 ```bash
 pnpm install --frozen-lockfile
-pnpm --filter @zenml-io/kitaru-mastra build
-pnpm --filter @zenml-io/kitaru-example-mastra-support-triage build
+pnpm build
 OPENAI_API_KEY='your-openai-key' uv run python -m v2_examples.mastra_support_triage.demo
 ```
 

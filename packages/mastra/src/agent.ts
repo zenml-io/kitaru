@@ -129,12 +129,12 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       };
     }
     if (replay.spec) {
+      stripLiveMemoryOptions(effectiveOptions);
       await assertReplayToolCoverage({
         agent: this.#agent,
         runtimeOptions: effectiveOptions,
         spec: replay.spec,
       });
-      stripLiveMemoryOptions(effectiveOptions);
       // Serial tool calls let a policy failure stop the run before another
       // tool in the same step executes for real.
       effectiveOptions.toolCallConcurrency = 1;
@@ -196,7 +196,15 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
         throw state.failure;
       }
       await recorder.complete(
-        boundedRecorderJson(runResultSummary(result), "generation result"),
+        boundedRecorderJson(
+          runResultSummary(result, {
+            structuredOutputField:
+              effectiveOptions.structuredOutput === undefined
+                ? undefined
+                : "object",
+          }),
+          "generation result",
+        ),
       );
       return result;
     } catch (error) {

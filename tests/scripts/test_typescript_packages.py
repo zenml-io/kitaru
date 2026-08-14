@@ -153,6 +153,8 @@ def test_typescript_release_workflow_contract() -> None:
     assert "--provenance" in publish_source
     assert "preflight_package" in publish_source
     assert "NPM_CONFIG_USERCONFIG" in publish_source
+    assert "else\n                view_status=$?" in publish_source
+    assert "fi\n              view_status=$?" not in publish_source
     assert "Verify registry installation" in verify_source
     assert 'gh release view "$PACKAGE_TAG"' in verify_source
     assert "gh release upload" in verify_source
@@ -178,3 +180,25 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
 
     assert base_matrix.count("--ignore=tests/typescript") == 4
     assert "run: uv run pytest -q tests/typescript" in typescript_job
+
+
+def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
+    workflow_source = CI_WORKFLOW_PATH.read_text()
+    job = workflow_source.split("\n  typescript-ticket-resolver:\n", maxsplit=1)[
+        1
+    ].split("\n  client-import:\n", maxsplit=1)[0]
+
+    assert "image: postgres:16-alpine" in job
+    assert "run: pnpm install --frozen-lockfile" in job
+    assert "pnpm --filter @zenml-io/kitaru build" in job
+    assert "pnpm --filter @zenml-io/kitaru-vercel-ai build" in job
+    assert "CI=true pnpm --ignore-workspace install --frozen-lockfile" in job
+    for command in (
+        "pnpm build",
+        "pnpm test",
+        "pnpm test:evaluator",
+        "pnpm typecheck",
+        "pnpm lint",
+        "pnpm test:e2e",
+    ):
+        assert command in job

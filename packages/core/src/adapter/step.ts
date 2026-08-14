@@ -74,8 +74,8 @@ function toolNode(
   const ledgerEntry = state.getToolCall(call.callId);
   const failed =
     ledgerEntry?.outcome === "failed" ||
-    call.result === undefined ||
-    call.result.failed;
+    call.result?.failed === true ||
+    (call.result === undefined && ledgerEntry?.outcome !== "completed");
   return {
     ...state.allocateNode(),
     attributes: toolCallAttributes(

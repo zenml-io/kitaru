@@ -188,6 +188,32 @@ export class FakeAgent {
     this.calls.push({ messages, options });
     return this.#run(messages, options);
   }
+
+  async getToolsForExecution(
+    options: RuntimeGenerateOptions = {},
+  ): Promise<Record<string, unknown>> {
+    return Object.assign(
+      {},
+      options.clientTools,
+      ...Object.values(
+        (options.toolsets as
+          | Record<string, Record<string, unknown>>
+          | undefined) ?? {},
+      ),
+    );
+  }
+
+  async getDefaultOptions(): Promise<Record<string, unknown>> {
+    return {};
+  }
+
+  async listConfiguredInputProcessors(): Promise<unknown[]> {
+    return [];
+  }
+
+  async listTools(): Promise<Record<string, unknown>> {
+    return {};
+  }
 }
 
 export async function invokeTool(

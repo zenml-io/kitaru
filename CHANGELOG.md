@@ -24,7 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Prepared the first Kitaru 0.22 release candidate with a selected frontend release and independently versioned plugin packages.
 ## [Unreleased]
 
+### Fixed
+
+- Fixed TypeScript replay policy edge cases and made the adapter examples reproducible, rerunnable, and part of CI.
+
 ### Added
+- TypeScript SDK packages for the core client and replay runtime, with Mastra and Vercel AI SDK adapters and runnable examples.
 - TypeScript release packaging for the core, Mastra, and Vercel AI SDK packages, with lockstep release-candidate versions, clean-consumer tarball checks, npm publishing, and GitHub release artifacts.
 - Session lists filter by `experiment_run_id`, returning the sessions produced as the results of the run's replays. Baseline sessions do not match.
 - The PydanticAI adapter records estimated LLM costs from its bundled pricing catalog and accepts a custom cost calculator for private models or negotiated rates.

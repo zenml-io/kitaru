@@ -29,6 +29,23 @@ const VALUE_INPUT = jsonSchema<{ value: string }>(
   },
 );
 
+const SUCCESS_OUTPUT = jsonSchema<{ saved: boolean }>(
+  {
+    additionalProperties: false,
+    properties: { saved: { type: "boolean" } },
+    required: ["saved"],
+    type: "object",
+  },
+  {
+    validate: (value) =>
+      typeof value === "object" &&
+      value !== null &&
+      typeof (value as { saved?: unknown }).saved === "boolean"
+        ? { success: true, value: value as { saved: boolean } }
+        : { success: false, error: new TypeError("invalid saved result") },
+  },
+);
+
 function modelForValue() {
   return new MockLanguageModelV4({
     doGenerate: toolResponse([
@@ -38,6 +55,26 @@ function modelForValue() {
 }
 
 describe("replay tool policies", () => {
+  it("rejects prepareStep before replay can replace the model or prompt", async () => {
+    const client = new FakeClient({ replay: replaySpec() });
+    const model = modelForValue();
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model,
+        prepareStep: () => ({ model, messages: [] }),
+        prompt: "go",
+      }),
+    ).rejects.toThrow("Replay does not support prepareStep");
+    expect(client.created).toHaveLength(0);
+    expect(model.doGenerateCalls).toHaveLength(0);
+  });
+
   it.each([
     ["provider", { type: "provider" }],
     ["dynamic", { type: "dynamic", execute: async () => "done" }],
@@ -173,6 +210,165 @@ describe("replay tool policies", () => {
     expect(later).not.toHaveBeenCalled();
     expect(model.doGenerateCalls).toHaveLength(1);
     expect(client.updated.at(-1)?.status).toBe("failed");
+  });
+
+  it("fails closed when history returns an ambiguous null result", async () => {
+    const client = new FakeClient({
+      lookup: () => ({ found: true, result: null }),
+      replay: replaySpec({ on_miss: "passthrough", type: "history" }),
+    });
+    const execute = vi.fn(async () => ({ saved: true }));
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model: modelForValue(),
+        prompt: "go",
+        tools: {
+          write: tool({
+            execute,
+            inputSchema: VALUE_INPUT,
+            outputSchema: SUCCESS_OUTPUT,
+          }),
+        },
+      }),
+    ).rejects.toThrow(
+      /cannot distinguish a failed recording from a null result/,
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(client.updated.at(-1)?.status).toBe("failed");
+    const toolNode = client.nodeBatches
+      .flatMap((batch) => batch.nodes)
+      .find((node) => node.node_type === "tool_call");
+    expect(toolNode).toMatchObject({
+      error: expect.stringContaining(
+        "cannot distinguish a failed recording from a null result",
+      ),
+      outputs: null,
+      status: "failed",
+    });
+  });
+
+  it("returns an error_result without validating it as a successful output", async () => {
+    const client = new FakeClient({
+      replay: replaySpec({
+        cases: [],
+        on_miss: "error_result",
+        type: "static",
+      }),
+    });
+    const execute = vi.fn(async () => ({ saved: true }));
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    const result = await generate({
+      model: modelForValue(),
+      prompt: "go",
+      tools: {
+        write: tool({
+          execute,
+          inputSchema: VALUE_INPUT,
+          outputSchema: SUCCESS_OUTPUT,
+        }),
+      },
+    });
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(result.toolResults[0]?.output).toEqual({
+      error: "No static result for tool 'write'",
+    });
+    expect(client.updated.at(-1)?.status).toBe("completed");
+    const toolNode = client.nodeBatches
+      .flatMap((batch) => batch.nodes)
+      .find((node) => node.node_type === "tool_call");
+    expect(toolNode).toMatchObject({
+      attributes: { mocked: true, policy: "static" },
+      error: "No static result for tool 'write'",
+      status: "failed",
+    });
+  });
+
+  it("still validates successful mocked output against the tool schema", async () => {
+    const client = new FakeClient({
+      replay: replaySpec({
+        cases: [
+          {
+            match: null,
+            match_mode: "exact",
+            result: { invalid: true },
+          },
+        ],
+        on_miss: "fail",
+        type: "static",
+      }),
+    });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model: modelForValue(),
+        prompt: "go",
+        tools: {
+          write: tool({
+            execute: async () => ({ saved: true }),
+            inputSchema: VALUE_INPUT,
+            outputSchema: SUCCESS_OUTPUT,
+          }),
+        },
+      }),
+    ).rejects.toThrow("failed its output schema");
+  });
+
+  it("rejects successful mocked output when the output schema has no validator", async () => {
+    const client = new FakeClient({
+      replay: replaySpec({
+        cases: [
+          {
+            match: null,
+            match_mode: "exact",
+            result: { saved: true },
+          },
+        ],
+        on_miss: "fail",
+        type: "static",
+      }),
+    });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model: modelForValue(),
+        prompt: "go",
+        tools: {
+          write: tool({
+            execute: async () => ({ saved: true }),
+            inputSchema: VALUE_INPUT,
+            outputSchema: jsonSchema<{ saved: boolean }>({
+              additionalProperties: false,
+              properties: { saved: { type: "boolean" } },
+              required: ["saved"],
+              type: "object",
+            }),
+          }),
+        },
+      }),
+    ).rejects.toThrow("output schema has no runtime validator");
   });
 
   it("isolates ticket and failure state across concurrent invocations", async () => {

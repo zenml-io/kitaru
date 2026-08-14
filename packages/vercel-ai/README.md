@@ -26,6 +26,8 @@ The returned function has the native AI SDK `generateText` signature and returns
 
 Replay supports local executable tools with passthrough, static, and history policies. Static and history hits return the configured value without calling the original `execute`; passthrough calls the original function. Replay registers tool calls in model-output order before local execution begins, so a failing earlier policy prevents later queued local side effects. Baseline execution retains AI SDK concurrency. Recorded node indexes represent completed adapter callbacks and parent-before-child storage, not provider-side start order or wall-clock order among concurrent work.
 
+Successful static and history values are validated against a tool's `outputSchema`. A schema supplied with `jsonSchema()` must include its optional runtime `validate` callback so replay can enforce it; replay fails closed when a declared output schema has no runtime validator. An `error_result` miss is a deliberate error sentinel, not a successful tool value, so it bypasses that schema, records a failed tool node, and lets the generation continue.
+
 History matching is guaranteed only for traces recorded and replayed through this Vercel AI SDK adapter. Another framework may validate, default, or serialize the same logical tool input differently, so cross-framework history replay is not a compatibility promise.
 
 Kitaru looks recorded tool results up by tool name and arguments. When one run calls the same tool twice with identical arguments, both replayed calls resolve to the last recorded result for that pair, so a polling loop replays differently from its baseline. The adapter writes a `console.warn` the first time a run repeats a call, because nothing else can tell you the replayed trajectory diverged.
@@ -54,7 +56,7 @@ Each LLM node carries a `cost` attribute recording where the number came from: `
 
 ## Current scope
 
-This experimental release supports AI SDK 7 non-streaming `generateText` with local executable tools. It does not support streaming generation, provider-executed or dynamic tools, tool approval, sandboxed replay, async-iterable tools during replay, or the LLM tool policy.
+This experimental release supports AI SDK 7 non-streaming `generateText` with local executable tools. It does not support streaming generation, provider-executed or dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, or the LLM tool policy.
 
 Replay runs tools one at a time in model-output order. `ticketTimeoutMs` (30 seconds by default) bounds how long a queued tool waits for its predecessor to *start*, not how long that predecessor runs, so a slow passthrough tool does not fail the calls queued behind it.
 

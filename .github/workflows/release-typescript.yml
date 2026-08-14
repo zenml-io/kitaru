@@ -157,8 +157,9 @@ jobs:
               if remote_url=$(npm view "$package_name@$VERSION" dist.tarball 2>"$view_error"); then
                 view_status=0
                 break
+              else
+                view_status=$?
               fi
-              view_status=$?
               if grep -q 'E404' "$view_error"; then
                 remote_url=""
                 view_status=0

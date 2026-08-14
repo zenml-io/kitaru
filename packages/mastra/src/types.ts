@@ -1,5 +1,6 @@
 import type { Agent } from "@mastra/core/agent";
 import type { MastraModelConfig } from "@mastra/core/llm";
+import type { RequestContext } from "@mastra/core/request-context";
 import type { LLMStepResult } from "@mastra/core/stream";
 import type { ToolHooks } from "@mastra/core/tools";
 import type { KitaruEnvironmentOptions } from "@zenml-io/kitaru";
@@ -45,6 +46,7 @@ export interface RuntimeGenerateOptions {
   model?: unknown;
   modelSettings?: Record<string, unknown>;
   onStepFinish?: ConfiguredOnStepFinish;
+  requestContext?: RequestContext;
   system?: unknown;
   [key: string]: unknown;
 }

@@ -92,6 +92,32 @@ describe("KitaruAgent", () => {
     });
   });
 
+  it("records configured structured output in the run summary", async () => {
+    const api = installTestApi();
+    const expected = {
+      finishReason: "stop",
+      object: { answer: "yes" },
+      steps: [],
+      text: "",
+    };
+    const agent = new FakeAgent(async () => expected);
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+
+    const result = await recorded.generate("hello", {
+      structuredOutput: { schema: {} },
+    } as never);
+
+    expect(result).toBe(expected);
+    expect(api.nodeBatches().at(-1)?.[0]).toMatchObject({
+      outputs: { object: { answer: "yes" } },
+      status: "completed",
+    });
+  });
+
   it("does not replace caller tool hooks outside replay", async () => {
     installTestApi();
     const callerBefore = vi.fn();

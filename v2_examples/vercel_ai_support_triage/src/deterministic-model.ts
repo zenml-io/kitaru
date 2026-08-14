@@ -97,7 +97,7 @@ export function createDeterministicModel(replay = false): MockLanguageModelV4 {
     doGenerate: async (options) => {
       const serializedPrompt = JSON.stringify(options.prompt);
       const expectedInput = replay ? REPLAY_PROMPT : BASELINE_PROMPT;
-      const expectedMaxOutputTokens = replay ? 2000 : 900;
+      const expectedMaxOutputTokens = replay ? 3000 : 2000;
       if (!serializedPrompt.includes(expectedInput)) {
         throw new Error(
           `Expected ${replay ? "replay" : "baseline"} input was not applied`,

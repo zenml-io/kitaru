@@ -101,7 +101,7 @@ describe("replay tool policies", () => {
     });
   });
 
-  it("treats a found null history result as a hit and sends the cache key", async () => {
+  it("fails closed for an ambiguous found null history result", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi({
       lookup: () => ({ found: true, result: null }),
@@ -120,11 +120,10 @@ describe("replay tool policies", () => {
       unknown
     >;
 
-    const result = await wrapper(replayAgent(execute, rawInput)).generate(
-      "run",
-    );
+    await expect(
+      wrapper(replayAgent(execute, rawInput)).generate("run"),
+    ).rejects.toBeInstanceOf(ToolPolicyError);
 
-    expect(result).toBeNull();
     expect(execute).not.toHaveBeenCalled();
     const lookup = api.calls.find((call) => call.path.endsWith("/tool-lookup"));
     expect(lookup?.body).toEqual({

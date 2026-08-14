@@ -517,16 +517,35 @@ export function assertSafeKeys(
  * Project the fields both adapters record as a run's output summary.
  *
  * A generation result carries the framework's own step objects, which are far
- * too large and too circular to record, so only the three fields an operator
- * reads survive. Non-object results pass through for the converter to bound.
+ * too large and too circular to record, so only the small fields an operator
+ * reads survive. Frameworks opt in to reading a configured structured output
+ * because some result objects expose it through a getter that can throw.
+ * Non-object results pass through for the converter to bound.
  */
-export function runResultSummary(result: unknown): unknown {
+export function runResultSummary(
+  result: unknown,
+  options: { structuredOutputField?: "object" | "output" } = {},
+): unknown {
   if (typeof result !== "object" || result === null || Array.isArray(result)) {
     return result;
   }
   const candidate = result as Record<string, unknown>;
+  const structuredOutputField = options.structuredOutputField;
+  let structuredOutput: unknown;
+  let hasStructuredOutput = false;
+  if (structuredOutputField) {
+    try {
+      structuredOutput = candidate[structuredOutputField];
+      hasStructuredOutput = true;
+    } catch {
+      // Some SDK result objects expose structured output through a getter that
+      // throws when generation completed without a usable structured value.
+      // Recording must not turn that successful generation into a failed run.
+    }
+  }
   return {
     finish_reason: candidate.finishReason,
+    ...(hasStructuredOutput ? { object: structuredOutput } : {}),
     step_count: Array.isArray(candidate.steps) ? candidate.steps.length : 0,
     text: typeof candidate.text === "string" ? candidate.text : undefined,
   };

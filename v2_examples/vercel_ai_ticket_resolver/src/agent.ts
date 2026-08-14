@@ -13,17 +13,21 @@ export type ModelProvider = "deterministic" | "openai";
 
 export const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
 
-const RESOLUTION_SCHEMA = jsonSchema<Resolution>({
+export const RESOLUTION_JSON_SCHEMA: Parameters<
+  typeof jsonSchema<Resolution>
+>[0] = {
   additionalProperties: false,
   properties: {
     action: { enum: [...resolutionActions] },
-    amount: { exclusiveMinimum: 0, type: "number" },
+    amount: { exclusiveMinimum: 0, type: ["number", "null"] },
     customer_reply: { minLength: 1, type: "string" },
     reason: { minLength: 1, type: "string" },
   },
-  required: ["action", "reason", "customer_reply"],
+  required: ["action", "amount", "reason", "customer_reply"],
   type: "object",
-});
+};
+
+const RESOLUTION_SCHEMA = jsonSchema<Resolution>(RESOLUTION_JSON_SCHEMA);
 
 const TASK_INSTRUCTIONS = `
 You autonomously resolve one synthetic customer return or delivery ticket.

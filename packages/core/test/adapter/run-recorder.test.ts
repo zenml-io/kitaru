@@ -114,6 +114,79 @@ describe("normalized run lifecycle", () => {
     );
   });
 
+  it("uses a completed ledger outcome when the framework omits the result", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    run.state.setToolCall({
+      callId: "call-1",
+      inputs: { value: "a" },
+      mocked: false,
+      outcome: "completed",
+      output: { saved: true },
+      toolName: "save",
+    });
+
+    await recordNormalizedStep(run.state, {
+      attributes: {},
+      failed: false,
+      inputs: null,
+      outputs: null,
+      tools: [
+        {
+          callId: "call-1",
+          inputs: { value: "a" },
+          toolName: "save",
+        },
+      ],
+    });
+
+    expect(client.nodes[1]?.nodes[1]).toMatchObject({
+      error: null,
+      outputs: { saved: true },
+      status: "completed",
+    });
+  });
+
+  it("does not hide an explicit framework tool failure with a completed ledger", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    run.state.setToolCall({
+      callId: "call-1",
+      inputs: {},
+      mocked: true,
+      outcome: "completed",
+      output: { saved: true },
+      policy: "static",
+      toolName: "save",
+    });
+
+    await recordNormalizedStep(run.state, {
+      attributes: {},
+      failed: false,
+      inputs: null,
+      outputs: null,
+      tools: [
+        {
+          callId: "call-1",
+          inputs: {},
+          result: {
+            error: "Schema rejected output",
+            failed: true,
+            output: null,
+          },
+          toolName: "save",
+        },
+      ],
+    });
+
+    expect(client.nodes[1]?.nodes[1]).toMatchObject({
+      error: "Schema rejected output",
+      status: "failed",
+    });
+  });
+
   it("drains queued steps before marking the run failed", async () => {
     const client = fakeClient();
     const run = await recorder(client);

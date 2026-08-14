@@ -13,9 +13,9 @@
     "lint": "biome check .",
     "smoke": "KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 KITARU_VERCEL_AI_SMOKE=1 node dist/main.js",
     "test": "vitest run test",
-    "test:e2e": "KITARU_REQUIRE_POSTGRES=1 uv run pytest test/test_e2e.py -q",
+    "test:e2e": "KITARU_REQUIRE_POSTGRES=1 uv run --extra server pytest test/test_e2e.py -q",
     "test:evaluator": "uv run pytest test/test_documented_evaluator.py -q",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.typecheck.json"
   },
   "dependencies": {
     "@ai-sdk/openai": "4.0.20",

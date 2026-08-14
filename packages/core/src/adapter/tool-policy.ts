@@ -9,6 +9,7 @@ type ToolLedgerEntry = NonNullable<ReturnType<AdapterRunState["getToolCall"]>>;
 
 export type ToolPolicyDecision =
   | { type: "execute" }
+  | { output: unknown; type: "mocked_error" }
   | { output: unknown; type: "mocked_result" };
 
 export interface ToolCallInput {
@@ -139,7 +140,7 @@ function policyMiss(
     entry.output = output;
     entry.error = { message, name: "ToolPolicyMiss" };
     entry.outcome = "failed";
-    return { output, type: "mocked_result" };
+    return { output, type: "mocked_error" };
   }
   const error = new ToolPolicyMissError(message);
   entry.error = { message, name: error.name };
@@ -223,6 +224,12 @@ export async function decideToolCall(
       cache_key: cacheKey,
       tool_name: input.toolName,
     });
+    if (lookup.found && lookup.result === null) {
+      throw new ToolPolicyError(
+        `History lookup for tool '${input.toolName}' cannot distinguish a ` +
+          "failed recording from a null result; refusing to execute or mock it",
+      );
+    }
     if (lookup.found) {
       entry.mocked = true;
       entry.outcome = "completed";

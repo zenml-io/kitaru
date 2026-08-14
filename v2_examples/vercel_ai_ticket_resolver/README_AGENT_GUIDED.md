@@ -2,13 +2,15 @@
 
 This path asks a coding agent to conduct the same evidence-first walkthrough through Kitaru's standard-mode MCP server and the CLI. You do not choose session IDs or write evaluator code. The coding agent explains concepts as they become useful, asks one question at a time, persists your judgment, and reports exact resource identities.
 
-All commerce data and actions are synthetic and each invocation has a fresh in-memory store. The default model is scripted integration proof, not evidence that prompting caused a real model to improve. Its recordings use requested model ID `openai/gpt-5-nano` and fixed synthetic token counts, so token and cost figures are scripted rather than measured. Optional OpenAI calls are paid and require separate approval.
+All commerce data and actions are synthetic and each invocation has a fresh in-memory store. The default model is scripted integration proof, not evidence that prompting caused a real model to improve. Its recordings use requested model ID `openai/gpt-5-nano` and fixed synthetic token counts. Token figures are scripted rather than measured, while cost remains unavailable because this example does not configure a price calculator. Optional OpenAI calls are paid and require separate approval.
 
 ## Prepare the checkout and baseline
 
 Run the setup, registration, worker, and direct-recording steps in [README.md](README.md) through the creation of `.state/baseline-sessions.json`. Direct Vercel-adapter recording replaces the Python example's Langfuse import. Python and uv remain required because the Kitaru evaluator and worker ABI is Python.
 
-The coding agent must select only session IDs from `.state/baseline-sessions.json`. A normal restart resumes missing tickets. `--fresh` archives the old manifest and starts a new evidence set, so it requires approval. If `.state/attempts/` contains an uncommitted session file, the agent must inspect the exact remote session and ask before using `--adopt ticket-id=session-id` when it completed or `--retry ticket-id=session-id` when it failed. It must never guess or silently discard the orphan. Retry archives the local orphan marker, records a new remote session, and never deletes remote state.
+Treat each shell invocation as fresh unless you deliberately keep one process open. Before running a later command block, load `.env` and `.state/run.env` exactly as the README instructs. The latter contains every generated resource name and, after baseline setup, the resolved agent and version IDs.
+
+The coding agent must select only session IDs from `.state/baseline-sessions.json`. The manual setup deliberately starts with `--fresh` so its uniquely named agent gets a matching evidence set. A normal restart of that recording omits `--fresh` and resumes missing tickets. After the new baseline exists, another `--fresh` archives it and requires approval. If `.state/attempts/` contains an uncommitted session file, the agent must inspect the exact remote session and ask before using `--adopt ticket-id=session-id` when it completed or `--retry ticket-id=session-id` when it failed. It must never guess or silently discard the orphan. Retry archives the local orphan marker, records a new session, and never deletes remote state.
 
 Recorded prompts contain ticket ID, sender, subject, and body. They do not contain `scenario` or `expected_action`. During discovery, the coding agent must not read those fixture oracle fields or use the expected target/control list as proof.
 

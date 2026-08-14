@@ -36,7 +36,7 @@ async function main(): Promise<void> {
     sessionName: "Mastra support triage",
   });
   const result = await agent.generate(DEFAULT_PROMPT, {
-    modelSettings: { maxOutputTokens: 900 },
+    modelSettings: { maxOutputTokens: 2000 },
   });
   console.log(result.text);
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { createTicketRun } from "../src/agent.js";
+import { createTicketRun, RESOLUTION_JSON_SCHEMA } from "../src/agent.js";
 import { ticketCases } from "../src/fixtures.js";
 import { renderTicketPrompt } from "../src/models.js";
 import { SmokeClient } from "../src/smoke-client.js";
@@ -8,6 +8,16 @@ import { SmokeClient } from "../src/smoke-client.js";
 const AGENT_ID = "018f0000-0000-7000-8000-000000000100";
 
 describe("Vercel returns resolver", () => {
+  it("requires every strict structured-output property", () => {
+    expect([...RESOLUTION_JSON_SCHEMA.required].sort()).toEqual(
+      Object.keys(RESOLUTION_JSON_SCHEMA.properties).sort(),
+    );
+    expect(RESOLUTION_JSON_SCHEMA.properties.amount).toMatchObject({
+      exclusiveMinimum: 0,
+      type: ["number", "null"],
+    });
+  });
+
   it("loads the source-checkout adapter dist entrypoint", async () => {
     const adapter = await import("../../../packages/vercel-ai/dist/index.js");
 
@@ -98,7 +108,10 @@ describe("Vercel returns resolver", () => {
     });
 
     expect(JSON.parse((await baseline.generate()).text).action).toBe("refund");
-    expect(JSON.parse((await strict.generate()).text).action).toBe("escalate");
+    expect(JSON.parse((await strict.generate()).text)).toMatchObject({
+      action: "escalate",
+      amount: null,
+    });
     expect(strict.store.actions.some(({ action }) => action === "refund")).toBe(
       false,
     );

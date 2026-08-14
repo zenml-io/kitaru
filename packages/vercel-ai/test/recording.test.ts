@@ -77,6 +77,8 @@ describe("recording large payloads", () => {
     );
     expect(toolNode?.inputs).toEqual({ value: LONG_TEXT });
     expect(toolNode?.outputs).toBe(LONG_TEXT);
+    expect(toolNode?.status).toBe("completed");
+    expect(toolNode?.error).toBeNull();
   });
 
   it("degrades a payload beyond the recording ceiling instead of failing the run", async () => {

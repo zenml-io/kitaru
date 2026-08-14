@@ -45,10 +45,14 @@ describe("normalized replay policy decisions", () => {
     });
   });
 
-  it("returns found null history results as hits", async () => {
+  it.each([
+    "fail",
+    "error_result",
+    "passthrough",
+  ] as const)("fails closed for an ambiguous null history result with %s on_miss", async (onMiss) => {
     const run = state(
       {
-        default: { on_miss: "fail", scope: "baseline", type: "history" },
+        default: { on_miss: onMiss, scope: "baseline", type: "history" },
         tools: {},
       },
       () => ({ found: true, result: null }),
@@ -60,7 +64,14 @@ describe("normalized replay policy decisions", () => {
         inputs: { value: 1 },
         toolName: "lookup",
       }),
-    ).resolves.toEqual({ output: null, type: "mocked_result" });
+    ).rejects.toThrow(
+      /cannot distinguish a failed recording from a null result/,
+    );
+    expect(run.failure).toBeInstanceOf(ToolPolicyError);
+    expect(run.getToolCall("call-1")).toMatchObject({
+      mocked: false,
+      outcome: "failed",
+    });
   });
 
   it.each([
@@ -69,7 +80,7 @@ describe("normalized replay policy decisions", () => {
       "error_result",
       {
         output: { error: "No static result for tool 'lookup'" },
-        type: "mocked_result",
+        type: "mocked_error",
       },
     ],
   ] as const)("handles a static %s miss", async (onMiss, expected) => {

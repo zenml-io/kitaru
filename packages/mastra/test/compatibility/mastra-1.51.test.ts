@@ -141,6 +141,54 @@ afterEach(() => {
 });
 
 describe("Mastra 1.51.0 compatibility", () => {
+  it("keeps raw registry keys in listTools and formats execution keys", async () => {
+    const { model } = makeModel([textResult("unused")]);
+    const agent = new Agent({
+      id: "tool-name-agent",
+      name: "Tool name agent",
+      instructions: "Use the tool.",
+      model,
+      tools: {
+        "send.email": createTool({
+          id: "send.email",
+          description: "Send an email",
+          inputSchema: z.object({}),
+          execute: async () => ({ sent: true }),
+        }),
+      },
+    });
+
+    expect(Object.keys(await agent.listTools())).toEqual(["send.email"]);
+    expect(Object.keys(await agent.getToolsForExecution({}))).toEqual([
+      "send_email",
+    ]);
+  });
+
+  it("reports the stable Mastra collision error identifier", async () => {
+    const { model } = makeModel([textResult("unused")]);
+    const tool = (id: string) =>
+      createTool({
+        id,
+        description: "Collision probe",
+        inputSchema: z.object({}),
+        execute: async () => ({ ok: true }),
+      });
+    const agent = new Agent({
+      id: "tool-collision-agent",
+      name: "Tool collision agent",
+      instructions: "Use the tool.",
+      model,
+      tools: {
+        "send.email": tool("send.email"),
+        send_email: tool("send_email"),
+      },
+    });
+
+    await expect(agent.getToolsForExecution({})).rejects.toMatchObject({
+      id: "AGENT_TOOL_NAME_COLLISION",
+    });
+  });
+
   it("accepts public run overrides and exposes complete step-local data", async () => {
     const configured = makeModel([textResult("configured")], {
       modelId: "configured-model",

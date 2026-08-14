@@ -17,7 +17,7 @@ export interface TicketInput {
 
 export interface Resolution {
   action: ResolutionAction;
-  amount?: number;
+  amount: number | null;
   reason: string;
   customer_reply: string;
 }

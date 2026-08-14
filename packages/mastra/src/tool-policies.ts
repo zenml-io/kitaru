@@ -105,7 +105,7 @@ export function createReplayToolHooks(options: ReplayHookOptions): ToolHooks {
         inputsLossy: converted.lossy,
         toolName: hookContext.toolName,
       });
-      if (decision.type === "mocked_result") {
+      if (decision.type !== "execute") {
         return { output: decision.output, proceed: false };
       }
       return invokePassthroughBeforeHooks(

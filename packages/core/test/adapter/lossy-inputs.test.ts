@@ -132,7 +132,7 @@ describe("history lookup of lossily converted tool arguments", () => {
           "Tool 'lookup' arguments could not be recorded losslessly, so they " +
           "could not be matched against recorded history",
       },
-      type: "mocked_result",
+      type: "mocked_error",
     });
   });
 

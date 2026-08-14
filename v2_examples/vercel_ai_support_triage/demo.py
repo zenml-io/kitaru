@@ -103,6 +103,15 @@ def _outbox_count(path: Path) -> int:
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
+def _require_nonempty_text(outputs: object) -> str:
+    if not isinstance(outputs, dict):
+        raise RuntimeError("The baseline session did not record output text")
+    text = outputs.get("text")
+    if not isinstance(text, str) or not text.strip():
+        raise RuntimeError("The baseline session recorded empty output text")
+    return text
+
+
 def _assert_recorded_shape(nodes: list[SessionNodeResponse]) -> None:
     roots = [
         node
@@ -207,11 +216,12 @@ async def run_demo(
     run_env = {"KITARU_SUPPORT_TRIAGE_STATE_DIR": str(state_dir)}
     if test_model:
         run_env["KITARU_VERCEL_AI_TEST_MODEL"] = "1"
+    resource_suffix = uuid.uuid4().hex[:10]
 
     async with KitaruAPIClient(base_url=api_url, api_key=api_key or None) as client:
         agent = await client.agents.create(
             AgentCreateRequest(
-                name=f"vercel-ai-support-triage-{os.getpid()}",
+                name=f"vercel-ai-support-triage-{resource_suffix}",
                 description="Vercel AI SDK record/replay demo.",
             )
         )
@@ -233,7 +243,7 @@ async def run_demo(
         )
         evaluator = await client.evaluators.create(
             EvaluatorCreateRequest(
-                name=f"vercel-ai-support-triage-{os.getpid()}",
+                name=f"vercel-ai-support-triage-{resource_suffix}",
                 description="Deterministic checks for the Vercel AI SDK demo.",
             )
         )
@@ -269,6 +279,7 @@ async def run_demo(
         initial_session_id = await _result_session_id(client, initial_job)
         initial_session = await client.sessions.get(uuid.UUID(initial_session_id))
         assert initial_session.status is SessionStatus.COMPLETED
+        _require_nonempty_text(initial_session.outputs)
         initial_nodes = await _nodes(client, initial_session_id)
         _assert_recorded_shape(initial_nodes)
         replay = await client.replays.create(
@@ -279,7 +290,7 @@ async def run_demo(
                     model=REQUESTED_MODEL_ID,
                     prompt=OVERRIDE_PROMPT,
                     system_prompt=OVERRIDE_SYSTEM,
-                    model_params={"maxOutputTokens": 2000},
+                    model_params={"maxOutputTokens": 3000},
                 ),
                 tool_policy=ToolPolicy(
                     default=PassthroughConfig(),
@@ -343,7 +354,7 @@ async def run_demo(
     assert all(node.requested_model == REQUESTED_MODEL_ID for node in llm_nodes)
     assert all(node.model != REQUESTED_MODEL_ID for node in llm_nodes)
     assert all(node.cost is not None and node.cost > 0 for node in llm_nodes)
-    assert any(node.model_params == {"maxOutputTokens": 2000} for node in llm_nodes)
+    assert any(node.model_params == {"maxOutputTokens": 3000} for node in llm_nodes)
     assert {evaluation.name for evaluation in evaluations} == {
         "decision_structure",
         "trace_completeness",

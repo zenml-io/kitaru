@@ -22,7 +22,7 @@ Never claim that an action was queued unless the tool returned queued=true.
 
 // Published gpt-5-nano list prices in US dollars per million tokens. Kitaru
 // stores whatever cost the adapter sends and never prices a call itself, so a
-// session totals zero without a calculator like this one. The sibling
+// session has no cost estimate without a calculator like this one. The sibling
 // mastra_support_triage example carries the same two prices and the same
 // estimateSupportCost helper; each example stays copy-pasteable on its own, so
 // update both whenever OpenAI reprices the model.
@@ -74,7 +74,7 @@ export function createSupportGenerateText(client?: AdapterClient) {
   return () =>
     generateText({
       instructions: SUPPORT_INSTRUCTIONS,
-      maxOutputTokens: 900,
+      maxOutputTokens: 2000,
       model: configuredModel(),
       prompt: BASELINE_PROMPT,
       stopWhen: stepCountIs(5),

@@ -43,7 +43,7 @@ function resolution(
 ): Resolution {
   return {
     action,
-    ...(options.amount === undefined ? {} : { amount: options.amount }),
+    amount: options.amount ?? null,
     reason: options.reason,
     customer_reply: customerReply(action, customer),
   };

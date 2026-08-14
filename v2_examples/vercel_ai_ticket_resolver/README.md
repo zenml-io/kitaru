@@ -4,7 +4,7 @@ This example runs the canonical ten-ticket returns story with TypeScript, AI SDK
 
 All customers, orders, shipments, and actions are synthetic. Every invocation gets a fresh in-memory store. Passthrough replay is safe here for that reason only; do not copy that policy to tools that contact payment, fulfillment, or support systems.
 
-The default `MockLanguageModelV4` path is scripted. Its recordings use the requested model ID `openai/gpt-5-nano` and fixed synthetic token counts, so token and cost figures are scripted rather than measured. Its fixed outcomes prove the adapter, recording, evaluation, cohort, and replay workflow. They do not prove that prompting caused a real model to improve. The optional OpenAI path is paid, non-deterministic evidence to inspect and never promises the fixed result table below.
+The default `MockLanguageModelV4` path is scripted. Its recordings use the requested model ID `openai/gpt-5-nano` and fixed synthetic token counts. Token figures are scripted rather than measured, while cost remains unavailable because this example does not configure a price calculator. Its fixed outcomes prove the adapter, recording, evaluation, cohort, and replay workflow. They do not prove that prompting caused a real model to improve. The optional OpenAI path is paid, non-deterministic evidence to inspect and never promises the fixed result table below.
 
 From the repository root, enter the standalone example directory before running the commands below unless a command says otherwise:
 
@@ -19,6 +19,7 @@ Use Node 22, Python 3.11 or newer, pnpm, uv, jq, Docker, and a source checkout o
 Build the local TypeScript packages without registering this standalone example in the root workspace, then install and verify the example:
 
 ```bash
+pnpm --dir ../.. install --frozen-lockfile
 pnpm --dir ../.. --filter @zenml-io/kitaru build
 pnpm --dir ../.. --filter @zenml-io/kitaru-vercel-ai build
 CI=true pnpm --ignore-workspace install --frozen-lockfile
@@ -56,8 +57,26 @@ Load `.env` in every terminal used for the example. It gives both the TypeScript
 Register the compiled TypeScript command. One invocation receives one rendered email string, calls only the six synthetic tools, and returns structured resolution JSON.
 
 ```bash
+export RUN_SUFFIX="$(node --input-type=module -e 'console.log(crypto.randomUUID())')"
+export AGENT_NAME="returns-resolver-${RUN_SUFFIX}"
+export EVALUATOR_NAME="returns-policy-${RUN_SUFFIX}"
+export INVESTIGATION_NAME="refund-policy-review-${RUN_SUFFIX}"
+export TARGET_COHORT_NAME="unsafe-refund-baseline-${RUN_SUFFIX}"
+export CONTROL_COHORT_NAME="safe-refund-control-${RUN_SUFFIX}"
+export EXPERIMENT_NAME="improve-returns-policy-${RUN_SUFFIX}"
+export WORKER_NAME="vercel-returns-example-worker-${RUN_SUFFIX}"
+mkdir -p .state
+{
+  printf 'export AGENT_NAME="%s"\n' "$AGENT_NAME"
+  printf 'export EVALUATOR_NAME="%s"\n' "$EVALUATOR_NAME"
+  printf 'export INVESTIGATION_NAME="%s"\n' "$INVESTIGATION_NAME"
+  printf 'export TARGET_COHORT_NAME="%s"\n' "$TARGET_COHORT_NAME"
+  printf 'export CONTROL_COHORT_NAME="%s"\n' "$CONTROL_COHORT_NAME"
+  printf 'export EXPERIMENT_NAME="%s"\n' "$EXPERIMENT_NAME"
+  printf 'export WORKER_NAME="%s"\n' "$WORKER_NAME"
+} > .state/run.env
 uv run kitaru agent register \
-  returns-resolver \
+  "$AGENT_NAME" \
   --command "node dist/main.js" \
   --description "Resolve one synthetic returns or delivery ticket." \
   --display-version baseline-v1 \
@@ -74,13 +93,21 @@ uv run kitaru agent register \
 
 Run that command from this directory so `$PWD` stores the example's absolute path. A worker runs the command in the recorded directory, and a relative `--working-dir` would resolve against whichever worker claimed the job.
 
+The generated resource names live in `.state/run.env`. Every later command assumes the primary shell still has `.env` and this file loaded. In any fresh shell, restore both before continuing:
+
+```bash
+set -a; source .env; set +a
+source .state/run.env
+```
+
 Version 1 records its sessions from this shell in step 3, so its run spec needs no agent identity. Any version a worker executes does: the worker gives the process only the Kitaru API URL, a task token, the task ID and inputs, and the version's own `--env` pairs. Step 7 therefore registers the replayed strict version with `KITARU_AGENT_ID` in its run spec, using the ID exported in step 3.
 
 Start a worker in a second terminal from this directory and leave it active:
 
 ```bash
 set -a; source .env; set +a
-uv run kitaru worker start --name vercel-returns-example-worker
+source .state/run.env
+uv run --frozen kitaru worker start --name "$WORKER_NAME"
 ```
 
 Attach exactly one worker to this server while running the walkthrough. A worker claims any queued task the server offers it, so a second worker started for another agent or example can claim these replay jobs and run them in its own directory.
@@ -91,15 +118,19 @@ Resolve and export the registered identities, then record all ten tickets direct
 
 ```bash
 export KITARU_AGENT_ID="$(
-  uv run kitaru --output json agent get returns-resolver | jq -r '.item.id'
+  uv run kitaru --output json agent get "$AGENT_NAME" | jq -r '.item.id'
 )"
 export KITARU_AGENT_VERSION_ID="$(
-  uv run kitaru --output json agent version get returns-resolver@1 | jq -r '.item.id'
+  uv run kitaru --output json agent version get "${AGENT_NAME}@1" | jq -r '.item.id'
 )"
-pnpm baseline
+{
+  printf 'export KITARU_AGENT_ID="%s"\n' "$KITARU_AGENT_ID"
+  printf 'export KITARU_AGENT_VERSION_ID="%s"\n' "$KITARU_AGENT_VERSION_ID"
+} >> .state/run.env
+pnpm baseline --fresh
 ```
 
-The runner writes the exact ticket-to-session map to `.state/baseline-sessions.json` after each completed ticket. It resumes missing tickets by default. `--fresh` archives the prior manifest under `.state/evidence-sets/` before creating another evidence set, so use it only when you intentionally want new evidence.
+The runner writes the exact ticket-to-session map to `.state/baseline-sessions.json` after each completed ticket. The walkthrough starts with `--fresh` because every invocation registers a uniquely named agent. That flag archives any prior manifest under `.state/evidence-sets/` before creating evidence for the new agent. If this recording is interrupted, resume its missing tickets with `pnpm baseline` and do not pass `--fresh` again.
 
 If a process stops after Kitaru writes a session ID but before the manifest commits it, the runner refuses to guess. Inspect the orphan named in `.state/attempts/<evidence-set-id>/<ticket-id>.session-id` with `uv run kitaru session get SESSION_ID`. Adopt it only after confirming that the remote session completed:
 
@@ -117,7 +148,7 @@ Create a reusable exact-session file and inspect the recorded set:
 jq -r '.sessions | to_entries[] | .value.session_id' \
   .state/baseline-sessions.json > .state/baseline-session-ids.txt
 uv run kitaru session list \
-  --agent returns-resolver \
+  --agent "$AGENT_NAME" \
   --origin recorded \
   --status completed \
   --size 20
@@ -128,7 +159,8 @@ uv run kitaru session list \
 A built-in evaluator runs as a `uv run --with kitaru-evaluator==VERSION` subprocess, and `uv` applies the `exclude-newer` cutoff configured in whichever project the worker runs from. This repository sets one, so for the first few days after a `kitaru-evaluator` release the pinned version is filtered out and every evaluation task fails with `No solution found`. Start the worker with the cutoff moved to now when that happens:
 
 ```bash
-UV_EXCLUDE_NEWER="$(date -u +%Y-%m-%dT%H:%M:%SZ)" uv run kitaru worker start --name vercel-returns-example-worker
+source .state/run.env
+UV_EXCLUDE_NEWER="$(date -u +%Y-%m-%dT%H:%M:%SZ)" uv run --frozen kitaru worker start --name "$WORKER_NAME"
 ```
 
 Run the broad deterministic evaluators over only the manifest sessions:
@@ -161,8 +193,8 @@ Create an investigation whose questions carry curated highlights, answer each qu
 ```bash
 TICKET_004_REFUND_NODE_ID="YOUR_COMPLETED_REFUND_NODE_UUID"
 INVESTIGATION_ID="$(
-  uv run kitaru --output json investigation create refund-policy-review \
-    --agent returns-resolver \
+  uv run kitaru --output json investigation create "$INVESTIGATION_NAME" \
+    --agent "$AGENT_NAME" \
     --description "Review whether risky refunds require human approval." \
     --session "${TICKET_004_SESSION_ID}" \
     --session-question "${TICKET_004_SESSION_ID}:outcome=Is this outcome acceptable, problematic, or uncertain, and why?" \
@@ -362,14 +394,14 @@ Save that block as `evaluator.py`, then use the CLI for the local file operation
 ```bash
 uv run kitaru evaluator test evaluator.py --entrypoint evaluate
 uv run kitaru evaluator register \
-  returns-policy \
+  "$EVALUATOR_NAME" \
   --script evaluator.py \
   --entrypoint evaluate \
   --description "Check reported and accepted returns actions against reviewed policy." \
   --display-version 1.0
 uv run kitaru session evaluate \
   --sessions-file .state/baseline-session-ids.txt \
-  --evaluator returns-policy@1 \
+  --evaluator "${EVALUATOR_NAME}@1" \
   --wait \
   --timeout 1800
 ```
@@ -385,16 +417,16 @@ jq -r '.sessions["ticket-004"].session_id, .sessions["ticket-007"].session_id' \
   .state/baseline-sessions.json > .state/target-session-ids.txt
 jq -r '.sessions["ticket-001"].session_id, .sessions["ticket-009"].session_id, .sessions["ticket-010"].session_id' \
   .state/baseline-sessions.json > .state/control-session-ids.txt
-uv run kitaru cohort create unsafe-refund-baseline \
-  --agent returns-resolver \
+uv run kitaru cohort create "$TARGET_COHORT_NAME" \
+  --agent "$AGENT_NAME" \
   --description "Reviewed refunds that require human approval." \
   --sessions-file .state/target-session-ids.txt
-uv run kitaru cohort create safe-refund-control \
-  --agent returns-resolver \
+uv run kitaru cohort create "$CONTROL_COHORT_NAME" \
+  --agent "$AGENT_NAME" \
   --description "Valid refunds that must remain correct." \
   --sessions-file .state/control-session-ids.txt
-uv run kitaru session list --cohort unsafe-refund-baseline@1 --size 20
-uv run kitaru session list --cohort safe-refund-control@1 --size 20
+uv run kitaru session list --cohort "${TARGET_COHORT_NAME}@1" --size 20
+uv run kitaru session list --cohort "${CONTROL_COHORT_NAME}@1" --size 20
 ```
 
 ## 7. Register the strict candidate and experiment
@@ -403,7 +435,7 @@ The strict mode checks approval thresholds and risk flags before `issue_refund`.
 
 ```bash
 uv run kitaru agent version register \
-  returns-resolver \
+  "$AGENT_NAME" \
   --command "node dist/main.js" \
   --display-version strict-policy-v2 \
   --working-dir "$PWD" \
@@ -417,11 +449,11 @@ uv run kitaru agent version register \
   --tool create_replacement \
   --tool escalate_to_human
 uv run kitaru experiment create \
-  improve-returns-policy \
-  --agent returns-resolver \
+  "$EXPERIMENT_NAME" \
+  --agent "$AGENT_NAME" \
   --description "Replay policy-risk and valid-refund cohorts with strict rules." \
   --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
-  --evaluator returns-policy@1 \
+  --evaluator "${EVALUATOR_NAME}@1" \
   --evaluator kitaru/cost@latest \
   --evaluator kitaru/latency@latest \
   --evaluator kitaru/tool-call-patterns@latest
@@ -433,22 +465,22 @@ Resolve the immutable cohort-version IDs and run both cohorts through the strict
 
 ```bash
 TARGET_COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get unsafe-refund-baseline@1 \
+  uv run kitaru --output json cohort version get "${TARGET_COHORT_NAME}@1" \
   | jq -r '.item.id'
 )"
 CONTROL_COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get safe-refund-control@1 \
+  uv run kitaru --output json cohort version get "${CONTROL_COHORT_NAME}@1" \
   | jq -r '.item.id'
 )"
-uv run kitaru experiment run start improve-returns-policy \
+uv run kitaru experiment run start "$EXPERIMENT_NAME" \
   --cohort-version "$TARGET_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
+  --agent "${AGENT_NAME}@2" \
   --evaluate-baselines \
   --wait \
   --timeout 1800
-uv run kitaru experiment run start improve-returns-policy \
+uv run kitaru experiment run start "$EXPERIMENT_NAME" \
   --cohort-version "$CONTROL_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
+  --agent "${AGENT_NAME}@2" \
   --evaluate-baselines \
   --wait \
   --timeout 1800
@@ -469,7 +501,7 @@ List replay sessions and policy results, then inspect changed tool nodes with `k
 
 ```bash
 uv run kitaru session list \
-  --agent returns-resolver \
+  --agent "$AGENT_NAME" \
   --origin replay \
   --size 20
 uv run kitaru evaluation list \

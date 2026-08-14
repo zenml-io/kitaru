@@ -12,6 +12,7 @@ import {
   generateText,
   type LanguageModel,
   type LanguageModelCallEndEvent,
+  type LanguageModelCallStartEvent,
   type StepResult,
   type ToolSet,
 } from "ai";
@@ -23,7 +24,10 @@ import {
   parseWorkerTaskInput,
   type SafeReplayOverride,
 } from "./options.js";
-import { recordVercelStep } from "./step-recorder.js";
+import {
+  recordFailedVercelModelCall,
+  recordVercelStep,
+} from "./step-recorder.js";
 import { ExecutionTickets } from "./tickets.js";
 import {
   assertSupportedReplayTools,
@@ -47,11 +51,21 @@ if (
 const ADAPTER_VERSION = packageMetadata.version;
 
 type RuntimeOptions = Record<string, unknown> & {
+  experimental_onLanguageModelCallEnd?: RuntimeCallback<
+    LanguageModelCallEndEvent<ToolSet>
+  >;
+  experimental_onLanguageModelCallStart?: RuntimeCallback<LanguageModelCallStartEvent>;
   messages?: unknown;
   model: LanguageModel;
+  onLanguageModelCallEnd?: RuntimeCallback<LanguageModelCallEndEvent<ToolSet>>;
+  onLanguageModelCallStart?: RuntimeCallback<LanguageModelCallStartEvent>;
+  onStepEnd?: RuntimeCallback<StepResult<ToolSet>>;
+  onStepFinish?: RuntimeCallback<StepResult<ToolSet>>;
   prompt?: unknown;
   tools?: ToolSet;
 };
+
+type RuntimeCallback<T> = (value: T) => Promise<unknown> | unknown;
 
 type RuntimeResult = {
   finishReason?: unknown;
@@ -74,8 +88,16 @@ function effectiveRuntimeInput(options: RuntimeOptions): unknown {
   return options.prompt !== undefined ? options.prompt : options.messages;
 }
 
-function safeResultSummary(result: RuntimeResult): JsonValue {
-  return recordedPayloadJson(runResultSummary(result), "generation result");
+function safeResultSummary(
+  result: RuntimeResult,
+  includeOutput: boolean,
+): JsonValue {
+  return recordedPayloadJson(
+    runResultSummary(result, {
+      structuredOutputField: includeOutput ? "output" : undefined,
+    }),
+    "generation result",
+  );
 }
 
 function applyOverride(
@@ -217,12 +239,27 @@ export function createKitaruGenerateText(
     });
     const tickets = new ExecutionTickets(adapterOptions.ticketTimeoutMs);
     const state = recorder.state;
+    let pendingModelCall:
+      | (Pick<
+          LanguageModelCallStartEvent,
+          "callId" | "modelId" | "provider"
+        > & { startedAt: string })
+      | undefined;
 
     try {
       await recorder.initialize();
+      const callerOnLanguageModelCallStart =
+        effectiveOptions.onLanguageModelCallStart ??
+        effectiveOptions.experimental_onLanguageModelCallStart;
       const callerOnLanguageModelCallEnd =
-        effectiveOptions.onLanguageModelCallEnd;
-      const callerOnStepEnd = effectiveOptions.onStepEnd;
+        effectiveOptions.onLanguageModelCallEnd ??
+        effectiveOptions.experimental_onLanguageModelCallEnd;
+      const callerOnStepEnd =
+        effectiveOptions.onStepEnd ?? effectiveOptions.onStepFinish;
+
+      delete effectiveOptions.experimental_onLanguageModelCallStart;
+      delete effectiveOptions.experimental_onLanguageModelCallEnd;
+      delete effectiveOptions.onStepFinish;
 
       const wrappedTools = wrapTools({
         state,
@@ -235,9 +272,21 @@ export function createKitaruGenerateText(
         state,
         effectiveOptions.stopWhen as never,
       );
+      effectiveOptions.onLanguageModelCallStart = async (
+        event: LanguageModelCallStartEvent,
+      ) => {
+        await callerOnLanguageModelCallStart?.(event);
+        pendingModelCall = {
+          callId: event.callId,
+          modelId: event.modelId,
+          provider: event.provider,
+          startedAt: new Date().toISOString(),
+        };
+      };
       effectiveOptions.onLanguageModelCallEnd = async (
         event: LanguageModelCallEndEvent<ToolSet>,
       ) => {
+        pendingModelCall = undefined;
         if (replay.spec) {
           registerReplayTickets({
             event,
@@ -246,11 +295,7 @@ export function createKitaruGenerateText(
             tools: wrappedTools,
           });
         }
-        await (
-          callerOnLanguageModelCallEnd as
-            | ((event: LanguageModelCallEndEvent<ToolSet>) => unknown)
-            | undefined
-        )?.(event);
+        await callerOnLanguageModelCallEnd?.(event);
       };
       effectiveOptions.onStepEnd = async (step: StepResult<ToolSet>) => {
         try {
@@ -260,11 +305,7 @@ export function createKitaruGenerateText(
           throw error;
         }
         await adapterOptions.configuredOnStepEnd?.(step);
-        await (
-          callerOnStepEnd as
-            | ((step: StepResult<ToolSet>) => unknown)
-            | undefined
-        )?.(step);
+        await callerOnStepEnd?.(step);
       };
 
       const result = (await (
@@ -278,10 +319,19 @@ export function createKitaruGenerateText(
       if (replay.spec) {
         tickets.assertConsumed();
       }
-      await recorder.complete(safeResultSummary(result));
+      await recorder.complete(
+        safeResultSummary(result, effectiveOptions.output !== undefined),
+      );
       return result;
     } catch (error) {
       const primary = state.failure ?? error;
+      if (pendingModelCall !== undefined) {
+        try {
+          await recordFailedVercelModelCall(state, pendingModelCall, primary);
+        } catch {
+          // Preserve the runtime failure if best-effort trace recording fails.
+        }
+      }
       await recorder.fail(primary);
       throw primary;
     } finally {

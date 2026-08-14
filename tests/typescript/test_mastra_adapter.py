@@ -19,6 +19,17 @@ from kitaru.server.api.app import create_app
 from kitaru.server.database.service import DatabaseService
 
 
+@pytest.mark.parametrize(
+    "outputs", [None, {}, {"text": None}, {"text": ""}, {"text": "   "}]
+)
+def test_mastra_demo_rejects_a_baseline_without_text(outputs: object) -> None:
+    """Do not replay a baseline that produced no usable final answer."""
+    demo = importlib.import_module("v2_examples.mastra_support_triage.demo")
+
+    with pytest.raises(RuntimeError, match="baseline session"):
+        demo._require_nonempty_text(outputs)
+
+
 def _available_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -61,16 +72,16 @@ async def _network_server() -> AsyncIterator[str]:
 async def test_worker_records_and_history_replays_compiled_mastra(tmp_path) -> None:
     """Prove worker, Node/Mastra, history replay, overrides, and scoring."""
     repo_root = Path(__file__).resolve().parents[2]
-    subprocess.run(
-        [
-            "pnpm",
-            "--filter",
-            "@zenml-io/kitaru-example-mastra-support-triage",
-            "build",
-        ],
-        cwd=repo_root,
-        check=True,
-    )
+    for package in (
+        "@zenml-io/kitaru",
+        "@zenml-io/kitaru-mastra",
+        "@zenml-io/kitaru-example-mastra-support-triage",
+    ):
+        subprocess.run(
+            ["pnpm", "--filter", package, "build"],
+            cwd=repo_root,
+            check=True,
+        )
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
     demo = importlib.import_module("v2_examples.mastra_support_triage.demo")
 
@@ -80,10 +91,18 @@ async def test_worker_records_and_history_replays_compiled_mastra(tmp_path) -> N
             state_dir=tmp_path,
             test_model=True,
         )
+        rerun = await demo.run_demo(
+            api_url=api_url,
+            state_dir=tmp_path,
+            test_model=True,
+        )
 
     assert result.initial_outbox_count == 1
     assert result.replay_outbox_count == 1
     assert result.replay.status is ReplayStatus.COMPLETED
+    assert rerun.replay.status is ReplayStatus.COMPLETED
+    assert rerun.initial_outbox_count == 1
+    assert rerun.replay_outbox_count == 1
     assert all(evaluation.passed is True for evaluation in result.evaluations)
     assert (
         sum(node.node_type is NodeType.LLM_CALL for node in result.initial_nodes) >= 2

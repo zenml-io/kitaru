@@ -9,7 +9,7 @@ export const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
 
 // Published gpt-5-nano list prices in US dollars per million tokens. Kitaru
 // stores whatever cost the adapter sends and never prices a call itself, so a
-// session totals zero without a calculator like this one. The sibling
+// session has no cost estimate without a calculator like this one. The sibling
 // vercel_ai_support_triage example carries the same two prices and the same
 // estimateSupportCost helper; each example stays copy-pasteable on its own, so
 // update both whenever OpenAI reprices the model.

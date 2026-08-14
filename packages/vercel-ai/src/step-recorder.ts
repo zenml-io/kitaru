@@ -1,4 +1,8 @@
-import type { JsonValue, SessionNodeCreateRequest } from "@zenml-io/kitaru";
+import {
+  type JsonValue,
+  recorderError,
+  type SessionNodeCreateRequest,
+} from "@zenml-io/kitaru";
 import {
   type AdapterRunState,
   boundedRecordedText,
@@ -11,7 +15,12 @@ import {
   recordNormalizedStep,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
-import type { ContentPart, StepResult, ToolSet } from "ai";
+import type {
+  ContentPart,
+  LanguageModelCallStartEvent,
+  StepResult,
+  ToolSet,
+} from "ai";
 
 import type { KitaruCostCalculator } from "./types.js";
 
@@ -160,5 +169,26 @@ export async function recordVercelStep(
     provider: step.model.provider,
     tokens,
     tools,
+  });
+}
+
+export async function recordFailedVercelModelCall(
+  state: AdapterRunState,
+  call: Pick<LanguageModelCallStartEvent, "callId" | "modelId" | "provider"> & {
+    startedAt: string;
+  },
+  error: unknown,
+): Promise<void> {
+  await recordNormalizedStep(state, {
+    attributes: {},
+    error: recorderError(error).message,
+    externalId: call.callId,
+    failed: true,
+    inputs: null,
+    model: call.modelId,
+    outputs: null,
+    provider: call.provider,
+    startedAt: call.startedAt,
+    tools: [],
   });
 }

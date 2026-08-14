@@ -67,6 +67,9 @@ export function assertSupportedReplayTools(options: {
   if (options.generationOptions.experimental_sandbox !== undefined) {
     throw new ToolPolicyError("Replay does not support sandboxed tools");
   }
+  if (options.generationOptions.prepareStep !== undefined) {
+    throw new ToolPolicyError("Replay does not support prepareStep");
+  }
   for (const [toolName, tool] of Object.entries(options.tools ?? {})) {
     if (tool.needsApproval !== undefined && tool.needsApproval !== false) {
       throw new ToolPolicyError(
@@ -99,7 +102,9 @@ async function validateMockedOutput(
   }
   const schema = asSchema(tool.outputSchema);
   if (schema.validate === undefined) {
-    return bounded;
+    throw new ToolPolicyError(
+      `Cannot validate mocked output for tool '${toolName}' because its output schema has no runtime validator`,
+    );
   }
   const validation = await schema.validate(bounded);
   if (!validation.success) {
@@ -321,6 +326,12 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
             inputsLossy: convertedInput.lossy,
             toolName,
           });
+          if (decision.type === "mocked_error") {
+            return recordedPayloadJson(
+              decision.output,
+              `mocked error for '${toolName}'`,
+            );
+          }
           if (decision.type === "mocked_result") {
             try {
               return await validateMockedOutput(
