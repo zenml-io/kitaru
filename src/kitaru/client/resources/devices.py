@@ -41,11 +41,14 @@ class DevicesResource:
         """
         self._client = client
 
-    async def get(self, device_id: uuid.UUID) -> DeviceResponse:
+    async def get(
+        self, device_id: uuid.UUID, user_code: str | None = None
+    ) -> DeviceResponse:
         """Get a device by id.
 
         Args:
             device_id: Id of the device.
+            user_code: User code of a device no account approved yet.
 
         Raises:
             APIError: The request failed, including 404 for a missing device.
@@ -53,7 +56,10 @@ class DevicesResource:
         Returns:
             Stored device.
         """
-        response = await self._client.request("GET", f"/v1/devices/{device_id}")
+        params = {} if user_code is None else {"user_code": user_code}
+        response = await self._client.request(
+            "GET", f"/v1/devices/{device_id}", params=params
+        )
         return DeviceResponse.model_validate(response.json())
 
     async def list(

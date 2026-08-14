@@ -37,6 +37,10 @@ class ServerInfoResponse(ResponseModel):
         description="Server ID.",
     )
     version: str = Field(description="Kitaru version the server runs.")
+    ui_version: str | None = Field(
+        default=None,
+        description="Kitaru UI version the server serves.",
+    )
     auth_scheme: AuthScheme = Field(description="Scheme used to authenticate requests.")
     server_url: str | None = Field(
         default=None,
