@@ -42,7 +42,7 @@ Set `agent_version_id` when you know which code produced the traces — it's wha
 
 ## The built-in importers
 
-Kitaru ships five importers as default plugins, registered at server startup under the `kitaru/` namespace — `kitaru/langfuse`, `kitaru/langsmith`, `kitaru/braintrust`, `kitaru/opentelemetry`, and `kitaru/kitaru-jsonl` (a native JSONL shape) — so `--importer kitaru/langfuse@latest` always resolves. They run on your worker like any other importer; there is nothing to write.
+Kitaru ships four importers as default plugins, registered at server startup under the `kitaru/` namespace — `kitaru/langfuse`, `kitaru/langsmith`, `kitaru/braintrust`, and `kitaru/kitaru-jsonl` (a native JSONL shape) — so `--importer kitaru/langfuse@latest` always resolves. They run on your worker like any other importer; there is nothing to write.
 
 The Langfuse importer parses **Langfuse JSONL exports** — up to 50 MiB per payload (the importer's own cap, separate from the server's configurable blob limit) — and understands three record shapes: `trace`, `observation`, and raw `ingestion_event` lines. Traces map to sessions; observations map to nodes with their parent relationships, timings, model names, token usage, and cost preserved. `params`:
 
