@@ -10882,7 +10882,7 @@
         ]
       },
       "get": {
-        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when the caller owns no device\nwith this id.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Stored device.",
+        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when no device has this id or\nanother account already approved it.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Stored device.",
         "operationId": "get_device_v1_devices__device_id__get",
         "parameters": [
           {

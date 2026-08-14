@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fetching a pending device authorization by id no longer fails before an account approves it, so the device verification page can render.
 - Fixed TypeScript replay and recording edge cases, aligned credential redaction and provider diagnostics across adapters, and made the adapter examples reproducible, rerunnable, and part of CI.
 
 ### Added

@@ -197,12 +197,17 @@ class DeviceService:
             actor: Caller context.
 
         Raises:
-            DeviceNotFound: No device of the caller has this id.
+            DeviceNotFound: No device has this id, or another account already
+                approved it.
 
         Returns:
             Stored device.
         """
-        return await self._get_owned_device(device_id, actor.account.id)
+        # The verification page reads the device before the caller approves
+        # it, while it is still unclaimed.
+        return await self._get_owned_device(
+            device_id, actor.account.id, allow_unclaimed=True
+        )
 
     async def list_devices(
         self, device_filter: DeviceFilter, actor: AuthContext
@@ -242,7 +247,7 @@ class DeviceService:
         Returns:
             Updated device.
         """
-        device = await self.get_device(device_id, actor=actor)
+        device = await self._get_owned_device(device_id, actor.account.id)
         if locked is not None:
             device.update_locked(locked)
         if trusted is not None:
@@ -259,7 +264,7 @@ class DeviceService:
         Raises:
             DeviceNotFound: No device of the caller has this id.
         """
-        await self.get_device(device_id, actor=actor)
+        await self._get_owned_device(device_id, actor.account.id)
         await self._repository.delete(device_id)
 
     async def _get_owned_device(

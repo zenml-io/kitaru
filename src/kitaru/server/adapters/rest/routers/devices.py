@@ -72,8 +72,8 @@ async def get_device(
 ) -> DeviceResponse:
     """Get a device by id.
 
-    Clients observe HTTP 200 on success and 404 when the caller owns no device
-    with this id.
+    Clients observe HTTP 200 on success and 404 when no device has this id or
+    another account already approved it.
 
     Args:
         device_id: Id of the device.
