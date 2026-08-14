@@ -188,9 +188,9 @@ jobs:
             fi
             tarballs_to_publish+=("$tarball")
           }
-          preflight_package "@zenml-io/kitaru" "typescript-dist/zenml-io-kitaru-${VERSION}.tgz"
-          preflight_package "@zenml-io/kitaru-mastra" "typescript-dist/zenml-io-kitaru-mastra-${VERSION}.tgz"
-          preflight_package "@zenml-io/kitaru-vercel-ai" "typescript-dist/zenml-io-kitaru-vercel-ai-${VERSION}.tgz"
+          preflight_package "@zenml-io/kitaru" "./typescript-dist/zenml-io-kitaru-${VERSION}.tgz"
+          preflight_package "@zenml-io/kitaru-mastra" "./typescript-dist/zenml-io-kitaru-mastra-${VERSION}.tgz"
+          preflight_package "@zenml-io/kitaru-vercel-ai" "./typescript-dist/zenml-io-kitaru-vercel-ai-${VERSION}.tgz"
           for tarball in "${tarballs_to_publish[@]}"; do
             npm publish "$tarball" --access public --tag "$NPM_TAG" --provenance
           done
