@@ -370,8 +370,10 @@ split wants a deliberate decision before publish.
   `canonical-returns`). Fixed, which also cleared one lychee 404. This
   was on the Aug 7 dead-until-merge list as if it would resolve at
   merge; it would not have.
-- **typos** — `flavoured` → `flavored` (US spelling, mine), and
-  rephrased `PNGs` in these notes, which the checker reads as `PN`.
+- **typos** — one British spelling of "flavored" (mine), and a plural
+  image-format acronym in these notes that the checker misreads as a
+  two-letter typo. Both rewritten. Note that describing either one
+  literally re-breaks the check, so keep this entry paraphrased.
 - **lychee** — the four remaining 404s are `docs.zenml.io/kitaru/*` deep
   paths. `/kitaru` is live; the restructured paths only exist once this
   merges and GitBook syncs. Added a **temporary** scoped exclusion in
