@@ -153,12 +153,28 @@ async def test_no_auth_login_stores_only_the_selected_target(
     assert get_server_url() == "https://public.example.com"
 
 
+@pytest.mark.parametrize(
+    ("upgrade", "expected_message"),
+    [
+        (
+            False,
+            "Starting the local Kitaru server. Docker may download images "
+            "during first-time setup.",
+        ),
+        (
+            True,
+            "Upgrading the local Kitaru server. Docker may download a new "
+            "image. Your local database will be kept.",
+        ),
+    ],
+)
 async def test_local_login_starts_runtime_before_selecting_target(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, upgrade, expected_message
 ) -> None:
     """Local login delegates deployment startup and selects it after success."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
     captured: dict[str, object] = {}
+    interactions: list[str] = []
 
     async def fake_start(**kwargs):
         captured.update(kwargs)
@@ -179,13 +195,13 @@ async def test_local_login_starts_runtime_before_selecting_target(
 
     monkeypatch.setattr(auth.local_runtime, "start_local_runtime", fake_start)
     monkeypatch.setattr(auth.local_runtime, "open_local_dashboard", opened)
-    monkeypatch.setattr(auth, "write_interaction", lambda message: None)
+    monkeypatch.setattr(auth, "write_interaction", interactions.append)
     client = FakeClient(AuthScheme.NONE)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
     result = await auth.login(
         server=None,
         local=True,
-        upgrade=False,
+        upgrade=upgrade,
         username=None,
         password_stdin=False,
         api_key_stdin=False,
@@ -199,9 +215,10 @@ async def test_local_login_starts_runtime_before_selecting_target(
 
     assert captured == {
         "package_version": "0.21.0",
-        "upgrade": False,
+        "upgrade": upgrade,
         "timeout": 30,
     }
+    assert interactions == [expected_message]
     assert result.item["deployment"] == "created"
     assert "could not be opened" in result.warnings[0]
     assert get_server_url() == auth.local_runtime.LOCAL_SERVER_URL
