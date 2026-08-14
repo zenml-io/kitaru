@@ -204,6 +204,7 @@ function createKitaruToolLoopAgentImpl<
         if (runState === undefined) {
           throw new Error("Kitaru recorder was not initialized");
         }
+        state.pendingModelCall = undefined;
         try {
           await recordVercelStep(
             runState,
@@ -348,7 +349,6 @@ function createKitaruToolLoopAgentImpl<
         runtime.onLanguageModelCallEnd = async (
           event: LanguageModelCallEndEvent<ToolSet>,
         ) => {
-          state.pendingModelCall = undefined;
           if (replay.spec) {
             registerReplayTickets({
               event,

@@ -167,6 +167,45 @@ describe("createKitaruToolLoopAgent", () => {
     ).toMatchObject({ error: "provider failed", status: "failed" });
   });
 
+  it("records the model call when a post-response tool callback throws", async () => {
+    const client = new FakeClient();
+    const callbackError = new Error("input callback failed");
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({
+          doGenerate: toolResponse([{ id: "call-1", name: "work" }]),
+        }),
+        tools: {
+          work: tool({
+            execute: async () => "done",
+            inputSchema: jsonSchema<Record<never, never>>({
+              additionalProperties: false,
+              properties: {},
+              type: "object",
+            }),
+            onInputStart: () => {
+              throw callbackError;
+            },
+          }),
+        },
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await expect(agent.generate({ prompt: "Work" })).rejects.toBe(
+      callbackError,
+    );
+    expect(
+      client.nodeBatches
+        .flatMap((batch) => batch.nodes)
+        .find((node) => node.node_type === "llm_call"),
+    ).toMatchObject({ error: "input callback failed", status: "failed" });
+    expect(client.updated.at(-1)).toMatchObject({
+      error: "input callback failed",
+      status: "failed",
+    });
+  });
+
   it("stops before another model call after step recording fails", async () => {
     const client = new FakeClient({
       failNodeBatch: (_batch, index) => index === 1,
