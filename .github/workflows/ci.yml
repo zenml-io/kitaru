@@ -108,7 +108,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm --filter @zenml-io/kitaru build
       - run: pnpm --filter @zenml-io/kitaru-vercel-ai build
-      - run: uv sync --frozen --extra server
+      - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Install standalone example
         working-directory: v2_examples/vercel_ai_ticket_resolver
         run: CI=true pnpm --ignore-workspace install --frozen-lockfile

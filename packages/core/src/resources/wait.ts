@@ -1,4 +1,4 @@
-import { KitaruApiError, KitaruWaitError } from "../errors.js";
+import { KitaruWaitError } from "../errors.js";
 import type { ResourceRequestOptions } from "./pagination.js";
 
 const DEFAULT_INTERVAL_MS = 2_000;
@@ -109,10 +109,7 @@ export async function waitForTerminal<T extends { status: string }>({
       if (options.signal?.aborted) {
         throwWaitError(resource, resourceId, "canceled", lastState, error);
       }
-      if (
-        requestSignal.aborted ||
-        (error instanceof KitaruApiError && error.kind === "timeout")
-      ) {
+      if (requestSignal.aborted) {
         throwWaitError(resource, resourceId, "timeout", lastState, error);
       }
       throw error;

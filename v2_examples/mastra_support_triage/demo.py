@@ -103,7 +103,8 @@ async def run_demo(
     if process.returncode != 0:
         detail = stderr_bytes.decode().strip() or stdout.strip()
         raise RuntimeError(
-            f"The TypeScript Mastra demo exited with code {process.returncode}: {detail}"
+            "The TypeScript Mastra demo exited with code "
+            f"{process.returncode}: {detail}"
         )
     return _parse_result(stdout)
 

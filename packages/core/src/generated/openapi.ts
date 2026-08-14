@@ -4605,15 +4605,25 @@ export interface components {
          */
         EvaluationStats: {
             /**
-             * Average
-             * @description Mean score of float evaluations, share of true results of bool evaluations, null for other data types.
-             */
-            average?: number | null;
-            /**
              * Count
              * @description Number of aggregated evaluations.
              */
             count: number;
+            /**
+             * Max
+             * @description Highest score of float and bool evaluations, null for other data types.
+             */
+            max?: number | null;
+            /**
+             * Mean
+             * @description Mean score of float evaluations, share of true results of bool evaluations, null for other data types.
+             */
+            mean?: number | null;
+            /**
+             * Min
+             * @description Lowest score of float and bool evaluations, null for other data types.
+             */
+            min?: number | null;
             /**
              * Pass Rate
              * @description Share of passed evaluations among those carrying a passed flag, null when none do.

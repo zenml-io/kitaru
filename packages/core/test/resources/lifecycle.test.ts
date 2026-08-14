@@ -340,6 +340,37 @@ describe("execution lifecycle resources", () => {
     });
   });
 
+  it("preserves a transport timeout before the wait deadline", async () => {
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      (_url, init) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener(
+            "abort",
+            () =>
+              reject(
+                init.signal?.reason ??
+                  new DOMException("Aborted", "AbortError"),
+              ),
+            { once: true },
+          );
+        }),
+    );
+    const client = new KitaruClient({
+      apiUrl: "https://api.example",
+      fetch,
+      timeoutMs: 5,
+    });
+
+    const error = await client.jobs
+      .wait(ID, { intervalMs: 1, timeoutMs: 1_000 })
+      .catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(KitaruApiError);
+    expect(error).not.toBeInstanceOf(KitaruWaitError);
+    expect(error).toMatchObject({ kind: "timeout", status: null });
+    expect((error as Error).message).toContain("timed out after 5ms");
+  });
+
   it("caller abort stops only local waiting and retains the last state", async () => {
     const controller = new AbortController();
     const fetch = vi
