@@ -287,6 +287,16 @@ def test_development_version_requires_an_override(monkeypatch) -> None:
         local_runtime._get_server_image("0.22.0.dev1")
 
 
+def test_release_candidate_uses_published_image_tag(monkeypatch) -> None:
+    """PEP 440 release candidates map to the published Docker tag format."""
+    monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
+
+    image, overridden = local_runtime._get_server_image("0.22.0rc5")
+
+    assert image == "zenmldocker/kitaru-server:0.22.0-rc.5"
+    assert overridden is False
+
+
 def test_runtime_files_contain_no_world_readable_secrets(runtime_paths) -> None:
     """Generated runtime secrets are restricted to the current user."""
     local_runtime._write_runtime_files(

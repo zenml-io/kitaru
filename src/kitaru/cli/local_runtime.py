@@ -397,7 +397,10 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             "No published local server image is available for this development build.",
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
         )
-    return f"zenmldocker/kitaru-server:{package_version}", False
+    image_version = package_version
+    if parsed_version.pre is not None and parsed_version.pre[0] == "rc":
+        image_version = f"{parsed_version.base_version}-rc.{parsed_version.pre[1]}"
+    return f"zenmldocker/kitaru-server:{image_version}", False
 
 
 async def _ensure_image(
