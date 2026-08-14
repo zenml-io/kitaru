@@ -103,19 +103,25 @@ def test_local_python_versions_are_rejected_for_pypi() -> None:
 
 def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    plugin_workflow = (
+        REPO_ROOT / ".github" / "workflows" / "release-plugins.yml"
+    ).read_text()
 
-    assert "workflows: [Release Python package]" in workflow
+    assert "workflow_run:" not in workflow
+    assert "python/kitaru/v*" in workflow
     assert "bundle/kitaru/v*" not in workflow
-    assert (
-        "startsWith(github.event.workflow_run.head_branch, 'python/kitaru/v')"
-        in workflow
-    )
+    assert "publish-deployables:" in workflow
     assert "plugins/default-requirements.txt" not in workflow
     assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
     assert "gh release upload" not in workflow
-    assert "SHA256SUMS" not in workflow
-    assert "contents: write" not in workflow
+    assert "create-release:" in workflow
+    assert (
+        "needs: [build, publish-python, publish-deployables, promote-latest]"
+        in workflow
+    )
     assert "promote-latest:" in workflow
+    assert "publish-deployables:" not in plugin_workflow
+    assert "!python/kitaru/**" in plugin_workflow
 
 
 def test_managed_image_failure_does_not_block_the_release() -> None:
@@ -319,30 +325,44 @@ def test_plugin_matrix_is_generated_from_the_nine_plugin_units() -> None:
     }
 
 
-def test_python_release_workflow_resolves_every_tag_from_the_inventory() -> None:
+def test_plugin_release_workflow_resolves_plugin_tags_from_the_inventory() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
 
     assert "python/**" in workflow
+    assert "!python/kitaru/**" in workflow
     assert "scripts/release_units.py resolve --tag" in workflow
-    assert "scripts/release_ui.py --version" in workflow
+    assert "scripts/release_ui.py --version" not in workflow
     assert "uv version" not in workflow
     assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
 
 
 def test_python_release_workflow_can_resume_after_partial_publication() -> None:
-    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+    workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml")
+    ]
 
-    assert "skip-existing: true" in workflow
-    assert "GH_REPO: ${{ github.repository }}" in workflow
-    assert 'gh release view "$PACKAGE_TAG"' in workflow
-    assert (
-        'gh release upload "$PACKAGE_TAG" package-dist/* evidence/* --clobber'
-        in workflow
+    for workflow in workflows:
+        assert "skip-existing: true" in workflow
+        assert "GH_REPO: ${{ github.repository }}" in workflow
+        assert 'gh release view "$PACKAGE_TAG"' in workflow
+        assert "already exists; leaving it unchanged" in workflow
+        assert "gh release upload" not in workflow
+
+
+def test_core_github_release_is_created_after_registry_publication() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+
+    assert workflow.index("  create-release:\n") > workflow.index(
+        "  publish-deployables:\n"
     )
+    assert workflow.index("  create-release:\n") > workflow.index("  promote-latest:\n")
+    assert "needs.publish-deployables.result == 'success'" in workflow
+    assert "needs.promote-latest.result == 'success'" in workflow
 
 
 def test_python_release_workflow_can_install_a_new_core_release() -> None:
-    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
 
     assert '--exclude-newer-package "kitaru=0 days"' in workflow
 
