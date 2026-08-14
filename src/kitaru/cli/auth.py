@@ -132,10 +132,7 @@ async def login(
         return CommandResult(
             item=item,
             warnings=warnings,
-            links={
-                "dashboard": local_runtime.LOCAL_DASHBOARD_URL,
-                "cloud": "https://cloud.zenml.io/",
-            },
+            links={"dashboard": local_runtime.LOCAL_DASHBOARD_URL},
             next_actions=["Run `kitaru status` to inspect the local server."],
         )
     server_url = validate_server_url(LOCAL_SERVER_URL if local else str(server))
@@ -239,12 +236,7 @@ async def logout(
                 "invalid_configuration", "No server was resolved for logout."
             )
         if server_url == local_runtime.LOCAL_SERVER_URL:
-            if delete_volumes and not local_runtime.is_local_runtime_owned():
-                raise CLIError(
-                    "invalid_configuration",
-                    "The selected localhost server is not owned by the Kitaru CLI.",
-                )
-            if local_runtime.is_local_runtime_owned():
+            if delete_volumes or local_runtime.is_local_runtime_owned():
                 item = await local_runtime.stop_local_runtime(
                     delete_volumes=delete_volumes
                 )

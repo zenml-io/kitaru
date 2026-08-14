@@ -262,12 +262,28 @@ async def stop_local_runtime(
     """Stop a CLI-owned deployment and optionally delete its data."""
     paths = paths or get_local_runtime_paths()
     state = _read_state(paths.state)
-    if state is None:
+    if state is None and not delete_volumes:
         raise CLIError(
             "invalid_configuration",
             "No CLI-owned local Kitaru deployment was found.",
         )
     runner = runner or await _get_docker_runner()
+    if state is None:
+        with _operation_lock(paths):
+            await _validate_docker(runner)
+            removed = await _remove_labeled_resources(runner)
+            if not removed:
+                raise CLIError(
+                    "invalid_configuration",
+                    "No CLI-owned local Kitaru deployment was found.",
+                )
+            paths.environment.unlink(missing_ok=True)
+            paths.compose.unlink(missing_ok=True)
+            return {
+                "server_url": LOCAL_SERVER_URL,
+                "deployment": "deleted",
+                "data_deleted": True,
+            }
     with _operation_lock(paths):
         await _validate_docker(runner)
         arguments = ["down"]
@@ -443,25 +459,59 @@ async def _ensure_image(
     _raise_for_docker(pulled, f"Docker could not pull {image!r}.")
 
 
-async def _reject_unowned_resources(runner: DockerCommandRunner) -> None:
-    filters = (
-        ("ps", "--all", "--quiet", "--filter"),
-        ("network", "ls", "--quiet", "--filter"),
-        ("volume", "ls", "--quiet", "--filter"),
-    )
-    for prefix in filters:
+_RESOURCE_QUERIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("containers", ("ps", "--all", "--quiet", "--filter")),
+    ("networks", ("network", "ls", "--quiet", "--filter")),
+    ("volumes", ("volume", "ls", "--quiet", "--filter")),
+)
+
+
+async def _find_labeled_resources(
+    runner: DockerCommandRunner,
+) -> dict[str, list[str]]:
+    found: dict[str, list[str]] = {}
+    for kind, prefix in _RESOURCE_QUERIES:
         result = await runner.run(
             *prefix,
             f"label=com.docker.compose.project={LOCAL_PROJECT_NAME}",
             timeout=30,
         )
         _raise_for_docker(result, "Docker resources could not be inspected.")
-        if result.stdout.strip():
-            raise CLIError(
-                "conflict",
-                "Docker resources named for Kitaru exist without CLI ownership state.",
-                hint="Remove or rename those resources before retrying.",
-            )
+        identifiers = result.stdout.split()
+        if identifiers:
+            found[kind] = identifiers
+    return found
+
+
+async def _reject_unowned_resources(runner: DockerCommandRunner) -> None:
+    found = await _find_labeled_resources(runner)
+    if not found:
+        return
+    # The database password is regenerated along with the runtime files, and
+    # Postgres only applies it when it initializes an empty data directory, so
+    # an adopted volume would leave the server unable to authenticate.
+    raise CLIError(
+        "conflict",
+        "Docker resources named for Kitaru exist without CLI ownership state.",
+        hint="Run `kitaru logout --volumes` to delete them, then retry.",
+        details={kind: sorted(values) for kind, values in found.items()},
+    )
+
+
+async def _remove_labeled_resources(runner: DockerCommandRunner) -> dict[str, object]:
+    found = await _find_labeled_resources(runner)
+    removals = (
+        ("containers", ("rm", "--force")),
+        ("networks", ("network", "rm")),
+        ("volumes", ("volume", "rm")),
+    )
+    for kind, command in removals:
+        identifiers = found.get(kind)
+        if not identifiers:
+            continue
+        result = await runner.run(*command, *identifiers, timeout=120)
+        _raise_for_docker(result, f"Docker {kind} could not be removed.")
+    return {kind: sorted(values) for kind, values in found.items()}
 
 
 def _reject_occupied_port() -> None:

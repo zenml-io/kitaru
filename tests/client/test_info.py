@@ -38,7 +38,6 @@ async def test_info_reports_the_control_plane_api_url() -> None:
 
     assert info.auth_scheme is AuthScheme.CONTROL_PLANE
     assert info.control_plane_api_url == "https://control-plane.example.com"
-    assert info.id == settings.SERVER_ID
 
 
 async def test_info_reports_the_configured_urls() -> None:
@@ -56,13 +55,12 @@ async def test_info_reports_the_configured_urls() -> None:
     assert info.dashboard_url == "https://dashboard.example.com"
 
 
-async def test_info_omits_unconfigured_urls_and_id() -> None:
-    """Leave the URLs and the server id null when they are not configured."""
+async def test_info_omits_unconfigured_urls() -> None:
+    """Leave the URLs null when they are not configured."""
     app = create_app(local_settings())
     async with asgi_api_client(app) as client:
         info = await client.info.get()
 
-    assert info.id is None
     assert info.server_url is None
     assert info.dashboard_url is None
 

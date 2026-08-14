@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Fixed
+
+- The server info endpoint reports the persisted server id instead of the configured one, which was unset on servers that generate their id at startup.
+- `kitaru login --local` no longer prints a Kitaru Cloud link, and takes its analytics opt-in and analytics debug settings from the environment instead of forcing the opt-in off.
+- `kitaru login --local` no longer dead-ends when Docker resources outlive the CLI ownership state. The conflict names the resources it found, and `kitaru logout --volumes` deletes them.
+
 ## [0.22.0rc6]
 
 ### Changed
