@@ -1,4 +1,4 @@
 interface:
-  display_name: "Kitaru Release Preparation"
-  short_description: "Interview and prepare Kitaru release PRs"
-  default_prompt: "Use $kitaru-release to interview me and prepare a Kitaru release pull request."
+  display_name: "Kitaru Release"
+  short_description: "Prepare and publish Kitaru releases"
+  default_prompt: "Use $kitaru-release to prepare or execute a Kitaru release."
