@@ -99,6 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- Experiment run job listings now return only the jobs backing the selected run's replays instead of every job in the database. (#749)
 - A Mastra replay no longer executes tools live after a tool-policy decision fails. Mastra swallowed the exception the policy hook raised, so a replay that could not find a recorded result ran the real tool and still recorded the session as completed. Replays now stop at the first policy failure, and the TypeScript core refuses every later tool call in the run rather than relying on each adapter to notice.
 - A Mastra replay now rejects tools it cannot intercept, and no longer reads or writes live Mastra memory threads, so recording state and replay state stay separate.
 - The Vercel AI adapter no longer fails a running agent because a model response or tool payload was too large to record. Recording bounds oversized values instead of raising, and the shared recorder used by the TypeScript core applies the same bound to tool results captured during replay.

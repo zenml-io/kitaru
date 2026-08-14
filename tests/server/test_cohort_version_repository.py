@@ -89,6 +89,7 @@ Setup = tuple[
     uuid.UUID,
     uuid.UUID,
     Callable[[], Awaitable[uuid.UUID]],
+    Callable[[], Awaitable[uuid.UUID]],
     Callable[[uuid.UUID], Awaitable[None]],
     TagRepository,
 ]
@@ -98,9 +99,10 @@ Setup = tuple[
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
     """Provide each cohort version repository implementation, a session
     repository sharing its backend, an owner id, a cohort id to attach
-    versions to, a factory for further session ids on the cohort's agent,
-    a factory attaching an experiment run to a given cohort version id, and
-    a tag repository sharing the backend."""
+    versions to, a factory for further cohort ids, a factory for further
+    session ids on the cohort's agent, a factory attaching an experiment
+    run to a given cohort version id, and a tag repository sharing the
+    backend."""
     if request.param == "fake":
         sessions = FakeSessionRepository()
         cohorts = FakeCohortRepository()
@@ -112,6 +114,12 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         owner_id = uuid.uuid4()
         agent_id = uuid.uuid4()
         cohort = await create_cohort(cohorts, owner_id, agent_id)
+
+        async def make_cohort_id() -> uuid.UUID:
+            created = await create_cohort(
+                cohorts, owner_id, agent_id, name=f"cohort-{uuid.uuid4().hex[:8]}"
+            )
+            return created.id
 
         async def make_session_id() -> uuid.UUID:
             created = await create_session(sessions, owner_id, agent_id=agent_id)
@@ -133,6 +141,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             sessions,
             owner_id,
             cohort.id,
+            make_cohort_id,
             make_session_id,
             attach_experiment_run,
             tags,
@@ -149,6 +158,17 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         cohort = await cohorts_repository.create(
             Cohort(owner_id=owner.id, name="cohort", agent_id=agent.id)
         )
+
+        async def make_cohort_id() -> uuid.UUID:
+            created = await cohorts_repository.create(
+                Cohort(
+                    owner_id=owner.id,
+                    name=f"cohort-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent.id,
+                )
+            )
+            return created.id
+
         sessions_repository = SQLSessionRepository(session, engine)
         agent_versions_repository = SQLAgentVersionRepository(session)
         experiments_repository = SQLExperimentRepository(session)
@@ -200,6 +220,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             sessions_repository,
             owner.id,
             cohort.id,
+            make_cohort_id,
             make_session_id,
             attach_experiment_run,
             SQLTagRepository(session),
@@ -208,7 +229,7 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 
 async def test_create_sets_version_and_timestamps(setup: Setup) -> None:
     """Assign version 1 and both timestamps to the first version."""
-    repository, _, owner_id, cohort_id, make_session_id, _, _ = setup
+    repository, _, owner_id, cohort_id, _, make_session_id, _, _ = setup
     session_ids = [await make_session_id(), await make_session_id()]
     version = await repository.create(
         CohortVersion(
@@ -230,7 +251,7 @@ async def test_create_sets_version_and_timestamps(setup: Setup) -> None:
 
 async def test_create_numbers_versions_sequentially(setup: Setup) -> None:
     """Assign consecutive version numbers per cohort."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     first = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -245,7 +266,7 @@ async def test_create_numbers_versions_sequentially(setup: Setup) -> None:
 
 async def test_create_missing_cohort(setup: Setup) -> None:
     """Raise when the cohort does not exist."""
-    repository, _, owner_id, _, _, _, _ = setup
+    repository, _, owner_id, _, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(CohortNotFound, match=f"Cohort {missing_id} was not found"):
         await repository.create(
@@ -255,7 +276,7 @@ async def test_create_missing_cohort(setup: Setup) -> None:
 
 async def test_get(setup: Setup) -> None:
     """Load a stored cohort version by id."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     created = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -265,7 +286,7 @@ async def test_get(setup: Setup) -> None:
 
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort version id."""
-    repository, _, _, _, _, _, _ = setup
+    repository, _, _, _, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(
         CohortVersionIdNotFound, match=f"Cohort version {missing_id} was not found"
@@ -275,7 +296,7 @@ async def test_get_not_found(setup: Setup) -> None:
 
 async def test_get_by_number(setup: Setup) -> None:
     """Load a stored cohort version by cohort id and version number."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     created = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -285,7 +306,7 @@ async def test_get_by_number(setup: Setup) -> None:
 
 async def test_get_by_number_not_found(setup: Setup) -> None:
     """Raise for an unknown version number."""
-    repository, _, _, cohort_id, _, _, _ = setup
+    repository, _, _, cohort_id, _, _, _, _ = setup
     with pytest.raises(
         CohortVersionNotFound, match=f"Version 1 of cohort {cohort_id} was not found"
     ):
@@ -294,7 +315,7 @@ async def test_get_by_number_not_found(setup: Setup) -> None:
 
 async def test_query_scoped_to_cohort(setup: Setup) -> None:
     """Query only the versions of the requested cohort, newest-first."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     v1 = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -308,9 +329,23 @@ async def test_query_scoped_to_cohort(setup: Setup) -> None:
     assert [version.id for version in versions] == [v2.id, v1.id]
 
 
+async def test_query_excludes_other_cohort_versions(setup: Setup) -> None:
+    """Exclude another cohort's versions from a cohort-scoped query."""
+    repository, _, owner_id, cohort_id, make_cohort_id, _, _, _ = setup
+    other_cohort_id = await make_cohort_id()
+    created = await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
+    )
+    await repository.create(
+        CohortVersion(owner_id=owner_id, cohort_id=other_cohort_id, session_count=0), []
+    )
+    versions, _ = await repository.query(CohortVersionFilter(cohort_id=cohort_id))
+    assert [version.id for version in versions] == [created.id]
+
+
 async def test_query_filters_by_tag(setup: Setup) -> None:
     """Filter cohort versions linked to a tag through tag_link."""
-    repository, _, owner_id, cohort_id, _, _, tags = setup
+    repository, _, owner_id, cohort_id, _, _, _, tags = setup
     tagged = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -336,7 +371,7 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
 
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     created = [
         await repository.create(
             CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
@@ -362,7 +397,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
 
 async def test_list_session_ids_preserves_order(setup: Setup) -> None:
     """List a version's member session ids in the order they were given."""
-    repository, _, owner_id, cohort_id, make_session_id, _, _ = setup
+    repository, _, owner_id, cohort_id, _, make_session_id, _, _ = setup
     session_ids = [
         await make_session_id(),
         await make_session_id(),
@@ -380,7 +415,7 @@ async def test_list_session_ids_preserves_order(setup: Setup) -> None:
 
 async def test_list_session_ids_empty_version(setup: Setup) -> None:
     """List an empty member list for a version without members."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     created = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -389,7 +424,7 @@ async def test_list_session_ids_empty_version(setup: Setup) -> None:
 
 async def test_list_session_ids_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort version id."""
-    repository, _, _, _, _, _, _ = setup
+    repository, _, _, _, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(
         CohortVersionIdNotFound, match=f"Cohort version {missing_id} was not found"
@@ -399,7 +434,7 @@ async def test_list_session_ids_not_found(setup: Setup) -> None:
 
 async def test_update(setup: Setup) -> None:
     """Persist a display version change and renew the updated timestamp."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     created = await repository.create(
         CohortVersion(
             owner_id=owner_id,
@@ -422,7 +457,7 @@ async def test_update(setup: Setup) -> None:
 
 async def test_update_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort version id."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     version = CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0)
     with pytest.raises(
         CohortVersionIdNotFound, match=f"Cohort version {version.id} was not found"
@@ -432,7 +467,7 @@ async def test_update_not_found(setup: Setup) -> None:
 
 async def test_delete(setup: Setup) -> None:
     """Delete a stored cohort version."""
-    repository, _, owner_id, cohort_id, _, _, _ = setup
+    repository, _, owner_id, cohort_id, _, _, _, _ = setup
     created = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -443,7 +478,7 @@ async def test_delete(setup: Setup) -> None:
 
 async def test_delete_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort version id."""
-    repository, _, _, _, _, _, _ = setup
+    repository, _, _, _, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(
         CohortVersionIdNotFound, match=f"Cohort version {missing_id} was not found"
@@ -453,7 +488,7 @@ async def test_delete_not_found(setup: Setup) -> None:
 
 async def test_delete_in_use(setup: Setup) -> None:
     """Reject deleting a version referenced by an experiment run."""
-    repository, _, owner_id, cohort_id, _, attach_experiment_run, _ = setup
+    repository, _, owner_id, cohort_id, _, _, attach_experiment_run, _ = setup
     created = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0), []
     )
@@ -464,7 +499,7 @@ async def test_delete_in_use(setup: Setup) -> None:
 
 async def test_delete_frees_member_session(setup: Setup) -> None:
     """Free a member session for deletion once its cohort version is gone."""
-    repository, sessions, owner_id, cohort_id, make_session_id, _, _ = setup
+    repository, sessions, owner_id, cohort_id, _, make_session_id, _, _ = setup
     session_id = await make_session_id()
     created = await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=1),
@@ -476,7 +511,7 @@ async def test_delete_frees_member_session(setup: Setup) -> None:
 
 async def test_session_in_cohort_version_delete_conflict(setup: Setup) -> None:
     """Reject deleting a session that belongs to a cohort version."""
-    repository, sessions, owner_id, cohort_id, make_session_id, _, _ = setup
+    repository, sessions, owner_id, cohort_id, _, make_session_id, _, _ = setup
     session_id = await make_session_id()
     await repository.create(
         CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=1),

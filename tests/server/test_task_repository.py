@@ -329,6 +329,37 @@ async def test_query_filters(setup: Setup) -> None:
     assert [t.id for t in tasks] == [task.id]
 
 
+async def test_query_filters_by_job_id(setup: Setup) -> None:
+    """Scope the query to one job, tasks of other jobs excluded."""
+    matching = await setup.tasks.create(_agent_task(setup))
+    other_job = await setup.jobs.create(
+        Job(owner_id=setup.owner_id, kind=JobKind.SESSION_RUN)
+    )
+    await setup.tasks.create(_agent_task(setup, job_id=other_job.id))
+
+    tasks, next_cursor = await setup.tasks.query(TaskFilter(job_id=setup.job_id))
+    assert next_cursor is None
+    assert [task.id for task in tasks] == [matching.id]
+
+
+async def test_query_filters_by_stale_before(setup: Setup) -> None:
+    """Filter in-flight tasks whose last heartbeat predates the bound."""
+    stale = await setup.tasks.create(_agent_task(setup))
+    await setup.tasks.create(_agent_task(setup))
+    await setup.tasks.claim_pending(
+        WorkerScope(), setup.worker_id, 1, datetime.now(UTC) - timedelta(hours=2)
+    )
+    await setup.tasks.claim_pending(
+        WorkerScope(), setup.worker_id, 1, datetime.now(UTC)
+    )
+
+    tasks, next_cursor = await setup.tasks.query(
+        TaskFilter(stale_before=datetime.now(UTC) - timedelta(hours=1))
+    )
+    assert next_cursor is None
+    assert [task.id for task in tasks] == [stale.id]
+
+
 async def test_update_persists_status(setup: Setup) -> None:
     """Persist a status transition and renew the updated timestamp."""
     created = await setup.tasks.create(_agent_task(setup))

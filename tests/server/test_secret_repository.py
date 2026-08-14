@@ -178,6 +178,17 @@ async def test_query_internal_filter(setup: Setup) -> None:
     assert secrets[0] == hidden
 
 
+async def test_query_owner_id_filter(setup: Setup) -> None:
+    """Query secrets filtered on owner_id, excluding secrets of other owners."""
+    repository, owner_id, other_owner_id = setup
+    db = await repository.create(Secret(owner_id=owner_id, name="db", values=VALUES))
+    await repository.create(Secret(owner_id=other_owner_id, name="s3", values=VALUES))
+
+    secrets, next_cursor = await repository.query(SecretFilter(owner_id=owner_id))
+    assert next_cursor is None
+    assert [secret.id for secret in secrets] == [db.id]
+
+
 async def test_query_sort_created_asc(setup: Setup) -> None:
     """Sort secrets oldest-first with sort=created:asc."""
     repository, owner_id, _ = setup
