@@ -1,4 +1,4 @@
-"""PostgreSQL proof for the TypeScript canonical returns walkthrough."""
+"""PostgreSQL proof for the canonical TypeScript returns workflow."""
 
 import asyncio
 import json
@@ -8,9 +8,10 @@ import socket
 import subprocess
 import sys
 import uuid
-from collections.abc import AsyncIterator, Iterator
-from contextlib import asynccontextmanager, contextmanager
+from collections.abc import AsyncIterator, Mapping, Sequence
+from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Any
 
 import pytest
 import uvicorn
@@ -21,137 +22,131 @@ TESTS_DIR = REPOSITORY_ROOT / "tests"
 sys.path.insert(0, str(TESTS_DIR))
 
 from conftest import db_settings, drop_test_database, postgres_available  # noqa: E402
-from kitaru.api_models.v1.agent import AgentCreateRequest  # noqa: E402
-from kitaru.api_models.v1.agent_version import (  # noqa: E402
-    AgentCapabilities,
-    AgentVersionCreateRequest,
-    RunSpec,
-)
-from kitaru.api_models.v1.cohort import CohortCreateRequest  # noqa: E402
-from kitaru.api_models.v1.cohort_version import (  # noqa: E402
-    CohortVersionCreateRequest,
-)
-from kitaru.api_models.v1.evaluation import (  # noqa: E402
-    EvaluationBatchCreateRequest,
-    EvaluationListParams,
-)
-from kitaru.api_models.v1.evaluator import (  # noqa: E402
-    EvaluatorCreateRequest,
-    EvaluatorVersionCreateRequest,
-)
-from kitaru.api_models.v1.experiment import ExperimentCreateRequest  # noqa: E402
-from kitaru.api_models.v1.experiment_run import (  # noqa: E402
-    ExperimentRunCreateRequest,
-    ExperimentRunStatus,
-)
-from kitaru.api_models.v1.filter import FilterCondition, FilterOp  # noqa: E402
-from kitaru.api_models.v1.job import JobResponse, JobStatus  # noqa: E402
-from kitaru.api_models.v1.plugin import ScriptPluginSource  # noqa: E402
-from kitaru.api_models.v1.replay import (  # noqa: E402
-    ReplayListParams,
-    ReplayResponse,
-    ReplayStatus,
-)
-from kitaru.api_models.v1.replay_config import (  # noqa: E402
-    EvaluatorConfig,
-    PassthroughConfig,
-    ToolPolicy,
-)
-from kitaru.api_models.v1.session import (  # noqa: E402
-    SessionListParams,
-    SessionOrigin,
-    SessionResponse,
-    SessionStatus,
-)
-from kitaru.api_models.v1.session_node import (  # noqa: E402
-    NodeStatus,
-    NodeType,
-    SessionNodeListParams,
-    SessionNodeResponse,
-)
-from kitaru.api_models.v1.worker import WorkerScope  # noqa: E402
-from kitaru.client.api_client import KitaruAPIClient  # noqa: E402
 from kitaru.server.api.app import create_app  # noqa: E402
 from kitaru.server.database.service import DatabaseService  # noqa: E402
-from kitaru.worker import Worker, WorkerConfig  # noqa: E402
 
-README_PATH = EXAMPLE_DIR / "README.md"
-DOCUMENTED_EVALUATOR = re.compile(
-    r"<!-- documented-evaluator:start -->\n```python\n(.*?)\n```\n"
-    r"<!-- documented-evaluator:end -->",
-    re.DOTALL,
-)
-TERMINAL_TOOLS = {
-    "issue_refund": "refund",
-    "create_replacement": "replacement",
-    "escalate_to_human": "escalate",
-}
-INVESTIGATION_TOOLS = {
-    "lookup_order",
-    "get_return_policy",
-    "check_shipping",
-}
-EXPECTED_INVESTIGATION_TOOLS = {
-    "ticket-001": {"lookup_order", "get_return_policy"},
-    "ticket-002": {"lookup_order", "get_return_policy"},
-    "ticket-003": {"lookup_order", "get_return_policy"},
-    "ticket-004": {"lookup_order", "get_return_policy"},
-    "ticket-005": {"lookup_order"},
-    "ticket-006": {"lookup_order", "check_shipping"},
-    "ticket-007": {"lookup_order", "get_return_policy"},
-    "ticket-008": {"lookup_order", "get_return_policy"},
-    "ticket-009": {"lookup_order", "get_return_policy"},
-    "ticket-010": {"lookup_order", "get_return_policy"},
-}
-REQUESTED_MODEL_ID = "openai/gpt-5-nano"
-# The scripted fixture answers as its own served model, the way a provider
-# returns a dated model id rather than the id the caller asked for.
-SERVED_MODEL_ID = "kitaru-returns-scripted-fixture"
-BASELINE_ACTIONS = {
-    "ticket-001": ("refund", 98),
-    "ticket-002": ("escalate", None),
-    "ticket-003": ("escalate", None),
-    "ticket-004": ("refund", 280),
-    "ticket-005": ("escalate", None),
-    "ticket-006": ("replacement", None),
-    "ticket-007": ("refund", 120),
-    "ticket-008": ("escalate", None),
-    "ticket-009": ("refund", 80),
-    "ticket-010": ("refund", 98),
-}
-STRICT_ACTIONS = {
-    "ticket-004": ("escalate", None),
-    "ticket-007": ("escalate", None),
-    "ticket-001": ("refund", 98),
-    "ticket-009": ("refund", 80),
-    "ticket-010": ("refund", 98),
-}
-TARGET_TICKETS = ("ticket-004", "ticket-007")
-CONTROL_TICKETS = ("ticket-001", "ticket-009", "ticket-010")
-TOOLS = [
-    "lookup_order",
-    "get_return_policy",
-    "check_shipping",
-    "issue_refund",
-    "create_replacement",
-    "escalate_to_human",
-]
-SETTLED_JOB_STATUSES = {
-    JobStatus.COMPLETED,
-    JobStatus.FAILED,
-    JobStatus.CANCELED,
-}
-SETTLED_RUN_STATUSES = {
-    ExperimentRunStatus.COMPLETED,
-    ExperimentRunStatus.FAILED,
-    ExperimentRunStatus.CANCELED,
-}
-SETTLED_REPLAY_STATUSES = {
-    ReplayStatus.COMPLETED,
-    ReplayStatus.FAILED,
-    ReplayStatus.CANCELED,
-}
 REQUIRE_POSTGRES_ENVIRONMENT_VARIABLE = "KITARU_REQUIRE_POSTGRES"
+WORKFLOW_MANIFEST_RELATIVE_PATH = Path(".state/workflow.json")
+WORKFLOW_EVENT_SCHEMA_VERSION = 1
+WORKFLOW_MANIFEST_SCHEMA_VERSION = 2
+WORKFLOW_TIMEOUT_SECONDS = 300
+WORKER_TIMEOUT_SECONDS = 300
+UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
+EXPECTED_COUNTS = {
+    "baseline_sessions": 10,
+    "baseline_passes": 8,
+    "baseline_failures": 2,
+    "target_sessions": 2,
+    "control_sessions": 3,
+    "experiment_runs": 2,
+    "replays": 5,
+    "replay_passes": 5,
+}
+EXPECTED_HANDOFFS = (
+    ("baseline_evaluation", 1, "evaluation"),
+    ("experiment_runs", 5, "replay"),
+)
+WORKFLOW_HANDOFF_KEYS = {
+    "event",
+    "schema_version",
+    "evidence_set_id",
+    "phase",
+    "manifest_relative_path",
+    "jobs",
+}
+WORKFLOW_COMPLETED_KEYS = {
+    "event",
+    "schema_version",
+    "evidence_set_id",
+    "counts",
+}
+WORKFLOW_JOB_KEYS = {"job_id", "job_kind", "agent_version_id"}
+WORKFLOW_MANIFEST_KEYS = {
+    "evidence_set_id",
+    "ids",
+    "pending_operation",
+    "phase",
+    "provider",
+    "schema_version",
+    "server",
+    "source_hashes",
+    "stages",
+}
+WORKFLOW_SERVER_KEYS = {"account_id", "api_url", "auth_scheme", "version"}
+WORKFLOW_PROVIDER_KEYS = {
+    "fixture_version",
+    "kind",
+    "provider_call",
+    "requested_model",
+    "served_model",
+    "synthetic_usage",
+}
+WORKFLOW_SOURCE_HASH_KEYS = {
+    "baseline_instructions_sha256",
+    "evaluator_sha256",
+    "fixtures_sha256",
+    "strict_instructions_sha256",
+}
+WORKFLOW_STAGE_KEYS = {
+    "baseline",
+    "review",
+    "baseline_evaluation",
+    "cohorts",
+    "experiment_runs",
+    "verification",
+}
+WORKFLOW_ID_KEYS = {
+    "agent_id",
+    "agent_versions",
+    "annotation_ids",
+    "baseline_sessions",
+    "cohort_versions",
+    "cohorts",
+    "evaluation_ids",
+    "evaluation_job_id",
+    "evaluator_blob_id",
+    "evaluator_id",
+    "evaluator_version_id",
+    "experiment_id",
+    "experiment_run_ids",
+    "investigation_id",
+    "investigation_session_id",
+    "replay_evaluation_ids",
+    "replay_ids",
+    "replay_job_ids",
+    "replay_result_session_ids",
+    "task_ids",
+}
+WORKER_LIFECYCLE_EVENT_KEYS = {
+    "schema_version",
+    "command",
+    "ok",
+    "event",
+    "item",
+}
+WORKER_RESULT_EVENT_KEYS = WORKER_LIFECYCLE_EVENT_KEYS | {
+    "warnings",
+    "links",
+    "next_actions",
+}
+SUBPROCESS_ENVIRONMENT_ALLOWLIST = {
+    "HOME",
+    "LANG",
+    "LC_ALL",
+    "PATH",
+    "PATHEXT",
+    "SYSTEMROOT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "UV_CACHE_DIR",
+    "VIRTUAL_ENV",
+    "WINDIR",
+}
 
 
 async def _require_postgres() -> None:
@@ -202,36 +197,30 @@ async def _network_server() -> AsyncIterator[str]:
         yield f"http://127.0.0.1:{port}"
     finally:
         server.should_exit = True
-        await task
-        await drop_test_database(settings)
+        try:
+            await task
+        finally:
+            await drop_test_database(settings)
 
 
-@contextmanager
-def _worker_environment(api_url: str) -> Iterator[None]:
-    names = ("KITARU_API_URL", "KITARU_API_KEY")
-    original = {name: os.environ.get(name) for name in names}
-    os.environ["KITARU_API_URL"] = api_url
-    os.environ["KITARU_API_KEY"] = "local-development-key"
-    try:
-        yield
-    finally:
-        for name, value in original.items():
-            if value is None:
-                os.environ.pop(name, None)
-            else:
-                os.environ[name] = value
+def _subprocess_environment(**updates: str) -> dict[str, str]:
+    environment = {
+        name: value
+        for name in SUBPROCESS_ENVIRONMENT_ALLOWLIST
+        if (value := os.environ.get(name)) is not None
+    }
+    environment.update(updates)
+    return environment
 
 
-def _run(
-    command: list[str], *, cwd: Path, environment: dict[str, str] | None = None
-) -> None:
+def _run_checked(command: Sequence[str], *, cwd: Path) -> None:
     result = subprocess.run(
         command,
         cwd=cwd,
-        env=environment,
+        env=_subprocess_environment(),
         text=True,
         capture_output=True,
-        timeout=300,
+        timeout=WORKFLOW_TIMEOUT_SECONDS,
         check=False,
     )
     if result.returncode != 0:
@@ -241,530 +230,363 @@ def _run(
         )
 
 
-def _build_compiled_commands() -> None:
-    if not (EXAMPLE_DIR / "node_modules").exists():
+async def _build_typescript() -> None:
+    commands = (
+        (["pnpm", "--filter", "@zenml-io/kitaru", "build"], REPOSITORY_ROOT),
+        (
+            ["pnpm", "--filter", "@zenml-io/kitaru-vercel-ai", "build"],
+            REPOSITORY_ROOT,
+        ),
+        (["pnpm", "--ignore-workspace", "build"], EXAMPLE_DIR),
+    )
+    for command, cwd in commands:
+        await asyncio.to_thread(_run_checked, command, cwd=cwd)
+
+
+async def _run_process(
+    command: Sequence[str],
+    *,
+    cwd: Path,
+    environment: Mapping[str, str],
+    timeout: float,
+) -> tuple[str, str]:
+    process = await asyncio.create_subprocess_exec(
+        *command,
+        cwd=cwd,
+        env=dict(environment),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            process.communicate(), timeout=timeout
+        )
+    except TimeoutError:
+        process.kill()
+        stdout_bytes, stderr_bytes = await process.communicate()
         pytest.fail(
-            "Standalone dependencies are missing. Run `pnpm --ignore-workspace "
-            "install --frozen-lockfile` in the example directory."
+            f"Command timed out after {timeout} seconds: {' '.join(command)}\n"
+            f"stdout:\n{stdout_bytes.decode('utf-8', errors='replace')}\n"
+            f"stderr:\n{stderr_bytes.decode('utf-8', errors='replace')}"
         )
-    _run(
-        ["pnpm", "--filter", "@zenml-io/kitaru", "build"],
-        cwd=REPOSITORY_ROOT,
+    stdout = stdout_bytes.decode("utf-8", errors="replace")
+    stderr = stderr_bytes.decode("utf-8", errors="replace")
+    if process.returncode != 0:
+        pytest.fail(
+            f"Command failed ({process.returncode}): {' '.join(command)}\n"
+            f"stdout:\n{stdout}\nstderr:\n{stderr}"
+        )
+    return stdout, stderr
+
+
+def _parse_json_object(line: str, *, source: str) -> dict[str, Any]:
+    try:
+        value = json.loads(line)
+    except json.JSONDecodeError as error:
+        pytest.fail(f"{source} emitted invalid JSON: {line!r}: {error}")
+    if not isinstance(value, dict):
+        pytest.fail(f"{source} emitted a non-object JSON value: {value!r}")
+    return value
+
+
+def _parse_single_workflow_event(stdout: str) -> dict[str, Any]:
+    lines = stdout.splitlines()
+    assert len(lines) == 1, (
+        "The TypeScript workflow must emit exactly one versioned JSON event per "
+        f"invocation; received {lines!r}"
     )
-    _run(
-        ["pnpm", "--filter", "@zenml-io/kitaru-vercel-ai", "build"],
-        cwd=REPOSITORY_ROOT,
+    event = _parse_json_object(lines[0], source="TypeScript workflow")
+    assert type(event.get("schema_version")) is int
+    assert event["schema_version"] == WORKFLOW_EVENT_SCHEMA_VERSION
+    event_name = event.get("event")
+    if event_name == "kitaru.worker_handoff":
+        assert set(event) == WORKFLOW_HANDOFF_KEYS
+    elif event_name == "kitaru.workflow_completed":
+        assert set(event) == WORKFLOW_COMPLETED_KEYS
+    else:
+        pytest.fail(f"TypeScript workflow emitted unknown event {event_name!r}")
+    _uuid(event.get("evidence_set_id"), field="event.evidence_set_id")
+    return event
+
+
+def _uuid(value: object, *, field: str) -> uuid.UUID:
+    assert isinstance(value, str) and UUID_PATTERN.fullmatch(value), (
+        f"{field} must be a UUID, received {value!r}"
     )
-    _run(["pnpm", "--ignore-workspace", "build"], cwd=EXAMPLE_DIR)
+    return uuid.UUID(value)
 
 
-def _assert_documented_registration(invocation: str, *, env: tuple[str, ...]) -> None:
-    """Assert the documented registration still teaches the shape that works."""
-    readme = README_PATH.read_text(encoding="utf-8")
-    start = readme.index(f"uv run kitaru {invocation}")
-    command = readme[start : readme.index("\n```", start)]
-    required = (
-        '--command "node dist/main.js"',
-        # A relative --working-dir resolves against whichever worker claims the
-        # task, so the documented command has to capture an absolute path.
-        '--working-dir "$PWD"',
-        "--timeout-seconds 180",
-        *(f"--env {pair}" for pair in env),
-        *(f"--tool {tool}" for tool in TOOLS),
-    )
-    missing = [fragment for fragment in required if fragment not in command]
-    assert not missing, (
-        f"`uv run kitaru {invocation}` in {README_PATH} no longer documents "
-        f"{missing}; the README must keep teaching a registration that works."
-    )
+def _assert_handoff(
+    event: Mapping[str, Any],
+    *,
+    expected_phase: str,
+    expected_jobs: int,
+    expected_kind: str,
+) -> list[dict[str, Any]]:
+    assert event["event"] == "kitaru.worker_handoff"
+    assert event["phase"] == expected_phase
+    assert event["manifest_relative_path"] == str(WORKFLOW_MANIFEST_RELATIVE_PATH)
+    jobs = event["jobs"]
+    assert isinstance(jobs, list) and len(jobs) == expected_jobs
+    assert all(isinstance(job, dict) and set(job) == WORKFLOW_JOB_KEYS for job in jobs)
+    job_ids = [str(_uuid(job["job_id"], field="job.job_id")) for job in jobs]
+    assert job_ids == sorted(job_ids), "Workflow handoff jobs must be UUID-sorted"
+    assert len(set(job_ids)) == len(job_ids)
+    for job in jobs:
+        assert job["job_kind"] == expected_kind
+        if expected_kind == "evaluation":
+            assert job["agent_version_id"] is None
+        else:
+            _uuid(job["agent_version_id"], field="job.agent_version_id")
+    return jobs
 
 
-def _documented_evaluator_source() -> str:
-    matches = DOCUMENTED_EVALUATOR.findall(README_PATH.read_text(encoding="utf-8"))
-    assert len(matches) == 1, "README must contain one stable evaluator source block"
-    return matches[0]
+def _parse_worker_events(stdout: str, *, job_id: str) -> list[dict[str, Any]]:
+    lines = stdout.splitlines()
+    assert lines, f"Worker for {job_id} emitted no JSONL lifecycle events"
+    events = [_parse_json_object(line, source=f"worker for {job_id}") for line in lines]
+    for event in events[:-1]:
+        assert set(event) == WORKER_LIFECYCLE_EVENT_KEYS
+    assert set(events[-1]) == WORKER_RESULT_EVENT_KEYS
+    for event in events:
+        assert event["schema_version"] == "1"
+        assert event["command"] == "worker.start"
+        assert event["ok"] is True
+        assert isinstance(event["event"], str)
+    assert [events[0]["event"], events[-1]["event"]] == ["starting", "stopped"]
+    starting = events[0]["item"]
+    stopped = events[-1]["item"]
+    assert isinstance(starting, dict) and isinstance(stopped, dict)
+    assert starting["job_id"] == job_id
+    assert starting["concurrency"] == 1
+    assert stopped["job_id"] == job_id
+    assert stopped["status"] == "stopped"
+    assert stopped["stop_reason"] == "completed"
+    assert events[-1]["warnings"] == []
+    assert events[-1]["links"] == {}
+    assert events[-1]["next_actions"] == []
+    return events
 
 
-def _ticket_id(session: SessionResponse) -> str:
-    assert isinstance(session.inputs, str), session.inputs
-    match = re.search(r"(?m)^Ticket ID:\s*(ticket-\d+)\s*$", session.inputs)
-    assert match is not None, session.inputs
-    return match.group(1)
-
-
-def _node_output(node: SessionNodeResponse) -> dict[str, object]:
-    assert isinstance(node.outputs, dict), (
-        f"node {node.id} has non-object output: {node.outputs!r}"
-    )
-    return node.outputs
-
-
-def _accepted_terminal(nodes: list[SessionNodeResponse]) -> SessionNodeResponse:
-    accepted = [
-        node
-        for node in nodes
-        if node.node_type is NodeType.TOOL_CALL
-        and node.status is NodeStatus.COMPLETED
-        and node.tool_name in TERMINAL_TOOLS
-        and _node_output(node).get("accepted") is True
+async def _run_job_worker(job_id: str, *, api_url: str, state_dir: Path) -> None:
+    worker_state = state_dir / "workers" / job_id
+    command = [
+        "uv",
+        "run",
+        "kitaru",
+        "--output",
+        "jsonl",
+        "worker",
+        "start",
+        "--job-id",
+        job_id,
+        "--name",
+        f"vercel-returns-e2e-{job_id}",
+        "--concurrency",
+        "1",
+        "--poll-interval",
+        ".05",
+        "--timeout",
+        str(WORKER_TIMEOUT_SECONDS),
+        "--blob-cache-root",
+        str(worker_state / "blobs"),
+        "--payload-cache-root",
+        str(worker_state / "payloads"),
     ]
-    assert len(accepted) == 1, [
-        (node.id, node.status, node.tool_name, node.outputs)
-        for node in nodes
-        if node.node_type is NodeType.TOOL_CALL and node.tool_name in TERMINAL_TOOLS
-    ]
-    return accepted[0]
+    stdout, _stderr = await _run_process(
+        command,
+        cwd=REPOSITORY_ROOT,
+        environment=_subprocess_environment(
+            KITARU_API_KEY="local-development-key",
+            KITARU_API_URL=api_url,
+        ),
+        timeout=WORKER_TIMEOUT_SECONDS + 30,
+    )
+    _parse_worker_events(stdout, job_id=job_id)
 
 
-def _assert_evidence(
-    session: SessionResponse,
-    nodes: list[SessionNodeResponse],
-    expected: tuple[str, int | None],
+async def _invoke_workflow(*, api_url: str, state_dir: Path) -> dict[str, Any]:
+    stdout, _stderr = await _run_process(
+        ["node", "dist/workflow.js", "--state-dir", str(state_dir)],
+        cwd=EXAMPLE_DIR,
+        environment=_subprocess_environment(
+            KITARU_API_KEY="local-development-key",
+            KITARU_API_URL=api_url,
+        ),
+        timeout=WORKFLOW_TIMEOUT_SECONDS,
+    )
+    return _parse_single_workflow_event(stdout)
+
+
+def _read_manifest(state_dir: Path) -> dict[str, Any]:
+    manifest_path = state_dir / "workflow.json"
+    try:
+        value = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        pytest.fail(f"Workflow manifest is unreadable at {manifest_path}: {error}")
+    if not isinstance(value, dict):
+        pytest.fail(f"Workflow manifest must be an object, received {value!r}")
+    return value
+
+
+def _assert_manifest(
+    manifest: Mapping[str, Any],
+    *,
+    api_url: str,
+    evidence_set_id: str,
 ) -> None:
-    roots = [
-        node
-        for node in nodes
-        if node.node_type is NodeType.SPAN and node.parent_index is None
-    ]
-    llm_nodes = [node for node in nodes if node.node_type is NodeType.LLM_CALL]
-    investigation = {
-        node.tool_name
-        for node in nodes
-        if node.node_type is NodeType.TOOL_CALL
-        and node.tool_name in INVESTIGATION_TOOLS
+    assert set(manifest) == WORKFLOW_MANIFEST_KEYS
+    assert manifest["schema_version"] == WORKFLOW_MANIFEST_SCHEMA_VERSION
+    assert manifest["evidence_set_id"] == evidence_set_id
+    assert manifest["phase"] == "completed"
+    assert manifest["pending_operation"] is None
+
+    server = manifest["server"]
+    assert isinstance(server, dict) and set(server) == WORKFLOW_SERVER_KEYS
+    assert server["api_url"] == api_url
+    _uuid(server["account_id"], field="manifest.server.account_id")
+    assert server["auth_scheme"] == "none"
+    assert isinstance(server["version"], str) and server["version"]
+
+    provider = manifest["provider"]
+    assert isinstance(provider, dict) and set(provider) == WORKFLOW_PROVIDER_KEYS
+    assert provider["kind"] == "deterministic"
+    assert provider["provider_call"] is False
+    assert provider["synthetic_usage"] is True
+    assert provider["fixture_version"] == "returns-v1"
+    assert provider["requested_model"] == "openai/gpt-5-nano"
+    assert provider["served_model"] == "kitaru-returns-scripted-fixture"
+
+    source_hashes = manifest["source_hashes"]
+    assert isinstance(source_hashes, dict)
+    assert set(source_hashes) == WORKFLOW_SOURCE_HASH_KEYS
+    assert all(
+        isinstance(name, str)
+        and isinstance(digest, str)
+        and SHA256_PATTERN.fullmatch(digest)
+        for name, digest in source_hashes.items()
+    )
+
+    stages = manifest["stages"]
+    assert isinstance(stages, dict) and set(stages) == WORKFLOW_STAGE_KEYS
+    assert all(
+        isinstance(stage, dict)
+        and set(stage) == {"status"}
+        and stage["status"] == "completed"
+        for stage in stages.values()
+    )
+
+    ids = manifest["ids"]
+    assert isinstance(ids, dict) and set(ids) == WORKFLOW_ID_KEYS
+    _assert_manifest_ids(ids)
+
+
+def _assert_manifest_ids(ids: Mapping[str, Any]) -> None:
+    """Assert the complete remote-resource inventory written by the workflow."""
+    singular_fields = (
+        "agent_id",
+        "evaluation_job_id",
+        "evaluator_blob_id",
+        "evaluator_id",
+        "evaluator_version_id",
+        "experiment_id",
+        "investigation_id",
+        "investigation_session_id",
+    )
+    for field in singular_fields:
+        _uuid(ids[field], field=f"manifest.ids.{field}")
+
+    for field, expected_keys in (
+        ("agent_versions", {"baseline", "strict"}),
+        ("cohort_versions", {"control", "target"}),
+        ("cohorts", {"control", "target"}),
+        ("experiment_run_ids", {"control", "target"}),
+    ):
+        value = ids[field]
+        assert isinstance(value, dict) and set(value) == expected_keys
+        for name, resource_id in value.items():
+            _uuid(resource_id, field=f"manifest.ids.{field}.{name}")
+        assert len(set(value.values())) == len(expected_keys)
+
+    baseline_sessions = ids["baseline_sessions"]
+    assert isinstance(baseline_sessions, dict)
+    assert set(baseline_sessions) == {f"ticket-{index:03d}" for index in range(1, 11)}
+    for ticket_id, session_id in baseline_sessions.items():
+        _uuid(session_id, field=f"manifest.ids.baseline_sessions.{ticket_id}")
+    assert len(set(baseline_sessions.values())) == 10
+    expected_list_sizes = {
+        "annotation_ids": 3,
+        "evaluation_ids": 10,
+        "replay_evaluation_ids": 5,
+        "replay_ids": 5,
+        "replay_job_ids": 5,
+        "replay_result_session_ids": 5,
+        "task_ids": 20,
     }
-    assert session.status is SessionStatus.COMPLETED, (
-        f"session {session.id} failed: {session.error}"
+    for field, expected_size in expected_list_sizes.items():
+        values = ids[field]
+        assert isinstance(values, list) and len(values) == expected_size
+        normalized = [
+            str(_uuid(value, field=f"manifest.ids.{field}[]")) for value in values
+        ]
+        assert len(set(normalized)) == expected_size
+
+    assert set(ids["evaluation_ids"]).isdisjoint(ids["replay_evaluation_ids"])
+    assert set(baseline_sessions.values()).isdisjoint(ids["replay_result_session_ids"])
+
+
+def _assert_advertised_jobs(
+    manifest: Mapping[str, Any], jobs: Sequence[Mapping[str, Any]]
+) -> None:
+    ids = manifest["ids"]
+    assert isinstance(ids, dict)
+    evaluation_jobs = [job for job in jobs if job["job_kind"] == "evaluation"]
+    replay_jobs = [job for job in jobs if job["job_kind"] == "replay"]
+    assert [job["job_id"] for job in evaluation_jobs] == [ids["evaluation_job_id"]]
+    assert sorted(job["job_id"] for job in replay_jobs) == sorted(ids["replay_job_ids"])
+    agent_versions = ids["agent_versions"]
+    assert isinstance(agent_versions, dict)
+    assert all(
+        job["agent_version_id"] == agent_versions["strict"] for job in replay_jobs
     )
-    assert len(roots) == 1
-    assert len(llm_nodes) >= 2
-    assert all(node.requested_model == REQUESTED_MODEL_ID for node in llm_nodes)
-    assert all(node.model == SERVED_MODEL_ID for node in llm_nodes)
-    assert investigation == EXPECTED_INVESTIGATION_TOOLS[_ticket_id(session)]
-    terminal = _accepted_terminal(nodes)
-    action, amount = expected
-    assert TERMINAL_TOOLS[terminal.tool_name] == action
-    output = _node_output(terminal)
-    if amount is not None:
-        assert output.get("amount") == amount
-    if action != "refund":
-        assert not any(
-            node.tool_name == "issue_refund"
-            and node.status is NodeStatus.COMPLETED
-            and _node_output(node).get("accepted") is True
-            for node in nodes
-            if node.node_type is NodeType.TOOL_CALL
-        )
-
-
-async def _nodes(
-    client: KitaruAPIClient, session_id: uuid.UUID
-) -> list[SessionNodeResponse]:
-    return [
-        node
-        async for node in client.sessions.iter_nodes(
-            session_id, SessionNodeListParams(include_payloads=True, size=100)
-        )
-    ]
-
-
-async def _job_failure_details(client: KitaruAPIClient, job: JobResponse) -> str:
-    tasks = await client.jobs.list_tasks(job.id)
-    return json.dumps(
-        {
-            "job_id": str(job.id),
-            "job_status": job.status,
-            "job_error": job.error,
-            "tasks": [
-                {
-                    "id": str(task.id),
-                    "status": task.status,
-                    "error": task.error,
-                    "result_session_id": str(task.result_session_id)
-                    if task.result_session_id
-                    else None,
-                }
-                for task in tasks.items
-            ],
-        },
-        default=str,
-        indent=2,
-    )
-
-
-async def _wait_for_job(
-    client: KitaruAPIClient, job_id: uuid.UUID, *, timeout: float = 300
-) -> JobResponse:
-    deadline = asyncio.get_running_loop().time() + timeout
-    while True:
-        job = await client.jobs.get(job_id)
-        if job.status in SETTLED_JOB_STATUSES:
-            return job
-        if asyncio.get_running_loop().time() >= deadline:
-            pytest.fail(f"Job {job_id} did not settle within {timeout} seconds")
-        await asyncio.sleep(0.05)
-
-
-async def _run_scoped_worker(
-    job_id: uuid.UUID, *, api_url: str, state_dir: Path
-) -> JobResponse:
-    worker = Worker(
-        WorkerConfig(
-            name=f"vercel-returns-e2e-{job_id}",
-            scope=WorkerScope(job_id=job_id),
-            concurrency=4,
-            poll_interval=0.05,
-            timeout=300,
-            blob_cache_root=state_dir / "blobs" / str(job_id),
-            payload_cache_root=state_dir / "payloads" / str(job_id),
-        )
-    )
-    with _worker_environment(api_url):
-        await worker.run()
-    async with KitaruAPIClient(base_url=api_url) as client:
-        job = await _wait_for_job(client, job_id)
-        if job.status is not JobStatus.COMPLETED:
-            pytest.fail(await _job_failure_details(client, job))
-        return job
-
-
-async def _wait_for_run(
-    client: KitaruAPIClient, run_id: uuid.UUID, *, timeout: float = 300
-):
-    deadline = asyncio.get_running_loop().time() + timeout
-    while True:
-        run = await client.experiment_runs.get(run_id)
-        if run.status in SETTLED_RUN_STATUSES:
-            return run
-        if asyncio.get_running_loop().time() >= deadline:
-            jobs = await client.experiment_runs.list_jobs(run_id)
-            pytest.fail(
-                f"Experiment run {run_id} did not settle; jobs="
-                f"{[(str(job.id), job.status, job.error) for job in jobs.items]}"
-            )
-        await asyncio.sleep(0.05)
-
-
-async def _wait_for_replay(
-    client: KitaruAPIClient, replay_id: uuid.UUID, *, timeout: float = 300
-) -> ReplayResponse:
-    deadline = asyncio.get_running_loop().time() + timeout
-    while True:
-        replay = await client.replays.get(replay_id)
-        if replay.status in SETTLED_REPLAY_STATUSES:
-            return replay
-        if asyncio.get_running_loop().time() >= deadline:
-            pytest.fail(
-                f"Replay {replay_id} did not settle; job={replay.job_id}, "
-                f"status={replay.status}, error={replay.error}"
-            )
-        await asyncio.sleep(0.05)
-
-
-async def _sessions_in_cohort(
-    client: KitaruAPIClient, cohort_version_id: uuid.UUID
-) -> set[uuid.UUID]:
-    page = await client.sessions.list(
-        SessionListParams(
-            filter=FilterCondition(
-                field="cohort_version_id",
-                op=FilterOp.EQ,
-                value=str(cohort_version_id),
-            ),
-            size=100,
-        )
-    )
-    return {session.id for session in page.items}
-
-
-async def _replays_for_run(
-    client: KitaruAPIClient, run_id: uuid.UUID
-) -> list[ReplayResponse]:
-    page = await client.replays.list(
-        ReplayListParams(
-            filter=FilterCondition(
-                field="experiment_run_id", op=FilterOp.EQ, value=str(run_id)
-            ),
-            size=100,
-        )
-    )
-    return list(page.items)
 
 
 async def test_typescript_canonical_improvement_loop(tmp_path: Path) -> None:
-    """Record, score, cohort, and replay the deterministic TypeScript story."""
-    _build_compiled_commands()
+    """Run and resume the deterministic TypeScript workflow through its public SDK."""
+    await _build_typescript()
+    state_dir = tmp_path / ".state"
 
     async with _network_server() as api_url:
-        async with KitaruAPIClient(base_url=api_url) as client:
-            suffix = uuid.uuid4().hex[:10]
-            agent = await client.agents.create(
-                AgentCreateRequest(
-                    name=f"vercel-returns-e2e-{suffix}",
-                    description="Synthetic TypeScript returns resolver E2E.",
-                )
+        evidence_set_id: str | None = None
+        advertised_jobs: list[dict[str, Any]] = []
+        for expected_phase, expected_jobs, expected_kind in EXPECTED_HANDOFFS:
+            event = await _invoke_workflow(api_url=api_url, state_dir=state_dir)
+            if evidence_set_id is None:
+                evidence_set_id = event["evidence_set_id"]
+            assert event["evidence_set_id"] == evidence_set_id
+            jobs = _assert_handoff(
+                event,
+                expected_phase=expected_phase,
+                expected_jobs=expected_jobs,
+                expected_kind=expected_kind,
             )
-            _assert_documented_registration(
-                "agent register", env=("RETURNS_POLICY_MODE=baseline",)
-            )
-            baseline_version = await client.agents.create_version(
-                agent.id,
-                AgentVersionCreateRequest(
-                    display_version="baseline-v1",
-                    description="Deterministic baseline returns policy.",
-                    run_spec=RunSpec(
-                        command="node dist/main.js",
-                        working_dir=str(EXAMPLE_DIR),
-                        env={
-                            "KITARU_AGENT_ID": str(agent.id),
-                            "RETURNS_POLICY_MODE": "baseline",
-                        },
-                        timeout_seconds=180,
-                    ),
-                    capabilities=AgentCapabilities(tools=TOOLS),
-                ),
-            )
+            for job in jobs:
+                job_id = job["job_id"]
+                assert all(existing["job_id"] != job_id for existing in advertised_jobs)
+                advertised_jobs.append(job)
+                await _run_job_worker(job_id, api_url=api_url, state_dir=state_dir)
 
-        baseline_environment = os.environ.copy()
-        baseline_environment.update(
-            {
-                "KITARU_API_URL": api_url,
-                "KITARU_AGENT_ID": str(agent.id),
-                "KITARU_AGENT_VERSION_ID": str(baseline_version.id),
-            }
+        completed = await _invoke_workflow(api_url=api_url, state_dir=state_dir)
+        assert completed["event"] == "kitaru.workflow_completed"
+        assert completed["evidence_set_id"] == evidence_set_id
+        assert completed["counts"] == EXPECTED_COUNTS
+        assert len(advertised_jobs) == 6
+
+        manifest = _read_manifest(state_dir)
+        assert evidence_set_id is not None
+        _assert_manifest(
+            manifest,
+            api_url=api_url,
+            evidence_set_id=evidence_set_id,
         )
-        await asyncio.to_thread(
-            _run,
-            ["node", str(EXAMPLE_DIR / "dist" / "baseline.js")],
-            cwd=tmp_path,
-            environment=baseline_environment,
-        )
-        manifest = json.loads(
-            (tmp_path / ".state" / "baseline-sessions.json").read_text(encoding="utf-8")
-        )
-        assert manifest["status"] == "completed"
-        assert set(manifest["sessions"]) == set(BASELINE_ACTIONS)
-        baseline_ids = {
-            ticket_id: uuid.UUID(value["session_id"])
-            for ticket_id, value in manifest["sessions"].items()
-        }
-        assert len(set(baseline_ids.values())) == 10
-
-        async with KitaruAPIClient(base_url=api_url) as client:
-            for ticket_id, session_id in baseline_ids.items():
-                session = await client.sessions.get(session_id)
-                assert session.agent_id == agent.id
-                assert session.agent_version_id == baseline_version.id
-                assert session.origin is SessionOrigin.RECORDED
-                assert _ticket_id(session) == ticket_id
-                _assert_evidence(
-                    session,
-                    await _nodes(client, session_id),
-                    BASELINE_ACTIONS[ticket_id],
-                )
-
-            evaluator = await client.evaluators.create(
-                EvaluatorCreateRequest(
-                    name=f"returns-policy-e2e-{suffix}",
-                    description="README-derived synthetic returns policy.",
-                )
-            )
-            evaluator_blob = await client.blobs.upload(
-                _documented_evaluator_source().encode(),
-                media_type="text/x-python",
-                filename="returns_policy.py",
-            )
-            evaluator_version = await client.evaluators.create_version(
-                evaluator.id,
-                EvaluatorVersionCreateRequest(
-                    source=ScriptPluginSource(
-                        blob_id=evaluator_blob.id, entrypoint="evaluate"
-                    ),
-                    display_version="1.0",
-                ),
-            )
-            evaluation_job = await client.evaluations.create(
-                EvaluationBatchCreateRequest(
-                    input_session_ids=list(baseline_ids.values()),
-                    evaluators=[EvaluatorConfig(evaluator=evaluator.name, version=1)],
-                )
-            )
-
-        await _run_scoped_worker(
-            evaluation_job.id, api_url=api_url, state_dir=tmp_path / "worker"
-        )
-
-        async with KitaruAPIClient(base_url=api_url) as client:
-            evaluations = (
-                await client.evaluations.list(
-                    EvaluationListParams(
-                        filter=FilterCondition(
-                            field="evaluator_version_id",
-                            op=FilterOp.EQ,
-                            value=str(evaluator_version.id),
-                        ),
-                        size=100,
-                    )
-                )
-            ).items
-            assert len(evaluations) == 10
-            ticket_by_session = {
-                session_id: ticket_id for ticket_id, session_id in baseline_ids.items()
-            }
-            results = {
-                ticket_by_session[evaluation.session_id]: evaluation.passed
-                for evaluation in evaluations
-            }
-            assert sum(passed is True for passed in results.values()) == 8
-            assert {
-                ticket_id for ticket_id, passed in results.items() if passed is False
-            } == {"ticket-004", "ticket-007"}
-
-            target = await client.cohorts.create(
-                CohortCreateRequest(
-                    name=f"unsafe-refund-baseline-{suffix}",
-                    agent_id=agent.id,
-                )
-            )
-            target_version = await client.cohorts.create_version(
-                target.id,
-                CohortVersionCreateRequest(
-                    add_session_ids=[baseline_ids[ticket] for ticket in TARGET_TICKETS],
-                    display_version="baseline-targets",
-                ),
-            )
-            control = await client.cohorts.create(
-                CohortCreateRequest(
-                    name=f"safe-refund-control-{suffix}",
-                    agent_id=agent.id,
-                )
-            )
-            control_version = await client.cohorts.create_version(
-                control.id,
-                CohortVersionCreateRequest(
-                    add_session_ids=[
-                        baseline_ids[ticket] for ticket in CONTROL_TICKETS
-                    ],
-                    display_version="baseline-controls",
-                ),
-            )
-            assert target_version.session_count == 2
-            assert control_version.session_count == 3
-            assert await _sessions_in_cohort(client, target_version.id) == {
-                baseline_ids[ticket] for ticket in TARGET_TICKETS
-            }
-            assert await _sessions_in_cohort(client, control_version.id) == {
-                baseline_ids[ticket] for ticket in CONTROL_TICKETS
-            }
-
-            _assert_documented_registration(
-                "agent version register",
-                env=(
-                    "RETURNS_POLICY_MODE=strict",
-                    'KITARU_AGENT_ID="${KITARU_AGENT_ID}"',
-                ),
-            )
-            strict_version = await client.agents.create_version(
-                agent.id,
-                AgentVersionCreateRequest(
-                    display_version="strict-policy-v2",
-                    description="Require approval for risky or oversized refunds.",
-                    run_spec=RunSpec(
-                        command="node dist/main.js",
-                        working_dir=str(EXAMPLE_DIR),
-                        env={
-                            "KITARU_AGENT_ID": str(agent.id),
-                            "RETURNS_POLICY_MODE": "strict",
-                        },
-                        timeout_seconds=180,
-                    ),
-                    capabilities=AgentCapabilities(tools=TOOLS),
-                ),
-            )
-            experiment = await client.experiments.create(
-                ExperimentCreateRequest(
-                    name=f"improve-returns-policy-{suffix}",
-                    agent_id=agent.id,
-                    tool_policy=ToolPolicy(default=PassthroughConfig()),
-                    evaluators=[EvaluatorConfig(evaluator=evaluator.name, version=1)],
-                )
-            )
-            runs = [
-                await client.experiments.start_run(
-                    experiment.id,
-                    ExperimentRunCreateRequest(
-                        cohort_version_id=cohort_version.id,
-                        agent_version_id=strict_version.id,
-                        evaluate_baselines=True,
-                    ),
-                )
-                for cohort_version in (target_version, control_version)
-            ]
-            pending_replays = [
-                replay
-                for run in runs
-                for replay in await _replays_for_run(client, run.id)
-            ]
-            assert len(pending_replays) == 5
-            jobs = [await client.jobs.get(replay.job_id) for replay in pending_replays]
-            assert len(jobs) == 5
-
-        for job in jobs:
-            await _run_scoped_worker(
-                job.id, api_url=api_url, state_dir=tmp_path / "worker"
-            )
-
-        async with KitaruAPIClient(base_url=api_url) as client:
-            replays = [
-                await _wait_for_replay(client, replay.id) for replay in pending_replays
-            ]
-            assert all(replay.status is ReplayStatus.COMPLETED for replay in replays), [
-                (replay.id, replay.job_id, replay.status, replay.error)
-                for replay in replays
-            ]
-            settled_runs = [await _wait_for_run(client, run.id) for run in runs]
-            assert all(
-                run.status is ExperimentRunStatus.COMPLETED for run in settled_runs
-            ), [(run.id, run.status, run.error, run.progress) for run in settled_runs]
-            assert sum(run.progress.completed for run in settled_runs) == 5
-            assert sum(run.progress.failed for run in settled_runs) == 0
-
-            assert len(replays) == 5
-            assert {replay.experiment_run_id for replay in replays} == {
-                run.id for run in settled_runs
-            }
-            assert all(replay.result_session_id is not None for replay in replays)
-
-            replay_by_ticket: dict[str, SessionResponse] = {}
-            for replay in replays:
-                assert replay.result_session_id is not None
-                session = await client.sessions.get(replay.result_session_id)
-                ticket_id = _ticket_id(session)
-                replay_by_ticket[ticket_id] = session
-                assert session.agent_version_id == strict_version.id
-                assert session.origin is SessionOrigin.REPLAY
-                _assert_evidence(
-                    session, await _nodes(client, session.id), STRICT_ACTIONS[ticket_id]
-                )
-            assert set(replay_by_ticket) == set(STRICT_ACTIONS)
-
-            replay_ids = {session.id for session in replay_by_ticket.values()}
-            all_policy = (
-                await client.evaluations.list(
-                    EvaluationListParams(
-                        filter=FilterCondition(
-                            field="evaluator_version_id",
-                            op=FilterOp.EQ,
-                            value=str(evaluator_version.id),
-                        ),
-                        size=100,
-                    )
-                )
-            ).items
-            replay_policy = [
-                evaluation
-                for evaluation in all_policy
-                if evaluation.session_id in replay_ids
-            ]
-            assert len(replay_policy) == 5
-            assert all(evaluation.passed is True for evaluation in replay_policy)
+        _assert_advertised_jobs(manifest, advertised_jobs)

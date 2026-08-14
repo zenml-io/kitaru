@@ -4,9 +4,41 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import * as rootExports from "../src/index.js";
+
 const packageRoot = dirname(dirname(fileURLToPath(import.meta.url)));
 
 describe("core import boundary", () => {
+  it("keeps Node filesystem access out of the root import graph", async () => {
+    const rootSource = await readFile(
+      join(packageRoot, "src", "index.ts"),
+      "utf8",
+    );
+    const runtimeNeutralSources = await Promise.all(
+      ["auth/index.ts", "client.ts", "environment.ts", "transport.ts"].map(
+        (path) => readFile(join(packageRoot, "src", path), "utf8"),
+      ),
+    );
+
+    expect(rootSource).not.toMatch(/\.\/node(?:\/|\.js)/);
+    expect(runtimeNeutralSources.join("\n")).not.toMatch(
+      /(?:from|import)\s*\(?["']node:(?:fs|os|path)/,
+    );
+  });
+
+  it("does not publish internal resource constructors from the package root", () => {
+    expect(Object.keys(rootExports)).not.toEqual(
+      expect.arrayContaining([
+        "AccountsResource",
+        "AgentsResource",
+        "JobsResource",
+        "ReplaysResource",
+        "SessionsResource",
+        "TasksResource",
+      ]),
+    );
+  });
+
   it("does not depend on agent frameworks or model providers", async () => {
     const sourceRoot = join(packageRoot, "src");
     const sourceFiles = (

@@ -57,7 +57,7 @@ const result = await recordedAgent.generate(messages, options);
 console.log(result.text);
 ```
 
-Configure the Kitaru connection with `KITARU_API_URL` and, when required, `KITARU_API_KEY`. The wrapper calls the existing agent's public `generate()` method. It does not recreate tools, inspect private agent fields, install model middleware, or replace the returned result.
+Configure the adapter subprocess with `KITARU_API_URL` and either the worker-provided `KITARU_API_TOKEN` or `KITARU_API_KEY`. A separate Node management driver can use [`createKitaruClient()`](../typescript-sdk.md#reuse-a-developer-login) to reuse `kitaru login` without exporting a token. The wrapper calls the existing agent's public `generate()` method. It does not recreate tools, inspect private agent fields, install model middleware, or replace the returned result.
 
 `requestedModelId` is the Kitaru model identifier for the normal run. `allowedReplayModels` limits which replay model overrides the process will accept. When a replay selects another allowed model, `resolveModel` turns its Kitaru identifier into a Mastra model configuration. If no replay can change the model, `resolveModel` can be omitted.
 
@@ -115,7 +115,7 @@ A found history value of `null` fails closed. The current lookup response cannot
 
 Before a replay starts, the adapter inventories configured tools, function-valued tools resolved from the run's `requestContext`, and per-run `clientTools` and `toolsets`. It rejects tools without a local `execute` function, approval-gated runs, sandboxed tools, and tool keys that Mastra would rename before exposing them to the model. Tools added only during execution and tools executed by a provider remain outside this preflight check and are not supported replay targets.
 
-A tool-policy failure aborts the replay and records the session as failed. Replay forces `toolCallConcurrency: 1` so a policy failure stops the step before a sibling tool can execute a side effect.
+A tool-policy failure aborts the replay and records the session as failed. Replay forces `toolCallConcurrency: 1` and aborts Mastra's generation loop as soon as a tool hook fails, so a later model step or sibling tool cannot continue after the policy failure.
 
 {% hint style="danger" %}
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll it back. Use application-level idempotency keys for side-effecting tools, or choose static or history policies when replay must suppress execution.
