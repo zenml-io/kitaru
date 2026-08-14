@@ -43,7 +43,6 @@ known-first-party = [
     "kitaru_langgraph",
     "kitaru_langsmith_importer",
     "kitaru_openai_agents",
-    "kitaru_opentelemetry_importer",
     "kitaru_pydantic_ai",
 ]
 

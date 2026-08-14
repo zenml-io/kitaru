@@ -21,7 +21,6 @@ members = [
     "kitaru-langgraph",
     "kitaru-langsmith-importer",
     "kitaru-openai-agents",
-    "kitaru-opentelemetry-importer",
     "kitaru-pydantic-ai",
 ]
 
@@ -923,7 +922,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc0"
+version = "0.22.0rc3"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1086,17 +1085,6 @@ requires-dist = [
     { name = "kitaru", editable = "../" },
     { name = "openai-agents", specifier = ">=0.19.3,<0.20" },
 ]
-
-[[package]]
-name = "kitaru-opentelemetry-importer"
-version = "0.1.0rc0"
-source = { editable = "packages/opentelemetry-importer" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-pydantic-ai"
