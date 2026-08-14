@@ -196,8 +196,13 @@ async def start_local_runtime(
         elif state.server_image != image and not upgrade:
             raise CLIError(
                 "conflict",
-                "The local deployment uses a different Kitaru server image.",
-                hint="Run `kitaru login --local --upgrade` to replace it.",
+                f"Your local Kitaru server uses {state.server_image}, but this "
+                f"login expects {image}. Kitaru will not replace the server "
+                "container without your approval.",
+                hint=(
+                    "Run `kitaru login --local --upgrade` to use the expected "
+                    "image. Your local database will be kept."
+                ),
                 details={"current_image": state.server_image, "requested_image": image},
             )
         if state is None:

@@ -503,6 +503,10 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         origin=SessionOrigin.RECORDED,
         started_at=started_at,
         tokens=TokenUsage(input_tokens=100, output_tokens=50),
+        framework="langgraph",
+        adapter_version="0.1.0",
+        llm_call_count=3,
+        tool_call_count=5,
     )
     ended_at = started_at + timedelta(seconds=30)
     await service.update_session(
@@ -519,6 +523,10 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         "origin": "recorded",
         "status": "completed",
         "duration_seconds": 30.0,
+        "framework": "langgraph",
+        "adapter_version": "0.1.0",
+        "llm_call_count": 3,
+        "tool_call_count": 5,
         "input_tokens": 100,
         "output_tokens": 50,
     }
@@ -602,7 +610,12 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
     tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
     assert tracked_user_id == created.owner_id
     assert tracked_event == AnalyticsEvent.SESSION_COMPLETED
-    assert tracked_properties == {"origin": "imported", "status": "failed"}
+    assert tracked_properties == {
+        "origin": "imported",
+        "status": "failed",
+        "llm_call_count": 0,
+        "tool_call_count": 0,
+    }
 
 
 async def test_create_session_in_progress_tracks_nothing(
