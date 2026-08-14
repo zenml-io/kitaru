@@ -379,16 +379,17 @@ def _format_image_version(version: Version) -> str:
     """Format a PEP 440 version as a Docker-compatible image tag."""
     canonical_version = str(version)
     base_version = version.base_version
+    image_base_version = base_version.replace("!", ".epoch.")
     suffix = canonical_version.removeprefix(base_version)
     if not suffix:
-        return base_version
+        return image_base_version
 
     public_suffix, local_separator, local_suffix = suffix.partition("+")
     public_suffix = re.sub(r"([A-Za-z]+)([0-9]+)", r"\1.\2", public_suffix).strip(".")
     suffix_parts = [public_suffix] if public_suffix else []
     if local_separator:
         suffix_parts.append(f"local.{local_suffix}")
-    return f"{base_version}-{'.'.join(suffix_parts)}"
+    return f"{image_base_version}-{'.'.join(suffix_parts)}"
 
 
 def _get_server_image(package_version: str) -> tuple[str, bool]:

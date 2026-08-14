@@ -317,6 +317,7 @@ def test_release_suffix_uses_docker_image_tag(
         ("0.22.0rc5.post2", "0.22.0-rc.5.post.2"),
         ("0.22.0.dev3", "0.22.0-dev.3"),
         ("0.22.0+macos.arm64", "0.22.0-local.macos.arm64"),
+        ("1!0.22.0rc5", "1.epoch.0.22.0-rc.5"),
         (
             "0.22.0rc5.post2.dev3+macos.arm64",
             "0.22.0-rc.5.post.2.dev.3.local.macos.arm64",
