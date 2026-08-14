@@ -218,21 +218,26 @@ jobs:
           mkdir "$verification_dir"
           cd "$verification_dir"
           npm init --yes
-          installed=false
-          for _ in $(seq 1 10); do
-            if npm install --ignore-scripts \
-              "@zenml-io/kitaru@$VERSION" \
-              "@zenml-io/kitaru-mastra@$VERSION" \
-              "@zenml-io/kitaru-vercel-ai@$VERSION" \
-              "@mastra/core@1.51.0" \
-              "ai@7.0.55"; then
-              installed=true
+          registry_ready=false
+          for attempt in $(seq 1 60); do
+            if npm view "@zenml-io/kitaru@$VERSION" version >/dev/null 2>&1 && \
+              npm view "@zenml-io/kitaru-mastra@$VERSION" version >/dev/null 2>&1 && \
+              npm view "@zenml-io/kitaru-vercel-ai@$VERSION" version >/dev/null 2>&1; then
+              registry_ready=true
               break
             fi
-            rm -rf node_modules package-lock.json
-            sleep 10
+            if [ "$attempt" -lt 60 ]; then
+              echo "Waiting for npm publish-time scanning ($attempt/60)..."
+              sleep 20
+            fi
           done
-          test "$installed" = true
+          test "$registry_ready" = true
+          npm install --ignore-scripts \
+            "@zenml-io/kitaru@$VERSION" \
+            "@zenml-io/kitaru-mastra@$VERSION" \
+            "@zenml-io/kitaru-vercel-ai@$VERSION" \
+            "@mastra/core@1.51.0" \
+            "ai@7.0.55"
           node --input-type=module <<'NODE'
           import { KitaruClient } from "@zenml-io/kitaru";
           import { KitaruAgent } from "@zenml-io/kitaru-mastra";

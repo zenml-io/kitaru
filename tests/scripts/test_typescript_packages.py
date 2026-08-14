@@ -157,6 +157,13 @@ def test_typescript_release_workflow_contract() -> None:
     assert "else\n                view_status=$?" in publish_source
     assert "fi\n              view_status=$?" not in publish_source
     assert "Verify registry installation" in verify_source
+    assert "for attempt in $(seq 1 60)" in verify_source
+    assert 'npm view "@zenml-io/kitaru@$VERSION" version' in verify_source
+    assert 'npm view "@zenml-io/kitaru-mastra@$VERSION" version' in verify_source
+    assert 'npm view "@zenml-io/kitaru-vercel-ai@$VERSION" version' in verify_source
+    assert 'echo "Waiting for npm publish-time scanning' in verify_source
+    assert "sleep 20" in verify_source
+    assert verify_source.count("npm install --ignore-scripts") == 1
     assert 'gh release view "$PACKAGE_TAG"' in verify_source
     assert "gh release upload" in verify_source
     assert "--clobber" in verify_source
