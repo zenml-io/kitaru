@@ -1007,13 +1007,15 @@ export interface paths {
          * Get Device
          * @description Get a device by id.
          *
-         *     Clients observe HTTP 200 on success and 404 when the caller owns no device
-         *     with this id.
+         *     Clients observe HTTP 200 on success and 404 when no device has this id,
+         *     another account already approved it, or the user code of an unapproved
+         *     device is missing or wrong.
          *
          *     Args:
          *         device_id: Id of the device.
          *         service: Device service.
          *         actor: Caller context.
+         *         user_code: User code of a device no account approved yet.
          *
          *     Returns:
          *         Stored device.
@@ -1898,6 +1900,7 @@ export interface paths {
          *
          *     Args:
          *         settings: Service settings governing auth behavior.
+         *         ui_version: UI version served by this process.
          *
          *     Returns:
          *         Server info.
@@ -6669,6 +6672,11 @@ export interface components {
              */
             server_url?: string | null;
             /**
+             * Ui Version
+             * @description Kitaru UI version the server serves.
+             */
+            ui_version?: string | null;
+            /**
              * Version
              * @description Kitaru version the server runs.
              */
@@ -9578,7 +9586,9 @@ export interface operations {
     };
     get_device_v1_devices__device_id__get: {
         parameters: {
-            query?: never;
+            query?: {
+                user_code?: string | null;
+            };
             header?: never;
             path: {
                 device_id: string;
