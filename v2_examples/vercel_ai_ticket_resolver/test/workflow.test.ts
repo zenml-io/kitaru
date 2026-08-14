@@ -27,6 +27,7 @@ import {
 import {
   BASELINE_FAILURE_TICKETS,
   CONTROL_TICKETS,
+  ensureExperiment,
   findInvestigationsByName,
   getCohortVersionForAdoption,
   getEvaluatorVersionForAdoption,
@@ -239,6 +240,43 @@ describe("canonical workflow manifest", () => {
     ).rejects.toThrow("Agent version does not match the workflow definition");
     expect(client.agents.getVersion).toHaveBeenCalledWith(
       state.ids.agent_versions.baseline,
+    );
+  });
+
+  it("rejects a changed stored experiment before starting runs", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    state.ids.agent_id = id(3);
+    state.ids.experiment_id = id(4);
+    const experiment = {
+      agent_id: state.ids.agent_id,
+      created: "2026-08-14T00:00:00Z",
+      description: null,
+      evaluators: [{ evaluator: "policy", version: 1 }],
+      id: state.ids.experiment_id,
+      name: `improve-returns-policy-${state.evidence_set_id.replaceAll("-", "").slice(0, 12)}`,
+      override: null,
+      owner_id: id(1),
+      tool_policy: { default: { type: "deny" }, tools: {} },
+      updated: "2026-08-14T00:00:00Z",
+    } as const;
+    const client = {
+      experiments: { get: vi.fn(async () => experiment) },
+    } as unknown as KitaruClient;
+
+    await expect(
+      ensureExperiment(
+        client,
+        state,
+        store,
+        parseWorkflowArguments(["--state-dir", directory]),
+        { name: "policy" },
+        { version: 1 },
+      ),
+    ).rejects.toThrow("Experiment does not match the workflow definition");
+    expect(client.experiments.get).toHaveBeenCalledWith(
+      state.ids.experiment_id,
     );
   });
 

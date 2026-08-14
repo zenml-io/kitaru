@@ -14,6 +14,7 @@ import type {
   EvaluationResponse,
   EvaluatorResponse,
   EvaluatorVersionResponse,
+  ExperimentCreateRequest,
   ExperimentResponse,
   ExperimentRunResponse,
   InvestigationResponse,
@@ -1246,21 +1247,38 @@ async function ensureCohort(
   );
 }
 
-async function ensureExperiment(
+function normalizeExperiment(
+  value: Pick<
+    ExperimentCreateRequest,
+    | "agent_id"
+    | "description"
+    | "evaluators"
+    | "name"
+    | "override"
+    | "tool_policy"
+  >,
+) {
+  return {
+    agent_id: value.agent_id,
+    description: value.description ?? null,
+    evaluators: value.evaluators,
+    name: value.name,
+    override: value.override ?? null,
+    tool_policy: value.tool_policy ?? null,
+  };
+}
+
+export async function ensureExperiment(
   client: KitaruClient,
   manifest: WorkflowManifest,
   store: WorkflowManifestStore,
   recovery: WorkflowArguments,
-  evaluator: EvaluatorResponse,
-  evaluatorVersion: EvaluatorVersionResponse,
+  evaluator: Pick<EvaluatorResponse, "name">,
+  evaluatorVersion: Pick<EvaluatorVersionResponse, "version">,
 ): Promise<ExperimentResponse> {
-  const existing = manifest.ids.experiment_id;
-  if (existing !== null) {
-    return client.experiments.get(existing);
-  }
   const agentId = assertId(manifest.ids.agent_id, "agent_id");
   const name = `improve-returns-policy-${manifest.evidence_set_id.replaceAll("-", "").slice(0, 12)}`;
-  const request = {
+  const request: ExperimentCreateRequest = {
     agent_id: agentId,
     name,
     tool_policy: workflowRequests.toolPolicy,
@@ -1268,6 +1286,20 @@ async function ensureExperiment(
       { evaluator: evaluator.name, version: evaluatorVersion.version },
     ],
   };
+  const validate = (value: ExperimentResponse) => {
+    if (
+      createFingerprint(normalizeExperiment(value)) !==
+      createFingerprint(normalizeExperiment(request))
+    ) {
+      throw new Error("Experiment does not match the workflow definition");
+    }
+  };
+  const existing = manifest.ids.experiment_id;
+  if (existing !== null) {
+    const experiment = await client.experiments.get(existing);
+    validate(experiment);
+    return experiment;
+  }
   return runJournaledMutation(
     {
       adopt: (id) => client.experiments.get(id),
@@ -1284,11 +1316,7 @@ async function ensureExperiment(
         (await client.experiments.list(createNamedFilter(name))).items,
       stage: "experiment_runs",
       store,
-      validate: (value) => {
-        if (value.agent_id !== agentId || value.name !== name) {
-          throw new Error("Adopted experiment does not match workflow");
-        }
-      },
+      validate,
     },
     recovery,
   );
