@@ -26,7 +26,7 @@ Model-provider packages are not bundled. An `init_chat_model` string like `"open
 Check the construction path before requesting replay behavior. Unsupported operations fail before the graph runs.
 
 | Construction | Invocation recording | Whole-input replacement | Model-request overrides | Tool-result substitution | Nested coverage |
-|---|---:|---:|---:|---:|---|
+| --- | --: | --: | --: | --: | --- |
 | Direct compiled graph wrapper | Yes | Yes | No | No | Public callbacks observed by the outer run |
 | `langchain.agents.create_agent` factory | Yes | Yes | Yes, with one live model call | Yes, for supported static or history results | Main agent and observable descendants |
 | `deepagents.create_deep_agent` factory | Yes | Yes | Yes, with one live model call | Yes, for supported static or history results | Main agent and explicit Kitaru-built local subagents |
@@ -128,13 +128,13 @@ Prompts, graph state, tool arguments, tool results, outputs, errors, and arbitra
 
 The default per-invocation bounds are:
 
-| Limit | Default |
-|---|---:|
-| Child nodes | 10,000 |
+| Limit                | Default |
+| -------------------- | ------: |
+| Child nodes          |  10,000 |
 | One UTF-8 JSON field | 256 KiB |
-| Buffered node data | 16 MiB |
-| Capture depth | 20 |
-| Items per collection | 1,000 |
+| Buffered node data   |  16 MiB |
+| Capture depth        |      20 |
+| Items per collection |   1,000 |
 
 Limit hits or serialization failures mark capture as lossy, truncate or drop only the stored copy, and preserve the graph outcome. Lossy tool arguments or results are not eligible for history substitution.
 
@@ -147,7 +147,7 @@ Session and root-node setup must succeed before the graph starts. After graph de
 The v2 adapter is a smaller recording and replay boundary, not a port of the v1 execution system.
 
 | v1 capability | v2 status |
-|---|---|
+| --- | --- |
 | Record one graph invocation | Use `KitaruGraphRunner.invoke()` or `ainvoke()`; each invocation is one Kitaru session |
 | Middleware-observed model and tool calls | Use `from_agent_factory()` with LangChain or Deep Agents |
 | Graph-call versus calls checkpoint strategies | Removed; construction determines the declared capability set |
@@ -163,5 +163,5 @@ If your integration depends on v1 streaming, checkpoint strategies, synthetic ch
 ## Next steps
 
 - Run the [provider-free recording example](https://github.com/zenml-io/kitaru/tree/develop/examples/integrations/langgraph_v2).
-- Compare other integration boundaries in [Choose an Adapter](../guides/choose-an-adapter.md).
+- Compare other integration boundaries in the [adapters overview](README.md).
 - Read the [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview) and [interrupt documentation](https://docs.langchain.com/oss/python/langgraph/interrupts).

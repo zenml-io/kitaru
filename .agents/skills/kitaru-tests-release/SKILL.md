@@ -103,6 +103,8 @@ Do not describe the inherited `llm-integration.yml` provider markers or absent `
 
 After a successful core Python workflow, `.github/workflows/release.yml` automatically publishes the matching client, server, worker, and managed images plus the Helm chart. It converts Python RC versions such as `0.22.0rc1` to deployable tags such as `0.22.0-rc.1`. No separate bundle tag is used. A manual dispatch with the existing core package tag is the recovery path.
 
+`.github/workflows/release-typescript.yml` publishes `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, and `@zenml-io/kitaru-vercel-ai` together from an immutable `typescript/kitaru/v<VERSION>` tag. Read `release/typescript.md` before preparing or recovering a TypeScript release. Manual dispatch is a non-publishing rehearsal; pushing the tag publishes the tested tarballs, waits for npm publish-time scanning, verifies a clean registry install, and creates the GitHub Release. The three packages use one lockstep stable or `-rc.N` version.
+
 Before creating a core tag:
 
 1. Fetch `develop`, `main`, and tags.
@@ -123,6 +125,7 @@ Do not use the removed `scripts/smoke-test.sh`, provider-area flags, remote-stac
 - Pull requests normally target `develop`; v2 feature work may target its explicit integration branch until that migration lands.
 - `main` tracks the latest released version only; do not push directly.
 - Python releases are cut with namespaced tags handled by `.github/workflows/release-plugins.yml`.
+- TypeScript releases are cut with `typescript/kitaru/v<VERSION>` tags handled by `.github/workflows/release-typescript.yml`; rehearse the exact tag through manual dispatch before pushing it.
 - A successful core Python release automatically starts `.github/workflows/release.yml`; manual dispatch is reserved for recovery.
 - Release preparation maintains the version in `pyproject.toml`; application code should use `importlib.metadata.version("kitaru")` rather than hardcoding it.
 - Update `CHANGELOG.md` under `[Unreleased]` for user-facing changes.

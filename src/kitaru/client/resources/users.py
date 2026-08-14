@@ -39,7 +39,9 @@ class UsersResource:
         """
         self._client = client
 
-    async def create(self, request: UserCreateRequest) -> AccountResponse:
+    async def create(
+        self, request: UserCreateRequest
+    ) -> AccountResponse | UserActivationTokenResponse:
         """Create a user.
 
         Args:
@@ -49,14 +51,18 @@ class UsersResource:
             APIError: The request failed, including 409 for a duplicate name.
 
         Returns:
-            Created account.
+            Created account. Users created without a password include their
+            one-time activation token.
         """
         response = await self._client.request(
             "POST",
             "/v1/users",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
-        return AccountResponse.model_validate(response.json())
+        payload = response.json()
+        if "activation_token" in payload:
+            return UserActivationTokenResponse.model_validate(payload)
+        return AccountResponse.model_validate(payload)
 
     async def update(
         self, account_id: uuid.UUID, request: UserUpdateRequest

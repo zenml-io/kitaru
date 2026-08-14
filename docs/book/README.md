@@ -1,127 +1,46 @@
 ---
-description: The runtime for production AI agents. Run, replay, improve.
+description: Replay-based evals for AI agents. Traces you can run, not just read.
 icon: hand-wave
 ---
 
 # Welcome to Kitaru
 
-Kitaru is the runtime for production AI agents: **run, replay, improve**. It
-records every model call and tool call as a durable checkpoint, then lets you
-re-execute a real run faithfully with one thing changed — a different model, a
-different prompt — and diff the result against the original. Because the baseline
-reproduces, the difference you see is your change, not replay noise.
+Most traces are transcripts: you read them. Kitaru records an agent run as a **session** — every model call, tool call, and decision — and a session **re-executes**: your real code runs again, with the recording answering for the world the original run saw. Reproduce a run, fork it with one thing changed, and trust that the difference you see is your change.
 
-The harness you already picked (PydanticAI, OpenAI Agents SDK, LangGraph, Claude
-Agent SDK, raw Python) keeps owning how the agent thinks. Kitaru owns the run
-record and the replay loop. A Kitaru flow is a dynamic ZenML pipeline, so agents
-run on the same [stacks](stacks/README.md), server, and dashboard as your ZenML
-pipelines.
+That single verb — **replay** — is what turns production's past into your test bench. You can't unit-test an agent that writes to real systems, and your agent left the test suite behind the day it shipped. But it has been generating test cases all along: every production run. Kitaru is the machinery that makes them runnable — a debugger with a memory, sitting beside your observability stack. Traces tell you what happened; Kitaru re-runs it.
 
-## Run, replay, improve
+Kitaru comes from the team behind [ZenML](https://zenml.io): ZenML is for ML pipelines, Kitaru is for agents.
 
-* **Run (durable).** Every `@checkpoint` is a durable unit of work; its output is
-  persisted automatically, and every model and tool call is recorded. If a flow
-  fails partway, replaying it reuses recorded results instead of re-running
-  expensive work.
-* **Replay (the differentiator).** Re-execute a recorded run from any checkpoint.
-  A plain rerun with no change reproduces the original — that is your baseline.
-  Replay again with one input overridden and diff the two. This re-executes the
-  real run from a checkpoint; it is not re-scoring saved outputs like an eval.
-* **Improve.** Apply the same change across a cohort of recent runs, measure
-  cost, latency, and quality, and keep the winner.
+## The loop
 
-Kitaru is self-host-first: a single-service server on your own Kubernetes,
-artifacts in your own S3/GCS/Azure Blob. No mandatory SaaS control plane in the
-path of your agent's data. See
-[Harness, Runtime, Platform](concepts/harness-runtime-platform.md) for where
-Kitaru fits.
-
-## The replay loop
+- **Record** — wrap the agent you already have with an [adapter](adapters/README.md) (one wrapper, no rewrite), or [import the traces you already collect](getting-started/import-your-traces.md). Langfuse stays your system of record; Kitaru gets a runnable copy. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
+- **Replay** — [re-execute a session](concepts/replay.md) against your real code. Tool calls are answered from the recording, so nothing touches real systems. Unchanged, the replay reproduces the original — the faithful baseline that makes a diff trustworthy. Then fork it: a different model, a new prompt, your working tree's code.
+- **Improve** — [evaluators](concepts/evaluators.md) score both sides; [cohorts](concepts/cohorts.md) freeze the population; [experiments](concepts/experiments.md) replay a cohort against a change and show what improved and what regressed. The cohort that caught a failure becomes the regression gate that keeps it caught.
 
 ```python
-import kitaru
-from kitaru import checkpoint, flow
+from pydantic_ai import Agent
+from kitaru_pydantic_ai import KitaruAgent
 
-@checkpoint
-def research(topic: str) -> str:
-    return kitaru.llm(f"Summarize {topic} in two sentences.")
+agent = Agent("openai:gpt-5.4", name="support-agent",
+              system_prompt="You resolve support tickets.")
 
-@checkpoint
-def draft_report(summary: str) -> str:
-    return kitaru.llm(f"Write a short report based on: {summary}")
+@agent.tool_plain
+def refund_payment(order_id: str) -> str:
+    return payments.refund(order_id)  # your real API
 
-@flow
-def research_agent(topic: str) -> str:
-    summary = research(topic)
-    return draft_report(summary)
-
-if __name__ == "__main__":
-    # Run, then replay from a checkpoint with one input changed.
-    run = research_agent.run(topic="Why do agents need durable execution?").wait()
-
-    baseline = research_agent.replay(run.exec_id, at="draft_report")
-    variant = research_agent.replay(
-        run.exec_id,
-        at="draft_report",
-        flow_overrides={"model": "anthropic/claude-opus-4"},
-    )
-    # baseline reproduces the original; diff variant against it to isolate your change.
+support = KitaruAgent(agent, agent_id=AGENT_ID)
+support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
-`run(...)` returns a handle; `.wait()` blocks for the result and exposes `.exec_id`. `replay(exec_id, at="<checkpoint>", flow_overrides={...})` re-executes from that checkpoint, overriding flow inputs such as the model or prompt profile. The [CLI](https://sdkdocs.kitaru.ai) exposes the execution workflow, while the read-only-by-default [MCP server](agent-native/mcp-server.md) provides a compact v2 registry/activity interface and explicitly gated asynchronous triggers.
+Every run is now a session you can replay — the [Quickstart](getting-started/quickstart.md) takes you from this wrapper to a measured model-swap experiment in one sitting.
 
-See the [Quickstart](getting-started/quickstart.md) to install and run this
-yourself.
+## Built to sit in your stack
 
-## Where ZenML fits
-
-Kitaru is built by the team behind [ZenML](https://docs.zenml.io), the
-open-source framework for production ML and LLM pipelines, and runs on the same
-foundations. Each project works on its own — you can use Kitaru without ever
-touching ZenML. If you use both, they compose rather than coexist: a Kitaru flow
-is a dynamic ZenML pipeline under the hood, so your agents and pipelines run on
-the same [stacks](stacks/README.md), persist artifacts to the same stores, and
-show up in the same server and dashboard. If your work is ML pipelines rather
-than agents, start with the [ZenML docs](https://docs.zenml.io) — and if you
-want the narrative tutorial for agents, the
-[Agents guide](https://docs.zenml.io/user-guides/agents-guide) sits alongside
-ZenML's Starter, Production, and LLMOps guides in the shared
-[Learn](https://docs.zenml.io/user-guides) section.
-
-## Runtime primitives
-
-These are the primitives Kitaru adds on top of your existing Python agent code.
-You keep your harness and your control flow; Kitaru records the run and makes it
-replayable.
-
-* **Replay and override:** Re-execute any run from any checkpoint — to recover
-  from a failure, or with [overrides](guides/replay-and-overrides.md) (a
-  different model or parameter) to isolate the effect of a change before you ship
-  it. Use invocation overrides when you need to change one recorded checkpoint,
-  tool, or model call instead of every call with the same checkpoint name.
-* **Durable execution:** Wrap steps in [`@checkpoint`](concepts/checkpoints.md)
-  and your agent picks up where it left off without re-running expensive work
-* **Wait and resume:** Add [`kitaru.wait()`](guides/wait-and-resume.md) and let
-  agents pause for a human, another system, or later input; after the polling
-  timeout, compute is released and the run resumes when input lands
-* **Artifact lineage:** Every checkpoint output is written to your object store
-  as a typed, versioned artifact — step through runs, diff outputs across runs,
-  and trace a bad final output back to the exact step that produced it
-* **Execution management:** [`KitaruClient`](guides/execution-management.md) lets
-  you inspect, replay, retry, resume, and cancel executions from code or CLI
-* **Tracked LLM calls:** Use [`kitaru.llm()`](guides/llm-calls.md) and every call
-  gets automatic secret resolution, prompt/response capture, and token/latency
-  logging
-* **Persistent data:** [`kitaru.save()` / `kitaru.load()`](guides/artifacts.md)
-  let agents store and retrieve files, objects, and results across executions
-* **Structured observability:** [`kitaru.log()`](concepts/logging.md) attaches
-  key-value metadata to any checkpoint or flow for debugging and the UI
-* **Runtime configuration:** [`kitaru.configure()`](guides/configuration.md) sets
-  your model, log store, and stack defaults in one call
-* **Framework and infrastructure portability:** Keep your Python control flow,
-  use your preferred framework, and run locally or on remote stacks — Kubernetes,
-  Vertex AI, SageMaker, AzureML
+- **Self-hosted, open source (Apache 2.0).** One FastAPI + Postgres server on your infrastructure. Replays, imports, and evaluations execute on [workers](concepts/workers.md) in _your_ environment — your traces and credentials don't leave your systems.
+- **Beside your observability, not instead of it.** Langfuse, LangSmith, and Braintrust remain where you watch production. Kitaru is where you re-run it.
+- **Framework-agnostic by design.** Shipped adapters cover PydanticAI, LangGraph, OpenAI Agents SDK, Mastra, and the Vercel AI SDK; the [adapter overview](adapters/README.md) states each integration's boundary. The [import path](getting-started/import-your-traces.md) works regardless of framework.
+- **Four ways to drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/mcp-server.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
 
 ## Next steps
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Installation</strong></td><td>Install Kitaru with uv or pip.</td><td><a href="getting-started/installation.md">getting-started/installation.md</a></td></tr><tr><td><strong>Quickstart</strong></td><td>Run a tiny flow end to end.</td><td><a href="getting-started/quickstart.md">getting-started/quickstart.md</a></td></tr><tr><td><strong>Examples</strong></td><td>Browse runnable workflows grouped by goal.</td><td><a href="getting-started/examples.md">getting-started/examples.md</a></td></tr><tr><td><strong>Harness, Runtime, Platform</strong></td><td>Where Kitaru fits in an agent stack, and where it doesn't.</td><td><a href="concepts/harness-runtime-platform.md">concepts/harness-runtime-platform.md</a></td></tr><tr><td><strong>How It Works</strong></td><td>Server, runner, execution targets, and what lives where in local dev vs production.</td><td><a href="concepts/how-it-works.md">concepts/how-it-works.md</a></td></tr><tr><td><strong>Core Concepts</strong></td><td>Flows, checkpoints, and the execution model.</td><td><a href="concepts/README.md">concepts/README.md</a></td></tr><tr><td><strong>Execution Management</strong></td><td>Inspect runs, replay, retry, resume, and fetch logs.</td><td><a href="guides/execution-management.md">guides/execution-management.md</a></td></tr><tr><td><strong>Wait, Input, and Resume</strong></td><td>Pause flows for external input and continue the same execution.</td><td><a href="guides/wait-and-resume.md">guides/wait-and-resume.md</a></td></tr><tr><td><strong>Tracked LLM Calls</strong></td><td>Use kitaru.llm() with aliases, secrets, and captured artifacts.</td><td><a href="guides/llm-calls.md">guides/llm-calls.md</a></td></tr><tr><td><strong>Secrets + Model Registration</strong></td><td>Store provider credentials, register a model alias, and use kitaru.llm().</td><td><a href="guides/secrets-and-model-registration.md">guides/secrets-and-model-registration.md</a></td></tr><tr><td><strong>Configuration</strong></td><td>Set runtime defaults and understand override precedence.</td><td><a href="guides/configuration.md">guides/configuration.md</a></td></tr><tr><td><strong>Stacks</strong></td><td>Create, inspect, switch, and clean up local and remote stacks across Kubernetes, AWS, GCP, and Azure.</td><td><a href="stacks/README.md">stacks/README.md</a></td></tr><tr><td><strong>MCP Server</strong></td><td>Query and manage executions via MCP tools.</td><td><a href="agent-native/mcp-server.md">agent-native/mcp-server.md</a></td></tr><tr><td><strong>Agent Skills</strong></td><td>Install quickstart, scoping, authoring, and adapter migration skills.</td><td><a href="agent-native/claude-code-skill.md">agent-native/claude-code-skill.md</a></td></tr><tr><td><strong>CLI Reference</strong></td><td>Browse the generated command reference.</td><td><a href="https://sdkdocs.kitaru.ai">cli/README.md</a></td></tr><tr><td><strong>Blog</strong></td><td>Read essays on durable execution, long-running agents, and Kitaru's design.</td><td><a href="https://kitaru.ai/blog/">https://kitaru.ai/blog/</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Installation</strong></td><td>SDK, CLI, a local server, and a login.</td><td><a href="getting-started/installation.md">getting-started/installation.md</a></td></tr><tr><td><strong>Quickstart</strong></td><td>Wrap, record, replay, fork, diff — one sitting.</td><td><a href="getting-started/quickstart.md">getting-started/quickstart.md</a></td></tr><tr><td><strong>Import your traces</strong></td><td>Start from the history you already have.</td><td><a href="getting-started/import-your-traces.md">getting-started/import-your-traces.md</a></td></tr><tr><td><strong>Core Concepts</strong></td><td>Sessions, replay, evaluators, cohorts, experiments.</td><td><a href="concepts/README.md">concepts/README.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Production traffic as your test suite.</td><td><a href="guides/regression-suite.md">guides/regression-suite.md</a></td></tr><tr><td><strong>Deploy Kitaru</strong></td><td>Self-host for your team.</td><td><a href="deploy/README.md">deploy/README.md</a></td></tr></tbody></table>

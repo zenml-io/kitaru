@@ -1,138 +1,40 @@
 ---
-description: Diagnose problems and reset Kitaru state
+description: Diagnose connection, worker, and replay problems.
 icon: wrench
 ---
 
 # Troubleshooting
 
-When a flow won't run, a replay misbehaves, or your local state is stale, start with diagnostics, then reset state if needed. Most problems are environment or stale-state issues this page covers.
+Most problems are one of three things: the client can't reach the server, no worker is claiming the work, or the replayed subprocess is missing something from its environment. Work down the chain.
 
-## Gathering diagnostics
-
-Start with `kitaru info` to see your current environment at a glance:
+## Start with the diagnostics
 
 ```bash
-kitaru info
+kitaru status      # who am I, which server, which context
+kitaru doctor      # connection and environment checks
+kitaru version
 ```
 
-This shows your SDK version, connection state, server URL, active stack,
-config file paths, and more.
+The CLI and SDK read `KITARU_API_URL` and `KITARU_API_KEY` from the environment; `kitaru login` stores credentials per server context (`kitaru context list` shows them). When a script fails with `KITARU_API_URL is not set`, it's the environment, not the server.
 
-For a full diagnostic dump (including all installed packages and environment
-type), use:
+## Nothing is happening
 
-```bash
-kitaru info --all
-```
+A replay, import, or evaluation that sits in `pending` almost always means **no worker is claiming it**:
 
-### Exporting diagnostics for support
+- Is a worker running? `kitaru worker list` shows workers and liveness.
+- Can this worker claim this task? A worker started with `--kinds` or `--selector` skips tasks outside its scope; a bare `kitaru worker start` claims anything.
+- Watch the job directly: `kitaru job watch <job-id>` shows tasks moving through `pending → claimed → running`.
 
-If you're opening a [GitHub issue](https://github.com/zenml-io/kitaru/issues)
-or asking for help in the [ZenML Slack](https://zenml.io/slack), include the
-output of `kitaru info` so we have the full picture. The easiest way is to
-export it to a file:
+## A replay fails
 
-```bash
-kitaru info --all --file debug.json
-# or: kitaru info --all --file debug.yaml
-```
+`kitaru job get <job-id>` carries the failing task's error and a tail of the subprocess's stderr. The usual suspects:
 
-{% hint style="info" %}
-Environment variables with secret-like names (containing TOKEN, KEY, SECRET,
-PASSWORD, CREDENTIAL, or AUTH) are automatically masked in the exported file.
-Review other fields such as server URL before sharing publicly.
-{% endhint %}
+- **The agent version has no run command** — register it with `--command`; that command is what the worker executes.
+- **Missing dependencies or keys** — the subprocess runs in the worker's environment. Start the worker in the same virtualenv as your agent, with the provider keys exported.
+- **A tool call missed under `on_miss="fail"`** — the fork took a path the recording doesn't answer. See [Tool policies](../guides/tool-policies.md) for the options.
 
-You can also get JSON output directly for pasting into an issue:
+## The server
 
-```bash
-kitaru info --all -o json
-```
+The server's health endpoint is `GET /health`; Docker Compose users can check `docker compose ps` and `docker compose logs server`. The interactive API reference lives at `/docs` on your server.
 
-## Resetting Kitaru state
-
-If your local database is in a bad state, connections are stale, or you
-want a fresh start, `kitaru clean` resets local and global state.
-
-### Preview before deleting
-
-Always use `--dry-run` first to see what would be removed:
-
-```bash
-kitaru clean project --dry-run   # Preview project-local cleanup
-kitaru clean global --dry-run    # Preview global config cleanup
-kitaru clean all --dry-run       # Preview both
-```
-
-### Clean scopes
-
-| Command | What it removes |
-|---|---|
-| `kitaru clean project` | The `.kitaru/` directory in the current project |
-| `kitaru clean global` | The global config directory (database, stores, server state) |
-| `kitaru clean all` | Both project and global state |
-
-### Safety features
-
-- **Auto-backup:** Before removing global state, the SQLite database is
-  backed up automatically
-- **Model registry protection:** If you have registered model aliases,
-  `clean global` and `clean all` require `--force` to confirm
-- **Local server teardown:** A running local server is stopped before cleanup
-- **Confirmation prompt:** You'll be asked to confirm unless you pass `--yes`
-
-### Common scenarios
-
-**Database in a bad state:**
-
-```bash
-kitaru clean global --force --yes
-kitaru login
-```
-
-This backs up your database, removes all global state, and starts fresh.
-
-**Starting a new project from scratch:**
-
-```bash
-kitaru clean project --yes
-kitaru init
-```
-
-**Full reset (nuclear option):**
-
-```bash
-kitaru clean all --force --yes
-kitaru init
-kitaru login
-```
-
-## Analytics
-
-Kitaru collects anonymous usage analytics to help improve the product.
-You can check your current preference and opt out at any time:
-
-```bash
-kitaru analytics status      # Show current preference
-kitaru analytics opt-out     # Disable analytics
-kitaru analytics opt-in      # Re-enable analytics
-```
-
-The preference is persisted to your config file, so it applies to all
-surfaces — CLI, SDK, and MCP servers. This is important because MCP
-clients launch `kitaru-mcp` in a sanitized environment where shell
-environment variables (like `ZENML_ANALYTICS_OPT_IN`) are not
-available.
-
-{% hint style="info" %}
-If you previously disabled analytics via the `ZENML_ANALYTICS_OPT_IN=false`
-environment variable, run `kitaru analytics opt-out` to persist the
-preference to your config file. The environment variable alone does not
-reach MCP server subprocesses.
-{% endhint %}
-
-## Getting help
-
-- [GitHub Issues](https://github.com/zenml-io/kitaru/issues) — bug reports
-  and feature requests
-- [ZenML Slack](https://zenml.io/slack) — real-time help from the team
+Still stuck? Ask in the [community](https://www.zenml.io/slack) or [open an issue](https://github.com/zenml-io/kitaru/issues).

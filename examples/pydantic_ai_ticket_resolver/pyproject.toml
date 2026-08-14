@@ -1,0 +1,24 @@
+[project]
+name = "kitaru-pydantic-ai-ticket-resolver"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "kitaru[cli,mcp,worker]>=0.22.0rc4,<0.23",
+    "kitaru-pydantic-ai[openai]>=0.1.0rc0,<0.2",
+    "langfuse>=4.14,<5",
+]
+
+[tool.uv]
+package = false
+exclude-newer = "3 days"
+
+[tool.uv.exclude-newer-package]
+kitaru = false
+kitaru-braintrust-importer = false
+kitaru-evaluator = false
+kitaru-jsonl-importer = false
+kitaru-langfuse-importer = false
+kitaru-langgraph = false
+kitaru-langsmith-importer = false
+kitaru-openai-agents = false
+kitaru-pydantic-ai = false

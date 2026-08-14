@@ -1,287 +1,346 @@
 ---
-description: Run a flow, replay it with one change, and compare the two runs
+description: Wrap an agent, record a run, replay it unchanged, and compare it with a replay that uses a cheaper model.
 icon: rocket
 ---
 
 # Quickstart
 
-In the next five minutes you'll run a durable agent flow, replay it faithfully,
-then replay it again with one input changed and compare the two runs. That
-replay loop — reproduce a real run, change one thing, diff the result — is what
-Kitaru is for. Durable execution is the mechanism that makes the replay
-faithful, not the point.
+This guide records one support-agent run as a [session](../concepts/agents-and-sessions.md). You will first replay the session unchanged, then replay it with a cheaper model and compare the results. The example uses this ticket:
 
-If you haven't installed Kitaru yet, start with [Installation](installation.md).
+> Refund order #4821: the card reader was double-charged.
 
-## Set up a project and model
+You need a running server and a connection, covered in [Installation](installation.md). If you already collect traces in Langfuse or another tracing system, start with [Import your traces](import-your-traces.md). The rest of this guide applies from [step 4](#4-write-the-evaluator).
+
+## 1. Register the agent
+
+The agent is a support copilot; tell Kitaru it exists and how to start it:
 
 ```bash
-kitaru init
+kitaru agent register support-agent \
+  --command "python support.py" \
+  --description "Resolves support tickets"
+export KITARU_AGENT_ID=<id from the output>
 ```
 
-This creates a `.kitaru/` directory that marks your project root.
-
-The example calls an OpenAI model, so install Kitaru with the OpenAI
-provider package:
-
-{% tabs %}
-{% tab title="uv (recommended)" %}
-```bash
-uv add "kitaru[openai]"
-```
-{% endtab %}
-
-{% tab title="pip" %}
-```bash
-pip install "kitaru[openai]"
-```
-{% endtab %}
-{% endtabs %}
-
-`kitaru.llm()` reads its provider key and default model from the environment:
+The `--command` is the agent's run spec. A [worker](../concepts/workers.md) uses it to start the agent during replay. The agent calls an OpenAI model, so it also needs an API key:
 
 ```bash
 export OPENAI_API_KEY=sk-...
-export KITARU_DEFAULT_MODEL=openai/gpt-5-nano
 ```
 
-{% hint style="info" %}
-For production, register a model alias so you can swap models or credentials
-without changing code:
+## 2. Wrap the agent and record a run
 
-```bash
-kitaru secrets set openai-creds --OPENAI_API_KEY=sk-...
-kitaru model register fast --model openai/gpt-5-nano --secret openai-creds
-```
-
-See [Secrets + Model Registration](../guides/secrets-and-model-registration.md)
-for the full setup.
-{% endhint %}
-
-## Run a flow
-
-Create `agent.py`. Note that `model` is a flow input — that's what makes it
-overridable on replay later.
+Wrap the existing agent with `KitaruAgent`, then run it as usual:
 
 ```python
-import kitaru
-from kitaru import checkpoint, flow
+# support.py
+import os
+import uuid
 
-@checkpoint
-def research(topic: str, model: str) -> str:
-    return kitaru.llm(f"Summarize {topic} in two sentences.", model=model)
+from pydantic_ai import Agent
+from kitaru_pydantic_ai import KitaruAgent
 
-@checkpoint
-def draft_report(summary: str, model: str) -> str:
-    return kitaru.llm(
-        f"Write a short report based on this summary:\n\n{summary}",
-        model=model,
-    )
+agent = Agent(
+    "openai:gpt-5.4",
+    name="support-agent",
+    system_prompt="You resolve support tickets. Issue refunds when the customer was overcharged.",
+)
 
-@flow
-def research_agent(topic: str, model: str = "openai/gpt-5-nano") -> str:
-    summary = research(topic, model)
-    return draft_report(summary, model)
+@agent.tool_plain
+def refund_payment(order_id: str) -> str:
+    # Replace this deterministic stand-in with your real refund API.
+    return f"Refunded {order_id}"
+
+support = KitaruAgent(agent, agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
 
 if __name__ == "__main__":
-    handle = research_agent.run(topic="durable execution for AI agents")
-    result = handle.wait()
-    print("exec_id:", handle.exec_id)
-    print(result)
+    result = support.run_sync(
+        "Refund order #4821: the card reader was double-charged."
+    )
+    print(result.output)
 ```
 
-Run it:
-
-{% tabs %}
-{% tab title="uv (recommended)" %}
 ```bash
-uv run agent.py
+python support.py
 ```
-{% endtab %}
 
-{% tab title="pip environment" %}
-```bash
-python agent.py
-```
-{% endtab %}
-{% endtabs %}
+The run created one session containing the model requests, the `refund_payment` call and result, token usage, and cost. The same script is the replay target. When a worker runs it, the adapter supplies the recorded inputs automatically.
 
-What happened:
+## 3. Look at the recording
 
-1. `@flow` marks the top-level execution boundary; everything inside is tracked.
-2. Each `@checkpoint` records its inputs and return value durably.
-3. `kitaru.llm()` calls the model and captures the prompt, response, token usage,
-   and latency.
-4. `.run()` starts the execution and returns a `FlowHandle`; `.wait()` blocks
-   until completion. `handle.exec_id` is the durable record of this run — save it.
-
-## Replay it: reproduce, then change one thing
-
-Replay re-executes a recorded run from a checkpoint. Run two replays from the
-`exec_id` you just printed.
-
-**First, a faithful rerun with no change.** This is your control. Because every
-model and tool call was recorded, replaying with nothing changed reproduces the
-original run — the baseline you measure against.
+The Python client is async and reads its connection from the environment:
 
 ```python
-import kitaru
-from agent import research_agent
+# show_session.py
+import asyncio
 
-EXEC_ID = "kr-..."  # the exec_id printed above
+from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.session import SessionListParams
+from kitaru.api_models.v1.session_node import SessionNodeListParams
 
-baseline = research_agent.replay(EXEC_ID, at="research")
-baseline_exec_id = baseline.results[0].replay_exec_id
+async def main() -> None:
+    client = KitaruAPIClient()
+    sessions = await client.sessions.list(SessionListParams(size=1))
+    session = sessions.items[0]
+    print(session.id, session.status, session.cost, session.tokens)
+
+    nodes = await client.sessions.list_nodes(
+        session.id, SessionNodeListParams(include_payloads=True)
+    )
+    for node in nodes.items:
+        print(f"{node.index:3} {node.node_type:12} {node.name}")
+
+asyncio.run(main())
 ```
 
-**Then replay again with one input changed** — here, a different model:
+```text
+  0 llm_call     support-agent
+  1 tool_call    refund_payment
+  2 llm_call     support-agent
+```
+
+Keep the session ID this prints and export it for the replay snippets in steps 6 and 7:
+
+```bash
+export KITARU_SESSION_ID=<session-id>
+```
+
+The recording shows what the model received, what the tool returned, and what the run cost.
+
+<a id="write-the-evaluator"></a>
+
+## 4. Write the evaluator
+
+A replay requires at least one evaluator. Scaffold an [evaluator](../concepts/evaluators.md), which is a Python function that reads the session:
+
+```bash
+kitaru evaluator scaffold refund-check
+```
 
 ```python
-candidate = research_agent.replay(
-    EXEC_ID,
-    at="research",
-    flow_overrides={"model": "openai/gpt-5"},
+# refund_check_evaluator.py
+from kitaru.task.evaluator import EvaluationResult, SessionView
+
+
+def evaluate(session: SessionView, **params) -> EvaluationResult:
+    refunded = any(
+        node.node_type == "tool_call" and node.tool_name == "refund_payment"
+        for node in session.nodes
+    )
+    return EvaluationResult(name="refund_issued", score=refunded, passed=refunded)
+```
+
+Try it offline, then register it:
+
+```bash
+kitaru evaluator test refund_check_evaluator.py --entrypoint evaluate
+kitaru evaluator register refund-check \
+  --script refund_check_evaluator.py --entrypoint evaluate
+```
+
+Kitaru also includes built-in evaluators such as `kitaru/cost` and the deterministic `kitaru/output-contract`. They are useful for initial triage. Custom evaluators such as `refund-check` encode criteria specific to your application.
+
+## 5. Start a worker
+
+Replays execute in **your** environment, not on the server. Open a second terminal in the same directory and virtualenv:
+
+```bash
+kitaru worker start
+```
+
+Leave it running. The worker will claim the replay, run `support.py` as a subprocess, and then run the evaluator.
+
+## 6. Replay it unchanged
+
+First, prove the recording is faithful. Re-run the session with nothing changed and every tool call answered from the recording:
+
+```python
+# replay.py
+import asyncio
+import os
+import uuid
+
+from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.replay import ReplayCreateRequest
+from kitaru.api_models.v1.replay_config import (
+    EvaluatorConfig,
+    HistoryConfig,
+    ToolPolicy,
 )
-candidate_exec_id = candidate.results[0].replay_exec_id
+
+RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
+SESSION_ID = uuid.UUID(os.environ["KITARU_SESSION_ID"])
+
+async def main() -> None:
+    client = KitaruAPIClient()
+    baseline = await client.replays.create(
+        ReplayCreateRequest(
+            baseline_session_id=SESSION_ID,   # from step 3
+            evaluators=[EvaluatorConfig(evaluator="refund-check")],
+            tool_policy=RECORDED_TOOLS,
+            evaluate_baselines=True,
+        )
+    )
+    print(baseline.id, baseline.job_id)
+
+asyncio.run(main())
 ```
 
-`flow_overrides={"model": "openai/gpt-5"}` changes the original `model` flow
-input for the replay run. `at="research"` re-executes from the `research`
-checkpoint forward. Everything upstream of that checkpoint is reused from the
-recorded run, so you don't pay for or re-run work you aren't changing.
-
-**Now compare the original and the two replays.** The replay call returns a
-`ReplaySubmission`: a small record with the replay execution IDs, counts, and
-compare URLs. Diff the original, the faithful baseline replay, and the changed
-replay:
-
-```python
-print("baseline replay:", baseline_exec_id)
-print("candidate replay:", candidate_exec_id)
-
-execution_diff = kitaru.diff(EXEC_ID, baseline_exec_id, candidate_exec_id)
-print(execution_diff.urls)
-```
-
-Each `kitaru.llm()` call also recorded its prompt, response, token usage, and
-latency, so you can compare cost and quality per run in the dashboard or from
-`kitaru.KitaruClient()`. Because the baseline reproduced, the difference between
-the two runs is your change — the new model — not replay noise. This is the core
-loop: reproduce a real run, change exactly one thing, and trust the diff.
-
-{% hint style="info" %}
-This is not re-scoring stored outputs like an offline eval. Replay
-re-executes the real run from a checkpoint with one input changed, so the
-model and tool calls downstream actually run again.
-{% endhint %}
-
-### Drive replay from the CLI or a coding agent
-
-The same loop is available from the CLI, so a coding agent (Claude Code, Codex,
-Cursor) can run it through Kitaru's [MCP server](../agent-native/mcp-server.md)
-and hill-climb on cost, latency, and quality:
+Watch it finish, then read the result:
 
 ```bash
-kitaru executions list                       # find the exec_id
-kitaru executions replay kr-... --at research \
-  --flow-overrides '{"model":"openai/gpt-5"}'
+kitaru job watch <job-id>
 ```
 
-For checkpoint-output overrides, selector rules, and divergence handling, see
-[Replay and Overrides](../guides/replay-and-overrides.md).
+The worker ran your code again, but the recording supplied the result of `refund_payment`, so the replay did not call the live refund service. With `on_miss="fail"`, the replay stops if the agent makes a tool call that the recording cannot answer.
 
-## Replay also resumes from failure
+Check that this unchanged replay follows the expected path and passes the same evaluations as the original session. If it does not, investigate the difference before testing a model or code change. Otherwise you cannot tell whether the next result came from your change or from an unreliable replay.
 
-Replay isn't only for experiments. If `research` succeeds but `draft_report`
-fails — a rate limit, a transient error — replay from the failure point instead
-of re-running the whole script:
+## 7. Fork it with one thing changed
+
+Now ask the question you actually care about: _would the cheaper model have handled this ticket?_ Create `fork.py` with the same recorded-tool policy and one override:
+
+```python
+import asyncio
+import os
+import uuid
+
+from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.replay import ReplayCreateRequest
+from kitaru.api_models.v1.replay_config import (
+    EvaluatorConfig,
+    HistoryConfig,
+    ReplayOverride,
+    ToolPolicy,
+)
+
+SESSION_ID = uuid.UUID(os.environ["KITARU_SESSION_ID"])
+RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
+
+
+async def main() -> None:
+    client = KitaruAPIClient()
+    replay = await client.replays.create(
+        ReplayCreateRequest(
+            baseline_session_id=SESSION_ID,
+            override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
+            evaluators=[EvaluatorConfig(evaluator="refund-check")],
+            tool_policy=RECORDED_TOOLS,
+        )
+    )
+    print(replay.id, replay.job_id)
+
+
+asyncio.run(main())
+```
+
+The agent now runs from the beginning with the cheaper model. Recorded tool results remain the same.
+
+## 8. Read the diff
+
+Each replay produced a new session (`origin: replay`), already evaluated. Compare the fork against the baseline:
+
+```python
+from kitaru.api_models.v1.evaluation import EvaluationListParams
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+
+async def show(client: KitaruAPIClient, session_id) -> None:
+    session = await client.sessions.get(session_id)
+    print(f"cost=${session.cost}  llm_calls={session.llm_call_count}")
+    async for e in client.evaluations.iter(EvaluationListParams(
+        filter=FilterCondition(field="session_id", op=FilterOp.EQ, value=session_id)
+    )):
+        print(f"  {e.name}: score={e.score} passed={e.passed}")
+```
+
+If `refund_issued` still passes and the recorded cost is lower, this session supports using the cheaper model for this kind of ticket. One session is not enough to establish how the model performs across your traffic, which is what the next step addresses.
+
+## 9. Widen it into a regression suite
+
+One replay tells you about one ticket. To test the change across more cases, freeze a set of recorded sessions into a [cohort](../concepts/cohorts.md), define the model swap as an [experiment](../concepts/experiments.md), and replay every session in the cohort. [Build a regression suite from production](../guides/regression-suite.md) covers that process.
+
+## Scale it to a population
+
+One replay answers a question about one session. The same machinery over a *population* answers the question that decides whether you ship, and the steps are the same ones you just did — only the unit changes.
+
+Start from traffic rather than a single run. Import what you already collect, and tag it while you can:
 
 ```bash
-kitaru executions replay kr-... --at draft_report
+kitaru session import traces/langfuse-traces.jsonl \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@1 \
+  --tag returns-baseline \
+  --media-type application/x-ndjson --wait
 ```
 
-The recorded output of `research` is reused; only `draft_report` re-executes.
-The more checkpoints your flow has, the less work you repeat. This works the
-same whether you use `kitaru.llm()` or bring your own client.
-
-## Take it to production
-
-Everything above runs where you launch it. Two steps move it to production: run
-on remote infrastructure, and deploy a versioned snapshot.
-
-### Run on a remote stack
-
-To execute on remote infrastructure (Kubernetes, Vertex AI, SageMaker, or
-AzureML), point the flow at a remote stack; Kitaru builds a container image with
-your code and dependencies. Control the base image, packages, and environment
-through the `image` parameter:
-
-```python
-@flow(
-    stack="prod-k8s",
-    image={
-        "base_image": "python:3.12-slim",
-        "requirements": ["kitaru[pydantic-ai,openai]", "httpx"],
-        "apt_packages": ["git"],
-    },
-)
-def research_agent(topic: str, model: str = "openai/gpt-5-nano") -> str:
-    ...
-```
-
-`research_agent.run(...)` now executes on that stack. Agents run on the same
-stacks, server, and dashboard as ZenML pipelines.
-
-ZenML supplies optional stack-integration dependencies; install them in the
-Python environment that submits the flow, not in its remote execution image.
-
-This example lists `kitaru[pydantic-ai,openai]` explicitly because setting
-`base_image` means you control the image contents — Kitaru auto-adds plain
-`kitaru` but does not guess optional extras such as the PydanticAI/OpenAI
-adapter dependencies. See the [Containerization guide](../guides/containerization.md)
-for image options, custom Dockerfiles, and how Kitaru packages your source.
-
-### Deploy a versioned snapshot
-
-`run()` executes the flow as it is on disk. `deploy()` freezes the current code
-and dependencies as an immutable, versioned snapshot that consumers invoke by
-name — so whatever *calls* your agent doesn't redeploy when you ship a new
-version:
-
-```python
-# Freeze a version and attach a routing tag.
-research_agent.deploy(
-    topic="durable execution for AI agents",  # representative deployment-time inputs
-    tags={"prod": True},
-)
-```
+Run the built-in descriptive evaluators over the tag first. They do not know what *good* means for your business, but they show where cost, latency and tool behavior are unusual, which is where to look:
 
 ```bash
-# Or from the CLI, deploying a flow target with one routing tag:
-kitaru deploy agent.py:research_agent --tag prod
+kitaru session evaluate --tag returns-baseline \
+  --evaluator kitaru/cost@latest \
+  --evaluator kitaru/latency@latest \
+  --evaluator kitaru/tool-call-patterns@latest --wait
 ```
 
-Consumers then invoke the deployed flow by name — from Python, CLI, MCP, or HTTP
-— and override inputs at call time:
+Then review what actually happened. Open an [investigation](../concepts/investigations.md), answer a question per session with the evidence pinned to the node that shows it, and settle each session with a verdict:
 
-```python
-kitaru.KitaruClient().deployments.invoke(
-    flow="research_agent",
-    inputs={"topic": "vector databases"},
-)
+```bash
+kitaru annotation create --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key outcome \
+  --value '"The refund exceeds the automatic approval threshold."'
+kitaru investigation session verdict "$INVESTIGATION_ID" "$SESSION_ID" problematic
 ```
 
-See [Deploy and Invoke Flows](../guides/deployments.md) for versioning, moving
-tags with `kitaru flow tag`, rollbacks, and invocation in depth.
+The annotation stores the rationale. The verdict stores the session classification.
 
-{% hint style="info" %}
-Flows always run where you execute them — a Kitaru server does not run your
-code. It stores execution metadata, secrets, model aliases, and serves the UI.
-To track local executions on a deployed server, run
-`kitaru login https://my-server.example.com` then `kitaru status` before
-running your flow.
-{% endhint %}
+Resist naming the failure category before you have looked — a taxonomy invented up front is the most common way to review fifty sessions and learn nothing.
 
-## What's next
+Freeze the reviewed sessions into two [cohorts](../concepts/cohorts.md), because a change that fixes the broken cases while wrecking the healthy ones is not a fix:
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Replay and Overrides</strong></td><td>Flow and checkpoint overrides, selector rules, and divergence handling</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Agents Guide</strong></td><td>The recommended end-to-end tour: run, replay, and improve a production agent on Kitaru + PydanticAI, in the ZenML Learn section</td><td><a href="https://docs.zenml.io/user-guides/agents-guide">https://docs.zenml.io/user-guides/agents-guide</a></td></tr><tr><td><strong>Core Concepts</strong></td><td>Understand flows, checkpoints, and the execution model</td><td><a href="../concepts/README.md">../concepts/README.md</a></td></tr><tr><td><strong>Execution Management</strong></td><td>Inspect runs, fetch logs, replay, retry, and resume</td><td><a href="../guides/execution-management.md">../guides/execution-management.md</a></td></tr><tr><td><strong>Configuration</strong></td><td>Configure runtime defaults and precedence</td><td><a href="../guides/configuration.md">../guides/configuration.md</a></td></tr><tr><td><strong>Examples</strong></td><td>Browse runnable Kitaru workflows grouped by goal</td><td><a href="examples.md">examples.md</a></td></tr><tr><td><strong>Containerization</strong></td><td>Control base images, dependencies, and Dockerfiles for remote execution</td><td><a href="../guides/containerization.md">../guides/containerization.md</a></td></tr><tr><td><strong>Wait, Input, and Resume</strong></td><td>Pause flows for external input and continue later</td><td><a href="../guides/wait-and-resume.md">../guides/wait-and-resume.md</a></td></tr><tr><td><strong>Tracked LLM Calls</strong></td><td>Use kitaru.llm() with captured prompt/response artifacts</td><td><a href="../guides/llm-calls.md">../guides/llm-calls.md</a></td></tr><tr><td><strong>Secrets + Model Setup</strong></td><td>Store provider credentials, register an alias, and use kitaru.llm()</td><td><a href="../guides/secrets-and-model-registration.md">../guides/secrets-and-model-registration.md</a></td></tr><tr><td><strong>MCP Server</strong></td><td>Drive replay and diff from a coding agent through tool calls</td><td><a href="../agent-native/mcp-server.md">../agent-native/mcp-server.md</a></td></tr></tbody></table>
+```bash
+kitaru cohort create unsafe-refund-baseline --agent support-agent \
+  --session "$TICKET_004" --session "$TICKET_007"
+kitaru cohort create safe-refund-control --agent support-agent \
+  --session "$TICKET_001" --session "$TICKET_002"
+```
+
+Cohort versions are immutable: `unsafe-refund-baseline@1` means the same sessions next month as today, which is the point. Register the fix as a new agent version, then make the change an [experiment](../concepts/experiments.md) and replay both cohorts:
+
+```bash
+kitaru agent version register support-agent \
+  --command "python support.py" --env RETURNS_POLICY_MODE=strict
+
+kitaru experiment create improve-returns-policy --agent support-agent \
+  --evaluator refund-check@1 --evaluator kitaru/cost@latest \
+  --tool-policy '{"default":{"type":"passthrough"},"tools":{}}'
+
+kitaru experiment run start improve-returns-policy \
+  --cohort-version "$TARGET_COHORT_VERSION_ID" \
+  --agent support-agent@2 --evaluate-baselines --wait
+```
+
+`--evaluate-baselines` scores the original sessions too; without it you have new numbers and nothing to compare them against. Read the result with `kitaru experiment run get "$RUN_ID"`, and read it honestly: improved, regressed, traded off (better on one evaluator, worse on another), or inconclusive. Inconclusive is a real result on a small cohort — the answer is more evidence, not a rounder number.
+
+The cohort that caught this failure is now a regression suite. Replay it against the next change too; that is how the loop compounds.
+
+## Run the whole thing
+
+Everything above is checked into the repository as a working example — a returns agent that sometimes refunds when it should escalate, with traces, an evaluator, and the full journey from import to experiment:
+
+```bash
+cd examples/pydantic_ai_ticket_resolver
+```
+
+Its [README](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) walks all fifteen steps, and CI runs it, so the commands there are the ones that actually work. The [MCP example](https://github.com/zenml-io/kitaru/tree/develop/examples/v2/mcp) shows the same loop driven from a coding assistant.
+
+For TypeScript, start with the focused [Mastra support-triage](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage) or [Vercel AI SDK support-triage](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage) examples. The [Vercel AI SDK ticket resolver](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver) is the complete recording, review, cohort, evaluator, worker, and replay walkthrough.
+
+Prefer to be walked through it? `kitaru-investigation` is an [agent skill](../agent-native/skills.md) that runs this journey conversationally — it picks the review batch, keeps the labels yours, and stops at checkpoints you can resume from:
+
+```bash
+npx skills add zenml-io/kitaru-skills
+```
+
+## Where to go next
+
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Import your traces</strong></td><td>Your existing history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Agent skills</strong></td><td>Let your coding assistant run the loop with you.</td><td><a href="../agent-native/skills.md">../agent-native/skills.md</a></td></tr><tr><td><strong>Deploy Kitaru</strong></td><td>Self-host for your team.</td><td><a href="../deploy/README.md">../deploy/README.md</a></td></tr></tbody></table>

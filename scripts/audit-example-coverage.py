@@ -7,13 +7,14 @@ import sys
 from pathlib import Path
 from typing import Any, cast
 
-import yaml
-
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST_PATH = ROOT / "examples" / "example-coverage.yaml"
 DOC_LIST_PATHS = (
     ROOT / "examples" / "README.md",
-    ROOT / "docs" / "book" / "getting-started" / "examples.md",
+    ROOT / "docs" / "book" / "getting-started" / "quickstart.md",
+    ROOT / "docs" / "book" / "adapters" / "pydantic-ai.md",
+    ROOT / "docs" / "book" / "adapters" / "openai-agents.md",
+    ROOT / "docs" / "book" / "adapters" / "langgraph.md",
 )
 ALLOWED_STATUSES = {
     "covered",
@@ -45,8 +46,10 @@ LLM_INTEGRATION_PROVIDER_INPUTS = (
 )
 EXAMPLE_PATH_RE = re.compile(
     r"(?:https://github\.com/zenml-io/kitaru/(?:tree|blob)/develop/)?"
-    r"(examples/[A-Za-z0-9_./#-]+)"
+    r"((?:v2_)?examples/[A-Za-z0-9_./#-]+)"
 )
+MARKDOWN_LINK_TARGET_RE = re.compile(r"\]\(([^)\s]+)")
+SHELL_PLACEHOLDER_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=<[^<>\s]+>$")
 
 
 def main() -> int:
@@ -100,7 +103,7 @@ def audit_manifest() -> list[str]:
         errors.extend(_audit_coverage(entry, context))
         errors.extend(_audit_release_policy(entry, context))
 
-    for docs_path in _public_example_paths_from_docs():
+    for docs_path in _public_example_paths_from_docs(examples):
         if docs_path in excluded_paths:
             continue
         if not _is_manifest_aware(docs_path, manifest_paths):
@@ -113,6 +116,8 @@ def audit_manifest() -> list[str]:
 
 
 def _load_yaml(path: Path) -> dict[str, Any]:
+    import yaml
+
     with path.open(encoding="utf-8") as handle:
         data = yaml.safe_load(handle)
     if not isinstance(data, dict):
@@ -148,12 +153,30 @@ def _audit_public_docs(entry: dict[str, Any], context: str) -> list[str]:
     public_docs = entry.get("public_docs")
     if not isinstance(public_docs, list) or not public_docs:
         return [f"{context}: public_docs must list at least one public source"]
+    example_path = entry.get("path")
+    normalized_example_path = (
+        _normalize_example_path(example_path) if isinstance(example_path, str) else None
+    )
     for doc_path in public_docs:
         if not isinstance(doc_path, str) or not doc_path:
             errors.append(f"{context}: public_docs entries must be non-empty strings")
             continue
-        if not (ROOT / doc_path).exists():
-            errors.append(f"{context}: public docs path does not exist: {doc_path}")
+        if not (ROOT / doc_path).is_file():
+            errors.append(f"{context}: public docs path is not a file: {doc_path}")
+            continue
+        if normalized_example_path is None:
+            continue
+        if _doc_is_within_example(ROOT / doc_path, normalized_example_path):
+            continue
+        linked_paths = _example_paths_from_doc(ROOT / doc_path)
+        if not any(
+            _is_manifest_aware(linked_path, {normalized_example_path: context})
+            for linked_path in linked_paths
+        ):
+            errors.append(
+                f"{context}: public docs path {doc_path} does not link to "
+                f"{normalized_example_path}"
+            )
     return errors
 
 
@@ -246,6 +269,16 @@ def _audit_command(section: dict[str, Any], context: str, field_name: str) -> li
         return [f"{context}: {field_name}.command must be a non-empty string or null"]
 
     errors: list[str] = []
+    try:
+        command_parts = shlex.split(command)
+    except ValueError:
+        command_parts = []
+    if any(SHELL_PLACEHOLDER_ASSIGNMENT_RE.fullmatch(part) for part in command_parts):
+        errors.append(
+            f"{context}: {field_name}.command contains an executable shell "
+            "placeholder such as NAME=<value>; declare the variable in required_env "
+            "instead"
+        )
     command_paths = section.get("command_paths")
     if _requires_declared_command_paths(command) and not _is_non_empty_string_list(
         command_paths
@@ -510,16 +543,51 @@ def _command_sets_input(command: str, input_name: str) -> bool:
     return False
 
 
-def _public_example_paths_from_docs() -> set[str]:
+def _public_example_paths_from_docs(examples: list[object]) -> set[str]:
     paths: set[str] = set()
-    for doc_path in DOC_LIST_PATHS:
-        text = doc_path.read_text(encoding="utf-8")
-        for raw_path in EXAMPLE_PATH_RE.findall(text):
-            path = _normalize_example_path(raw_path)
-            if _should_ignore_public_path(path):
-                continue
+    doc_paths = set(DOC_LIST_PATHS)
+    for entry in examples:
+        if not isinstance(entry, dict):
+            continue
+        public_docs = entry.get("public_docs")
+        if not isinstance(public_docs, list):
+            continue
+        doc_paths.update(
+            ROOT / doc_path for doc_path in public_docs if isinstance(doc_path, str)
+        )
+    for doc_path in doc_paths:
+        if doc_path.is_file():
+            paths.update(_example_paths_from_doc(doc_path))
+    return paths
+
+
+def _example_paths_from_doc(doc_path: Path) -> set[str]:
+    paths: set[str] = set()
+    text = doc_path.read_text(encoding="utf-8")
+    for raw_path in EXAMPLE_PATH_RE.findall(text):
+        path = _normalize_example_path(raw_path)
+        if not _should_ignore_public_path(path):
+            paths.add(path)
+    for raw_target in MARKDOWN_LINK_TARGET_RE.findall(text):
+        if "://" in raw_target:
+            continue
+        target = raw_target.split("#", 1)[0]
+        try:
+            relative_path = (
+                (doc_path.parent / target).resolve().relative_to(ROOT.resolve())
+            )
+        except ValueError:
+            continue
+        path = _normalize_example_path(relative_path.as_posix())
+        if path.startswith(("examples/", "v2_examples/")):
             paths.add(path)
     return paths
+
+
+def _doc_is_within_example(doc_path: Path, example_path: str) -> bool:
+    example_abs = ROOT / example_path
+    example_root = example_abs if example_abs.is_dir() else example_abs.parent
+    return doc_path.resolve().is_relative_to(example_root.resolve())
 
 
 def _normalize_example_path(path: str) -> str:
@@ -562,7 +630,7 @@ def _command_paths(command: str) -> set[str]:
 
     for part in parts:
         cleaned = _normalize_example_path(part)
-        if cleaned.startswith(("examples/", "scripts/")):
+        if cleaned.startswith(("examples/", "v2_examples/", "scripts/")):
             paths.add(cleaned)
         elif cleaned.startswith("./scripts/"):
             paths.add(cleaned[2:])

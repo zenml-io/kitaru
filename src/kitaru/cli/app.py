@@ -2083,7 +2083,7 @@ async def investigation_session_verdict(
                 "JSON object",
                 "option",
                 False,
-                "Optional node, payload part, JSON Pointer, or span selector.",
+                "Optional node, JSON Pointer, or span selector.",
             ),
             ParameterSpec("--value", "JSON value", "option", True, "Annotation value."),
         ),

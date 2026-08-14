@@ -202,3 +202,41 @@ Framework detection only sets `framework` when trace metadata identifies one sup
 ## Inspect failures
 
 The import job result reports created, skipped, and failed counts plus a bounded failure sample. Reimporting the same `(imported_from, external_id)` pair skips the duplicate.
+
+## No importer for your provider
+
+You have two ways in, and neither requires waiting for us to ship an importer.
+
+**Convert to a format Kitaru already reads.** Write out [Kitaru JSONL](#create-kitaru-jsonl) — one session object per line, exactly the contract above — or emit OTLP with `gen_ai.*` attributes and import with `kitaru/opentelemetry@latest`. This is the right choice for a one-off backfill or an export you can transform with a script. Nothing gets installed or registered.
+
+**Write an importer.** Worth it when the conversion is ongoing, or when the source needs real normalization rather than a field rename. The contract is one function:
+
+```python
+Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedSession | ImportFailure]]
+```
+
+That is the whole interface. You receive the uploaded bytes and the `--params` object, and yield one `ImportedSession` per session you recognize — or an `ImportFailure` for a record you cannot parse, which isolates that record instead of failing the whole import:
+
+```python
+from kitaru.api_models.v1.imports import ImportFailure
+from kitaru.task.importer import ImportedSession
+
+def parse(content: bytes, params: dict[str, Any]) -> Iterator[ImportedSession | ImportFailure]:
+    for line_number, line in enumerate(content.decode("utf-8").splitlines(), start=1):
+        try:
+            yield ImportedSession.model_validate(transform(json.loads(line)))
+        except ValueError as exc:
+            yield ImportFailure(line=line_number, external_id=None, error=str(exc))
+```
+
+Three things to get right, because they are where custom importers usually go wrong:
+
+- **`external_id` is your identity, and it must be stable.** Kitaru deduplicates on `(imported_from, external_id)`, so a re-import is only safe if the id does not move between runs. Derive it from the source's own identifier, never from a row number or a timestamp.
+- **Decide session boundaries deliberately.** One `ImportedSession` should be one end-to-end run — see [what a session is](../concepts/agents-and-sessions.md). If your source splits a run across records, join them in the parser.
+- **Yield failures, don't raise them.** An exception ends the import; an `ImportFailure` costs you one record and keeps the rest.
+
+The shipped importers are the reference: `plugins/packages/jsonl-importer` is the smallest at under 80 lines, and the Langfuse one shows real normalization. The `kitaru-importer-builder` [agent skill](../agent-native/skills.md) exists for this job — it turns a representative export into a locally validated importer, keeps the mapping from source evidence to normalized sessions explicit so you can see what is preserved, approximated, or unavailable, and finishes locally until you approve registration:
+
+```bash
+npx skills add zenml-io/kitaru-skills
+```
