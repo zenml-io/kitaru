@@ -202,6 +202,19 @@ def get_app_settings(request: Request) -> APISettings:
     return settings
 
 
+def get_ui_version_state(request: Request) -> str | None:
+    """Return the served UI version attached to the application state.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        UI version for this process, or None when no UI is served.
+    """
+    ui_version: str | None = request.app.state.ui_version
+    return ui_version
+
+
 def get_analytics_client(request: Request) -> AnalyticsClient:
     """Return the analytics client attached to the application state.
 

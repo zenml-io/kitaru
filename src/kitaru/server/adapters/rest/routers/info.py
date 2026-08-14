@@ -19,7 +19,10 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
-from kitaru.server.adapters.rest.dependencies import get_app_settings
+from kitaru.server.adapters.rest.dependencies import (
+    get_app_settings,
+    get_ui_version_state,
+)
 from kitaru.server.api.config import APISettings
 
 router = APIRouter()
@@ -30,6 +33,7 @@ KITARU_VERSION = version("kitaru")
 @router.get("")
 async def get_info(
     settings: Annotated[APISettings, Depends(get_app_settings)],
+    ui_version: Annotated[str | None, Depends(get_ui_version_state)],
 ) -> ServerInfoResponse:
     """Report how this server identifies itself and authenticates its callers.
 
@@ -38,6 +42,7 @@ async def get_info(
 
     Args:
         settings: Service settings governing auth behavior.
+        ui_version: UI version served by this process.
 
     Returns:
         Server info.
@@ -48,6 +53,7 @@ async def get_info(
     return ServerInfoResponse(
         id=settings.SERVER_ID,
         version=KITARU_VERSION,
+        ui_version=ui_version,
         auth_scheme=settings.AUTH_SCHEME,
         server_url=settings.SERVER_URL.rstrip("/") or None,
         dashboard_url=settings.DASHBOARD_URL.rstrip("/") or None,

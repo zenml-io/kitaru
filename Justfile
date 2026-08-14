@@ -5,7 +5,6 @@ ZENML_SERVER_TAG := "0.96.1"
 DOCKER_REPO := "zenmldocker/kitaru-server"
 DOCKER_TAG := "latest"
 UI_TAG := "latest"
-UI_BUNDLE_ROOT := ".kitaru-ui-bundles"
 
 # List available recipes
 default:
@@ -113,21 +112,19 @@ mcp-schema-check:
 mcp-wheel-smoke:
     uv run --no-sync python scripts/smoke_mcp_wheel.py dist
 
-# Download/extract a local Kitaru UI bundle for manual login/smoke testing.
+# Download/extract the Kitaru UI bundle into the packaged location the server serves.
 # Defaults to the latest stable kitaru-ui-v* release.
 # Pass UI_TAG=kitaru-ui-v0.2.0 to pin a stable release.
 ui-bundle:
     @set -e; \
     if [ "{{ UI_TAG }}" = "latest" ]; then \
-        dest="{{ UI_BUNDLE_ROOT }}/current"; \
-        printf 'Downloading latest stable Kitaru UI bundle into %s/dist\n' "$dest"; \
-        KITARU_UI_INSTALL_DIR="$dest" bash scripts/download-ui.sh; \
+        printf 'Downloading latest stable Kitaru UI bundle into src/kitaru/_ui/dist\n'; \
+        bash scripts/download-ui.sh; \
     else \
-        dest="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}"; \
-        printf 'Downloading Kitaru UI bundle {{ UI_TAG }} into %s/dist\n' "$dest"; \
-        KITARU_UI_INSTALL_DIR="$dest" TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
+        printf 'Downloading Kitaru UI bundle {{ UI_TAG }} into src/kitaru/_ui/dist\n'; \
+        TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
     fi; \
-    printf '\nUse with: KITARU_UI_DIST_PATH=%s/dist uv run kitaru login\n' "$dest"
+    printf '\nThe server serves this bundle from src/kitaru/_ui/dist. Next: just ui-serve\n'
 
 # Download/extract an explicit prerelease Kitaru UI bundle for local testing.
 ui-bundle-prerelease:
@@ -136,21 +133,16 @@ ui-bundle-prerelease:
         printf 'Error: pass an explicit prerelease tag, e.g. UI_TAG=kitaru-ui-v0.3.0-rc.1\n' >&2; \
         exit 1; \
     fi; \
-    dest="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}"; \
-    printf 'Downloading prerelease Kitaru UI bundle {{ UI_TAG }} into %s/dist\n' "$dest"; \
-    KITARU_UI_ALLOW_PRERELEASE=true KITARU_UI_INSTALL_DIR="$dest" TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
-    printf '\nUse with: KITARU_UI_DIST_PATH=%s/dist uv run kitaru login\n' "$dest"
+    printf 'Downloading prerelease Kitaru UI bundle {{ UI_TAG }} into src/kitaru/_ui/dist\n'; \
+    KITARU_UI_ALLOW_PRERELEASE=true TAG="{{ UI_TAG }}" bash scripts/download-ui.sh; \
+    printf '\nThe server serves this bundle from src/kitaru/_ui/dist. Next: just ui-serve\n'
 
-# Start local Kitaru with a prepared UI bundle.
-ui-login:
-    @set -e; \
-    if [ "{{ UI_TAG }}" = "latest" ]; then \
-        dist="{{ UI_BUNDLE_ROOT }}/current/dist"; \
-    else \
-        dist="{{ UI_BUNDLE_ROOT }}/{{ UI_TAG }}/dist"; \
-    fi; \
-    test -f "$dist/index.html" || { printf 'Error: %s/index.html not found. Run just ui-bundle first.\n' "$dist" >&2; exit 1; }; \
-    KITARU_UI_DIST_PATH="$dist" uv run kitaru login
+# Run the API server from source, serving the downloaded UI bundle. Requires docker compose up -d db.
+ui-serve:
+    @test -f src/kitaru/_ui/dist/index.html || { printf 'Error: src/kitaru/_ui/dist/index.html not found. Run just ui-bundle first.\n' >&2; exit 1; }
+    KITARU_SERVER_DB_HOST=localhost KITARU_SERVER_DB_PORT=5433 KITARU_SERVER_DB_NAME=kitaru_ui \
+    KITARU_SERVER_JWT_SIGNING_KEY=dev KITARU_SERVER_SECRET_ENCRYPTION_KEY=dev KITARU_SERVER_ANALYTICS_OPT_IN=false \
+    exec uv run uvicorn kitaru.server.api.main:app --factory --port 8000
 
 # Audit the public example coverage manifest without running examples or providers.
 example-coverage-audit:

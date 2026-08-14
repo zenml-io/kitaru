@@ -7,9 +7,5 @@ rules:
   # dangerous-triggers: docs.yml uses pull_request_target only for preview
   # cleanup on closed/drafted same-repo PRs. The cleanup job does not checkout
   # or run PR-controlled code; it only deletes a deterministic Worker name.
-  # release.yml follows a successful tag or manual core-package release. That
-  # upstream workflow does not run on pull requests, and release.yml checks out
-  # the triggering SHA without credentials and verifies that SHA is contained in
-  # develop before producing any artifact used by the publishing job.
   dangerous-triggers:
-    ignore: [docs.yml:3, release.yml:3]
+    ignore: [docs.yml:3]

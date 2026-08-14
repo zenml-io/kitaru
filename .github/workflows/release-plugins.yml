@@ -1,17 +1,17 @@
 ---
-name: Release Python package
+name: Release Kitaru plugins
 on:
   workflow_dispatch:
     inputs:
       package-tag:
-        description: Namespaced package tag to rehearse, such as python/kitaru/v0.22.0rc1.
+        description: Plugin package tag to rehearse, such as python/kitaru-langgraph/v0.4.0.
         required: true
         type: string
   push:
-    tags: [python/**]
+    tags: [python/**, '!python/kitaru/**']
 permissions: {}
 concurrency:
-  group: release-python-${{ github.ref_name }}
+  group: release-plugin-${{ github.ref_name }}
   cancel-in-progress: false
 jobs:
   build:
@@ -53,6 +53,10 @@ jobs:
           if [[ "$version" =~ (a|b|rc|dev)[0-9]+ ]]; then
             is_prerelease=true
           fi
+          if [ "$distribution" = kitaru ]; then
+            echo "::error::Core Kitaru releases belong in release.yml."
+            exit 1
+          fi
           {
             printf 'DISTRIBUTION=%s\n' "$distribution"
             printf 'IS_PRERELEASE=%s\n' "$is_prerelease"
@@ -75,30 +79,7 @@ jobs:
             echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
             exit 1
           fi
-      - name: Resolve exact frontend artifact
-        if: env.DISTRIBUTION == 'kitaru'
-        run: |
-          set -euo pipefail
-          ui=$(uv run --no-project python scripts/release_ui.py --version "$VERSION")
-          {
-            printf 'KITARU_UI_ALLOW_PRERELEASE=%s\n' "$(jq -r '.allow_prerelease' <<<"$ui")"
-            printf 'KITARU_UI_RELEASE_REPO=%s\n' "$(jq -r '.repository' <<<"$ui")"
-            printf 'KITARU_UI_TAG=%s\n' "$(jq -r '.tag' <<<"$ui")"
-          } >> "$GITHUB_ENV"
-      - name: Download exact frontend artifact
-        if: env.DISTRIBUTION == 'kitaru'
-        env:
-          KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
-        run: bash scripts/download-ui.sh
-      - name: Build Kitaru
-        if: env.DISTRIBUTION == 'kitaru'
-        run: |
-          uv build --out-dir package-dist
-          wheel=$(find package-dist -maxdepth 1 -name '*.whl' -print -quit)
-          test -n "$wheel"
-          uv run --no-project scripts/verify-ui-wheel.py "$wheel"
       - name: Build plugin
-        if: env.DISTRIBUTION != 'kitaru'
         run: uv build --project "$PROJECT_DIR" --out-dir package-dist
       - name: Test installed distribution
         run: |
@@ -125,14 +106,13 @@ jobs:
             evidence/*
           if-no-files-found: error
           retention-days: 90
-  publish:
+  publish-python:
     if: github.event_name == 'push'
     needs: build
     runs-on: ubuntu-latest
     environment:
       name: pypi-${{ needs.build.outputs.distribution }}
     permissions:
-      contents: write
       id-token: write
     steps:
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
@@ -144,7 +124,18 @@ jobs:
         with:
           packages-dir: package-dist
           skip-existing: true
-      - name: Create package GitHub Release
+  create-release:
+    if: github.event_name == 'push'
+    needs: [build, publish-python]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: python-distribution
+          path: .
+      - name: Create immutable GitHub Release
         env:
           DISTRIBUTION: ${{ needs.build.outputs.distribution }}
           GH_TOKEN: ${{ github.token }}
@@ -154,22 +145,17 @@ jobs:
           VERSION: ${{ needs.build.outputs.version }}
         run: |-
           set -euo pipefail
+          if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
+            echo "GitHub Release $PACKAGE_TAG already exists; leaving it unchanged."
+            exit 0
+          fi
           prerelease=()
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
           fi
-          if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
-            gh release upload "$PACKAGE_TAG" package-dist/* evidence/* --clobber
-            gh release edit "$PACKAGE_TAG" \
-              --latest=false \
-              --prerelease="$IS_PRERELEASE" \
-              --title "$DISTRIBUTION $VERSION" \
-              --verify-tag
-          else
-            gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
-              "${prerelease[@]}" \
-              --verify-tag \
-              --latest=false \
-              --title "$DISTRIBUTION $VERSION" \
-              --generate-notes
-          fi
+          gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
+            "${prerelease[@]}" \
+            --verify-tag \
+            --latest=false \
+            --title "$DISTRIBUTION $VERSION" \
+            --generate-notes
