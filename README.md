@@ -129,15 +129,20 @@ The full walkthrough — same support agent, same ticket — is the
 ### Works with your agent SDK
 
 Adapters wrap your existing agent — your model, your tools, your
-framework. PydanticAI (`kitaru-pydantic-ai`), LangGraph
-(`kitaru-langgraph`, which also covers LangChain agents and Deep Agents)
-and the OpenAI Agents SDK (`kitaru-openai-agents`) ship today; the
-remaining v1 adapters are being ported to the v2 recording API. Any
-framework that traces to Langfuse can
-come in through the
-[import path](https://docs.zenml.io/kitaru/getting-started/import-your-traces)
-today, and the recording API itself is two client calls if you want to
-wire a framework directly.
+framework. In Python: PydanticAI (`kitaru-pydantic-ai`), LangGraph
+(`kitaru-langgraph`, which also covers LangChain agents and Deep Agents),
+and the OpenAI Agents SDK (`kitaru-openai-agents`). In TypeScript: the
+Vercel AI SDK (`@zenml-io/kitaru-vercel-ai`) and Mastra
+(`@zenml-io/kitaru-mastra`).
+
+**Framework not on that list? You are not blocked.** Import the traces
+you already collect — Langfuse, LangSmith, Braintrust and OpenTelemetry
+importers are built in, and any other format converts to Kitaru JSONL or
+OTLP. Or write a project-local adapter: the recording API is two client
+calls, and an agent skill will draft it for you. Or wrap nothing at all —
+register the agent as a function, and Kitaru asks *your* system to run
+it, then adopts the trace you import. See
+[no adapter for your framework](https://docs.zenml.io/kitaru/adapters/custom).
 
 ### Drive it from your coding agent
 
@@ -149,6 +154,19 @@ destructive), a CLI with `--output json` covering the whole loop
 `kitaru experiment run start --wait`), and a typed async Python client —
 so Claude Code, Codex, or Cursor can triage a failing session, write the
 evaluator, run the experiment, and report the diff while you review.
+
+Install the **agent skills** and it knows *how*, not just *what*:
+
+```bash
+npx skills add zenml-io/kitaru-skills
+```
+
+`kitaru-investigation` is the front door — hand it a bad session or a
+week of traffic and it walks you to a reviewed cohort, choosing the
+review batch, keeping the human labels yours, and stopping at
+checkpoints you can resume from. Others cover running an experiment and
+reading its result honestly, and building an adapter or importer for
+anything unsupported.
 
 ### Self-hosted, by design
 
@@ -164,7 +182,10 @@ leave your systems. Apache 2.0, no mandatory SaaS control plane.
 | Resource | Description |
 |---|---|
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
-| [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Start from the Langfuse history you already have |
+| [The full loop, end to end](https://docs.zenml.io/kitaru/getting-started/end-to-end) | Import, review, cohort, experiment — on real traffic |
+| [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Start from the history you already have |
+| [No adapter for your framework](https://docs.zenml.io/kitaru/adapters/custom) | Import, build an adapter, or let Kitaru call your agent |
+| [Agent skills](https://docs.zenml.io/kitaru/agent-native/skills) | Teach your coding assistant the loop |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Production traffic as your test suite, gated in CI |
 | [Run the Server](https://docs.zenml.io/kitaru/deploy) | Self-host for your team |
 
