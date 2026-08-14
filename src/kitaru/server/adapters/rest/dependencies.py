@@ -188,6 +188,37 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
+async def get_auth_session(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Provide the database session the auth path writes through.
+
+    On most routes this is the shared request session, committed by
+    ``CommitRoute`` like any other write. A ``read_only`` route binds the
+    request session to the read-replica engine, so the auth path instead
+    opens its own session on the writer engine here and commits it after the
+    request completes, letting auth writes such as an API key's
+    ``last_used`` timestamp persist even though the rest of the request only
+    reads.
+
+    Args:
+        request: Incoming request.
+        session: Request-scoped database session.
+
+    Yields:
+        The request session, or a writer-bound session scoped to the auth
+        path on a read-only route.
+    """
+    if not request_uses_read_engine(request):
+        yield session
+        return
+    database: DatabaseService = request.app.state.database
+    async for auth_session in database.get_async_session():
+        yield auth_session
+        await auth_session.commit()
+
+
 def get_engine(request: Request) -> AsyncEngine:
     """Provide the application database engine.
 
@@ -781,24 +812,21 @@ def get_annotation_service(
     )
 
 
-def get_device_service(
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
+def _build_device_service(
+    session: AsyncSession, engine: AsyncEngine, settings: APISettings
 ) -> DeviceService:
-    """Return a device service for the current request.
+    """Build a device service bound to the given session.
 
     Args:
-        request: Incoming request.
-        session: Request-scoped database session.
+        session: Database session backing the device repository.
+        engine: Application database engine.
         settings: API settings for this process.
 
     Returns:
         Device service bound to the SQL repository.
     """
-    database: DatabaseService = request.app.state.database
     return DeviceService(
-        repository=SQLDeviceRepository(session, database.engine),
+        repository=SQLDeviceRepository(session, engine),
         policy=DevicePolicy(
             auth_timeout_seconds=settings.DEVICE_AUTH_TIMEOUT_SECONDS,
             polling_interval_seconds=settings.DEVICE_AUTH_POLLING_INTERVAL_SECONDS,
@@ -807,6 +835,24 @@ def get_device_service(
             trusted_expiration_minutes=settings.TRUSTED_DEVICE_EXPIRATION_MINUTES,
         ),
     )
+
+
+def get_device_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> DeviceService:
+    """Return a device service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        engine: Application database engine.
+        settings: API settings for this process.
+
+    Returns:
+        Device service bound to the SQL repository.
+    """
+    return _build_device_service(session, engine, settings)
 
 
 def get_tag_service(
@@ -859,23 +905,27 @@ def get_idempotency_key_repository(
 
 def get_auth_service(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    device_service: Annotated[DeviceService, Depends(get_device_service)],
+    auth_session: Annotated[AsyncSession, Depends(get_auth_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AuthService:
     """Return an authentication service for the current request.
 
+    Repositories are bound to the auth session so a ``read_only`` route
+    still writes authentication side effects, such as an API key's
+    ``last_used`` timestamp, to the writer engine.
+
     Args:
         request: Incoming request.
-        session: Request-scoped database session.
-        device_service: Device service for the current request.
+        auth_session: Database session the auth path writes through.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
         Authentication service bound to the SQL repositories.
     """
     settings = get_app_settings(request)
-    account_repository = SQLAccountRepository(session)
+    account_repository = SQLAccountRepository(auth_session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
     if client is not None:
@@ -891,9 +941,9 @@ def get_auth_service(
     return AuthService(
         settings=settings,
         account_repository=account_repository,
-        api_key_repository=SQLApiKeyRepository(session),
+        api_key_repository=SQLApiKeyRepository(auth_session),
         password_hasher=BcryptPasswordHasher(),
-        device_service=device_service,
+        device_service=_build_device_service(auth_session, engine, settings),
         control_plane=control_plane,
     )
 
