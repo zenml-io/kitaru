@@ -1,6 +1,6 @@
 # Vercel AI SDK support triage
 
-This demo records and replays an AI SDK 7 `generateText` call using OpenAI `gpt-5-nano`. The agent investigates a delayed order and suspected duplicate charge with three local tools:
+This demo records and replays an AI SDK 7 `ToolLoopAgent` using OpenAI `gpt-5-nano`. The application calls the agent's native `generate()` method. The agent investigates a delayed order and suspected duplicate charge with three local tools:
 
 - `lookupAccount` and `lookupOrder` read copied, versioned fixtures.
 - `queueRefundReview` appends one line on every real call.

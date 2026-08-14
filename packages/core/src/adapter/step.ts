@@ -30,6 +30,7 @@ export interface NormalizedModelStep {
   failed: boolean;
   inputs: JsonValue;
   model?: string;
+  modelSettings?: Record<string, JsonValue>;
   outputs: JsonValue;
   provider?: string;
   startedAt?: string;
@@ -125,7 +126,7 @@ export async function recordNormalizedStep(
       external_id: step.externalId,
       inputs: step.inputs,
       model: step.model,
-      model_params: state.effectiveModelSettings,
+      model_params: step.modelSettings ?? state.effectiveModelSettings,
       name: "model_request",
       node_type: "llm_call",
       outputs: step.outputs,

@@ -1,14 +1,14 @@
 ---
-description: Record and replay AI SDK 7 generateText calls with the Kitaru Vercel AI SDK adapter.
+description: Record and replay AI SDK 7 ToolLoopAgent and generateText calls with the Kitaru Vercel AI SDK adapter.
 icon: bolt
 ---
 
 # Vercel AI SDK Adapter
 
-`@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to the Vercel [AI SDK](https://ai-sdk.dev) 7 `generateText` function. Replace the imported function with `createKitaruGenerateText(...)`; the returned function keeps the complete native `generateText` signature and returns the native AI SDK result object.
+`@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to the Vercel [AI SDK](https://ai-sdk.dev) 7 `ToolLoopAgent` and `generateText` APIs. Use `createKitaruToolLoopAgent(...)` for an AI SDK Agent object or `createKitaruGenerateText(...)` for the direct function API. Both return native AI SDK results.
 
 {% hint style="info" %}
-Version `0.1.0-rc.1` is a pre-1.0 compatibility preview. It supports non-streaming `generateText` only, not `streamText`.
+Version `0.1.0-rc.2` is a pre-1.0 compatibility preview. Kitaru records non-streaming Agent `generate()` and direct `generateText` calls. Agent `stream()` remains available as a native, recording-free passthrough; standalone `streamText` is not wrapped.
 {% endhint %}
 
 ## Install
@@ -16,12 +16,54 @@ Version `0.1.0-rc.1` is a pre-1.0 compatibility preview. It supports non-streami
 Use Node 22.22 or later in the Node 22 release line. Install the adapter with AI SDK 7 and the provider package used by your agent. This OpenAI example uses the versions verified in the repository:
 
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@0.1.0-rc.1 ai@7.0.55 @ai-sdk/openai@4.0.20
+pnpm add @zenml-io/kitaru-vercel-ai@0.1.0-rc.2 ai@7.0.65 @ai-sdk/openai@4.0.20 zod@4.4.3
 ```
 
 The adapter includes `@zenml-io/kitaru`, the framework-neutral TypeScript SDK, as a dependency.
 
-## Record a generation
+## Record an Agent
+
+Pass native `ToolLoopAgent` settings and Kitaru configuration to `createKitaruToolLoopAgent`:
+
+```ts
+import { openai } from "@ai-sdk/openai";
+import { createKitaruToolLoopAgent } from "@zenml-io/kitaru-vercel-ai";
+import { tool } from "ai";
+import { z } from "zod";
+
+const agentId = process.env.KITARU_AGENT_ID;
+if (!agentId) {
+  throw new Error("KITARU_AGENT_ID is required");
+}
+
+const agent = createKitaruToolLoopAgent(
+  {
+    id: "support-agent",
+    instructions: "Investigate the request before answering.",
+    model: openai("gpt-5-nano"),
+    tools: {
+      lookupOrder: tool({
+        description: "Look up an order",
+        inputSchema: z.object({ orderId: z.string() }),
+        execute: async ({ orderId }) => findOrder(orderId),
+      }),
+    },
+  },
+  { agentId },
+);
+
+const result = await agent.generate({
+  prompt: "Why is order ord-123 delayed?",
+});
+
+console.log(result.text);
+```
+
+The returned object implements AI SDK's public `Agent` interface. `version`, `id`, typed `tools`, all four Agent generic parameters, call-option validation, `prepareCall`, callbacks, runtime context, structured output, retries, timeouts, abort signals, and the native result object remain available. Each overlapping `generate()` invocation gets an independent Kitaru recorder and tool state.
+
+AI SDK's `Agent` interface also requires `stream()`. During ordinary execution, the adapter delegates that method directly to a native `ToolLoopAgent` without starting a Kitaru session. This preserves compatibility with native consumers, but Kitaru does not record the stream. When `KITARU_REPLAY_ID` is set, `stream()` rejects before provider or tool execution because streaming replay is unsupported.
+
+## Record a direct generation
 
 Register an agent in Kitaru, then pass its ID to the adapter:
 
@@ -46,7 +88,7 @@ console.log(result.text);
 
 Configure the Kitaru connection with `KITARU_API_URL` and either `KITARU_API_TOKEN` or `KITARU_API_KEY`. You can also pass `apiUrl` and `apiKey` to `createKitaruGenerateText`.
 
-The wrapper calls AI SDK's public `generateText`, callbacks, and local tool `execute` functions. It does not reproduce the AI SDK generation loop. Native options, callbacks, generic types, and return behavior therefore remain available. The adapter sets `maxRetries` to `0` so Kitaru records one provider attempt rather than hiding retries inside a node.
+The direct wrapper calls AI SDK's public `generateText`, callbacks, and local tool `execute` functions. It does not reproduce the AI SDK generation loop. Native options, callbacks, generic types, and return behavior therefore remain available. The direct wrapper sets `maxRetries` to `0` so Kitaru records one provider attempt rather than hiding retries inside a node. The Agent API preserves native retry settings.
 
 Each run creates a Kitaru session. It records one `llm_call` node per model step and one `tool_call` node per local tool execution, including model identity, provider, tokens, tool arguments, tool results, failures, and optional estimated cost. The adapter deliberately records `null` for LLM-node inputs rather than copying provider request data. Session inputs retain the effective prompt or messages, and the completed session summary retains the generated text and other bounded result metadata.
 
@@ -77,29 +119,29 @@ When AI SDK produces the object, Kitaru includes it in the session summary. If g
 
 ## Replay
 
-The same program records ordinary runs and executes replays. When a [worker](../concepts/workers.md) starts the registered command, it injects the task-scoped Kitaru connection, task ID, replay ID, and baseline inputs. The adapter then:
+The same program records ordinary runs and executes replays. When a [worker](../concepts/workers.md) starts the registered command, it injects the task-scoped Kitaru connection, task ID, replay ID, and baseline inputs. The adapter resolves an Agent's `prepareCall` first, then:
 
 1. replaces the caller's prompt or messages with the replay input;
 2. applies supported prompt, instruction, model-setting, and allowlisted model overrides;
-3. runs `generateText` again; and
+3. runs the native Agent or `generateText` call again; and
 4. answers each local tool call according to the replay's [tool policy](../guides/tool-policies.md).
 
 Model replacement is opt-in. Set `allowedReplayModels` and provide `resolveModel` to map each allowed Kitaru model ID to an AI SDK `LanguageModel`:
 
 ```ts
-const generateText = createKitaruGenerateText({
+const replayOptions = {
   agentId,
   allowedReplayModels: ["openai/gpt-5-nano"],
-  resolveModel: (modelId) => {
+  resolveModel: (modelId: string) => {
     if (modelId === "openai/gpt-5-nano") {
       return openai("gpt-5-nano");
     }
     return undefined;
   },
-});
+};
 ```
 
-Unsafe or unallowlisted overrides fail before a model call begins.
+Pass `replayOptions` as the Kitaru options to either factory. Unsafe or unallowlisted overrides fail before a model call begins.
 
 ### Tool policies
 
@@ -154,9 +196,11 @@ The program should call the wrapped `generateText` function normally. It does no
 
 ## Supported boundary
 
-Version `0.1.0-rc.1` supports:
+Version `0.1.0-rc.2` supports:
 
-- AI SDK `>=7.0.0 <8.0.0`;
+- AI SDK `>=7.0.60 <8.0.0`;
+- non-streaming `ToolLoopAgent.generate()` with the public AI SDK Agent type;
+- native, recording-free Agent `stream()` passthrough outside replay;
 - non-streaming `generateText`;
 - prompt strings and message arrays;
 - local tools with an `execute` function;
@@ -164,7 +208,9 @@ Version `0.1.0-rc.1` supports:
 - `history`, `static`, and `passthrough` replay policies; and
 - bounded prompt, instruction, model-setting, and allowlisted model replacement during replay.
 
-It does not support streaming generation, provider-executed tools, dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, or the `llm` tool policy. Async-iterable local tools remain native during baseline recording, but cannot be replayed.
+It does not record streaming generation and does not wrap standalone `streamText`. Agent `stream()` rejects when replay is active. Provider-executed tools, dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, and the `llm` tool policy are unsupported in replay. Async-iterable local tools remain native during baseline recording, but cannot be replayed.
+
+Manual approval is a two-call workflow in AI SDK, but Kitaru cannot persist a waiting Agent run without server and worker changes. When baseline `generate()` returns an unresolved manual approval request, the adapter returns the native result unchanged and marks the Kitaru session failed with `manual_approval_continuation_unsupported`. Automatic approval decisions complete normally. Agent replay rejects approval configuration and approval messages before any provider or tool side effect.
 
 ## Runnable examples
 

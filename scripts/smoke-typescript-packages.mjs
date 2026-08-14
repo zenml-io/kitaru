@@ -68,8 +68,8 @@ try {
     join(consumerRoot, "index.mjs"),
     `import { KitaruClient } from "@zenml-io/kitaru";
 import { KitaruAgent } from "@zenml-io/kitaru-mastra";
-import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
-if (![KitaruClient, KitaruAgent, createKitaruGenerateText].every(Boolean)) {
+import { createKitaruGenerateText, createKitaruToolLoopAgent } from "@zenml-io/kitaru-vercel-ai";
+if (![KitaruClient, KitaruAgent, createKitaruGenerateText, createKitaruToolLoopAgent].every(Boolean)) {
   throw new Error("Packed package exports are missing");
 }
 `,
@@ -78,7 +78,7 @@ if (![KitaruClient, KitaruAgent, createKitaruGenerateText].every(Boolean)) {
     join(consumerRoot, "packages.ts"),
     `import { KitaruClient, type KitaruEnvironmentVariables } from "@zenml-io/kitaru";
 import { KitaruAgent, type KitaruAgentOptions } from "@zenml-io/kitaru-mastra";
-import { createKitaruGenerateText, type KitaruVercelAIOptions } from "@zenml-io/kitaru-vercel-ai";
+import { createKitaruGenerateText, createKitaruToolLoopAgent, type KitaruToolLoopAgentSettings, type KitaruVercelAIOptions } from "@zenml-io/kitaru-vercel-ai";
 const environment: KitaruEnvironmentVariables = { KITARU_API_URL: "http://localhost" };
 new KitaruClient({ apiUrl: environment.KITARU_API_URL });
 const mastraOptions: KitaruAgentOptions = {
@@ -88,6 +88,8 @@ const mastraOptions: KitaruAgentOptions = {
 new KitaruAgent({ generate: async () => ({}) }, mastraOptions);
 const vercelOptions: KitaruVercelAIOptions = { agentId: "package-smoke" };
 createKitaruGenerateText(vercelOptions);
+declare const agentSettings: KitaruToolLoopAgentSettings;
+createKitaruToolLoopAgent(agentSettings, vercelOptions);
 `,
   );
   writeFileSync(
@@ -118,7 +120,7 @@ createKitaruGenerateText(vercelOptions);
       join(smokeRoot, "npm-cache"),
       ...tarballs,
       "@mastra/core@1.51.0",
-      "ai@7.0.55",
+      "ai@7.0.65",
     ],
     consumerRoot,
   );

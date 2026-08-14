@@ -1,11 +1,11 @@
 # `@zenml-io/kitaru-vercel-ai`
 
-`@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to the non-streaming AI SDK 7 `generateText` function.
+`@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to AI SDK 7 `ToolLoopAgent.generate()` and the non-streaming `generateText` function.
 
 This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. Release candidates use npm's `rc` tag and remain pre-1.0 compatibility previews.
 
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
+pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.65
 ```
 
 ## Links
@@ -16,19 +16,24 @@ pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
 
 ```ts
 import { openai } from "@ai-sdk/openai";
-import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
+import { createKitaruToolLoopAgent } from "@zenml-io/kitaru-vercel-ai";
 
-const generateText = createKitaruGenerateText({
-  agentId: "your-agent-id",
-});
+const agent = createKitaruToolLoopAgent(
+  {
+    id: "support-agent",
+    model: openai("gpt-5"),
+  },
+  { agentId: "your-kitaru-agent-id" },
+);
 
-const result = await generateText({
-  model: openai("gpt-5"),
+const result = await agent.generate({
   prompt: "Triage this support request",
 });
 ```
 
-The returned function has the native AI SDK `generateText` signature and returns its native result object. The adapter calls AI SDK's public `generateText`, callback, and local tool `execute` APIs; it does not reproduce the SDK's generation loop.
+The returned object implements AI SDK's public `Agent` interface. Its `generate()` method returns the native AI SDK result object, and its tools, call options, `prepareCall`, callbacks, runtime context, output type, retries, timeouts, and abort signal remain native. The adapter calls AI SDK's public `ToolLoopAgent`, callback, and local tool `execute` APIs; it does not reproduce the SDK's generation loop.
+
+`createKitaruGenerateText(...)` remains available when an application uses the function API directly.
 
 Replay supports local executable tools with passthrough, static, and history policies. Static and history hits return the configured value without calling the original `execute`; passthrough calls the original function. Replay registers tool calls in model-output order before local execution begins, so a failing earlier policy prevents later queued local side effects. Baseline execution retains AI SDK concurrency. Recorded node indexes represent completed adapter callbacks and parent-before-child storage, not provider-side start order or wall-clock order among concurrent work.
 
@@ -62,8 +67,10 @@ Each LLM node carries a `cost` attribute recording where the number came from: `
 
 ## Current scope
 
-This experimental release supports AI SDK 7 non-streaming `generateText` with local executable tools. It does not support streaming generation, provider-executed or dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, or the LLM tool policy.
+This experimental release supports AI SDK `>=7.0.60 <8` for non-streaming `ToolLoopAgent.generate()` and `generateText` calls with local executable tools. The Agent's required `stream()` method remains a native, recording-free passthrough during ordinary execution. Kitaru does not record streaming calls, and `stream()` rejects before provider or tool execution when `KITARU_REPLAY_ID` is set.
+
+Durable manual approval continuation is not supported. If `generate()` returns an unresolved manual tool approval request, the native result is returned but the Kitaru session is marked failed with an unsupported-continuation diagnostic. Automatic approval decisions complete normally. Agent replay rejects approval configuration or approval messages before model or tool execution. Replay also rejects provider-executed or dynamic tools, sandboxed tools, per-step overrides through `prepareStep`, async-iterable tools, and the LLM tool policy.
 
 Replay runs tools one at a time in model-output order. `ticketTimeoutMs` (30 seconds by default) bounds how long a queued tool waits for its predecessor to *start*, not how long that predecessor runs, so a slow passthrough tool does not fail the calls queued behind it.
 
-The adapter disables generation retries. Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure. The adapter reports that failure, but it cannot roll back the completed effect. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.
+The direct `generateText` wrapper disables generation retries so one recorded node represents one provider attempt. The Agent API preserves native retry settings. Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure. The adapter reports that failure, but it cannot roll back the completed effect. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.

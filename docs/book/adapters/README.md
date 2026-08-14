@@ -7,7 +7,7 @@ icon: puzzle-piece
 
 Adapters are the first of two ways into Kitaru: wrap the agent you already have, and every run is recorded natively. (The second — [importing the traces you already collect](../getting-started/import-your-traces.md) — needs no adapter at all.)
 
-An adapter leaves your framework in charge of the agent loop while recording the model and tool activity that the integration exposes. The same adapter makes [replay](../concepts/replay.md) work: it applies supported overrides at the model boundary and answers tool calls per the [tool policy](../guides/tool-policies.md). Capabilities differ by integration. In particular, the current TypeScript adapters support non-streaming calls only; each adapter page states its exact boundary.
+An adapter leaves your framework in charge of the agent loop while recording the model and tool activity that the integration exposes. The same adapter makes [replay](../concepts/replay.md) work: it applies supported overrides at the model boundary and answers tool calls per the [tool policy](../guides/tool-policies.md). Capabilities differ by integration. The current TypeScript adapters record non-streaming calls only; the Vercel adapter also preserves Agent `stream()` as a native, recording-free passthrough. Each adapter page states its exact boundary.
 
 ## Available adapters
 
@@ -27,7 +27,7 @@ LangChain agents and Deep Agents use the LangGraph adapter — their public fact
 
 | Framework | Install | Entry point |
 |---|---|---|
-| [Vercel AI SDK](vercel-ai.md) | `@zenml-io/kitaru-vercel-ai` | `createKitaruGenerateText` |
+| [Vercel AI SDK](vercel-ai.md) | `@zenml-io/kitaru-vercel-ai` | `createKitaruToolLoopAgent`, `createKitaruGenerateText` |
 | [Mastra](mastra.md) | `@zenml-io/kitaru-mastra` | `KitaruAgent` |
 
 Both build on `@zenml-io/kitaru`, the framework-neutral TypeScript client and adapter foundation. Its public client uses methods such as `createSession(...)` and `upsertSessionNodes(...)`; it deliberately does not provide a framework-neutral agent or streaming abstraction.
@@ -40,4 +40,4 @@ If your framework isn't covered, see [No adapter for your framework](custom.md) 
 
 ## Why the wrapper is enough
 
-"One wrapper, no rewrite" means you keep the framework's agent loop and native result types. The Python adapters expose framework-shaped runner or agent objects. Mastra adds a `KitaruAgent(existingAgent, options)` with `generate(...)`; the Vercel AI SDK adapter returns a native-signature `generateText(...)` function. Under a [worker](../concepts/workers.md), the same entrypoint reads the replay task environment, substitutes the recorded inputs, and applies the supported replay configuration. Your application does not need a separate replay branch.
+"One wrapper, no rewrite" means you keep the framework's agent loop and native result types. The Python adapters expose framework-shaped runner or agent objects. Mastra adds a `KitaruAgent(existingAgent, options)` with `generate(...)`; the Vercel AI SDK adapter returns either a public AI SDK Agent or a native-signature `generateText(...)` function. Under a [worker](../concepts/workers.md), the same entrypoint reads the replay task environment, substitutes the recorded inputs, and applies the supported replay configuration. Your application does not need a separate replay branch.

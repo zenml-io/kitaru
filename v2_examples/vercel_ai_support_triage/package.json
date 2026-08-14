@@ -10,7 +10,7 @@
     "@ai-sdk/openai": "4.0.20",
     "@zenml-io/kitaru": "workspace:*",
     "@zenml-io/kitaru-vercel-ai": "workspace:*",
-    "ai": "7.0.55"
+    "ai": "7.0.65"
   },
   "scripts": {
     "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",

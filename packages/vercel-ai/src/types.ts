@@ -5,13 +5,30 @@ import type {
   CostInput,
 } from "@zenml-io/kitaru/adapter";
 import type {
+  Agent,
   GenerateTextOnStepEndCallback,
   generateText,
   LanguageModel,
+  Output,
+  ToolLoopAgentSettings,
   ToolSet,
 } from "ai";
 
 export type KitaruGenerateText = typeof generateText;
+
+export type KitaruToolLoopAgent<
+  CALL_OPTIONS = never,
+  TOOLS extends ToolSet = Record<never, never>,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+  OUTPUT extends Output.Output = never,
+> = Agent<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>;
+
+export type KitaruToolLoopAgentSettings<
+  CALL_OPTIONS = never,
+  TOOLS extends ToolSet = Record<never, never>,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+  OUTPUT extends Output.Output = never,
+> = ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>;
 
 export type KitaruCostInput = CostInput;
 export type KitaruCostCalculator = CostCalculator;
