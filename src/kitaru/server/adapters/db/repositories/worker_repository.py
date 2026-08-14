@@ -32,6 +32,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.worker import Worker, WorkerNotFound
 
 WORKER_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": WorkerORM.id,
     "name": WorkerORM.name,
 }
 

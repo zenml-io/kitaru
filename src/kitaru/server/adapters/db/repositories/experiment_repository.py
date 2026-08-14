@@ -51,6 +51,7 @@ from kitaru.server.domain.replay_config import (
 )
 
 EXPERIMENT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": ExperimentORM.id,
     "agent_id": ExperimentORM.agent_id,
     "name": ExperimentORM.name,
     "tag": build_tag_condition_binding(TagResourceType.EXPERIMENT, ExperimentORM.id),

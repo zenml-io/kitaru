@@ -27,6 +27,7 @@ class AnnotationFilter(ListFilter):
     """Annotation list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "session_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "investigation_session_id": FilterField(
             value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS

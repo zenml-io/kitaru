@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc3]
+
+### Changed
+
+- Updated the bundled Kitaru UI to `kitaru-ui-v0.2.0-rc.2`.
+
 ## [0.22.0rc2]
 
 ### Fixed
@@ -33,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Fixed TypeScript replay and recording edge cases, aligned credential redaction and provider diagnostics across adapters, and made the adapter examples reproducible, rerunnable, and part of CI.
 
 ### Added
+- Every filterable entity list filters by `id`, including `in` over a list of ids.
 - TypeScript SDK packages for the core client and replay runtime, with Mastra and Vercel AI SDK adapters and runnable examples.
 - TypeScript release packaging for the core, Mastra, and Vercel AI SDK packages, with lockstep release-candidate versions, clean-consumer tarball checks, npm publishing, and GitHub release artifacts.
 - Session lists filter by `experiment_run_id`, returning the sessions produced as the results of the run's replays. Baseline sessions do not match.
@@ -103,6 +110,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 - Passwordless user creation through `client.users.create(...)` now returns `UserActivationTokenResponse`, preserving the one-time activation token from the server response.
+- Experiment run job listings now return only the jobs backing the selected run's replays instead of every job in the database. (#749)
 - A Mastra replay no longer executes tools live after a tool-policy decision fails. Mastra swallowed the exception the policy hook raised, so a replay that could not find a recorded result ran the real tool and still recorded the session as completed. Replays now stop at the first policy failure, and the TypeScript core refuses every later tool call in the run rather than relying on each adapter to notice.
 - A Mastra replay now rejects tools it cannot intercept, and no longer reads or writes live Mastra memory threads, so recording state and replay state stay separate.
 - The Vercel AI adapter no longer fails a running agent because a model response or tool payload was too large to record. Recording bounds oversized values instead of raising, and the shared recorder used by the TypeScript core applies the same bound to tool results captured during replay.

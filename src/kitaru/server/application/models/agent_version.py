@@ -21,13 +21,14 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.agent_version import AgentCapabilities, RunSpec
-from kitaru.server.filtering import FilterField
+from kitaru.server.filtering import EQUALITY_OPS, FilterField
 
 
 class AgentVersionFilter(ListFilter):
     """Agent version list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
     }
 

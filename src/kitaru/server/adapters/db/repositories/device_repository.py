@@ -29,6 +29,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.device import Device, DeviceNotFound
 
 DEVICE_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": DeviceORM.id,
     "status": DeviceORM.status,
 }
 

@@ -40,6 +40,7 @@ class SessionFilter(ListFilter):
     """Session list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_version_id": FilterField(
             value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS

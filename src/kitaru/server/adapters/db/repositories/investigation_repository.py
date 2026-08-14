@@ -36,6 +36,7 @@ from kitaru.server.domain.investigation import (
 )
 
 INVESTIGATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": InvestigationORM.id,
     "agent_id": InvestigationORM.agent_id,
     "status": InvestigationORM.status,
 }

@@ -34,6 +34,7 @@ from kitaru.server.domain.api_key import (
 from kitaru.server.domain.base import NotFoundError
 
 API_KEY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": ApiKeyORM.id,
     "name": ApiKeyORM.name,
 }
 

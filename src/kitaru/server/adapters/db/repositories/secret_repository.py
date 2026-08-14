@@ -38,6 +38,7 @@ from kitaru.server.domain.secret import (
 )
 
 SECRET_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": SecretORM.id,
     "name": SecretORM.name,
 }
 

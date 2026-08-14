@@ -202,14 +202,14 @@ INVESTIGATION_SESSION_ID="$(
 )"
 ```
 
-Store the support lead's answers and anchor the outcome judgment to the refund node:
+Store the support lead's rationale and expected action, then record the verdict on the investigation session:
 
 ```bash
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
   --question-key outcome \
   --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\"}" \
-  --value '{"judgment":"problematic","reason":"The amount exceeds the automatic approval threshold."}'
+  --value '"The amount exceeds the automatic approval threshold."'
 
 uv run kitaru annotation create \
   --investigation-session "$INVESTIGATION_SESSION_ID" \
@@ -222,7 +222,7 @@ uv run kitaru investigation session verdict \
   problematic
 ```
 
-Kitaru now stores the session question, review progress, answers, and exact trace evidence. The guided path repeats this review over a diverse set that it selects from the sessions.
+The investigation-session verdict is the classification. The annotations store the rationale, expected action, and exact trace evidence without duplicating that verdict. The guided path repeats this review over a diverse set that it selects from the sessions.
 
 ## Step 7: Decide what to improve
 

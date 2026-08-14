@@ -305,6 +305,10 @@ def test_readme_teaches_the_complete_returns_improvement_loop() -> None:
     assert "--env-file .env" not in readme
     assert "$TICKET_004_SESSION_ID:outcome=" in readme
     assert "--question-key outcome" in readme
+    assert '--selector "{\\"node_id\\":\\"$TICKET_004_REFUND_NODE_ID\\"}"' in readme
+    assert "kitaru investigation session verdict" in readme
+    assert '"judgment":"problematic"' not in readme
+    assert "The investigation-session verdict is the classification." in readme
     assert (
         "uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'"
         in readme

@@ -58,6 +58,7 @@ def _compile_investigation_id_condition(
 
 
 ANNOTATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": AnnotationORM.id,
     "session_id": AnnotationORM.session_id,
     "investigation_session_id": AnnotationORM.investigation_session_id,
     "investigation_id": _compile_investigation_id_condition,

@@ -50,12 +50,19 @@ async def test_source_defaults_to_api(client: httpx.AsyncClient) -> None:
     assert response.json() == {"source": "kitaru-api"}
 
 
-async def test_source_parsed_from_client_header(client: httpx.AsyncClient) -> None:
+@pytest.mark.parametrize(
+    ("header", "source"),
+    [
+        ("kitaru-ui/0.3.0", "kitaru-ui"),
+        ("kitaru-typescript", "kitaru-typescript"),
+    ],
+)
+async def test_source_parsed_from_client_header(
+    client: httpx.AsyncClient, header: str, source: str
+) -> None:
     """Attribute requests to the source named in the client header."""
-    response = await client.get(
-        "/probe-source", headers={"X-Kitaru-Client": "kitaru-ui/0.3.0"}
-    )
-    assert response.json() == {"source": "kitaru-ui"}
+    response = await client.get("/probe-source", headers={"X-Kitaru-Client": header})
+    assert response.json() == {"source": source}
 
 
 async def test_unknown_client_header_falls_back_to_api(

@@ -29,6 +29,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.job import TERMINAL_JOB_STATUSES, Job, JobNotFound
 
 JOB_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": JobORM.id,
     "kind": JobORM.kind,
     "status": JobORM.status,
 }
@@ -169,6 +170,8 @@ class SQLJobRepository(BaseSQLRepository[JobORM]):
             Page of matching jobs and the next cursor.
         """
         statement = select(JobORM)
+        if job_filter.job_ids is not None:
+            statement = statement.where(JobORM.id.in_(job_filter.job_ids))
         if job_filter.expression is not None:
             statement = statement.where(
                 compile_filter_expression(job_filter.expression, JOB_FILTER_BINDINGS)

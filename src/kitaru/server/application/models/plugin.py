@@ -22,7 +22,12 @@ from pydantic import Field
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.domain.plugin import PluginKind
-from kitaru.server.filtering import NULLABLE_OPS, STRING_OPS, FilterField
+from kitaru.server.filtering import (
+    EQUALITY_OPS,
+    NULLABLE_OPS,
+    STRING_OPS,
+    FilterField,
+)
 
 
 class PluginFilter(ListFilter):
@@ -35,6 +40,7 @@ class EvaluatorFilter(PluginFilter):
     """Evaluator list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
     }
 
@@ -43,6 +49,7 @@ class ImporterFilter(PluginFilter):
     """Importer list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
         "provider": FilterField(value_type=str, ops=STRING_OPS | NULLABLE_OPS),
     }

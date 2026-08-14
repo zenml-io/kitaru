@@ -180,6 +180,18 @@ async def test_query_filters_by_kind(setup: Setup) -> None:
     assert [job.id for job in jobs] == [replay.id]
 
 
+async def test_query_filters_by_job_ids(setup: Setup) -> None:
+    """Filter jobs by an explicit id allowlist."""
+    repository, owner_id = setup
+    first = await repository.create(_job(owner_id))
+    second = await repository.create(_job(owner_id))
+    await repository.create(_job(owner_id))
+
+    jobs, next_cursor = await repository.query(JobFilter(job_ids=[first.id, second.id]))
+    assert next_cursor is None
+    assert {job.id for job in jobs} == {first.id, second.id}
+
+
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
     repository, owner_id = setup

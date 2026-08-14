@@ -301,6 +301,20 @@ async def test_query_versions(setup: Setup) -> None:
     assert sorted(version.version for version in versions) == [1, 2]
 
 
+async def test_query_versions_scoped_to_plugin(setup: Setup) -> None:
+    """Query only the versions of the requested plugin."""
+    repository, owner_id = setup
+    plugin = await repository.create(_plugin(owner_id))
+    other_plugin = await repository.create(_plugin(owner_id, name="other"))
+    await repository.create_version(plugin.id, SOURCE_V1, display_version=None)
+    await repository.create_version(other_plugin.id, SOURCE_V1, display_version=None)
+    versions, next_cursor = await repository.query_versions(
+        PluginVersionFilter(plugin_id=plugin.id)
+    )
+    assert next_cursor is None
+    assert [version.plugin_id for version in versions] == [plugin.id]
+
+
 async def test_update_version(setup: Setup) -> None:
     """Persist a display version change and renew the updated timestamp."""
     repository, owner_id = setup

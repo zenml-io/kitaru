@@ -286,9 +286,12 @@ Then review what actually happened. Open an [investigation](../concepts/investig
 
 ```bash
 kitaru annotation create --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key outcome --value '{"judgment":"problematic"}'
+  --question-key outcome \
+  --value '"The refund exceeds the automatic approval threshold."'
 kitaru investigation session verdict "$INVESTIGATION_ID" "$SESSION_ID" problematic
 ```
+
+The annotation stores the rationale. The verdict stores the session classification.
 
 Resist naming the failure category before you have looked — a taxonomy invented up front is the most common way to review fifty sessions and learn nothing.
 
