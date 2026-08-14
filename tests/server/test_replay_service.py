@@ -37,6 +37,8 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskPrincipal,
@@ -505,6 +507,76 @@ async def test_get_replay_result_session_id_appears_after_agent_task_links_it(
 
     refreshed = await services.replay_service.get_replay(bundle.replay.id, actor=ACTOR)
     assert refreshed.result_session_id == stored_task.result_session_id
+
+
+async def test_replay_agent_tasks_claim_only_their_scoped_version(
+    services: ReplayServices,
+) -> None:
+    """Two version-scoped workers each claim only their replay's agent version."""
+    first_version = await _agent_version(services, name="first")
+    second_version = await _agent_version(services, name="second")
+    first_baseline = await _session(services, first_version)
+    second_baseline = await _session(services, second_version)
+
+    first_bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=first_baseline.id,
+            agent_version_id=first_version.id,
+            evaluators=[],
+        ),
+        actor=ACTOR,
+    )
+    second_bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=second_baseline.id,
+            agent_version_id=second_version.id,
+            evaluators=[],
+        ),
+        actor=ACTOR,
+    )
+
+    first_worker = await create_worker(
+        services.workers,
+        ACTOR.account.id,
+        name="worker-first",
+        scope=WorkerScope(
+            claims=[WorkerClaim(kind=TaskKind.AGENT, agent_version_id=first_version.id)]
+        ),
+    )
+    second_worker = await create_worker(
+        services.workers,
+        ACTOR.account.id,
+        name="worker-second",
+        scope=WorkerScope(
+            claims=[
+                WorkerClaim(kind=TaskKind.AGENT, agent_version_id=second_version.id)
+            ]
+        ),
+    )
+
+    claimed_first = await services.task_service.claim_tasks(
+        10,
+        actor=WorkerAuthContext(
+            account=ACTOR.account, principal=WorkerPrincipal(worker_id=first_worker.id)
+        ),
+    )
+    claimed_second = await services.task_service.claim_tasks(
+        10,
+        actor=WorkerAuthContext(
+            account=ACTOR.account, principal=WorkerPrincipal(worker_id=second_worker.id)
+        ),
+    )
+
+    first_tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=first_bundle.replay.job_id), actor=ACTOR
+    )
+    second_tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=second_bundle.replay.job_id), actor=ACTOR
+    )
+    assert [item.task.id for item in claimed_first] == [task.id for task in first_tasks]
+    assert [item.task.id for item in claimed_second] == [
+        task.id for task in second_tasks
+    ]
 
 
 def _replay_service_with_analytics(

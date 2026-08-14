@@ -21,6 +21,7 @@ import pytest
 from conftest import db_settings, lifespan_client
 
 RUNTIME = {"platform": "bare"}
+SCOPE = {"claims": [{"kind": "agent"}]}
 
 
 @pytest.fixture
@@ -36,7 +37,7 @@ async def test_workers_persist_across_requests(client: httpx.AsyncClient) -> Non
         "/api/v1/workers",
         json={
             "name": "worker-1",
-            "scope": {"kinds": ["agent"]},
+            "scope": SCOPE,
             "runtime": RUNTIME,
             "metadata": {"region": "eu"},
         },
@@ -62,7 +63,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
             "/api/v1/workers",
             json={
                 "name": "worker-1",
-                "scope": {"kinds": ["agent"]},
+                "scope": SCOPE,
                 "runtime": RUNTIME,
                 "metadata": {"region": "eu"},
             },
@@ -74,7 +75,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
             "/api/v1/workers",
             json={
                 "name": "worker-1",
-                "scope": {"kinds": ["importer"]},
+                "scope": {"claims": [{"kind": "importer"}]},
                 "runtime": {"platform": "docker"},
                 "metadata": {"region": "us"},
             },
@@ -88,7 +89,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
     response = await client.get(f"/api/v1/workers/{first['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["scope"]["kinds"] == ["importer"]
+    assert body["scope"]["claims"] == [{"kind": "importer", "agent_version_id": None}]
     assert body["runtime"]["platform"] == "docker"
     assert body["metadata"] == {"region": "us"}
 
@@ -98,7 +99,12 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
     created = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()["worker"]
     response = await client.delete(f"/api/v1/workers/{created['id']}")

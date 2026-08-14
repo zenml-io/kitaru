@@ -82,6 +82,24 @@ CONTRACT_ENV_NAMES = frozenset(
 )
 CONTRACT_ENV_PREFIX = "KITARU_TASK_"
 
+# Queue keys partition the pending queue. Every task computes exactly one key
+# from its identity at creation, and workers claim by key.
+EVALUATOR_QUEUE_KEY = "evaluator"
+IMPORTER_QUEUE_KEY = "importer"
+AGENT_QUEUE_KEY_PREFIX = "agent:"
+
+
+def agent_queue_key(agent_version_id: uuid.UUID) -> str:
+    """Build the queue key for an agent version.
+
+    Args:
+        agent_version_id: Agent version the key covers.
+
+    Returns:
+        Queue key.
+    """
+    return f"{AGENT_QUEUE_KEY_PREFIX}{agent_version_id}"
+
 
 class TaskNotFound(NotFoundError):
     """Raised when a task lookup does not resolve."""
@@ -297,6 +315,15 @@ class Task(DomainModel):
     @property
     def kind(self) -> TaskKind:
         """Kind of work the task runs.
+
+        Raises:
+            NotImplementedError: Always.
+        """
+        raise NotImplementedError
+
+    @property
+    def queue_key(self) -> str:
+        """Queue the task is claimed from.
 
         Raises:
             NotImplementedError: Always.
@@ -590,6 +617,15 @@ class AgentTask(Task):
         """
         return TaskKind.AGENT
 
+    @property
+    def queue_key(self) -> str:
+        """Queue the task is claimed from.
+
+        Returns:
+            Agent version queue key.
+        """
+        return agent_queue_key(self.agent_version_id)
+
     def check_result(self, result: Any) -> None:
         """Require a linked result session, the agent task's actual outcome.
 
@@ -618,6 +654,15 @@ class EvaluationTask(Task):
             Evaluator kind.
         """
         return TaskKind.EVALUATOR
+
+    @property
+    def queue_key(self) -> str:
+        """Queue the task is claimed from.
+
+        Returns:
+            Evaluator queue key.
+        """
+        return EVALUATOR_QUEUE_KEY
 
     def check_result(self, result: Any) -> None:
         """Require a non-empty list of evaluation results with unique names.
@@ -666,6 +711,15 @@ class ImportTask(Task):
             Importer kind.
         """
         return TaskKind.IMPORTER
+
+    @property
+    def queue_key(self) -> str:
+        """Queue the task is claimed from.
+
+        Returns:
+            Importer queue key.
+        """
+        return IMPORTER_QUEUE_KEY
 
     def check_result(self, result: Any) -> None:
         """Require a result payload.

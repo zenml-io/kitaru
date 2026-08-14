@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 import pytest
 
 from conftest import (
+    UNSCOPED_WORKER_SCOPE,
     FakeAccountRepository,
     FakeAgentRepository,
     FakeAgentVersionRepository,
@@ -40,7 +41,9 @@ from conftest import (
     mint_worker_token,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
+    WorkerClaim,
     WorkerCreateRequest,
     WorkerHeartbeatRequest,
     WorkerListParams,
@@ -163,7 +166,7 @@ async def test_create(api_client: KitaruAPIClient, account: Account) -> None:
     """Register a worker through the SDK."""
     registered = await api_client.workers.create(
         WorkerCreateRequest(
-            name="worker-1", scope=WorkerScope(), runtime=RUNTIME, metadata={}
+            name="worker-1", scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
         )
     )
     assert isinstance(registered, WorkerRegistrationResponse)
@@ -177,7 +180,7 @@ async def test_create_upsert(api_client: KitaruAPIClient) -> None:
     first = await api_client.workers.create(
         WorkerCreateRequest(
             name="worker-1",
-            scope=WorkerScope(kinds=["agent"]),
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
             runtime=RUNTIME,
             metadata={},
         )
@@ -185,20 +188,22 @@ async def test_create_upsert(api_client: KitaruAPIClient) -> None:
     second = await api_client.workers.create(
         WorkerCreateRequest(
             name="worker-1",
-            scope=WorkerScope(kinds=["importer"]),
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
             runtime=RUNTIME,
             metadata={},
         )
     )
     assert second.worker.id == first.worker.id
-    assert second.worker.scope == WorkerScope(kinds=["importer"])
+    assert second.worker.scope == WorkerScope(
+        claims=[WorkerClaim(kind=TaskKind.IMPORTER)]
+    )
 
 
 async def test_get(api_client: KitaruAPIClient) -> None:
     """Get a worker by id through the SDK."""
     created = await api_client.workers.create(
         WorkerCreateRequest(
-            name="worker-1", scope=WorkerScope(), runtime=RUNTIME, metadata={}
+            name="worker-1", scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
         )
     )
     loaded = await api_client.workers.get(created.worker.id)
@@ -216,7 +221,7 @@ async def test_list(api_client: KitaruAPIClient) -> None:
     for name in ["worker-1", "worker-2", "worker-3"]:
         await api_client.workers.create(
             WorkerCreateRequest(
-                name=name, scope=WorkerScope(), runtime=RUNTIME, metadata={}
+                name=name, scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
             )
         )
 
@@ -237,7 +242,7 @@ async def test_iter(api_client: KitaruAPIClient) -> None:
     for name in ["worker-1", "worker-2", "worker-3"]:
         await api_client.workers.create(
             WorkerCreateRequest(
-                name=name, scope=WorkerScope(), runtime=RUNTIME, metadata={}
+                name=name, scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
             )
         )
 
@@ -252,7 +257,7 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
     """Delete a worker through the SDK."""
     created = await api_client.workers.create(
         WorkerCreateRequest(
-            name="worker-1", scope=WorkerScope(), runtime=RUNTIME, metadata={}
+            name="worker-1", scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
         )
     )
     await api_client.workers.delete(created.worker.id)
@@ -270,7 +275,7 @@ async def test_heartbeat(
     """Report held tasks through the SDK, receiving cancel_task_ids."""
     created = await api_client.workers.create(
         WorkerCreateRequest(
-            name="worker-1", scope=WorkerScope(), runtime=RUNTIME, metadata={}
+            name="worker-1", scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
         )
     )
     worker = created.worker

@@ -49,6 +49,7 @@ from kitaru.server.domain.task import (
 )
 
 KIND_LENGTH = 16
+QUEUE_KEY_LENGTH = 64
 STATUS_LENGTH = 16
 ON_FAILURE_LENGTH = 16
 
@@ -66,11 +67,14 @@ TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
 TASK_JOB_ID_STATUS_INDEX = index_name("task", ["job_id", "status"])
 TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
 TASK_RESULT_SESSION_ID_INDEX = index_name("task", ["result_session_id"])
-# Partial indexes covering the two queue scans: the claim query reads pending
-# rows in id order and matches selectors against labels, the staleness sweep
-# reads in-flight rows by their last sign of life.
+# Partial indexes covering the queue scans: a scope claiming everything reads
+# pending rows in id order, any other scope reads them per queue key, and the
+# staleness sweep reads in-flight rows by their last sign of life. The queue
+# key column uses the C collation so LIKE prefix claims scan the index as a
+# range and ORDER BY queue_key follows the index order without a sort.
+# Selectors filter the rows the claim scans fetch and use no index.
 TASK_PENDING_ID_INDEX = index_name("task", ["id"])
-TASK_PENDING_LABELS_INDEX = index_name("task", ["labels"])
+TASK_PENDING_QUEUE_KEY_INDEX = index_name("task", ["queue_key", "id"])
 TASK_STALENESS_INDEX = index_name("task", ["heartbeat_at", "claimed_at"])
 
 TERMINAL_STATUS_VALUES = [status.value for status in TERMINAL_TASK_STATUSES]
@@ -131,9 +135,9 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(TASK_RESULT_SESSION_ID_INDEX, "result_session_id"),
         Index(TASK_PENDING_ID_INDEX, "id", postgresql_where=text(PENDING_PREDICATE)),
         Index(
-            TASK_PENDING_LABELS_INDEX,
-            "labels",
-            postgresql_using="gin",
+            TASK_PENDING_QUEUE_KEY_INDEX,
+            "queue_key",
+            "id",
             postgresql_where=text(PENDING_PREDICATE),
         ),
         Index(
@@ -144,6 +148,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     kind: Mapped[str] = mapped_column(String(KIND_LENGTH))
+    queue_key: Mapped[str] = mapped_column(String(QUEUE_KEY_LENGTH, collation="C"))
     job_id: Mapped[uuid.UUID]
     agent_version_id: Mapped[uuid.UUID | None]
     agent_id: Mapped[uuid.UUID | None]
@@ -181,6 +186,7 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         row = cls(
             id=task.id,
             kind=task.kind.value,
+            queue_key=task.queue_key,
             job_id=task.job_id,
             status=task.status.value,
             attempt=task.attempt,

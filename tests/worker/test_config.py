@@ -18,7 +18,7 @@ import uuid
 import pytest
 
 from kitaru.api_models.v1.task import TaskKind
-from kitaru.api_models.v1.worker import LabelSelector, WorkerScope
+from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
 from kitaru.worker.config import WorkerConfig
 from kitaru.worker.worker import default_worker_name
 
@@ -28,7 +28,9 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("KITARU_WORKER_CONCURRENCY", raising=False)
     config = WorkerConfig()
     assert config.name is None
-    assert config.scope == WorkerScope()
+    assert config.scope == WorkerScope(
+        claims=[WorkerClaim(kind=kind) for kind in TaskKind]
+    )
     assert config.concurrency == 1
     assert config.claim_batch_size is None
     assert config.timeout is None
@@ -51,15 +53,16 @@ def test_explicit_config_values_override_environment(
     assert config.concurrency == 2
 
 
-def test_scope_kinds_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
-    """KITARU_WORKER_SCOPE__KINDS takes a JSON list of task kinds."""
-    monkeypatch.setenv("KITARU_WORKER_SCOPE__KINDS", '["importer"]')
+def test_scope_claims_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """KITARU_WORKER_SCOPE__CLAIMS takes a JSON list of claim objects."""
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "importer"}]')
     config = WorkerConfig()
-    assert config.scope.kinds == [TaskKind.IMPORTER]
+    assert config.scope.claims == [WorkerClaim(kind=TaskKind.IMPORTER)]
 
 
 def test_scope_selectors_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """KITARU_WORKER_SCOPE__SELECTORS takes a JSON list of selector objects."""
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "agent"}]')
     monkeypatch.setenv(
         "KITARU_WORKER_SCOPE__SELECTORS",
         '[{"key": "agent_version", "values": ["v1"], "required": false}]',
@@ -73,6 +76,7 @@ def test_scope_selectors_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_scope_job_id_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """KITARU_WORKER_SCOPE__JOB_ID takes a bare uuid value."""
     job_id = uuid.uuid4()
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "agent"}]')
     monkeypatch.setenv("KITARU_WORKER_SCOPE__JOB_ID", str(job_id))
     config = WorkerConfig()
     assert config.scope.job_id == job_id

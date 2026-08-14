@@ -222,8 +222,8 @@ export PATH="/tmp/kitaru-plugin-worker-venv/bin:$PATH"
 kitaru worker start \
   --server "$KITARU_API_URL" \
   --name local-wheel-worker \
-  --kinds importer \
-  --kinds evaluator
+  --claim importer \
+  --claim evaluator
 ```
 
 Keep the worker active while you create an import or evaluation job. Task subprocesses inherit `UV_FIND_LINKS` and resolve the candidate wheels.

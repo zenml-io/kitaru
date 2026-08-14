@@ -24,6 +24,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from conftest import (
+    UNSCOPED_WORKER_SCOPE,
     FakeJobRepository,
     FakeTaskRepository,
     create_job,
@@ -33,7 +34,12 @@ from conftest import (
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind
 from kitaru.api_models.v1.task import TaskKind, TaskStatus
-from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerClaim,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -85,10 +91,12 @@ class Setup(NamedTuple):
     job_id: uuid.UUID
     agent_id: uuid.UUID
     agent_version_id: uuid.UUID
+    agent_version_id_2: uuid.UUID
     plugin_version_id: uuid.UUID
     payload_blob_id: uuid.UUID
     session_id: uuid.UUID
     worker_id: uuid.UUID
+    worker_id_2: uuid.UUID
 
 
 async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
@@ -102,6 +110,9 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         Agent(owner_id=owner.id, name="assistant")
     )
     agent_version = await SQLAgentVersionRepository(session).create(
+        AgentVersion(owner_id=owner.id, agent_id=agent.id)
+    )
+    agent_version_2 = await SQLAgentVersionRepository(session).create(
         AgentVersion(owner_id=owner.id, agent_id=agent.id)
     )
     code_blob, _ = await SQLBlobRepository(session).create(
@@ -140,7 +151,16 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         Worker(
             owner_id=owner.id,
             name="worker-1",
-            scope=WorkerScope(),
+            scope=UNSCOPED_WORKER_SCOPE,
+            runtime=WorkerRuntime(platform="bare"),
+            last_seen_at=datetime.now(UTC),
+        )
+    )
+    worker_2 = await SQLWorkerRepository(session).register(
+        Worker(
+            owner_id=owner.id,
+            name="worker-2",
+            scope=UNSCOPED_WORKER_SCOPE,
             runtime=WorkerRuntime(platform="bare"),
             last_seen_at=datetime.now(UTC),
         )
@@ -152,10 +172,12 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
         job_id=job.id,
         agent_id=agent.id,
         agent_version_id=agent_version.id,
+        agent_version_id_2=agent_version_2.id,
         plugin_version_id=plugin_version.id,
         payload_blob_id=payload.id,
         session_id=stored_session.id,
         worker_id=worker.id,
+        worker_id_2=worker_2.id,
     )
 
 
@@ -175,10 +197,12 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
             job_id=job.id,
             agent_id=uuid.uuid4(),
             agent_version_id=uuid.uuid4(),
+            agent_version_id_2=uuid.uuid4(),
             plugin_version_id=uuid.uuid4(),
             payload_blob_id=uuid.uuid4(),
             session_id=uuid.uuid4(),
             worker_id=uuid.uuid4(),
+            worker_id_2=uuid.uuid4(),
         )
         return
     if not await postgres_available():
@@ -347,10 +371,13 @@ async def test_query_filters_by_stale_before(setup: Setup) -> None:
     stale = await setup.tasks.create(_agent_task(setup))
     await setup.tasks.create(_agent_task(setup))
     await setup.tasks.claim_pending(
-        WorkerScope(), setup.worker_id, 1, datetime.now(UTC) - timedelta(hours=2)
+        UNSCOPED_WORKER_SCOPE,
+        setup.worker_id,
+        1,
+        datetime.now(UTC) - timedelta(hours=2),
     )
     await setup.tasks.claim_pending(
-        WorkerScope(), setup.worker_id, 1, datetime.now(UTC)
+        UNSCOPED_WORKER_SCOPE, setup.worker_id, 1, datetime.now(UTC)
     )
 
     tasks, next_cursor = await setup.tasks.query(
@@ -377,7 +404,7 @@ async def test_claim_pending_orders_by_id_and_locks_rows(setup: Setup) -> None:
     first = await setup.tasks.create(_agent_task(setup))
     second = await setup.tasks.create(_agent_task(setup))
     claimed = await setup.tasks.claim_pending(
-        WorkerScope(), setup.worker_id, 1, datetime.now(UTC)
+        UNSCOPED_WORKER_SCOPE, setup.worker_id, 1, datetime.now(UTC)
     )
     assert [task.id for task in claimed] == [first.id]
     assert claimed[0].attempt == 1
@@ -405,7 +432,10 @@ async def test_claim_pending_kind_filter(setup: Setup) -> None:
         )
     )
     claimed = await setup.tasks.claim_pending(
-        WorkerScope(kinds=[TaskKind.IMPORTER]), setup.worker_id, 10, datetime.now(UTC)
+        WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
+        setup.worker_id,
+        10,
+        datetime.now(UTC),
     )
     assert [task.id for task in claimed] == [import_task.id]
     assert agent_task.id != import_task.id
@@ -417,7 +447,8 @@ async def test_claim_pending_required_selector(setup: Setup) -> None:
     await setup.tasks.create(_agent_task(setup, labels={"env": "dev"}))
     claimed = await setup.tasks.claim_pending(
         WorkerScope(
-            selectors=[LabelSelector(key="env", values=["prod"], required=True)]
+            claims=[WorkerClaim(kind=TaskKind.AGENT)],
+            selectors=[LabelSelector(key="env", values=["prod"], required=True)],
         ),
         setup.worker_id,
         10,
@@ -435,7 +466,8 @@ async def test_claim_pending_non_required_selector_matches_unlabeled(
     await setup.tasks.create(_agent_task(setup, labels={"env": "dev"}))
     claimed = await setup.tasks.claim_pending(
         WorkerScope(
-            selectors=[LabelSelector(key="env", values=["prod"], required=False)]
+            claims=[WorkerClaim(kind=TaskKind.AGENT)],
+            selectors=[LabelSelector(key="env", values=["prod"], required=False)],
         ),
         setup.worker_id,
         10,
@@ -448,21 +480,180 @@ async def test_claim_pending_job_pin(setup: Setup) -> None:
     """A job-pinned worker only claims that job's tasks."""
     pinned = await setup.tasks.create(_agent_task(setup))
     claimed = await setup.tasks.claim_pending(
-        WorkerScope(job_id=setup.job_id), setup.worker_id, 10, datetime.now(UTC)
+        WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=setup.job_id),
+        setup.worker_id,
+        10,
+        datetime.now(UTC),
     )
     assert [task.id for task in claimed] == [pinned.id]
 
     claimed_wrong_job = await setup.tasks.claim_pending(
-        WorkerScope(job_id=uuid.uuid4()), uuid.uuid4(), 10, datetime.now(UTC)
+        WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=uuid.uuid4()),
+        uuid.uuid4(),
+        10,
+        datetime.now(UTC),
     )
     assert claimed_wrong_job == []
+
+
+async def test_claim_pending_agent_version_scoped_workers_claim_only_their_own(
+    setup: Setup,
+) -> None:
+    """Two agent-version-scoped workers each claim only their own version's tasks."""
+    first_version_tasks = [
+        await setup.tasks.create(_agent_task(setup)) for _ in range(2)
+    ]
+    second_version_tasks = [
+        await setup.tasks.create(
+            _agent_task(setup, agent_version_id=setup.agent_version_id_2)
+        )
+        for _ in range(2)
+    ]
+    first_scope = WorkerScope(
+        claims=[
+            WorkerClaim(kind=TaskKind.AGENT, agent_version_id=setup.agent_version_id)
+        ]
+    )
+    second_scope = WorkerScope(
+        claims=[
+            WorkerClaim(kind=TaskKind.AGENT, agent_version_id=setup.agent_version_id_2)
+        ]
+    )
+
+    claimed_first = await setup.tasks.claim_pending(
+        first_scope, setup.worker_id, 10, datetime.now(UTC)
+    )
+    claimed_second = await setup.tasks.claim_pending(
+        second_scope, setup.worker_id_2, 10, datetime.now(UTC)
+    )
+    assert {task.id for task in claimed_first} == {
+        task.id for task in first_version_tasks
+    }
+    assert {task.id for task in claimed_second} == {
+        task.id for task in second_version_tasks
+    }
+
+
+async def test_claim_pending_unversioned_agent_claim_spans_every_version(
+    setup: Setup,
+) -> None:
+    """An unversioned agent claim claims tasks across every agent version."""
+    first_version_task = await setup.tasks.create(_agent_task(setup))
+    second_version_task = await setup.tasks.create(
+        _agent_task(setup, agent_version_id=setup.agent_version_id_2)
+    )
+    claimed = await setup.tasks.claim_pending(
+        WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
+        setup.worker_id,
+        10,
+        datetime.now(UTC),
+    )
+    assert {task.id for task in claimed} == {
+        first_version_task.id,
+        second_version_task.id,
+    }
+
+
+async def test_claim_pending_kind_isolation_across_claims(setup: Setup) -> None:
+    """A version-scoped agent claim and an evaluator claim never cross kinds."""
+    agent_task = await setup.tasks.create(_agent_task(setup))
+    evaluation_task = await setup.tasks.create(
+        EvaluationTask(
+            job_id=setup.job_id,
+            plugin_version_id=setup.plugin_version_id,
+            input_session_id=setup.session_id,
+        )
+    )
+    await setup.tasks.create(
+        ImportTask(
+            job_id=setup.job_id,
+            plugin_version_id=setup.plugin_version_id,
+            payload_blob_id=setup.payload_blob_id,
+            agent_id=setup.agent_id,
+        )
+    )
+
+    claimed_by_agent_scope = await setup.tasks.claim_pending(
+        WorkerScope(
+            claims=[
+                WorkerClaim(
+                    kind=TaskKind.AGENT, agent_version_id=setup.agent_version_id
+                )
+            ]
+        ),
+        setup.worker_id,
+        10,
+        datetime.now(UTC),
+    )
+    assert [task.id for task in claimed_by_agent_scope] == [agent_task.id]
+
+    claimed_by_evaluator_scope = await setup.tasks.claim_pending(
+        WorkerScope(claims=[WorkerClaim(kind=TaskKind.EVALUATOR)]),
+        setup.worker_id_2,
+        10,
+        datetime.now(UTC),
+    )
+    assert [task.id for task in claimed_by_evaluator_scope] == [evaluation_task.id]
+
+
+async def test_claim_pending_merges_claims_oldest_first(setup: Setup) -> None:
+    """Mixed claims hand out the oldest eligible tasks regardless of kind."""
+    evaluation_task = await setup.tasks.create(
+        EvaluationTask(
+            job_id=setup.job_id,
+            plugin_version_id=setup.plugin_version_id,
+            input_session_id=setup.session_id,
+        )
+    )
+    agent_tasks = [await setup.tasks.create(_agent_task(setup)) for _ in range(5)]
+
+    claimed = await setup.tasks.claim_pending(
+        WorkerScope(
+            claims=[
+                WorkerClaim(kind=TaskKind.EVALUATOR),
+                WorkerClaim(
+                    kind=TaskKind.AGENT, agent_version_id=setup.agent_version_id
+                ),
+            ]
+        ),
+        setup.worker_id,
+        4,
+        datetime.now(UTC),
+    )
+    assert [task.id for task in claimed] == [
+        evaluation_task.id,
+        *[task.id for task in agent_tasks[:3]],
+    ]
+
+
+async def test_claim_pending_full_scope_takes_an_older_task_of_any_kind(
+    setup: Setup,
+) -> None:
+    """A scope claiming everything takes an older task before newer agent tasks."""
+    evaluation_task = await setup.tasks.create(
+        EvaluationTask(
+            job_id=setup.job_id,
+            plugin_version_id=setup.plugin_version_id,
+            input_session_id=setup.session_id,
+        )
+    )
+    for _ in range(3):
+        await setup.tasks.create(_agent_task(setup))
+
+    claimed = await setup.tasks.claim_pending(
+        UNSCOPED_WORKER_SCOPE, setup.worker_id, 1, datetime.now(UTC)
+    )
+    assert [task.id for task in claimed] == [evaluation_task.id]
 
 
 async def test_claim_stale(setup: Setup) -> None:
     """Lock one in-flight task whose last heartbeat predates the cutoff."""
     task = await setup.tasks.create(_agent_task(setup))
     claimed = await setup.tasks.claim_pending(
-        WorkerScope(), setup.worker_id, 10, datetime.now(UTC) - timedelta(hours=1)
+        UNSCOPED_WORKER_SCOPE,
+        setup.worker_id,
+        10,
+        datetime.now(UTC) - timedelta(hours=1),
     )
     assert len(claimed) == 1
 
@@ -480,7 +671,10 @@ async def test_list_stale_ids(setup: Setup) -> None:
     """Read the ids of in-flight tasks whose last heartbeat predates the cutoff."""
     task = await setup.tasks.create(_agent_task(setup))
     await setup.tasks.claim_pending(
-        WorkerScope(), setup.worker_id, 10, datetime.now(UTC) - timedelta(hours=1)
+        UNSCOPED_WORKER_SCOPE,
+        setup.worker_id,
+        10,
+        datetime.now(UTC) - timedelta(hours=1),
     )
 
     assert await setup.tasks.list_stale_ids(datetime.now(UTC), 10) == [task.id]
@@ -623,7 +817,7 @@ async def test_claim_pending_skip_locked_never_double_claims() -> None:
         async def claim_one() -> list[Task]:
             async with session_factory() as session:
                 claimed = await SQLTaskRepository(session).claim_pending(
-                    WorkerScope(), setup.worker_id, 1, datetime.now(UTC)
+                    UNSCOPED_WORKER_SCOPE, setup.worker_id, 1, datetime.now(UTC)
                 )
                 await session.commit()
                 return claimed
