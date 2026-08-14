@@ -18,24 +18,10 @@ from typing import Any, cast
 from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from conftest import local_settings
+from conftest import base_asgi_scope, local_settings
 from kitaru.server.adapters.rest.dependencies import get_auth_session, get_session
 from kitaru.server.adapters.rest.request_state import mark_request_read_only
 from kitaru.server.database.service import DatabaseService
-
-_SCOPE: dict[str, Any] = {
-    "type": "http",
-    "asgi": {"version": "3.0"},
-    "http_version": "1.1",
-    "headers": [],
-    "query_string": b"",
-    "server": ("test", 80),
-    "client": ("test", 123),
-    "root_path": "",
-    "method": "GET",
-    "path": "/",
-    "raw_path": b"/",
-}
 
 
 def _request(database: DatabaseService, read_only: bool = False) -> Request:
@@ -51,7 +37,7 @@ def _request(database: DatabaseService, read_only: bool = False) -> Request:
     """
     app = FastAPI()
     app.state.database = database
-    request = Request({**_SCOPE, "app": app})
+    request = Request(base_asgi_scope(method="GET", path="/", raw_path=b"/", app=app))
     if read_only:
         mark_request_read_only(request)
     return request

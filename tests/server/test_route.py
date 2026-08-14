@@ -20,42 +20,16 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from conftest import base_asgi_scope
 from kitaru.server.adapters.rest.request_state import (
     attach_request_session,
     request_uses_read_engine,
 )
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
 
-_SCOPE: dict[str, Any] = {
-    "type": "http",
-    "asgi": {"version": "3.0"},
-    "http_version": "1.1",
-    "headers": [],
-    "query_string": b"",
-    "server": ("test", 80),
-    "client": ("test", 123),
-    "root_path": "",
-}
-
 
 class _RecordingSession:
     """Fake session recording commits into a shared event list."""
-
-    def __init__(self, events: list[str]) -> None:
-        """Record commits into the given event list.
-
-        Args:
-            events: Shared list commit and send events are appended to.
-        """
-        self.events = events
-
-    async def commit(self) -> None:
-        """Record a commit event."""
-        self.events.append("committed")
-
-
-class _DirtySession:
-    """Fake session exposing pending-write state like a real SQLAlchemy session."""
 
     def __init__(self, events: list[str], new: bool = False) -> None:
         """Record commits into the given event list, optionally starting dirty.
@@ -118,7 +92,7 @@ async def test_route_commits_before_response_is_sent() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {**_SCOPE, "method": "POST", "path": "/items", "raw_path": b"/items"}
+    scope = base_asgi_scope(method="POST", path="/items", raw_path=b"/items")
     receive, send = _drive(scope, events)
     await app(scope, receive, send)
 
@@ -141,7 +115,7 @@ async def test_route_skips_commit_on_exception() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {**_SCOPE, "method": "GET", "path": "/boom", "raw_path": b"/boom"}
+    scope = base_asgi_scope(method="GET", path="/boom", raw_path=b"/boom")
     receive, send = _drive(scope, events)
     with pytest.raises(RuntimeError):
         await app(scope, receive, send)
@@ -161,12 +135,7 @@ async def test_route_without_session_returns_response() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {
-        **_SCOPE,
-        "method": "GET",
-        "path": "/no-session",
-        "raw_path": b"/no-session",
-    }
+    scope = base_asgi_scope(method="GET", path="/no-session", raw_path=b"/no-session")
     receive, send = _drive(scope, events)
     await app(scope, receive, send)
 
@@ -195,7 +164,7 @@ async def test_route_marks_request_state_for_a_read_only_endpoint() -> None:
 
     events: list[str] = []
     for path in ("/read-only", "/normal"):
-        scope = {**_SCOPE, "method": "GET", "path": path, "raw_path": path.encode()}
+        scope = base_asgi_scope(method="GET", path=path, raw_path=path.encode())
         receive, send = _drive(scope, events)
         await app(scope, receive, send)
 
@@ -209,7 +178,7 @@ async def test_route_raises_when_a_read_only_route_has_pending_writes() -> None:
 
     async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
         attach_request_session(
-            request, cast(AsyncSession, _DirtySession(events, new=True))
+            request, cast(AsyncSession, _RecordingSession(events, new=True))
         )
         yield
 
@@ -221,7 +190,7 @@ async def test_route_raises_when_a_read_only_route_has_pending_writes() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {**_SCOPE, "method": "GET", "path": "/read-only", "raw_path": b"/read-only"}
+    scope = base_asgi_scope(method="GET", path="/read-only", raw_path=b"/read-only")
     receive, send = _drive(scope, events)
     with pytest.raises(RuntimeError, match="pending database writes"):
         await app(scope, receive, send)
@@ -236,7 +205,7 @@ async def test_route_commits_pending_writes_on_an_unmarked_route() -> None:
 
     async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
         attach_request_session(
-            request, cast(AsyncSession, _DirtySession(events, new=True))
+            request, cast(AsyncSession, _RecordingSession(events, new=True))
         )
         yield
 
@@ -247,7 +216,7 @@ async def test_route_commits_pending_writes_on_an_unmarked_route() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {**_SCOPE, "method": "GET", "path": "/normal", "raw_path": b"/normal"}
+    scope = base_asgi_scope(method="GET", path="/normal", raw_path=b"/normal")
     receive, send = _drive(scope, events)
     await app(scope, receive, send)
 

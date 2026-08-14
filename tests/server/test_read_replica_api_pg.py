@@ -14,19 +14,22 @@
 """End-to-end read-replica auth tests against PostgreSQL."""
 
 from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
 from typing import Annotated
 
 import httpx
 import pytest
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, FastAPI
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.sql import text
 
-from conftest import drop_test_database, local_settings, postgres_available
+from conftest import (
+    drop_test_database,
+    lifespan_client,
+    local_settings,
+    postgres_available,
+)
 from kitaru.server.adapters.rest.dependencies import authorize
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
-from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.database.service import DatabaseService
@@ -38,12 +41,8 @@ from kitaru.server.database.service import DatabaseService
 _probe_router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@_probe_router.get("/v1/__test__/read-only")
-@read_only
-async def _read_only_probe(
-    actor: Annotated[AuthContext, Depends(authorize)],
-) -> dict[str, str]:
-    """Authenticate a request on a read-only route without touching data.
+async def _probe_response(actor: AuthContext) -> dict[str, str]:
+    """Return the probe's fixed status body for an authenticated actor.
 
     Args:
         actor: Resolved auth context.
@@ -66,7 +65,23 @@ async def _normal_probe(
     Returns:
         A fixed status body.
     """
-    return {"status": "ok"}
+    return await _probe_response(actor)
+
+
+@_probe_router.get("/v1/__test__/read-only")
+@read_only
+async def _read_only_probe(
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> dict[str, str]:
+    """Authenticate a request on a read-only route without touching data.
+
+    Args:
+        actor: Resolved auth context.
+
+    Returns:
+        A fixed status body.
+    """
+    return await _probe_response(actor)
 
 
 async def test_read_engine_rejects_writes_at_the_database() -> None:
@@ -97,38 +112,21 @@ def _read_replica_settings() -> APISettings:
     return settings.model_copy(update={"DB_READ_HOST": settings.DB_HOST})
 
 
-@asynccontextmanager
-async def _client_with_probe_routes(
-    settings: APISettings,
-) -> AsyncGenerator[httpx.AsyncClient, None]:
-    """Run the app through its lifespan with the read-only probe routes mounted.
+def _mount_probe_routes(app: FastAPI) -> None:
+    """Mount the read-only probe routes on the app.
 
     Args:
-        settings: API server settings.
-
-    Yields:
-        HTTP client routed to the app.
+        app: Application to mount the probe routes on.
     """
-    if not await postgres_available():
-        pytest.skip("PostgreSQL is not reachable")
-    await DatabaseService.create_db(settings)
-    try:
-        app = create_app(settings)
-        app.include_router(_probe_router)
-        async with app.router.lifespan_context(app):
-            transport = httpx.ASGITransport(app=app)
-            async with httpx.AsyncClient(
-                transport=transport, base_url="http://test"
-            ) as client:
-                yield client
-    finally:
-        await drop_test_database(settings)
+    app.include_router(_probe_router)
 
 
 @pytest.fixture
 async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with the probe routes mounted."""
-    async with _client_with_probe_routes(_read_replica_settings()) as client:
+    async with lifespan_client(
+        _read_replica_settings(), mutate_app=_mount_probe_routes
+    ) as client:
         yield client
 
 
@@ -148,43 +146,23 @@ async def _login(client: httpx.AsyncClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-async def test_read_only_route_persists_the_throttled_api_key_last_used(
-    client: httpx.AsyncClient,
+@pytest.mark.parametrize("path", ["/v1/__test__/read-only", "/v1/__test__/normal"])
+async def test_probe_route_persists_the_throttled_api_key_last_used(
+    client: httpx.AsyncClient, path: str
 ) -> None:
-    """An API key request on a read-only route still records last_used.
+    """An API key request on either probe route still records last_used.
 
-    The write goes through the writer auth session, not the read-bound
-    request session, so the read-only route's pending-writes guard never
+    On the read-only route the write goes through the writer auth session,
+    not the read-bound request session, so the pending-writes guard never
     sees it and the request succeeds.
     """
     user_headers = await _login(client)
     created = (
-        await client.post(
-            "/v1/api-keys", json={"name": "read-only-probe"}, headers=user_headers
-        )
+        await client.post("/v1/api-keys", json={"name": "probe"}, headers=user_headers)
     ).json()
     key_headers = {"Authorization": f"Bearer {created['key']}"}
 
-    response = await client.get("/v1/__test__/read-only", headers=key_headers)
-    assert response.status_code == 200
-
-    response = await client.get(f"/v1/api-keys/{created['id']}", headers=user_headers)
-    assert response.json()["last_used"] is not None
-
-
-async def test_normal_route_persists_the_throttled_api_key_last_used(
-    client: httpx.AsyncClient,
-) -> None:
-    """An API key request on a normal route keeps recording last_used as before."""
-    user_headers = await _login(client)
-    created = (
-        await client.post(
-            "/v1/api-keys", json={"name": "normal-probe"}, headers=user_headers
-        )
-    ).json()
-    key_headers = {"Authorization": f"Bearer {created['key']}"}
-
-    response = await client.get("/v1/__test__/normal", headers=key_headers)
+    response = await client.get(path, headers=key_headers)
     assert response.status_code == 200
 
     response = await client.get(f"/v1/api-keys/{created['id']}", headers=user_headers)
