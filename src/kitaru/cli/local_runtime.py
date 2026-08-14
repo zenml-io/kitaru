@@ -397,12 +397,15 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             "No published local server image is available for this development build.",
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
         )
-    image_version = package_version
+    suffix_parts: list[str] = []
     if parsed_version.pre is not None:
         prerelease_type, prerelease_number = parsed_version.pre
-        image_version = (
-            f"{parsed_version.base_version}-{prerelease_type}.{prerelease_number}"
-        )
+        suffix_parts.extend((prerelease_type, str(prerelease_number)))
+    if parsed_version.post is not None:
+        suffix_parts.extend(("post", str(parsed_version.post)))
+    image_version = package_version
+    if suffix_parts:
+        image_version = f"{parsed_version.base_version}-{'.'.join(suffix_parts)}"
     return f"zenmldocker/kitaru-server:{image_version}", False
 
 

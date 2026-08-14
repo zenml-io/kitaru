@@ -293,12 +293,14 @@ def test_development_version_requires_an_override(monkeypatch) -> None:
         ("0.22.0a1", "0.22.0-a.1"),
         ("0.22.0b3", "0.22.0-b.3"),
         ("0.22.0rc5", "0.22.0-rc.5"),
+        ("0.22.0.post2", "0.22.0-post.2"),
+        ("0.22.0rc5.post2", "0.22.0-rc.5.post.2"),
     ],
 )
-def test_prerelease_uses_docker_image_tag(
+def test_release_suffix_uses_docker_image_tag(
     monkeypatch, package_version: str, image_version: str
 ) -> None:
-    """PEP 440 prereleases map to the Docker tag format."""
+    """PEP 440 release suffixes map to the Docker tag format."""
     monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
 
     image, overridden = local_runtime._get_server_image(package_version)
