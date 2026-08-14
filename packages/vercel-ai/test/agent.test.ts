@@ -102,6 +102,38 @@ describe("createKitaruToolLoopAgent", () => {
     ).toMatchObject({ error: "provider failed", status: "failed" });
   });
 
+  it("records provider failure when the start callback throws", async () => {
+    const client = new FakeClient();
+    const providerError = new Error("provider failed");
+    const model = new MockLanguageModelV4({
+      doGenerate: async () => {
+        throw providerError;
+      },
+    });
+    const agent = createKitaruToolLoopAgent(
+      {
+        maxRetries: 0,
+        model,
+        prepareCall: (call) => ({
+          ...call,
+          onLanguageModelCallStart: () => {
+            throw new Error("callback failed");
+          },
+        }),
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await expect(agent.generate({ prompt: "Help" })).rejects.toBe(
+      providerError,
+    );
+    expect(
+      client.nodeBatches
+        .flatMap((batch) => batch.nodes)
+        .find((node) => node.node_type === "llm_call"),
+    ).toMatchObject({ error: "provider failed", status: "failed" });
+  });
+
   it("stops before another model call after step recording fails", async () => {
     const client = new FakeClient({
       failNodeBatch: (_batch, index) => index === 1,

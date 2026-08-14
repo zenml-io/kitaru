@@ -288,11 +288,6 @@ export function createKitaruToolLoopAgent<
         runtime.onLanguageModelCallStart = async (
           event: LanguageModelCallStartEvent,
         ) => {
-          await (
-            callerOnLanguageModelCallStart as
-              | ((value: LanguageModelCallStartEvent) => unknown)
-              | undefined
-          )?.(event);
           state.pendingModelCall = {
             callId: event.callId,
             modelId: event.modelId,
@@ -303,6 +298,11 @@ export function createKitaruToolLoopAgent<
             startedAt: new Date().toISOString(),
           };
           state.currentModelSettings = state.pendingModelCall.modelSettings;
+          await (
+            callerOnLanguageModelCallStart as
+              | ((value: LanguageModelCallStartEvent) => unknown)
+              | undefined
+          )?.(event);
         };
         runtime.onLanguageModelCallEnd = async (
           event: LanguageModelCallEndEvent<ToolSet>,
