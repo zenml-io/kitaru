@@ -1,15 +1,15 @@
 ---
-description: Wrap an agent, record a run, replay it unchanged, fork it with a cheaper model, and read the diff. One sitting.
+description: Wrap an agent, record a run, replay it unchanged, and compare it with a replay that uses a cheaper model.
 icon: rocket
 ---
 
 # Quickstart
 
-You will take an agent you already have, wrap it so every run becomes a [session](../concepts/agents-and-sessions.md), and then do the one thing Kitaru is for: **replay** that recording. Reproduce it, fork it with one thing changed, and read what the change did. One sitting, one ticket:
+This guide records one support-agent run as a [session](../concepts/agents-and-sessions.md). You will first replay the session unchanged, then replay it with a cheaper model and compare the results. The example uses this ticket:
 
-> Refund order #4821 — the card reader was double-charged.
+> Refund order #4821: the card reader was double-charged.
 
-You need a running server and a connection, covered in [Installation](installation.md). Already collecting traces in Langfuse or elsewhere? You can skip wrapping entirely and start from [Import your traces](import-your-traces.md) — everything from [step 4](#4-write-the-evaluator) on works the same.
+You need a running server and a connection, covered in [Installation](installation.md). If you already collect traces in Langfuse or another tracing system, start with [Import your traces](import-your-traces.md). The rest of this guide applies from [step 4](#4-write-the-evaluator).
 
 ## 1. Register the agent
 
@@ -22,7 +22,7 @@ kitaru agent register support-agent \
 export KITARU_AGENT_ID=<id from the output>
 ```
 
-The `--command` is the agent's run spec — how a [worker](../concepts/workers.md) will re-launch this exact agent when you replay. The agent calls an OpenAI model, so give it a key too:
+The `--command` is the agent's run spec. A [worker](../concepts/workers.md) uses it to start the agent during replay. The agent calls an OpenAI model, so it also needs an API key:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -30,7 +30,7 @@ export OPENAI_API_KEY=sk-...
 
 ## 2. Wrap the agent and record a run
 
-No decorators, no graph, no rewrite. Wrap the agent you already have with `KitaruAgent` and run it:
+Wrap the existing agent with `KitaruAgent`, then run it as usual:
 
 ```python
 # support.py
@@ -55,7 +55,7 @@ support = KitaruAgent(agent, agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
 
 if __name__ == "__main__":
     result = support.run_sync(
-        "Refund order #4821 — the card reader was double-charged."
+        "Refund order #4821: the card reader was double-charged."
     )
     print(result.output)
 ```
@@ -64,7 +64,7 @@ if __name__ == "__main__":
 python support.py
 ```
 
-That run left behind one session: the model requests, the `refund_payment` call with its arguments and result, token usage, and cost, recorded as the run progressed. This same script is also your replay target — under a worker, the adapter feeds it the recorded inputs automatically, so nothing about it changes.
+The run created one session containing the model requests, the `refund_payment` call and result, token usage, and cost. The same script is the replay target. When a worker runs it, the adapter supplies the recorded inputs automatically.
 
 ## 3. Look at the recording
 
@@ -105,13 +105,13 @@ Keep the session ID this prints and export it for the replay snippets in steps 6
 export KITARU_SESSION_ID=<session-id>
 ```
 
-The recording is the whole conversation between your agent and the world: what the model saw, what the tool returned, what it cost.
+The recording shows what the model received, what the tool returned, and what the run cost.
 
 <a id="write-the-evaluator"></a>
 
 ## 4. Write the evaluator
 
-A replay is always evaluated, so define what "good" means before replaying. Scaffold an [evaluator](../concepts/evaluators.md) — plain Python reading the session:
+A replay requires at least one evaluator. Scaffold an [evaluator](../concepts/evaluators.md), which is a Python function that reads the session:
 
 ```bash
 kitaru evaluator scaffold refund-check
@@ -138,7 +138,7 @@ kitaru evaluator register refund-check \
   --script refund_check_evaluator.py --entrypoint evaluate
 ```
 
-(A suite of `kitaru/` evaluators comes built in — from `kitaru/cost` to deterministic checks like `kitaru/output-contract` — cheap triage before you write anything. The one you just wrote is the kind that encodes _your_ definition of good.)
+Kitaru also includes built-in evaluators such as `kitaru/cost` and the deterministic `kitaru/output-contract`. They are useful for initial triage. Custom evaluators such as `refund-check` encode criteria specific to your application.
 
 ## 5. Start a worker
 
@@ -148,9 +148,9 @@ Replays execute in **your** environment, not on the server. Open a second termin
 kitaru worker start
 ```
 
-Leave it running — it claims the replay you're about to create, re-runs `support.py` as a subprocess, and runs your evaluator.
+Leave it running. The worker will claim the replay, run `support.py` as a subprocess, and then run the evaluator.
 
-## 6. Replay it unchanged — the baseline
+## 6. Replay it unchanged
 
 First, prove the recording is faithful. Re-run the session with nothing changed and every tool call answered from the recording:
 
@@ -192,7 +192,9 @@ Watch it finish, then read the result:
 kitaru job watch <job-id>
 ```
 
-Your real code ran again — but `refund_payment` was answered from the recording, so no card was touched, and `on_miss="fail"` guarantees anything unrecorded stops the replay instead of reaching a live system. **This is the discipline: if the unchanged replay doesn't hold up, stop — nothing you fork from it can be trusted.** A faithful baseline is what makes the next step mean something.
+The worker ran your code again, but the recording supplied the result of `refund_payment`, so the replay did not call the live refund service. With `on_miss="fail"`, the replay stops if the agent makes a tool call that the recording cannot answer.
+
+Check that this unchanged replay follows the expected path and passes the same evaluations as the original session. If it does not, investigate the difference before testing a model or code change. Otherwise you cannot tell whether the next result came from your change or from an unreliable replay.
 
 ## 7. Fork it with one thing changed
 
@@ -232,7 +234,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The agent re-runs from the top on the cheaper model, against the same recorded world. One run, one thing changed.
+The agent now runs from the beginning with the cheaper model. Recorded tool results remain the same.
 
 ## 8. Read the diff
 
@@ -251,16 +253,14 @@ async def show(client: KitaruAPIClient, session_id) -> None:
         print(f"  {e.name}: score={e.score} passed={e.passed}")
 ```
 
-If `refund_issued` still passes and cost dropped, you just learned something real about a model swap — from a production run, without touching production.
+If `refund_issued` still passes and the recorded cost is lower, this session supports using the cheaper model for this kind of ticket. One session is not enough to establish how the model performs across your traffic, which is what the next step addresses.
 
 ## 9. Widen it into a regression suite
 
-One replay tells you about one ticket. Freeze a week of real runs into a [cohort](../concepts/cohorts.md), make the model swap an [experiment](../concepts/experiments.md), and replay the whole population — that's [Build a regression suite from production](../guides/regression-suite.md), and it's the loop that keeps a fixed failure fixed.
+One replay tells you about one ticket. To test the change across more cases, freeze a set of recorded sessions into a [cohort](../concepts/cohorts.md), define the model swap as an [experiment](../concepts/experiments.md), and replay every session in the cohort. [Build a regression suite from production](../guides/regression-suite.md) covers that process.
 
 ## Where to go next
 
-That was one run. The same loop on a *population* — import, review,
-freeze a cohort, prove a change against it — is
-[The full loop, end to end](end-to-end.md).
+[The full loop, end to end](end-to-end.md) applies the same process to a population of imported sessions: review the sessions, create a cohort, and test a change against it.
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>The full loop, end to end</strong></td><td>Import, investigate, cohort, experiment — on real traffic.</td><td><a href="end-to-end.md">end-to-end.md</a></td></tr><tr><td><strong>Import your traces</strong></td><td>Your existing Langfuse history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Examples</strong></td><td>The canonical returns agent, end to end.</td><td><a href="examples.md">examples.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>The full loop, end to end</strong></td><td>Import, investigate, create a cohort, and run an experiment on real traffic.</td><td><a href="end-to-end.md">end-to-end.md</a></td></tr><tr><td><strong>Import your traces</strong></td><td>Your existing Langfuse history, as replayable sessions.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay a failure and fork it</strong></td><td>Overrides, tool policies, and reading a comparison.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Cohorts, experiments, and the CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>From your domain expert's criteria to a versioned gate.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Examples</strong></td><td>The canonical returns agent, end to end.</td><td><a href="examples.md">examples.md</a></td></tr></tbody></table>
