@@ -167,7 +167,7 @@ async def test_version_mismatch_requires_explicit_upgrade(
     )
     monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
 
-    with pytest.raises(CLIError, match="different Kitaru server image") as raised:
+    with pytest.raises(CLIError, match="Your local Kitaru server uses") as raised:
         await local_runtime.start_local_runtime(
             package_version="0.21.0",
             upgrade=False,
@@ -177,7 +177,15 @@ async def test_version_mismatch_requires_explicit_upgrade(
         )
 
     assert raised.value.kind == "conflict"
+    assert "zenmldocker/kitaru-server:0.20.0" in raised.value.message
+    assert "zenmldocker/kitaru-server:0.21.0" in raised.value.message
+    assert "without your approval" in raised.value.message
     assert "--upgrade" in str(raised.value.hint)
+    assert "database will be kept" in str(raised.value.hint)
+    assert raised.value.details == {
+        "current_image": "zenmldocker/kitaru-server:0.20.0",
+        "requested_image": "zenmldocker/kitaru-server:0.21.0",
+    }
 
 
 async def test_upgrade_refreshes_release_image(runtime_paths, monkeypatch) -> None:
