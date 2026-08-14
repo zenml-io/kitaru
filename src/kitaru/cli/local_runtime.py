@@ -375,6 +375,22 @@ async def _validate_docker(runner: DockerCommandRunner) -> None:
         )
 
 
+def _format_image_version(version: Version) -> str:
+    """Format a PEP 440 version as a Docker-compatible image tag."""
+    canonical_version = str(version)
+    base_version = version.base_version
+    suffix = canonical_version.removeprefix(base_version)
+    if not suffix:
+        return base_version
+
+    public_suffix, local_separator, local_suffix = suffix.partition("+")
+    public_suffix = re.sub(r"([A-Za-z]+)([0-9]+)", r"\1.\2", public_suffix).strip(".")
+    suffix_parts = [public_suffix] if public_suffix else []
+    if local_separator:
+        suffix_parts.append(f"local.{local_suffix}")
+    return f"{base_version}-{'.'.join(suffix_parts)}"
+
+
 def _get_server_image(package_version: str) -> tuple[str, bool]:
     override = os.environ.get(LOCAL_IMAGE_ENV)
     if override:
@@ -397,15 +413,7 @@ def _get_server_image(package_version: str) -> tuple[str, bool]:
             "No published local server image is available for this development build.",
             hint=f"Set {LOCAL_IMAGE_ENV} to a compatible local image.",
         )
-    suffix_parts: list[str] = []
-    if parsed_version.pre is not None:
-        prerelease_type, prerelease_number = parsed_version.pre
-        suffix_parts.extend((prerelease_type, str(prerelease_number)))
-    if parsed_version.post is not None:
-        suffix_parts.extend(("post", str(parsed_version.post)))
-    image_version = package_version
-    if suffix_parts:
-        image_version = f"{parsed_version.base_version}-{'.'.join(suffix_parts)}"
+    image_version = _format_image_version(parsed_version)
     return f"zenmldocker/kitaru-server:{image_version}", False
 
 
