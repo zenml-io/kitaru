@@ -13,9 +13,9 @@ cp .env.example .env
 set -a; source .env; set +a
 ```
 
-The second command exports the values from `.env` into the current terminal. Run it once in every terminal used for this example. It also clears credentials left by an earlier Kitaru task or server before loading values explicitly defined in `.env`.
+The second command exports the values from `.env` into the current terminal. Run it once in every terminal used for this example.
 
-The template points the CLI at `http://localhost:8000` and includes a local-only worker credential for the server's unauthenticated development mode. Model and Langfuse credentials are only required when regenerating the traces.
+The template contains model and Langfuse settings, which are only required when regenerating the traces. The Kitaru connection comes from the login you choose below. Keep `KITARU_API_URL` and `KITARU_API_KEY` out of `.env` because they override the stored login target and credential.
 
 ## Optional Step 0: Generate real traces
 
@@ -29,27 +29,39 @@ Generate ten baseline traces:
 
 The script makes real model calls and writes the Langfuse export to `traces/langfuse-traces.jsonl`. It does not connect to Kitaru or create Kitaru resources.
 
-## Step 1: Start Kitaru locally
+## Step 1: Connect to Kitaru
 
-Start PostgreSQL, the Kitaru API, and the dashboard:
+Install the locked dependencies:
 
 ```bash
-docker compose -f ../../docker-compose.yml up -d --build
+uv sync
 ```
 
-Install the dependencies and connect the CLI:
+The example's `pyproject.toml` installs the official Kitaru, `kitaru-pydantic-ai`, PydanticAI OpenAI provider, and Langfuse packages from PyPI. Its `uv.lock` keeps the environment reproducible.
+
+Choose one workspace connection.
+
+### Local workspace
+
+Start a CLI-managed local Kitaru workspace and select it for later commands:
 
 ```bash
-uv sync --extra cli --extra worker --extra examples
-uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'
-uv run --no-sync python ../../scripts/smoke_plugin_artifacts.py \
-  --candidate-dir ../../plugins/candidate-wheels
-export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 uv run kitaru login --local
 uv run kitaru status
 ```
 
-The second command installs the standalone `kitaru-pydantic-ai` package and its OpenAI provider dependency into the repository environment. The next commands build and expose local wheels for the independently packaged importers and evaluators. Keep `UV_FIND_LINKS` set in every terminal that runs a worker until those exact package versions are available from the configured package index.
+The login command starts the local Kitaru services through Docker and opens the dashboard. The workspace is available at [http://localhost:8000](http://localhost:8000).
+
+### Remote workspace
+
+Log in with the URL shown for your remote Kitaru workspace, then confirm that it is selected:
+
+```bash
+uv run kitaru login https://your-kitaru-workspace.example.com
+uv run kitaru status
+```
+
+Interactive login opens the authentication flow in your browser and stores the credential for that workspace.
 
 The server registers Kitaru's official importers and evaluators when it starts. Confirm that the `kitaru/langfuse` importer and the `kitaru/cost`, `kitaru/latency`, and `kitaru/tool-call-patterns` evaluators are available:
 
@@ -57,8 +69,6 @@ The server registers Kitaru's official importers and evaluators when it starts. 
 uv run kitaru importer list
 uv run kitaru evaluator list
 ```
-
-Open [http://localhost:8000](http://localhost:8000) to use the dashboard.
 
 ## Step 2: Register the baseline agent
 
@@ -97,7 +107,6 @@ Registration creates the `returns-resolver` agent and version `1`.
 Open a second terminal in this directory and keep the worker active:
 
 ```bash
-export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 uv run kitaru worker start \
   --name returns-example-worker
 ```
@@ -593,16 +602,16 @@ uv run kitaru evaluation list \
   --size 100
 ```
 
-Open [http://localhost:8000](http://localhost:8000) to compare each imported session with its replay, inspect the changed tool path, and review policy correctness, latency, and tool-call patterns together. The replay uses the same model as the checked-in baseline by default, so latency is comparable unless you override `BASELINE_MODEL`. Replay cost is marked unavailable because the PydanticAI adapter does not currently record provider cost.
+Open the selected workspace's dashboard to compare each imported session with its replay, inspect the changed tool path, and review policy correctness, latency, and tool-call patterns together. The local dashboard is at [http://localhost:8000](http://localhost:8000); use your workspace URL for a remote deployment. The replay uses the same model as the checked-in baseline by default, so latency is comparable unless you override `BASELINE_MODEL`. Replay cost is marked unavailable because the PydanticAI adapter does not currently record provider cost.
 
 The candidate succeeds when tickets 004 and 007 change from policy failure to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Use the comparable latency and tool-path evidence as guardrails; do not interpret unavailable replay cost as zero cost. A failed replay remains useful evidence: inspect it, change the agent again, register another version, and rerun the same immutable experiment and cohort versions.
 
-## Step 15: Stop the local server
+## Step 15: Disconnect
 
-After the walkthrough, stop the containers:
+Disconnect from the selected workspace:
 
 ```bash
-docker compose -f ../../docker-compose.yml down
+uv run kitaru logout
 ```
 
-The PostgreSQL volume retains the agents, sessions, evaluations, cohorts, and experiment runs.
+For a CLI-managed local workspace, this stops its containers and retains the PostgreSQL volume. For a remote workspace, it removes the stored credential without changing the deployment.

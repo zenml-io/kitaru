@@ -28,31 +28,33 @@ cp .env.example .env
 set -a; source .env; set +a
 ```
 
-Start PostgreSQL, the API, and the dashboard:
+Keep `KITARU_API_URL` and `KITARU_API_KEY` out of `.env` because they override the workspace selected by login.
+
+Install the locked example, worker, CLI, and MCP dependencies:
 
 ```bash
-docker compose -f ../../docker-compose.yml up -d --build
+uv sync
 ```
 
-Install the example, worker, CLI, and MCP dependencies:
+Choose one workspace connection.
 
-```bash
-uv sync \
-  --extra cli \
-  --extra worker \
-  --extra examples \
-  --extra mcp
-uv pip install --editable '../../plugins/packages/pydantic-ai[openai]'
-uv run --no-sync python ../../scripts/smoke_plugin_artifacts.py \
-  --candidate-dir ../../plugins/candidate-wheels
-export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
-```
-
-Connect and confirm the server-provided plugins:
+For a CLI-managed local workspace:
 
 ```bash
 uv run kitaru login --local
 uv run kitaru status
+```
+
+For a remote workspace, use its URL:
+
+```bash
+uv run kitaru login https://your-kitaru-workspace.example.com
+uv run kitaru status
+```
+
+Confirm the server-provided plugins after either login:
+
+```bash
 uv run kitaru importer get kitaru/langfuse
 uv run kitaru evaluator get kitaru/cost
 ```
@@ -61,11 +63,8 @@ Start a worker in a second terminal and leave it running:
 
 ```bash
 set -a; source .env; set +a
-export UV_FIND_LINKS="$(cd ../../plugins/candidate-wheels && pwd)"
 uv run kitaru worker start --name returns-example-worker
 ```
-
-Keep `UV_FIND_LINKS` set while running a worker from a source checkout whose plugin versions have not been published yet.
 
 The checked-in Langfuse export is enough for the walkthrough. To generate a fresh export with paid OpenAI calls, add the OpenAI and Langfuse credentials to `.env` and run `./generate.sh`.
 
@@ -83,14 +82,14 @@ Configure your coding agent to start it in standard mode:
 {
   "mcpServers": {
     "kitaru": {
-      "command": "/absolute/path/to/kitaru/.venv/bin/kitaru-mcp",
-      "args": ["--mode", "standard", "--server", "http://localhost:8000"]
+      "command": "/absolute/path/to/kitaru/examples/pydantic_ai_ticket_resolver/.venv/bin/kitaru-mcp",
+      "args": ["--mode", "standard", "--server", "https://your-kitaru-workspace.example.com"]
     }
   }
 }
 ```
 
-Standard mode lets the coding agent inspect sessions, run evaluations and replays, conduct investigations, store annotations, and manage cohorts and experiments. Local trace upload plus agent and evaluator registration remain CLI operations because they use files from your repository.
+Use `http://localhost:8000` as the MCP server URL for a local workspace, or use the URL passed to remote login. Standard mode lets the coding agent inspect sessions, run evaluations and replays, conduct investigations, store annotations, and manage cohorts and experiments. Local trace upload plus agent and evaluator registration remain CLI operations because they use files from your repository.
 
 Restart the coding-agent session after adding the MCP configuration so it can discover Kitaru's tools.
 
