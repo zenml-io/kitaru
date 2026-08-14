@@ -114,7 +114,9 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     )
     assert "plugins/default-requirements.txt" not in workflow
     assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
-    assert 'gh release upload "$PACKAGE_TAG" bundle-dist/* --clobber' in workflow
+    assert "gh release upload" not in workflow
+    assert "SHA256SUMS" not in workflow
+    assert "contents: write" not in workflow
     assert "promote-latest:" in workflow
 
 
