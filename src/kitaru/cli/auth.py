@@ -90,21 +90,11 @@ async def login(
             api_key_stdin=api_key_stdin,
             scheme=AuthScheme.NONE,
         )
-        if not non_interactive:
-            if upgrade:
-                write_interaction(
-                    "Upgrading the local Kitaru server. Docker may download a "
-                    "new image. Your local database will be kept."
-                )
-            else:
-                write_interaction(
-                    "Starting the local Kitaru server. Docker may download "
-                    "images during first-time setup."
-                )
         item, warnings = await local_runtime.start_local_runtime(
             package_version=package_version,
             upgrade=upgrade,
             timeout=timeout,
+            progress=None if non_interactive else write_interaction,
         )
         client = KitaruAPIClient(
             base_url=local_runtime.LOCAL_SERVER_URL, timeout=timeout

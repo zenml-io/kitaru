@@ -34,6 +34,7 @@ class FakeDockerRunner:
     def __init__(self) -> None:
         """Initialize a successful local Docker daemon."""
         self.calls: list[tuple[str, ...]] = []
+        self.stream_calls: list[tuple[str, ...]] = []
         self.results: dict[tuple[str, ...], ProcessResult] = {}
 
     async def run(self, *arguments: str, timeout: float = 120) -> ProcessResult:
@@ -47,9 +48,15 @@ class FakeDockerRunner:
             return ProcessResult(0, '"unix:///var/run/docker.sock"', "")
         return ProcessResult(0, "", "")
 
-    async def stream(self, *arguments: str):
+    async def stream(
+        self,
+        *arguments: str,
+        failure_message: str = "Docker command failed.",
+    ):
         """Yield representative Compose log lines."""
+        del failure_message
         self.calls.append(arguments)
+        self.stream_calls.append(arguments)
         for line in ("server ready", "db ready"):
             yield line
 
@@ -97,6 +104,36 @@ async def test_first_start_writes_private_state_and_starts_compose(
     assert ("pull", "--platform", "linux/amd64", server_image) in runner.calls
     assert ("pull", local_runtime.POSTGRES_IMAGE) not in runner.calls
     assert any("up" in call and "--pull" in call for call in runner.calls)
+    assert runner.stream_calls == []
+
+
+async def test_interactive_start_streams_pull_and_compose_progress(
+    runtime_paths, monkeypatch
+) -> None:
+    """Interactive startup forwards long-running Docker output."""
+    runner = FakeDockerRunner()
+    server_image = "zenmldocker/kitaru-server:0.21.0"
+    runner.results[("image", "inspect", server_image)] = ProcessResult(1, "", "")
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda: None)
+
+    async def healthy(timeout: float) -> None:
+        pass
+
+    monkeypatch.setattr(local_runtime, "_wait_for_health", healthy)
+    progress: list[str] = []
+    await local_runtime.start_local_runtime(
+        package_version="0.21.0",
+        upgrade=False,
+        timeout=30,
+        progress=progress.append,
+        runner=runner,
+        paths=runtime_paths,
+    )
+
+    assert progress == ["server ready", "db ready", "server ready", "db ready"]
+    assert ("pull", "--platform", "linux/amd64", server_image) in runner.stream_calls
+    compose_call = next(call for call in runner.stream_calls if "up" in call)
+    assert compose_call[:3] == ("compose", "--progress", "plain")
 
 
 async def test_missing_compose_has_install_and_cloud_hint() -> None:
