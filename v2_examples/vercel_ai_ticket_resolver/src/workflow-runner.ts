@@ -1275,12 +1275,14 @@ async function listReplaysForRun(
 async function emitBaselineHandoff(
   manifest: WorkflowManifest,
   store: WorkflowManifestStore,
+  stateDirectory: string,
 ): Promise<ReturnType<typeof createWorkerHandoffEvent>> {
   setStage(manifest, "baseline_evaluation", "awaiting_worker");
   await store.save(manifest);
   return createWorkerHandoffEvent({
     evidenceSetId: manifest.evidence_set_id,
     phase: "baseline_evaluation",
+    stateDirectory,
     jobs: [
       {
         agent_version_id: null,
@@ -1294,6 +1296,7 @@ async function emitBaselineHandoff(
 async function emitExperimentHandoff(
   manifest: WorkflowManifest,
   store: WorkflowManifestStore,
+  stateDirectory: string,
 ): Promise<ReturnType<typeof createWorkerHandoffEvent>> {
   setStage(manifest, "experiment_runs", "awaiting_worker");
   await store.save(manifest);
@@ -1310,6 +1313,7 @@ async function emitExperimentHandoff(
     evidenceSetId: manifest.evidence_set_id,
     jobs,
     phase: "experiment_runs",
+    stateDirectory,
   });
 }
 
@@ -1415,7 +1419,7 @@ async function runWorkflowUnlocked(
       "baseline_evaluation",
     ))
   ) {
-    return emitBaselineHandoff(manifest, store);
+    return emitBaselineHandoff(manifest, store, args.stateDirectory);
   }
   await collectTasks(client, manifest, [evaluationJob.id]);
   const baselineResults = await listBaselineEvaluations(client, manifest);
@@ -1481,7 +1485,7 @@ async function runWorkflowUnlocked(
     replayJobsCompleted = replayJobsCompleted && completed;
   }
   if (!replayJobsCompleted) {
-    return emitExperimentHandoff(manifest, store);
+    return emitExperimentHandoff(manifest, store, args.stateDirectory);
   }
 
   await collectTasks(client, manifest, manifest.ids.replay_job_ids);

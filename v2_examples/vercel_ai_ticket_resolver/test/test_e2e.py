@@ -26,7 +26,6 @@ from kitaru.server.api.app import create_app  # noqa: E402
 from kitaru.server.database.service import DatabaseService  # noqa: E402
 
 REQUIRE_POSTGRES_ENVIRONMENT_VARIABLE = "KITARU_REQUIRE_POSTGRES"
-WORKFLOW_MANIFEST_RELATIVE_PATH = Path(".state/workflow.json")
 WORKFLOW_EVENT_SCHEMA_VERSION = 1
 WORKFLOW_MANIFEST_SCHEMA_VERSION = 2
 WORKFLOW_TIMEOUT_SECONDS = 300
@@ -322,10 +321,13 @@ def _assert_handoff(
     expected_phase: str,
     expected_jobs: int,
     expected_kind: str,
+    state_dir: Path,
 ) -> list[dict[str, Any]]:
     assert event["event"] == "kitaru.worker_handoff"
     assert event["phase"] == expected_phase
-    assert event["manifest_relative_path"] == str(WORKFLOW_MANIFEST_RELATIVE_PATH)
+    assert event["manifest_relative_path"] == os.path.relpath(
+        state_dir / "workflow.json", EXAMPLE_DIR
+    )
     jobs = event["jobs"]
     assert isinstance(jobs, list) and len(jobs) == expected_jobs
     assert all(isinstance(job, dict) and set(job) == WORKFLOW_JOB_KEYS for job in jobs)
@@ -569,6 +571,7 @@ async def test_typescript_canonical_improvement_loop(tmp_path: Path) -> None:
                 expected_phase=expected_phase,
                 expected_jobs=expected_jobs,
                 expected_kind=expected_kind,
+                state_dir=state_dir,
             )
             for job in jobs:
                 job_id = job["job_id"]

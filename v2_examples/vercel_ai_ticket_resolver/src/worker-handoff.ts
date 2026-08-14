@@ -1,3 +1,5 @@
+import { join, relative } from "node:path";
+
 export type WorkerHandoffPhase = "baseline_evaluation" | "experiment_runs";
 
 export interface WorkerHandoffJob {
@@ -10,6 +12,7 @@ interface WorkerHandoffInput {
   evidenceSetId: string;
   jobs: readonly WorkerHandoffJob[];
   phase: WorkerHandoffPhase;
+  stateDirectory: string;
 }
 
 export interface WorkflowCounts {
@@ -29,7 +32,10 @@ export function createWorkerHandoffEvent(input: WorkerHandoffInput) {
     schema_version: 1 as const,
     evidence_set_id: input.evidenceSetId,
     phase: input.phase,
-    manifest_relative_path: ".state/workflow.json" as const,
+    manifest_relative_path: relative(
+      process.cwd(),
+      join(input.stateDirectory, "workflow.json"),
+    ),
     jobs: [...input.jobs].sort((left, right) =>
       left.job_id.localeCompare(right.job_id),
     ),

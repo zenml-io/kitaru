@@ -754,6 +754,7 @@ describe("canonical workflow manifest", () => {
 
 describe("canonical machine events", () => {
   it("sorts exact-job handoffs and emits no credential fields", () => {
+    const stateDirectory = join(process.cwd(), "custom-workflow-state");
     const event = createWorkerHandoffEvent({
       evidenceSetId: id(2),
       jobs: [
@@ -761,6 +762,7 @@ describe("canonical machine events", () => {
         { agent_version_id: id(8), job_id: id(7), job_kind: "replay" },
       ],
       phase: "experiment_runs",
+      stateDirectory,
     });
 
     expect(event).toEqual({
@@ -768,7 +770,7 @@ describe("canonical machine events", () => {
       schema_version: 1,
       evidence_set_id: id(2),
       phase: "experiment_runs",
-      manifest_relative_path: ".state/workflow.json",
+      manifest_relative_path: join("custom-workflow-state", "workflow.json"),
       jobs: [
         { agent_version_id: id(8), job_id: id(7), job_kind: "replay" },
         { agent_version_id: id(8), job_id: id(9), job_kind: "replay" },
