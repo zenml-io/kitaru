@@ -9,9 +9,8 @@ from kitaru.task.importer import ImportedNode
 from kitaru_braintrust_importer import importer as braintrust
 from kitaru_langfuse_importer import importer as langfuse
 from kitaru_langsmith_importer import importer as langsmith
-from kitaru_opentelemetry_importer import importer as otlp
 
-IMPORTERS = (braintrust, langfuse, langsmith, otlp)
+IMPORTERS = (braintrust, langfuse, langsmith)
 
 
 @pytest.mark.parametrize("importer", IMPORTERS)

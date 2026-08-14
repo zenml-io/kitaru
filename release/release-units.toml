@@ -109,16 +109,6 @@ tag-prefix = "python/kitaru-openai-agents/v"
 checks = ["plugin package (openai-agents)"]
 
 [[units]]
-slug = "opentelemetry-importer"
-path = "plugins/packages/opentelemetry-importer"
-distribution = "kitaru-opentelemetry-importer"
-registry = "pypi"
-version-source = "plugins/packages/opentelemetry-importer/pyproject.toml"
-default-catalog = true
-tag-prefix = "python/kitaru-opentelemetry-importer/v"
-checks = ["plugin package (opentelemetry-importer)"]
-
-[[units]]
 slug = "pydantic-ai"
 path = "plugins/packages/pydantic-ai"
 distribution = "kitaru-pydantic-ai"

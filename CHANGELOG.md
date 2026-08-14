@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc4]
+
+### Changed
+
+- Prepared the fourth Kitaru 0.22 release candidate with TypeScript publishing fixes and simplified deployable release publishing.
+
 ## [0.22.0rc3]
 
 ### Changed
@@ -45,7 +51,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Session lists filter by `experiment_run_id`, returning the sessions produced as the results of the run's replays. Baseline sessions do not match.
 - The PydanticAI adapter records estimated LLM costs from its bundled pricing catalog and accepts a custom cost calculator for private models or negotiated rates.
 - Service accounts, managed via `/v1/service-accounts`. A service account is created active without credentials and cannot be an admin, and admins update its metadata and active state. Account writes moved from `/v1/accounts` to `/v1/users` and `/v1/service-accounts`, leaving `/v1/accounts` read-only over both kinds with a new `is_service_account` filter and a `/v1/accounts/me` endpoint returning the calling account. Like all account management, service accounts require the `local` auth scheme and are unavailable when a control plane owns accounts.
-- `kitaru session import --join-on /json/pointer` groups provider traces into sessions by a scalar selected with an RFC 6901 JSON Pointer. The CLI passes the pointer through importer parameters, and Braintrust, Langfuse, LangSmith, and OpenTelemetry importers support the same `join_on` parameter.
+- `kitaru session import --join-on /json/pointer` groups provider traces into sessions by a scalar selected with an RFC 6901 JSON Pointer. The CLI passes the pointer through importer parameters, and Braintrust, Langfuse, and LangSmith importers support the same `join_on` parameter.
 - A Kitaru v2 LangGraph adapter, shipped as the independently versioned `kitaru-langgraph` distribution with the `kitaru_langgraph` import package, for synchronous and asynchronous invocation recording across compiled LangGraph runnables, LangChain agents, and Deep Agents. Factory-built agents support live model-request overrides and capability-gated static or recorded-history tool-result substitution; streaming, batch invocation, native checkpoint reconstruction, and worker-managed interrupt resume remain unsupported.
 - A non-streaming OpenAI Agents adapter, shipped as the independently versioned `kitaru-openai-agents` distribution with the `kitaru_openai_agents` import package, that preserves the native `RunResult` while recording each run as a Kitaru session with root and observed activity nodes.
 - Bare `kitaru` and `kitaru --help` now report Kitaru agent-skill discovery and the canonical installation action, while `kitaru doctor` checks skill availability without treating absent skills as unhealthy.

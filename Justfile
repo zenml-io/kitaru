@@ -11,12 +11,14 @@ UI_BUNDLE_ROOT := ".kitaru-ui-bundles"
 default:
     @just --list
 
-# Run all checks (format, lint, typecheck, typos, yaml, actions, links)
+# Run all checks (format, lint, OpenAPI, typecheck, typos, yaml, actions, links)
 check:
     @printf '─── Format Check ───────────────────────────────\n'
     @just format-check
     @printf '\n─── Lint ───────────────────────────────────────\n'
     @just lint
+    @printf '\n─── OpenAPI ────────────────────────────────────\n'
+    @just openapi-check
     @printf '\n─── Type Check ─────────────────────────────────\n'
     @just typecheck
     @printf '\n─── Typos ──────────────────────────────────────\n'
@@ -37,6 +39,10 @@ format-check:
 # Run linter
 lint:
     uv run ruff check .
+
+# Verify the committed OpenAPI specification matches the application schema
+openapi-check:
+    uv run bash scripts/check_openapi.sh
 
 # Run type checker
 typecheck:

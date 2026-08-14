@@ -15,7 +15,8 @@ Use this when you need the command catalog beyond the daily loop in the root `AG
 - `uv sync --extra server`: include server components
 - `uv sync --extra worker`: include worker components
 - `uv sync --extra otel`: include OpenTelemetry integrations
-- `just check`: run formatting, lint, typecheck, typos, YAML, actions lint, and links
+- `just check`: run formatting, lint, OpenAPI freshness, typecheck, typos, YAML, actions lint, and links
+- `just openapi-check`: verify that the committed OpenAPI specification matches the application schema
 - `just fix`: auto-fix formatting, lint issues, and YAML
 - `just test`: run the full pytest suite
 - `just test tests/test_file.py::test_name`: run one targeted test

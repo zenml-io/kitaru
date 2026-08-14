@@ -129,15 +129,6 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         display_version="0.1.0rc0",
     ),
     DefaultPluginDefinition(
-        kind=PluginKind.IMPORTER,
-        name=f"{RESERVED_NAMESPACE}/opentelemetry",
-        description="Import OpenTelemetry, Arize, and Logfire JSON exports.",
-        provider="opentelemetry",
-        entrypoint="kitaru_opentelemetry_importer.importer:parse",
-        requirement="kitaru-opentelemetry-importer==0.1.0rc0",
-        display_version="0.1.0rc0",
-    ),
-    DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
         name=f"{RESERVED_NAMESPACE}/cost",
         description="Report the total recorded session cost.",

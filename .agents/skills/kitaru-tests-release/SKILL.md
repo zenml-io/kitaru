@@ -109,8 +109,9 @@ Before creating a core tag:
 2. Confirm the intended release commits are on `develop` and identify the last immutable release tag.
 3. Review the changelog and version classification.
 4. Confirm no other release run is active.
-5. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just plugin-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
-6. Dispatch `release-plugins.yml` with the proposed package tag when a non-publishing rehearsal is needed.
+5. After changing the core version, run `uv run python scripts/generate_openapi.py` and commit the updated `openapi/openapi.json`.
+6. Run `just check`, the relevant base/CLI/MCP tests, `just mcp-schema-check`, `just cli-artifact-smoke`, `just plugin-artifact-smoke`, `just migration-check`, and `just build` as applicable. Run `just mcp-wheel-smoke` only after `just build`; it consumes the wheel under `dist/`.
+7. Dispatch `release-plugins.yml` with the proposed package tag when a non-publishing rehearsal is needed.
 
 The core Python workflow builds and verifies the wheel, publishes it to PyPI, and creates the GitHub Release. The deployables workflow then verifies the core package, tests the release images, publishes the images and Helm chart, and attaches the chart to the core GitHub Release. Stable releases also move the Docker `latest` aliases.
 

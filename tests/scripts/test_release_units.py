@@ -27,7 +27,6 @@ EXPECTED_UNITS = {
     "langgraph": "kitaru-langgraph",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
-    "opentelemetry-importer": "kitaru-opentelemetry-importer",
     "pydantic-ai": "kitaru-pydantic-ai",
 }
 
@@ -37,7 +36,6 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
     "kitaru-langsmith-importer",
-    "kitaru-opentelemetry-importer",
 }
 
 
@@ -63,7 +61,7 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
+def test_inventory_describes_exactly_the_nine_python_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -114,7 +112,9 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     )
     assert "plugins/default-requirements.txt" not in workflow
     assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
-    assert 'gh release upload "$PACKAGE_TAG" bundle-dist/* --clobber' in workflow
+    assert "gh release upload" not in workflow
+    assert "SHA256SUMS" not in workflow
+    assert "contents: write" not in workflow
     assert "promote-latest:" in workflow
 
 
@@ -391,7 +391,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 10 release units."),
+        (["validate"], "Validated 9 release units."),
     ],
 )
 def test_cli_text_commands_succeed(
