@@ -4,7 +4,13 @@ import { MastraLanguageModelV2Mock } from "@mastra/core/test-utils/llm-mock";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { KitaruAgent } from "../src/index.js";
-import { AGENT_ID, FakeAgent, installTestApi, textStep } from "./helpers.js";
+import {
+  AGENT_ID,
+  FakeAgent,
+  installTestApi,
+  invokeTool,
+  textStep,
+} from "./helpers.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -118,10 +124,39 @@ describe("KitaruAgent", () => {
     });
   });
 
-  it("does not replace caller tool hooks outside replay", async () => {
+  it("rejects an explicit structured-output model before recording", async () => {
+    const api = installTestApi();
+    const agent = new FakeAgent();
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+
+    await expect(
+      recorded.generate("hello", {
+        structuredOutput: { model: "internal-model", schema: {} },
+      } as never),
+    ).rejects.toThrow(
+      "Kitaru cannot record Mastra structuredOutput.model because Mastra does not expose the internal model call to adapter instrumentation",
+    );
+
+    expect(agent.calls).toHaveLength(0);
+    expect(api.calls).toHaveLength(0);
+  });
+
+  it("composes caller tool hooks outside replay", async () => {
     installTestApi();
     const callerBefore = vi.fn();
-    const agent = new FakeAgent();
+    const agent = new FakeAgent(async (_messages, options) => {
+      await invokeTool(options.hooks ?? {}, {
+        args: {},
+        callId: "call-1",
+        output: "done",
+        toolName: "lookup",
+      });
+      return { text: "done" };
+    });
     const recorded = new KitaruAgent(agent, {
       agentId: AGENT_ID,
       apiUrl: "https://api.example",
@@ -132,6 +167,6 @@ describe("KitaruAgent", () => {
       hooks: { beforeToolCall: callerBefore },
     });
 
-    expect(agent.calls[0]?.options.hooks?.beforeToolCall).toBe(callerBefore);
+    expect(callerBefore).toHaveBeenCalledOnce();
   });
 });

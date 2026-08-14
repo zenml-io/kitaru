@@ -148,6 +148,68 @@ describe("normalized run lifecycle", () => {
     });
   });
 
+  it("does not label an unintercepted tool call as failed", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+
+    await recordNormalizedStep(run.state, {
+      attributes: {},
+      endedAt: "2026-01-01T00:00:01.000Z",
+      failed: false,
+      inputs: null,
+      outputs: null,
+      startedAt: "2026-01-01T00:00:00.000Z",
+      tools: [
+        {
+          callId: "call-1",
+          inputs: { value: "a" },
+          toolName: "approval-gated",
+        },
+      ],
+    });
+
+    expect(client.nodes[1]?.nodes[1]).toMatchObject({
+      error: null,
+      outputs: null,
+      status: "completed",
+    });
+    expect(client.nodes[1]?.nodes[1]?.started_at).toBeUndefined();
+  });
+
+  it("still fails an intercepted tool call that never completed", async () => {
+    const client = fakeClient();
+    const run = await recorder(client);
+    await run.initialize();
+    run.state.setToolCall({
+      callId: "call-1",
+      inputs: { value: "a" },
+      mocked: false,
+      outcome: "pending",
+      toolName: "save",
+    });
+
+    await recordNormalizedStep(run.state, {
+      attributes: {},
+      failed: false,
+      inputs: null,
+      outputs: null,
+      tools: [
+        {
+          callId: "call-1",
+          inputs: { value: "a" },
+          toolName: "save",
+        },
+      ],
+    });
+
+    expect(client.nodes[1]?.nodes[1]).toMatchObject({
+      error: "Tool did not produce a result",
+      outputs: null,
+      status: "failed",
+    });
+  });
+
   it("does not hide an explicit framework tool failure with a completed ledger", async () => {
     const client = fakeClient();
     const run = await recorder(client);

@@ -118,16 +118,32 @@ function usageTokens(usage: unknown): SessionNodeCreateRequest["tokens"] {
 
 function stepOutputs(
   step: RecordedStep,
-  calls: ToolCallPayload[],
-  results: Map<string, ToolResultPayload>,
+  tools: readonly NormalizedToolCall[],
 ): JsonValue {
   return boundedRecorderJson(
     {
-      finish_reason: step.finishReason,
-      text: step.text,
-      tool_calls: calls,
-      tool_results: [...results.values()],
-      warnings: step.warnings,
+      finish_reason: step.finishReason ?? null,
+      text: boundedRecorderJson(step.text, "model step text"),
+      tool_calls: tools.map((tool) => ({
+        args: tool.inputs,
+        toolCallId: tool.callId,
+        toolName: tool.toolName,
+      })),
+      tool_results: tools.flatMap((tool) =>
+        tool.result === undefined
+          ? []
+          : [
+              {
+                args: tool.inputs,
+                isError: tool.result.failed,
+                result: tool.result.output,
+                toolCallId: tool.callId,
+                toolName: tool.toolName,
+              },
+            ],
+      ),
+      tripwire: projectRecordedMetadata(step.tripwire),
+      warnings: boundedRecorderJson(step.warnings, "model warnings"),
     },
     "model step output",
   );
@@ -193,7 +209,7 @@ export async function recordStep(
       toolName: call.toolName,
     };
   });
-  const failed = step.finishReason === "error";
+  const failed = step.finishReason === "error" || step.tripwire !== undefined;
   const servedModelId = step.response?.modelId ?? step.model?.modelId;
   const tokens = usageTokens(step.usage);
   const cost = await resolveCost(costCalculator, {
@@ -211,12 +227,14 @@ export async function recordStep(
         : {}),
     },
     cost: cost.cost,
-    error: failed ? errorMessage(step.error, "Model step failed") : undefined,
+    error: failed
+      ? errorMessage(step.error ?? step.tripwire?.reason, "Model step failed")
+      : undefined,
     externalId: step.response?.id,
     failed,
     inputs: null,
     model: servedModelId,
-    outputs: stepOutputs(step, calls, results),
+    outputs: stepOutputs(step, tools),
     provider: step.model?.provider,
     tokens,
     tools,

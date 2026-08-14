@@ -19,7 +19,7 @@ import type {
   ConfiguredBeforeToolCall,
 } from "./types.js";
 
-interface ReplayHookOptions {
+interface ToolHookOptions {
   callerHooks?: ToolHooks;
   configuredAfterToolCall?: ConfiguredAfterToolCall;
   configuredBeforeToolCall?: ConfiguredBeforeToolCall;
@@ -79,7 +79,7 @@ async function invokePassthroughBeforeHooks(
   }
 }
 
-export function createReplayToolHooks(options: ReplayHookOptions): ToolHooks {
+export function createToolHooks(options: ToolHookOptions): ToolHooks {
   const {
     callerHooks,
     configuredAfterToolCall,
@@ -99,14 +99,26 @@ export function createReplayToolHooks(options: ReplayHookOptions): ToolHooks {
         hookContext.input,
         `tool '${hookContext.toolName}' input`,
       );
-      const decision = await decideToolCall(state, {
-        callId,
-        inputs: converted.value,
-        inputsLossy: converted.lossy,
-        toolName: hookContext.toolName,
-      });
-      if (decision.type !== "execute") {
-        return { output: decision.output, proceed: false };
+      if (state.spec) {
+        const decision = await decideToolCall(state, {
+          callId,
+          inputs: converted.value,
+          inputsLossy: converted.lossy,
+          toolName: hookContext.toolName,
+        });
+        if (decision.type !== "execute") {
+          return { output: decision.output, proceed: false };
+        }
+      } else {
+        state.setToolCall({
+          callId,
+          inputs: converted.value,
+          inputsLossy: converted.lossy,
+          mocked: false,
+          outcome: "pending",
+          startedAt: new Date().toISOString(),
+          toolName: hookContext.toolName,
+        });
       }
       return invokePassthroughBeforeHooks(
         state,

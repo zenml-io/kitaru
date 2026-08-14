@@ -301,9 +301,11 @@ function withoutFailing(
  * inline marker, and a payload past the size ceiling collapses to a degraded
  * marker. Throwing here would abort a generation the caller's own code handled.
  */
-export function recordedPayloadConversion(
+function largePayloadConversion(
   value: unknown,
   path: string,
+  sensitiveKeyMode: SensitiveKeyMode,
+  sensitiveKeys: ReadonlySet<string>,
 ): RecordedConversion {
   const options: CloneOptions = {
     budget: { chars: MAX_RECORDED_PAYLOAD_CHARS * 2 },
@@ -313,8 +315,8 @@ export function recordedPayloadConversion(
     maxStringChars: MAX_RECORDED_PAYLOAD_CHARS,
     path,
     rejectLongStrings: false,
-    sensitiveKeyMode: "allow",
-    sensitiveKeys: SENSITIVE_KEYS,
+    sensitiveKeyMode,
+    sensitiveKeys,
   };
   return withoutFailing(options, () => {
     const converted = convert(value, options);
@@ -323,11 +325,39 @@ export function recordedPayloadConversion(
   });
 }
 
+export function recordedPayloadConversion(
+  value: unknown,
+  path: string,
+): RecordedConversion {
+  return largePayloadConversion(value, path, "allow", SENSITIVE_KEYS);
+}
+
 /**
  * Convert a runtime payload for recording without ever failing the run.
  */
 export function recordedPayloadJson(value: unknown, path: string): JsonValue {
   return recordedPayloadConversion(value, path).value;
+}
+
+/**
+ * Convert tool arguments or results with replay-sized bounds and credentials hidden.
+ *
+ * Redacting a credential makes an input lossy, so callers must preserve the
+ * returned flag and refuse to use that value as a history cache key.
+ */
+export function recordedToolPayloadConversion(
+  value: unknown,
+  path: string,
+): RecordedConversion {
+  return largePayloadConversion(value, path, "redact", SECRET_KEYS);
+}
+
+/** Convert tool arguments or results for recording without exposing credentials. */
+export function recordedToolPayloadJson(
+  value: unknown,
+  path: string,
+): JsonValue {
+  return recordedToolPayloadConversion(value, path).value;
 }
 
 /**

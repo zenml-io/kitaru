@@ -192,6 +192,44 @@ describe("createKitaruGenerateText", () => {
     });
   });
 
+  it("records provider warnings", async () => {
+    const client = new FakeClient();
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+
+    await generate({
+      model: new MockLanguageModelV4({
+        doGenerate: {
+          ...textResponse(),
+          warnings: [
+            {
+              details: "ignored",
+              feature: "temperature",
+              type: "unsupported",
+            },
+          ],
+        },
+      }),
+      prompt: "go",
+    });
+
+    const llmNode = client.nodeBatches
+      .flatMap((batch) => batch.nodes)
+      .find((node) => node.node_type === "llm_call");
+    expect(llmNode?.outputs).toMatchObject({
+      warnings: [
+        {
+          details: "ignored",
+          feature: "temperature",
+          type: "unsupported",
+        },
+      ],
+    });
+  });
+
   it("preserves native baseline tool concurrency", async () => {
     const client = new FakeClient();
     const events: string[] = [];
@@ -236,6 +274,16 @@ describe("createKitaruGenerateText", () => {
       "second:end",
       "first:end",
     ]);
+    const toolNodes = client.nodeBatches
+      .flatMap((batch) => batch.nodes)
+      .filter((node) => node.node_type === "tool_call");
+    expect(toolNodes).toHaveLength(2);
+    for (const node of toolNodes) {
+      expect(typeof node.started_at).toBe("string");
+      expect(Date.parse(node.started_at ?? "")).toBeLessThanOrEqual(
+        Date.parse(node.ended_at ?? ""),
+      );
+    }
   });
 
   it("keeps an ordinary application tool error as a native tool-error", async () => {

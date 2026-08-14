@@ -457,6 +457,7 @@ describe("Mastra 1.51.0 compatibility", () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const model = makeModel([new Error("model failed")]);
     const steps: CompatibilityStep[] = [];
+    const events: string[] = [];
     const agent = new Agent({
       id: "model-failure-agent",
       name: "Model failure agent",
@@ -466,13 +467,19 @@ describe("Mastra 1.51.0 compatibility", () => {
 
     await expect(
       agent.generate("Fail.", {
+        onError: ({ error }) => {
+          expect(error).toMatchObject({ message: "model failed" });
+          events.push("error");
+        },
         onStepFinish: (step) => {
           steps.push(step);
+          events.push("step");
         },
       }),
     ).rejects.toThrow("model failed");
 
     expect(steps).toHaveLength(1);
+    expect(events).toEqual(["error", "step"]);
     expect(steps[0]).toMatchObject({
       finishReason: "error",
       toolCalls: [],

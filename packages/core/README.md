@@ -37,6 +37,6 @@ Replay is execution, not a transaction. A passthrough tool can complete an exter
 
 ## Data and ordering limits
 
-Adapter calls can send task inputs, tool inputs and outputs, model metadata, and result summaries to Kitaru. Keep secrets and unnecessary personal data out of those values; the shared package does not redact application payloads. Individual adapters may impose stricter size and shape limits before values cross the recording boundary.
+Adapter calls can send task inputs, tool inputs and outputs, model metadata, and result summaries to Kitaru. The shared tool-payload recorder replaces values under the credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` with `[redacted]`. This key-name rule is only a safety net, not semantic classification, so keep secrets and unnecessary personal data out of recorded values. Individual adapters may impose stricter size and shape limits before values cross the recording boundary.
 
 Node indexes preserve the order in which an adapter submits completed model steps, with each model node stored before its tool children. They do not prove provider-side start order or wall-clock ordering among concurrent operations. Consult the framework adapter README for its callback, concurrency, input, and privacy limits.

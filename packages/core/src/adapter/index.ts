@@ -15,6 +15,8 @@ export {
   projectRecordedMetadata,
   recordedPayloadConversion,
   recordedPayloadJson,
+  recordedToolPayloadConversion,
+  recordedToolPayloadJson,
   runResultSummary,
   strictRecordedJson,
 } from "./recorded-json.js";

@@ -15,6 +15,9 @@ export type ConfiguredOnStepFinish = (
     runId?: string;
   },
 ) => Promise<void> | void;
+export type ConfiguredOnError = (event: {
+  error: unknown;
+}) => Promise<void> | void;
 export type ConfiguredBeforeToolCall = NonNullable<ToolHooks["beforeToolCall"]>;
 export type ConfiguredAfterToolCall = NonNullable<ToolHooks["afterToolCall"]>;
 
@@ -45,6 +48,7 @@ export interface RuntimeGenerateOptions {
   instructions?: unknown;
   model?: unknown;
   modelSettings?: Record<string, unknown>;
+  onError?: ConfiguredOnError;
   onStepFinish?: ConfiguredOnStepFinish;
   requestContext?: RequestContext;
   system?: unknown;

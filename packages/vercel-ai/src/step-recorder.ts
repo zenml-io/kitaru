@@ -10,8 +10,8 @@ import {
   type NormalizedToolCall,
   projectRecordedMetadata,
   type RecordedConversion,
-  recordedPayloadConversion,
-  recordedPayloadJson,
+  recordedToolPayloadConversion,
+  recordedToolPayloadJson,
   recordNormalizedStep,
   resolveCost,
 } from "@zenml-io/kitaru/adapter";
@@ -62,7 +62,7 @@ function toolInputConversion(
 ): RecordedConversion {
   const entry = state.getToolCall(call.toolCallId);
   return entry === undefined
-    ? recordedPayloadConversion(call.input, `tool '${call.toolName}' input`)
+    ? recordedToolPayloadConversion(call.input, `tool '${call.toolName}' input`)
     : { lossy: entry.inputsLossy === true, value: entry.inputs };
 }
 
@@ -87,7 +87,7 @@ function normalizedTools(
               failed,
               output:
                 part.type === "tool-result"
-                  ? recordedPayloadJson(
+                  ? recordedToolPayloadJson(
                       part.output,
                       `tool '${call.toolName}' output`,
                     )
@@ -114,7 +114,7 @@ function stepOutputs(
       tool_calls: step.toolCalls.map((call) => ({
         input:
           converted.get(call.toolCallId)?.inputs ??
-          recordedPayloadJson(call.input, `tool '${call.toolName}' input`),
+          recordedToolPayloadJson(call.input, `tool '${call.toolName}' input`),
         tool_call_id: call.toolCallId,
         tool_name: call.toolName,
       })),
@@ -124,7 +124,7 @@ function stepOutputs(
           output:
             recorded && !recorded.failed
               ? recorded.output
-              : recordedPayloadJson(
+              : recordedToolPayloadJson(
                   result.output,
                   `tool '${result.toolName}' output`,
                 ),
@@ -132,6 +132,7 @@ function stepOutputs(
           tool_name: result.toolName,
         };
       }),
+      warnings: recordedToolPayloadJson(step.warnings ?? [], "model warnings"),
     },
     "model step output",
   );

@@ -4,6 +4,7 @@ import {
   decideToolCall,
   MAX_RECORDED_STRING_CHARS,
   recordedPayloadConversion,
+  recordedToolPayloadConversion,
   type ToolCallInput,
 } from "../../src/adapter/index.js";
 import type { RunState } from "../../src/adapter/run-state.js";
@@ -89,6 +90,26 @@ const COLLIDING_PAIRS: readonly [string, unknown, unknown][] = [
 ];
 
 describe("history lookup of lossily converted tool arguments", () => {
+  it("redacts credentials without truncating ordinary replay-sized payloads", () => {
+    const secret = recordedToolPayloadConversion(
+      { api_key: "SECRET_SENTINEL", query: "weather" },
+      "input",
+    );
+    const long = recordedToolPayloadConversion(
+      { query: "a".repeat(MAX_RECORDED_STRING_CHARS + 1) },
+      "input",
+    );
+
+    expect(secret).toEqual({
+      lossy: true,
+      value: { api_key: "[redacted]", query: "weather" },
+    });
+    expect(long.lossy).toBe(false);
+    expect(long.value).toEqual({
+      query: "a".repeat(MAX_RECORDED_STRING_CHARS + 1),
+    });
+  });
+
   it.each(
     COLLIDING_PAIRS,
   )("converts %s to one value that no longer identifies either call", (_name, recorded, other) => {

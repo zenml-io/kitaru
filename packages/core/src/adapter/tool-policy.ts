@@ -2,7 +2,7 @@ import { historyCacheKey } from "../cache-key.js";
 import { ToolPolicyError, ToolPolicyMissError } from "../errors.js";
 import { recorderError, toRecorderJson } from "../json.js";
 import type { JsonValue, ToolPolicy } from "../types.js";
-import { recordedPayloadJson } from "./recorded-json.js";
+import { recordedToolPayloadJson } from "./recorded-json.js";
 import type { AdapterRunState } from "./run-state.js";
 
 type ToolLedgerEntry = NonNullable<ReturnType<AdapterRunState["getToolCall"]>>;
@@ -269,7 +269,10 @@ export function completeToolCall(
   // A passthrough tool during a replay has already fired its side effect by
   // the time its result is recorded, so an oversized or circular result is
   // bounded rather than thrown: crashing here would strand a sent email.
-  entry.output = recordedPayloadJson(output, `tool '${entry.toolName}' output`);
+  entry.output = recordedToolPayloadJson(
+    output,
+    `tool '${entry.toolName}' output`,
+  );
   entry.outcome = "completed";
 }
 

@@ -14,7 +14,7 @@ import {
   stripLiveMemoryOptions,
 } from "./replay-guards.js";
 import { type RecordedStep, recordStep } from "./step-recorder.js";
-import { createReplayToolHooks } from "./tool-policies.js";
+import { createToolHooks } from "./tool-policies.js";
 import type {
   GenerateCapable,
   GenerateMethod,
@@ -60,6 +60,25 @@ function readableModelId(model: unknown): string | undefined {
   return undefined;
 }
 
+function structuredOutputUsesModel(options: RuntimeGenerateOptions): boolean {
+  return (
+    isRecord(options.structuredOutput) &&
+    Object.hasOwn(options.structuredOutput, "model") &&
+    options.structuredOutput.model !== undefined &&
+    options.structuredOutput.model !== null
+  );
+}
+
+function tripwireReason(value: unknown): string | undefined {
+  if (!isRecord(value) || !isRecord(value.tripwire)) {
+    return undefined;
+  }
+  return typeof value.tripwire.reason === "string" &&
+    value.tripwire.reason.length > 0
+    ? value.tripwire.reason
+    : "Mastra processor tripwire triggered";
+}
+
 export class KitaruAgent<TAgent extends GenerateCapable> {
   readonly generate: GenerateMethod<TAgent>;
 
@@ -84,6 +103,11 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     callerMessages: unknown,
     callerOptions: RuntimeGenerateOptions = {},
   ): Promise<unknown> {
+    if (structuredOutputUsesModel(callerOptions)) {
+      throw new TypeError(
+        "Kitaru cannot record Mastra structuredOutput.model because Mastra does not expose the internal model call to adapter instrumentation",
+      );
+    }
     const requestedModelId =
       readableModelId(callerOptions.model) ?? this.#options.requestedModelId;
     const replay = await resolveReplayContext({
@@ -162,13 +186,26 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     try {
       await recorder.initialize();
 
+      let modelError: unknown;
+      const callerOnError = effectiveOptions.onError;
+      effectiveOptions.onError = async (event) => {
+        modelError = event.error;
+        await callerOnError?.(event);
+      };
       const callerOnStepFinish = effectiveOptions.onStepFinish;
       effectiveOptions.onStepFinish = async (step) => {
+        const recordedStep =
+          step.finishReason === "error" && modelError !== undefined
+            ? { ...step, error: modelError }
+            : step;
         await recordStep(
           state,
-          step as RecordedStep,
+          recordedStep as RecordedStep,
           this.#options.costCalculator,
         );
+        if (step.finishReason === "error") {
+          modelError = undefined;
+        }
         await this.#options.configuredOnStepFinish?.(step);
         await callerOnStepFinish?.(step);
         // Mastra turns a tool-hook rejection into a tool-error result and keeps
@@ -177,14 +214,12 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
           throw state.failure;
         }
       };
-      if (replay.spec) {
-        effectiveOptions.hooks = createReplayToolHooks({
-          callerHooks: callerOptions.hooks,
-          configuredAfterToolCall: this.#options.configuredAfterToolCall,
-          configuredBeforeToolCall: this.#options.configuredBeforeToolCall,
-          state,
-        });
-      }
+      effectiveOptions.hooks = createToolHooks({
+        callerHooks: callerOptions.hooks,
+        configuredAfterToolCall: this.#options.configuredAfterToolCall,
+        configuredBeforeToolCall: this.#options.configuredBeforeToolCall,
+        state,
+      });
 
       const generate = this.#agent.generate as unknown as RuntimeGenerate;
       const result = await generate.call(
@@ -194,6 +229,11 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       );
       if (state.failure !== undefined) {
         throw state.failure;
+      }
+      const tripwire = tripwireReason(result);
+      if (tripwire !== undefined) {
+        await recorder.fail(new Error(tripwire));
+        return result;
       }
       await recorder.complete(
         boundedRecorderJson(

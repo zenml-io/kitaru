@@ -28,6 +28,12 @@ const VALUE_INPUT = jsonSchema<{ value: string }>(
         : { success: false, error: new TypeError("invalid value") },
   },
 );
+const SECRET_INPUT = jsonSchema<{ authorization: string }>({
+  additionalProperties: false,
+  properties: { authorization: { type: "string" } },
+  required: ["authorization"],
+  type: "object",
+});
 
 const SUCCESS_OUTPUT = jsonSchema<{ saved: boolean }>(
   {
@@ -55,6 +61,37 @@ function modelForValue() {
 }
 
 describe("replay tool policies", () => {
+  it("does not look up history with redacted credentials", async () => {
+    const client = new FakeClient({
+      replay: replaySpec({ on_miss: "fail", type: "history" }),
+    });
+    const execute = vi.fn(async () => "live");
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    await expect(
+      generate({
+        model: new MockLanguageModelV4({
+          doGenerate: toolResponse([
+            {
+              id: "call-secret",
+              input: '{"authorization":"Bearer SECRET_SENTINEL"}',
+              name: "write",
+            },
+          ]),
+        }),
+        prompt: "go",
+        tools: { write: tool({ execute, inputSchema: SECRET_INPUT }) },
+      }),
+    ).rejects.toThrow("arguments could not be recorded losslessly");
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(client.lookups).toEqual([]);
+  });
+
   it("rejects prepareStep before replay can replace the model or prompt", async () => {
     const client = new FakeClient({ replay: replaySpec() });
     const model = modelForValue();

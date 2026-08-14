@@ -14,9 +14,9 @@ describe("session lifecycle", () => {
     const api = installTestApi();
     const original = new Error("model failed");
     const agent = new FakeAgent(async (_messages, options) => {
+      await options.onError?.({ error: original });
       await options.onStepFinish?.({
         ...textStep("error"),
-        error: original,
         finishReason: "error",
       } as unknown as ReturnType<typeof textStep>);
       throw original;
@@ -26,10 +26,22 @@ describe("session lifecycle", () => {
       apiUrl: "https://api.example",
       requestedModelId: "requested-model",
     });
+    const callerOnError = vi.fn();
 
-    const error = await recorded.generate("fail").catch((caught) => caught);
+    const error = await recorded
+      .generate("fail", { onError: callerOnError })
+      .catch((caught) => caught);
 
     expect(error).toBe(original);
+    expect(callerOnError).toHaveBeenCalledWith({ error: original });
+    const failedModel = api
+      .nodeBatches()
+      .flat()
+      .find((node) => node.node_type === "llm_call");
+    expect(failedModel).toMatchObject({
+      error: "model failed",
+      status: "failed",
+    });
     expect(api.nodeBatches().at(-1)?.[0]).toMatchObject({
       error: "model failed",
       name: "run",
@@ -37,6 +49,49 @@ describe("session lifecycle", () => {
     });
     expect(api.calls.at(-1)?.body).toMatchObject({
       error: "model failed",
+      status: "failed",
+    });
+  });
+
+  it("records a tripwire as failed without changing the agent result", async () => {
+    const api = installTestApi();
+    const tripwire = {
+      metadata: { category: "policy" },
+      processorId: "guard",
+      reason: "blocked",
+    };
+    const result = { text: "", tripwire };
+    const agent = new FakeAgent(async (_messages, options) => {
+      await options.onStepFinish?.({
+        ...textStep("tripwire"),
+        finishReason: "tripwire",
+        tripwire,
+      } as unknown as ReturnType<typeof textStep>);
+      return result;
+    });
+    const recorded = new KitaruAgent(agent, {
+      agentId: AGENT_ID,
+      apiUrl: "https://api.example",
+      requestedModelId: "requested-model",
+    });
+
+    await expect(recorded.generate("run")).resolves.toBe(result);
+
+    const nodes = api.nodeBatches().flat();
+    expect(nodes.find((node) => node.node_type === "llm_call")).toMatchObject({
+      error: "blocked",
+      outputs: {
+        tripwire: {
+          metadata: { category: "policy" },
+          processorId: "guard",
+          reason: "blocked",
+        },
+      },
+      status: "failed",
+    });
+    expect(nodes.at(-1)).toMatchObject({ error: "blocked", status: "failed" });
+    expect(api.calls.at(-1)?.body).toMatchObject({
+      error: "blocked",
       status: "failed",
     });
   });

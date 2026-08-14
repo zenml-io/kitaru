@@ -3,7 +3,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { KitaruAgent } from "../src/index.js";
 import type { RecordedStep } from "../src/step-recorder.js";
 import type { KitaruCostCalculator } from "../src/types.js";
-import { AGENT_ID, FakeAgent, installTestApi, textStep } from "./helpers.js";
+import {
+  AGENT_ID,
+  FakeAgent,
+  installTestApi,
+  invokeTool,
+  textStep,
+} from "./helpers.js";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -54,8 +60,28 @@ describe("step recording", () => {
           },
         },
       ],
+      warnings: [
+        {
+          details: { api_key: "SECRET_SENTINEL" },
+          feature: "temperature",
+          type: "unsupported",
+        },
+      ],
     } as unknown as RecordedStep;
     const agent = new FakeAgent(async (_messages, options) => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      await invokeTool(options.hooks ?? {}, {
+        args: rawFirst,
+        callId: "call-1",
+        output: { count: 2, label: "default" },
+        toolName: "normalize",
+      });
+      await invokeTool(options.hooks ?? {}, {
+        args: rawSecond,
+        callId: "call-2",
+        output: { temperature: 21 },
+        toolName: "weather",
+      });
       await options.onStepFinish?.(step);
       await options.onStepFinish?.(textStep("final"));
       return { text: "done" };
@@ -84,6 +110,12 @@ describe("step recording", () => {
       parent_index: llm?.index,
       status: "completed",
     });
+    const toolStartedAt = firstTool?.started_at;
+    const modelStartedAt = llm?.started_at;
+    expect(typeof toolStartedAt).toBe("string");
+    expect(Date.parse(String(toolStartedAt))).toBeGreaterThan(
+      Date.parse(String(modelStartedAt)),
+    );
     expect(secondTool).toMatchObject({
       external_id: "call-2",
       inputs: rawSecond,
@@ -98,6 +130,15 @@ describe("step recording", () => {
       model_provider: "test-provider",
       requested_model: "requested-model",
       tokens: { input_tokens: 3, output_tokens: 2 },
+    });
+    expect(llm?.outputs).toMatchObject({
+      warnings: [
+        {
+          details: { api_key: "[redacted]" },
+          feature: "temperature",
+          type: "unsupported",
+        },
+      ],
     });
     expect(typeof llm?.started_at).toBe("string");
     expect(stepBatches[1]?.[0]?.index).toBe(4);

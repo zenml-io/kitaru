@@ -17,6 +17,12 @@ const VALUE_INPUT = jsonSchema<{ value: string }>({
   required: ["value"],
   type: "object",
 });
+const SECRET_INPUT = jsonSchema<{ authorization: string }>({
+  additionalProperties: false,
+  properties: { authorization: { type: "string" } },
+  required: ["authorization"],
+  type: "object",
+});
 
 function nodesOf(client: FakeClient): SessionNodeCreateRequest[] {
   return client.nodeBatches.flatMap((batch) => batch.nodes);
@@ -79,6 +85,43 @@ describe("recording large payloads", () => {
     expect(toolNode?.outputs).toBe(LONG_TEXT);
     expect(toolNode?.status).toBe("completed");
     expect(toolNode?.error).toBeNull();
+  });
+
+  it("redacts credentials from tool arguments and results", async () => {
+    const client = new FakeClient();
+    const model = new MockLanguageModelV4({
+      doGenerate: toolResponse([
+        {
+          id: "call-secret",
+          input: JSON.stringify({ authorization: "Bearer SECRET_SENTINEL" }),
+          name: "lookup",
+        },
+      ]),
+    });
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: {},
+    });
+
+    await generate({
+      model,
+      prompt: "go",
+      tools: {
+        lookup: tool({
+          execute: async () => ({ api_key: "SECRET_SENTINEL", hits: 2 }),
+          inputSchema: SECRET_INPUT,
+        }),
+      },
+    });
+
+    const serialized = JSON.stringify(nodesOf(client));
+    expect(serialized).not.toContain("SECRET_SENTINEL");
+    const toolNode = nodesOf(client).find(
+      (node) => node.node_type === "tool_call",
+    );
+    expect(toolNode?.inputs).toEqual({ authorization: "[redacted]" });
+    expect(toolNode?.outputs).toEqual({ api_key: "[redacted]", hits: 2 });
   });
 
   it("degrades a payload beyond the recording ceiling instead of failing the run", async () => {

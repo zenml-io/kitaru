@@ -26,7 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Fixed TypeScript replay policy edge cases and made the adapter examples reproducible, rerunnable, and part of CI.
+- Fixed TypeScript replay and recording edge cases, aligned credential redaction and provider diagnostics across adapters, and made the adapter examples reproducible, rerunnable, and part of CI.
 
 ### Added
 - TypeScript SDK packages for the core client and replay runtime, with Mastra and Vercel AI SDK adapters and runnable examples.

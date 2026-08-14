@@ -12,8 +12,8 @@ import {
   decideToolCall,
   failToolCall,
   type RecordedConversion,
-  recordedPayloadConversion,
   recordedPayloadJson,
+  recordedToolPayloadConversion,
   selectToolPolicy,
 } from "@zenml-io/kitaru/adapter";
 import {
@@ -131,6 +131,7 @@ function setBaselineLedger(
     inputsLossy: input.lossy,
     mocked: false,
     outcome: "pending",
+    startedAt: new Date().toISOString(),
     toolName,
   });
 }
@@ -286,7 +287,7 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
         executionOptions: ToolExecutionOptions<never>,
       ) => {
         const callId = executionOptions.toolCallId;
-        const convertedInput = recordedPayloadConversion(
+        const convertedInput = recordedToolPayloadConversion(
           input,
           `tool '${toolName}' input`,
         );

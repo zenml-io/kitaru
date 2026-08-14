@@ -132,6 +132,34 @@ describe("replay tool policies", () => {
     });
   });
 
+  it("does not look up history with redacted credentials", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const api = installTestApi({
+      replaySpec: replaySpec({
+        default: {
+          on_miss: "fail",
+          scope: "baseline",
+          type: "history",
+        },
+        tools: {},
+      }),
+    });
+    const execute = vi.fn(() => "real");
+
+    await expect(
+      wrapper(
+        replayAgent(execute, {
+          authorization: "Bearer SECRET_SENTINEL",
+        }),
+      ).generate("run"),
+    ).rejects.toBeInstanceOf(ToolPolicyMissError);
+
+    expect(execute).not.toHaveBeenCalled();
+    expect(api.calls.some((call) => call.path.endsWith("/tool-lookup"))).toBe(
+      false,
+    );
+  });
+
   it("returns and records a failed error_result on a static miss", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi({
