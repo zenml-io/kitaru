@@ -36,6 +36,12 @@ logger = logging.getLogger(__name__)
 # Maintenance database used for CREATE and DROP DATABASE statements.
 _DEFAULT_DATABASE = "postgres"
 
+# Async PostgreSQL driver used for all engines.
+_DRIVER = "postgresql+asyncpg"
+
+# Query parameters that configure SSL directly on a database URL.
+_SSL_QUERY_KEYS = {"ssl", "sslmode", "sslcert", "sslkey", "sslrootcert"}
+
 
 class DatabaseService:
     """Manage the Kitaru database engine and schema lifecycle."""
@@ -49,20 +55,28 @@ class DatabaseService:
         self.settings = settings or get_settings()
         logger.info("Initializing async database engine.")
         self.engine = self.create_async_engine(self.settings)
+        self.read_engine = self.create_read_async_engine(self.settings) or self.engine
         register_analytics_listeners()
 
     async def cleanup(self) -> None:
         """Release database engine resources."""
         await self.engine.dispose()
+        if self.read_engine is not self.engine:
+            await self.read_engine.dispose()
 
-    async def get_async_session(self) -> AsyncGenerator[AsyncSession, None]:
+    async def get_async_session(
+        self, read_only: bool = False
+    ) -> AsyncGenerator[AsyncSession, None]:
         """Provide one async database session for the current scope.
+
+        Args:
+            read_only: Bind the session to the read-replica engine.
 
         Yields:
             Request- or task-scoped session bound to the service engine.
         """
         session_factory = async_sessionmaker(
-            bind=self.engine,
+            bind=self.read_engine if read_only else self.engine,
             class_=AsyncSession,
             expire_on_commit=False,
             info={
@@ -180,11 +194,43 @@ class DatabaseService:
         Returns:
             Configured asynchronous database engine.
         """
+        return cls._create_engine_for_uri(
+            cls.generate_database_uri(settings, use_default_db=use_default_db),
+            settings,
+        )
+
+    @classmethod
+    def create_read_async_engine(cls, settings: Settings) -> AsyncEngine | None:
+        """Create the read-replica database engine when one is configured.
+
+        Args:
+            settings: Database connection settings.
+
+        Returns:
+            Configured asynchronous database engine, or None when no read
+            replica is configured.
+        """
+        uri = cls.generate_read_database_uri(settings)
+        if uri is None:
+            return None
+        return cls._create_engine_for_uri(uri, settings)
+
+    @classmethod
+    def _create_engine_for_uri(
+        cls, uri: sqlalchemy.engine.url.URL, settings: Settings
+    ) -> AsyncEngine:
+        """Create an async engine bound to the given connection URL.
+
+        Args:
+            uri: SQLAlchemy connection URL.
+            settings: Database connection settings supplying pool and SSL
+                options.
+
+        Returns:
+            Configured asynchronous database engine.
+        """
         return create_async_engine(
-            cls.generate_database_uri(
-                settings,
-                use_default_db=use_default_db,
-            ),
+            uri,
             connect_args={"ssl": cls._build_ssl_context(settings)},
             pool_size=settings.DB_POOL_SIZE,
             max_overflow=settings.DB_MAX_OVERFLOW,
@@ -195,6 +241,27 @@ class DatabaseService:
             pool_pre_ping=True,
             echo=False,
         )
+
+    @staticmethod
+    def _reject_ssl_query_params(
+        url: sqlalchemy.engine.url.URL, setting_name: str
+    ) -> None:
+        """Reject a database URL that configures SSL via query parameters.
+
+        Args:
+            url: Parsed database connection URL.
+            setting_name: Environment variable name to reference in the error.
+
+        Raises:
+            ValueError: The URL configures SSL through query parameters.
+        """
+        configured_ssl_keys = _SSL_QUERY_KEYS.intersection(url.query)
+        if configured_ssl_keys:
+            keys = ", ".join(sorted(configured_ssl_keys))
+            raise ValueError(
+                "Configure PostgreSQL SSL with KITARU_SERVER_DB_SSL_* "
+                f"settings, not {setting_name} query parameters: {keys}"
+            )
 
     @classmethod
     def generate_database_uri(
@@ -213,7 +280,6 @@ class DatabaseService:
         Returns:
             SQLAlchemy URL using the ``postgresql+asyncpg`` driver.
         """
-        driver = "postgresql+asyncpg"
         db_name = (
             _DEFAULT_DATABASE
             if use_default_db
@@ -222,27 +288,14 @@ class DatabaseService:
 
         if settings.DATABASE_URL:
             url = sqlalchemy.engine.url.make_url(settings.DATABASE_URL)
-            ssl_query_keys = {
-                "ssl",
-                "sslmode",
-                "sslcert",
-                "sslkey",
-                "sslrootcert",
-            }
-            configured_ssl_keys = ssl_query_keys.intersection(url.query)
-            if configured_ssl_keys:
-                keys = ", ".join(sorted(configured_ssl_keys))
-                raise ValueError(
-                    "Configure PostgreSQL SSL with KITARU_SERVER_DB_SSL_* "
-                    f"settings, not DATABASE_URL query parameters: {keys}"
-                )
+            cls._reject_ssl_query_params(url, "DATABASE_URL")
             if use_default_db:
                 url = url.set(database=_DEFAULT_DATABASE)
             return url
 
         if settings.DB_HOST:
             return sqlalchemy.engine.url.URL.create(
-                drivername=driver,
+                drivername=_DRIVER,
                 username=settings.DB_USER,
                 password=settings.DB_PWD,
                 database=db_name,
@@ -253,3 +306,33 @@ class DatabaseService:
         raise RuntimeError(
             "Either KITARU_SERVER_DB_HOST or KITARU_SERVER_DATABASE_URL must be set."
         )
+
+    @classmethod
+    def generate_read_database_uri(
+        cls, settings: Settings
+    ) -> sqlalchemy.engine.url.URL | None:
+        """Build the read-replica PostgreSQL connection URL used by the service.
+
+        Args:
+            settings: Service settings supplying connection parameters.
+
+        Returns:
+            SQLAlchemy URL using the ``postgresql+asyncpg`` driver, or None
+            when no read replica is configured.
+        """
+        if settings.READ_DATABASE_URL:
+            url = sqlalchemy.engine.url.make_url(settings.READ_DATABASE_URL)
+            cls._reject_ssl_query_params(url, "READ_DATABASE_URL")
+            return url
+
+        if settings.DB_READ_HOST:
+            return sqlalchemy.engine.url.URL.create(
+                drivername=_DRIVER,
+                username=settings.DB_USER,
+                password=settings.DB_PWD,
+                database=cls.application_database_name(settings),
+                host=settings.DB_READ_HOST,
+                port=settings.DB_PORT,
+            )
+
+        return None
