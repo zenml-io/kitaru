@@ -32,7 +32,7 @@ importers:
   packages/mastra:
     dependencies:
       '@zenml-io/kitaru':
-        specifier: workspace:0.1.0-rc.2
+        specifier: workspace:0.1.0-rc.3
         version: link:../core
     devDependencies:
       '@mastra/core':
@@ -45,7 +45,7 @@ importers:
   packages/vercel-ai:
     dependencies:
       '@zenml-io/kitaru':
-        specifier: workspace:0.1.0-rc.2
+        specifier: workspace:0.1.0-rc.3
         version: link:../core
     devDependencies:
       ai:

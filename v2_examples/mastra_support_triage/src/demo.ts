@@ -36,7 +36,7 @@ import {
   type RunManifest,
   RunManifestStore,
 } from "./run-state.js";
-import type { runDedicatedWorker } from "./worker.js";
+import { preflightDedicatedWorker, runDedicatedWorker } from "./worker.js";
 
 const EXAMPLE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolve(EXAMPLE_DIR, "../..");
@@ -86,6 +86,7 @@ export interface RunDemoOptions {
 export interface DemoDependencies {
   client?: KitaruClient;
   createClient?: typeof createKitaruClient;
+  preflightWorker?: typeof preflightDedicatedWorker;
   readScorer?: () => Promise<Uint8Array>;
   runWorker?: typeof runDedicatedWorker;
 }
@@ -434,6 +435,16 @@ async function runLockedDemo(
     return collectResult(client, store);
   }
 
+  const environment = options.environment ?? process.env;
+  if (dependencies.preflightWorker !== undefined) {
+    await dependencies.preflightWorker({ apiUrl: serverUrl });
+  } else if (dependencies.runWorker === undefined) {
+    await preflightDedicatedWorker({ apiUrl: serverUrl }, { environment });
+  }
+  const runWorker =
+    dependencies.runWorker ??
+    ((workerOptions) => runDedicatedWorker(workerOptions, { environment }));
+
   const suffix = manifest.run_id.replaceAll("-", "").slice(0, 10);
   if (manifest.resources.agent_id === undefined) {
     const request = {
@@ -664,7 +675,7 @@ async function runLockedDemo(
     expectedKind: "session_run",
     jobId: initialJobId,
     ownerId: account.id,
-    runWorker: dependencies.runWorker,
+    runWorker,
     store,
   });
   let initialSessionId = manifest.resources.initial_session_id;
@@ -790,7 +801,7 @@ async function runLockedDemo(
     expectedKind: "replay",
     jobId: replayBeforeRun.job_id,
     ownerId: account.id,
-    runWorker: dependencies.runWorker,
+    runWorker,
     store,
   });
   const replay = await client.replays.get(replayId);

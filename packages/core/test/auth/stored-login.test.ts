@@ -143,6 +143,64 @@ describe("stored CLI login", () => {
     });
   });
 
+  it("never uses a stored credential for a different server", async () => {
+    const root = await writeStore("https://first.example", {
+      api_key: "KITKEY_first",
+      type: "server",
+    });
+    const fetch = vi.fn<typeof globalThis.fetch>();
+    const client = await createKitaruClient({
+      apiUrl: "https://second.example",
+      environment: { KITARU_CONFIG_DIR: root },
+      fetch,
+    });
+
+    await expect(client.getReplay("missing")).rejects.toThrow(
+      "No stored Kitaru login exists for https://second.example",
+    );
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it("ignores canonical-key collisions for unrelated servers", async () => {
+    const serverUrl = "https://selected.example";
+    const root = await writeStore(serverUrl, {
+      api_key: "KITKEY_selected",
+      type: "server",
+    });
+    const path = join(root, "credentials.json");
+    const payload = JSON.parse(await readFile(path, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    payload["https://other.example"] = {
+      api_key: "KITKEY_other_one",
+      type: "server",
+      url: "https://other.example",
+    };
+    payload["https://OTHER.example:443"] = {
+      api_key: "KITKEY_other_two",
+      type: "server",
+      url: "https://OTHER.example:443",
+    };
+    await writeFile(path, JSON.stringify(payload));
+    await chmod(path, 0o600);
+    const fetch = vi.fn<typeof globalThis.fetch>(
+      async () =>
+        new Response(JSON.stringify({ detail: "missing" }), { status: 404 }),
+    );
+
+    const client = await createKitaruClient({
+      environment: { KITARU_CONFIG_DIR: root },
+      fetch,
+    });
+    await expect(client.getReplay("missing")).rejects.toMatchObject({
+      status: 404,
+    });
+    expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
+      Authorization: "Bearer KITKEY_selected",
+    });
+  });
+
   it("uses KITKEY directly and exchanges an expired device token read-only", async () => {
     const apiKeyRoot = await writeStore("https://key.example", {
       api_key: "KITKEY_direct",

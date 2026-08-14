@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   buildDedicatedWorkerInvocation,
+  preflightDedicatedWorker,
   runDedicatedWorker,
 } from "../src/worker.js";
 
@@ -38,15 +39,16 @@ describe("dedicated worker invocation", () => {
     ]);
   });
 
-  it("lets the Python CLI resolve its stored login without exporting a token", async () => {
+  it("passes only the credentials and runtime state needed by the trusted worker", async () => {
     const spawn = vi.fn((_command, _args, options) => {
       expect(options.env).toMatchObject({
         HOME: "/Users/test",
+        KITARU_API_KEY: "KITKEY_test",
+        KITARU_API_TOKEN: "access-token",
         KITARU_CONFIG_DIR: "/tmp/kitaru-config",
         PATH: "/usr/local/bin",
       });
-      expect(options.env).not.toHaveProperty("KITARU_API_KEY");
-      expect(options.env).not.toHaveProperty("KITARU_API_TOKEN");
+      expect(options.env).not.toHaveProperty("UNRELATED_SECRET");
       return Promise.resolve({ code: 0, signal: null });
     });
 
@@ -55,6 +57,8 @@ describe("dedicated worker invocation", () => {
       {
         environment: {
           HOME: "/Users/test",
+          KITARU_API_KEY: "KITKEY_test",
+          KITARU_API_TOKEN: "access-token",
           KITARU_CONFIG_DIR: "/tmp/kitaru-config",
           PATH: "/usr/local/bin",
           UNRELATED_SECRET: "must-not-cross",
@@ -64,6 +68,41 @@ describe("dedicated worker invocation", () => {
     );
 
     expect(spawn).toHaveBeenCalledTimes(1);
+  });
+
+  it("checks the worker CLI authentication before the demo mutates remote state", async () => {
+    const spawn = vi.fn().mockResolvedValue({ code: 3, signal: null });
+
+    await expect(
+      preflightDedicatedWorker(
+        { apiUrl: "https://kitaru.example.test" },
+        {
+          environment: { KITARU_API_KEY: "invalid", PATH: "/usr/bin" },
+          spawn,
+        },
+      ),
+    ).rejects.toThrow(
+      "Dedicated worker authentication preflight exited with code 3",
+    );
+    expect(spawn).toHaveBeenCalledWith(
+      "kitaru",
+      [
+        "doctor",
+        "--server",
+        "https://kitaru.example.test",
+        "--output",
+        "json",
+        "--machine",
+        "--non-interactive",
+        "--no-browser",
+      ],
+      expect.objectContaining({
+        env: {
+          KITARU_API_KEY: "invalid",
+          PATH: "/usr/bin",
+        },
+      }),
+    );
   });
 
   it("reports a non-zero worker exit without starting a second worker", async () => {

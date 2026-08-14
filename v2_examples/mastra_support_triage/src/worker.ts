@@ -8,6 +8,11 @@ export interface WorkerInvocationOptions {
   stateDir: string;
 }
 
+export interface WorkerPreflightOptions {
+  apiUrl?: string;
+  executable?: string;
+}
+
 export interface WorkerInvocation {
   args: string[];
   command: string;
@@ -35,6 +40,8 @@ export interface RunDedicatedWorkerDependencies {
 
 const PASSTHROUGH_ENVIRONMENT = [
   "HOME",
+  "KITARU_API_KEY",
+  "KITARU_API_TOKEN",
   "KITARU_CONFIG_DIR",
   "LANG",
   "LC_ALL",
@@ -66,6 +73,12 @@ const spawnWorker: SpawnWorker = (command, args, options) =>
     child.once("close", (code, signal) => resolve({ code, signal }));
   });
 
+function getWorkerExitOutcome(result: SpawnResult): string {
+  return result.code === null
+    ? `was terminated by ${result.signal ?? "an unknown signal"}`
+    : `exited with code ${result.code}`;
+}
+
 export function buildDedicatedWorkerInvocation(
   options: WorkerInvocationOptions,
 ): WorkerInvocation {
@@ -94,6 +107,36 @@ export function buildDedicatedWorkerInvocation(
   };
 }
 
+export async function preflightDedicatedWorker(
+  options: WorkerPreflightOptions = {},
+  dependencies: RunDedicatedWorkerDependencies = {},
+): Promise<void> {
+  const args = ["doctor"];
+  if (options.apiUrl !== undefined) {
+    args.push("--server", options.apiUrl);
+  }
+  args.push(
+    "--output",
+    "json",
+    "--machine",
+    "--non-interactive",
+    "--no-browser",
+  );
+  const result = await (dependencies.spawn ?? spawnWorker)(
+    options.executable ?? "kitaru",
+    args,
+    {
+      env: workerEnvironment(dependencies.environment ?? process.env),
+      signal: dependencies.signal,
+    },
+  );
+  if (result.code !== 0) {
+    throw new Error(
+      `Dedicated worker authentication preflight ${getWorkerExitOutcome(result)}`,
+    );
+  }
+}
+
 export async function runDedicatedWorker(
   options: WorkerInvocationOptions,
   dependencies: RunDedicatedWorkerDependencies = {},
@@ -114,10 +157,8 @@ export async function runDedicatedWorker(
     },
   );
   if (result.code !== 0) {
-    const outcome =
-      result.code === null
-        ? `was terminated by ${result.signal ?? "an unknown signal"}`
-        : `exited with code ${result.code}`;
-    throw new Error(`Dedicated worker for job ${options.jobId} ${outcome}`);
+    throw new Error(
+      `Dedicated worker for job ${options.jobId} ${getWorkerExitOutcome(result)}`,
+    );
   }
 }

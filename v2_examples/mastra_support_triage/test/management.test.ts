@@ -84,6 +84,44 @@ async function setupStore(): Promise<RunManifestStore> {
 }
 
 describe("runOwnedJob", () => {
+  it("sends one successful cancellation after a worker failure", async () => {
+    const primary = new Error("worker authentication failed");
+    const cancel = vi
+      .fn()
+      .mockResolvedValue(job({ cancel_requested_at: "2026-08-14T10:00:01Z" }));
+    const client: JobManagementClient = {
+      jobs: {
+        cancel,
+        get: vi.fn().mockResolvedValue(job()),
+        listTasks: vi.fn().mockResolvedValue({
+          items: [task()],
+          next_cursor: null,
+        }),
+        wait: vi.fn(),
+      },
+    };
+
+    const error = await runOwnedJob({
+      client,
+      expectedAgentVersionId: VERSION_ID,
+      expectedKind: "session_run",
+      jobId: JOB_ID,
+      ownerId: OWNER_ID,
+      runWorker: vi.fn().mockRejectedValue(primary),
+      store: await setupStore(),
+    }).catch((caught: unknown) => caught);
+
+    expect(error).toBeInstanceOf(WorkerJobError);
+    expect((error as WorkerJobError).cause).toBe(primary);
+    expect((error as WorkerJobError).cancellation).toMatchObject({
+      job_id: JOB_ID,
+      state: "accepted",
+      reconciled_after_error: false,
+    });
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(cancel).toHaveBeenCalledWith(JOB_ID);
+  });
+
   it("cancels once, reconciles a 409 by exact read, and preserves the worker error", async () => {
     const primary = new Error("worker authentication failed");
     const cancel = vi

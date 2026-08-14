@@ -97,7 +97,7 @@ jobs:
       - run: pnpm run test:built
       - name: Build and test exact package tarballs
         run: pnpm run pack:release:built
-      - run: uv sync --frozen --extra server
+      - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Test compiled TypeScript adapters through Worker
         run: uv run pytest -q tests/typescript
       - name: Record artifact checksums

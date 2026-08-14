@@ -277,6 +277,50 @@ describe("RunManifestStore", () => {
     });
   });
 
+  it("authorizes replacement only for the exact committed operation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kitaru-mastra-state-"));
+    const store = await RunManifestStore.create({
+      ownerId: OWNER_ID,
+      rootDir: root,
+      runId: RUN_ID,
+      serverUrl: "https://kitaru.example.test",
+    });
+    const fingerprint = operationFingerprint({ name: "replay" });
+    await store.createRemote("create_replay", fingerprint, async () => ({
+      id: OLD_JOB_ID,
+      job_id: NEW_JOB_ID,
+    }));
+
+    const mismatches = [
+      ["create_initial_job", fingerprint, [OLD_JOB_ID, NEW_JOB_ID]],
+      [
+        "create_replay",
+        operationFingerprint({ name: "changed" }),
+        [OLD_JOB_ID, NEW_JOB_ID],
+      ],
+      ["create_replay", fingerprint, [OLD_JOB_ID]],
+      ["create_replay", fingerprint, [OLD_JOB_ID, OWNER_ID]],
+      ["create_replay", fingerprint, [NEW_JOB_ID, OLD_JOB_ID]],
+    ] as const;
+    for (const [kind, candidateFingerprint, remoteIds] of mismatches) {
+      await expect(
+        store.authorizeReplacement(kind, candidateFingerprint, remoteIds),
+      ).rejects.toThrow("No exact committed");
+    }
+
+    expect((await store.read()).operations.at(-1)?.state).toBe("committed");
+    await store.authorizeReplacement("create_replay", fingerprint, [
+      OLD_JOB_ID,
+      NEW_JOB_ID,
+    ]);
+    expect((await store.read()).operations.at(-1)).toMatchObject({
+      fingerprint,
+      kind: "create_replay",
+      remote_ids: [OLD_JOB_ID, NEW_JOB_ID],
+      state: "retried",
+    });
+  });
+
   it("adopts an exact validated remote object without issuing the create again", async () => {
     const root = await mkdtemp(join(tmpdir(), "kitaru-mastra-state-"));
     const store = await RunManifestStore.create({

@@ -37,6 +37,8 @@ console.log(account.id);
 
 The Node entry reads the Python CLI's selected server and stored credential. It binds the credential to that exact server, renews an expired renewable login in memory, and never rewrites the CLI store. Explicit `apiUrl`, `apiKey`, or `credentialProvider` options override stored selection. `KITARU_API_TOKEN` takes precedence over `KITARU_API_KEY` when no credential option is supplied.
 
+The Node entry accepts HTTPS servers and cleartext HTTP only on loopback addresses, even if the Python CLI has stored another HTTP URL. If you run `kitaru login` again while a Node client is active, create a new client afterward. An existing client fails closed when the stored identity changes instead of silently adopting the replacement login.
+
 Importing `@zenml-io/kitaru` or `@zenml-io/kitaru/client` never reads CLI files. Use those runtime-neutral entries in browsers, edge runtimes, and processes that receive credentials explicitly.
 
 ## Use explicit process credentials
