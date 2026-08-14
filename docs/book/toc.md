@@ -41,6 +41,7 @@
 * [Pydantic AI](adapters/pydantic-ai.md)
 * [LangGraph](adapters/langgraph.md)
 * [OpenAI Agents SDK](adapters/openai-agents.md)
+* [No adapter for your framework](adapters/custom.md)
 
 ## Running the Server
 

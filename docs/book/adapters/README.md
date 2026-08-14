@@ -24,6 +24,8 @@ replaying are two modes of one wrapper.
 Each adapter ships as its own distribution, installed alongside Kitaru in
 the agent's environment.
 
+### Python
+
 | Framework | Install | Entry point | Records | Replays |
 |---|---|---|---|---|
 | [PydanticAI](pydantic-ai.md) | `kitaru-pydantic-ai` | `kitaru_pydantic_ai.KitaruAgent` | Yes | Yes |
@@ -35,6 +37,21 @@ factories return LangGraph runnables. What the LangGraph adapter can
 replay depends on how the graph was constructed; its
 [capability matrix](langgraph.md#capability-matrix) is the reference.
 
+### TypeScript
+
+<!-- TODO(v2-launch): TypeScript support lands with #679 (feat/ts-support),
+     open but unmerged at the time of writing, at 0.1.0-rc.1. Confirm the
+     published package names and entry points before publish. -->
+
+| Framework | Install | Entry point |
+|---|---|---|
+| Vercel AI SDK | `@zenml-io/kitaru-vercel-ai` | `createKitaruGenerateText` |
+| Mastra | `@zenml-io/kitaru-mastra` | `KitaruAgent` |
+
+Both build on `@zenml-io/kitaru`, the TypeScript SDK and adapter
+foundation, which you can also record against directly the same way the
+Python SDK is used below.
+
 <!-- TODO(v2-launch): the Claude Agent SDK, Gemini and Google ADK adapters
      from the v1 line are still unported to the v2 recording API — their
      pages exist on develop but describe the v1 surface. Confirm whether
@@ -42,16 +59,23 @@ replay depends on how the graph was constructed; its
 
 More adapters are on the way; the v1 line of Kitaru shipped six, and the
 rest are being ported to the v2 recording API. If your framework isn't
-covered yet, you have two options today:
+covered yet you have three options today, none of which involve waiting
+for us — see [No adapter for your framework](custom.md) for the full
+comparison:
 
 * **Import** — your framework already emits traces to Langfuse,
   LangSmith, Braintrust, or OpenTelemetry?
   [Import them](../getting-started/import-your-traces.md); sessions from
-  imports can be replayed and evaluated like any other.
+  imports can be replayed and evaluated like any other. Any other format
+  converts to [Kitaru JSONL or OTLP](../guides/importing-sessions.md).
 * **Record directly** — the recording API is small: create a session,
   ingest nodes. `client.sessions.create(...)` and
   `client.sessions.ingest_nodes(...)` are all an adapter does, and they're
-  yours to call from any Python agent.
+  yours to call from any Python agent. The `kitaru-adapter-builder`
+  [agent skill](../agent-native/skills.md) will write that wrapper for you.
+* **Hand the run back to your own system** — register the agent version as
+  a function instead of a command, and Kitaru calls you to run it. See
+  [Let Kitaru call your agent](custom.md#let-kitaru-call-your-agent).
 
 ## Why the wrapper is enough
 
