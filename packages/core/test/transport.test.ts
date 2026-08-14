@@ -137,6 +137,50 @@ describe("KitaruTransport", () => {
     expect((secondMultipart as FormData).get("file")).toBeInstanceOf(Blob);
   });
 
+  it("gives each retry attempt a fresh timeout", async () => {
+    vi.useFakeTimers();
+    try {
+      const fetch = vi.fn<typeof globalThis.fetch>(
+        (_input, init): Promise<Response> =>
+          new Promise((resolve, reject) => {
+            const timer = setTimeout(() => {
+              resolve(
+                fetch.mock.calls.length === 1
+                  ? jsonResponse({ detail: "unavailable" }, 503)
+                  : jsonResponse({ ok: true }),
+              );
+            }, 80);
+            init?.signal?.addEventListener(
+              "abort",
+              () => {
+                clearTimeout(timer);
+                reject(new DOMException("Aborted", "AbortError"));
+              },
+              { once: true },
+            );
+          }),
+      );
+      const transport = new KitaruTransport({
+        apiUrl: "https://api.example",
+        fetch,
+        timeoutMs: 100,
+      });
+
+      const result = transport.request<{ ok: boolean }>({
+        method: "GET",
+        path: "/v1/items",
+        retry: { attempts: 2, statuses: new Set([503]) },
+      });
+
+      await vi.advanceTimersByTimeAsync(80);
+      await vi.advanceTimersByTimeAsync(80);
+      await expect(result).resolves.toEqual({ ok: true });
+      expect(fetch).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("does not retry a mutation unless the endpoint opts in", async () => {
     const fetch = vi.fn<typeof globalThis.fetch>(async () =>
       jsonResponse({ detail: "unavailable" }, 503),

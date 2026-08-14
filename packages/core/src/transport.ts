@@ -253,6 +253,39 @@ async function discardResponse(response: Response): Promise<void> {
   }
 }
 
+interface RequestDeadline {
+  canceledByCaller: () => boolean;
+  cleanup: () => void;
+  signal: AbortSignal;
+}
+
+function createRequestDeadline(
+  callerSignal: AbortSignal | undefined,
+  timeoutMs: number,
+): RequestDeadline {
+  const controller = new AbortController();
+  let canceledByCaller = callerSignal?.aborted ?? false;
+  const cancel = () => {
+    canceledByCaller = true;
+    controller.abort(callerSignal?.reason);
+  };
+  callerSignal?.addEventListener("abort", cancel, { once: true });
+  if (canceledByCaller) {
+    controller.abort(callerSignal?.reason);
+  }
+  const timeout = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+  return {
+    canceledByCaller: () => canceledByCaller,
+    cleanup: () => {
+      clearTimeout(timeout);
+      callerSignal?.removeEventListener("abort", cancel);
+    },
+    signal: controller.signal,
+  };
+}
+
 export class KitaruTransport {
   readonly #apiUrl: string;
   readonly #credentialProvider?: ReturnType<typeof bindCredentialProvider>;
@@ -283,25 +316,14 @@ export class KitaruTransport {
     if (!Number.isInteger(attempts) || attempts < 1) {
       throw new Error("Retry attempts must be a positive integer");
     }
-    const controller = new AbortController();
-    let canceledByCaller = request.signal?.aborted ?? false;
-    const cancel = () => {
-      canceledByCaller = true;
-      controller.abort(request.signal?.reason);
-    };
-    request.signal?.addEventListener("abort", cancel, { once: true });
-    if (canceledByCaller) {
-      controller.abort(request.signal?.reason);
-    }
-    const timeout = setTimeout(() => {
-      controller.abort();
-    }, this.#timeoutMs);
-
-    const failForAbort = (cause?: unknown): never => {
-      const kind: KitaruApiErrorKind = canceledByCaller
+    const failForAbort = (
+      deadline: RequestDeadline,
+      cause?: unknown,
+    ): never => {
+      const kind: KitaruApiErrorKind = deadline.canceledByCaller()
         ? "canceled"
         : "timeout";
-      const detail = canceledByCaller
+      const detail = deadline.canceledByCaller()
         ? "Request canceled by caller"
         : `Request timed out after ${this.#timeoutMs}ms`;
       throw new KitaruApiError(request.method, request.path, null, detail, {
@@ -310,36 +332,48 @@ export class KitaruTransport {
       });
     };
 
-    try {
-      if (controller.signal.aborted) {
-        failForAbort();
-      }
-      let credential: ResolvedCredential | undefined;
+    let credential: ResolvedCredential | undefined;
+    const provider = this.#credentialProvider;
+    if (provider !== undefined && request.authenticate !== false) {
+      const credentialDeadline = createRequestDeadline(
+        request.signal,
+        this.#timeoutMs,
+      );
       try {
-        const provider = this.#credentialProvider;
-        if (provider !== undefined && request.authenticate !== false) {
-          credential = await provider.getCredential(controller.signal);
+        if (credentialDeadline.signal.aborted) {
+          failForAbort(credentialDeadline);
         }
-      } catch (error) {
-        if (controller.signal.aborted) {
-          failForAbort(error);
+        try {
+          credential = await provider.getCredential(credentialDeadline.signal);
+        } catch (error) {
+          if (credentialDeadline.signal.aborted) {
+            failForAbort(credentialDeadline, error);
+          }
+          throw new KitaruApiError(
+            request.method,
+            request.path,
+            null,
+            error instanceof KitaruCredentialError
+              ? error.message
+              : "Credential lookup failed",
+            { cause: error, kind: "transport" },
+          );
         }
-        throw new KitaruApiError(
-          request.method,
-          request.path,
-          null,
-          error instanceof KitaruCredentialError
-            ? error.message
-            : "Credential lookup failed",
-          { cause: error, kind: "transport" },
-        );
+      } finally {
+        credentialDeadline.cleanup();
       }
+    }
 
-      let attempt = 0;
-      let authenticationRetried = false;
-      while (attempt < attempts) {
-        if (controller.signal.aborted) {
-          failForAbort();
+    let attempt = 0;
+    let authenticationRetried = false;
+    while (attempt < attempts) {
+      const attemptDeadline = createRequestDeadline(
+        request.signal,
+        this.#timeoutMs,
+      );
+      try {
+        if (attemptDeadline.signal.aborted) {
+          failForAbort(attemptDeadline);
         }
         const createdBody = request.body?.create();
         let response: Response;
@@ -361,12 +395,12 @@ export class KitaruTransport {
                 ...request.headers,
               },
               body: createdBody?.body,
-              signal: controller.signal,
+              signal: attemptDeadline.signal,
             },
           );
         } catch (error) {
-          if (controller.signal.aborted) {
-            failForAbort(error);
+          if (attemptDeadline.signal.aborted) {
+            failForAbort(attemptDeadline, error);
           }
           if (request.retry?.retryTransportErrors && attempt + 1 < attempts) {
             attempt += 1;
@@ -403,11 +437,11 @@ export class KitaruTransport {
           try {
             credential = await this.#credentialProvider.renewCredential(
               credential,
-              controller.signal,
+              attemptDeadline.signal,
             );
           } catch (error) {
-            if (controller.signal.aborted) {
-              failForAbort(error);
+            if (attemptDeadline.signal.aborted) {
+              failForAbort(attemptDeadline, error);
             }
             throw new KitaruApiError(
               request.method,
@@ -443,8 +477,8 @@ export class KitaruTransport {
             value = new Uint8Array(await response.arrayBuffer());
           }
         } catch (error) {
-          if (controller.signal.aborted) {
-            failForAbort(error);
+          if (attemptDeadline.signal.aborted) {
+            failForAbort(attemptDeadline, error);
           }
           if (error instanceof SyntaxError) {
             value = undefined;
@@ -485,11 +519,10 @@ export class KitaruTransport {
           response.status,
         );
         return value as T;
+      } finally {
+        attemptDeadline.cleanup();
       }
-      throw new Error("Unreachable request state");
-    } finally {
-      clearTimeout(timeout);
-      request.signal?.removeEventListener("abort", cancel);
     }
+    throw new Error("Unreachable request state");
   }
 }
