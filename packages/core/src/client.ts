@@ -26,6 +26,8 @@ export interface KitaruClientOptions extends KitaruEnvironmentOptions {
 type HttpMethod = "GET" | "PATCH" | "POST";
 
 const RETRYABLE_UPSERT_STATUSES = new Set([502, 503, 504]);
+const KITARU_CLIENT_HEADER = "X-Kitaru-Client";
+const KITARU_CLIENT_IDENTIFICATION = "kitaru-typescript";
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SESSION_ORIGINS = new Set(["imported", "recorded", "replay"]);
@@ -350,6 +352,7 @@ export class KitaruClient {
           method,
           headers: {
             Accept: "application/json",
+            [KITARU_CLIENT_HEADER]: KITARU_CLIENT_IDENTIFICATION,
             ...(body === undefined
               ? {}
               : { "Content-Type": "application/json" }),

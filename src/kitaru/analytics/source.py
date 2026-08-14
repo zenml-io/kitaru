@@ -26,6 +26,7 @@ class AnalyticsSource(StrEnum):
     PYTHON = "kitaru-python"
     CLI = "kitaru-cli"
     MCP = "kitaru-mcp"
+    TYPESCRIPT = "kitaru-typescript"
     API = "kitaru-api"
     UI = "kitaru-ui"
 
