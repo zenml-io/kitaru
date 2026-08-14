@@ -126,6 +126,27 @@ async def test_get_device_foreign_owner(
     assert response.json() == {"detail": f"Device {device.id} was not found"}
 
 
+async def test_get_unclaimed_device_requires_user_code(
+    client: httpx.AsyncClient, repository: FakeDeviceRepository
+) -> None:
+    """Observe an unapproved device only with its user code."""
+    device, user_code, _ = await create_device(repository)
+
+    without_code = await client.get(f"/v1/devices/{device.id}")
+    assert without_code.status_code == 404
+
+    wrong_code = await client.get(
+        f"/v1/devices/{device.id}", params={"user_code": "WRONG-CODE"}
+    )
+    assert wrong_code.status_code == 404
+
+    with_code = await client.get(
+        f"/v1/devices/{device.id}", params={"user_code": user_code}
+    )
+    assert with_code.status_code == 200
+    assert with_code.json()["id"] == str(device.id)
+
+
 async def test_verify_device(
     client: httpx.AsyncClient, repository: FakeDeviceRepository
 ) -> None:

@@ -69,21 +69,24 @@ async def get_device(
     device_id: uuid.UUID,
     service: Annotated[DeviceService, Depends(get_device_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
+    user_code: str | None = None,
 ) -> DeviceResponse:
     """Get a device by id.
 
-    Clients observe HTTP 200 on success and 404 when no device has this id or
-    another account already approved it.
+    Clients observe HTTP 200 on success and 404 when no device has this id,
+    another account already approved it, or the user code of an unapproved
+    device is missing or wrong.
 
     Args:
         device_id: Id of the device.
         service: Device service.
         actor: Caller context.
+        user_code: User code of a device no account approved yet.
 
     Returns:
         Stored device.
     """
-    device = await service.get_device(device_id, actor=actor)
+    device = await service.get_device(device_id, actor=actor, user_code=user_code)
     return device_to_response(device)
 
 

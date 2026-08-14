@@ -10882,7 +10882,7 @@
         ]
       },
       "get": {
-        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when no device has this id or\nanother account already approved it.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Stored device.",
+        "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when no device has this id,\nanother account already approved it, or the user code of an unapproved\ndevice is missing or wrong.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n    user_code: User code of a device no account approved yet.\n\nReturns:\n    Stored device.",
         "operationId": "get_device_v1_devices__device_id__get",
         "parameters": [
           {
@@ -10893,6 +10893,22 @@
               "format": "uuid",
               "title": "Device Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "user_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Code"
             }
           }
         ],

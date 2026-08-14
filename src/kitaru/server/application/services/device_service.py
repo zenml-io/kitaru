@@ -37,6 +37,7 @@ from kitaru.server.domain.keys import (
     generate_secret,
     generate_user_code,
     hash_secret,
+    verify_secret,
 )
 from kitaru.server.utils import is_stale
 
@@ -189,25 +190,38 @@ class DeviceService:
         await self._touch(device, now)
         return device
 
-    async def get_device(self, device_id: uuid.UUID, actor: AuthContext) -> Device:
+    async def get_device(
+        self,
+        device_id: uuid.UUID,
+        actor: AuthContext,
+        user_code: str | None = None,
+    ) -> Device:
         """Get a device of the caller by id.
 
         Args:
             device_id: Id of the device.
             actor: Caller context.
+            user_code: Plaintext user code, required for a device no account
+                approved yet.
 
         Raises:
-            DeviceNotFound: No device has this id, or another account already
-                approved it.
+            DeviceNotFound: No device has this id, another account already
+                approved it, or the user code of an unapproved device is
+                missing or wrong.
 
         Returns:
             Stored device.
         """
-        # The verification page reads the device before the caller approves
-        # it, while it is still unclaimed.
-        return await self._get_owned_device(
-            device_id, actor.account.id, allow_unclaimed=True
-        )
+        device = await self._repository.get(device_id)
+        if device.account_id == actor.account.id:
+            return device
+        if (
+            device.account_id is None
+            and user_code is not None
+            and verify_secret(user_code, device.user_code_hash)
+        ):
+            return device
+        raise DeviceNotFound(device_id)
 
     async def list_devices(
         self, device_filter: DeviceFilter, actor: AuthContext
