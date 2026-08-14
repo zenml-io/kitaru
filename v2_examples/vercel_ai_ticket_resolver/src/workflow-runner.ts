@@ -1261,10 +1261,20 @@ function normalizeExperiment(
   return {
     agent_id: value.agent_id,
     description: value.description ?? null,
-    evaluators: value.evaluators,
+    evaluators: value.evaluators.map((evaluator) => ({
+      evaluator: evaluator.evaluator,
+      params: evaluator.params ?? {},
+      version: evaluator.version ?? null,
+    })),
     name: value.name,
     override: value.override ?? null,
-    tool_policy: value.tool_policy ?? null,
+    tool_policy:
+      value.tool_policy == null
+        ? null
+        : {
+            default: value.tool_policy.default,
+            tools: value.tool_policy.tools ?? {},
+          },
   };
 }
 
