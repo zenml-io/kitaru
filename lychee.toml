@@ -33,6 +33,12 @@ exclude = [
     "^https://(www\\.)?zenml\\.io/slack",
     # katacontainers.io refuses automated link-checker connections
     "^https://katacontainers\\.io",
+    # TEMPORARY (v2 docs restructure): docs.zenml.io/kitaru is live, but the
+    # restructured deep paths (concepts/, guides/, getting-started/, deploy/)
+    # only exist once this branch merges and GitBook syncs, so the checker sees
+    # 404s for links that are correct in the published site.
+    # Remove this line after the v2 docs go live.
+    "^https://docs\\.zenml\\.io/kitaru/",
 ]
 
 # Paths to exclude from scanning.

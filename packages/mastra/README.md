@@ -8,6 +8,12 @@ This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose 
 pnpm add @zenml-io/kitaru-mastra@rc @mastra/core@1.51.0
 ```
 
+## Links
+
+- [Mastra adapter documentation](https://docs.zenml.io/kitaru/adapters/mastra)
+- [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
+- [Run the Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage)
+
 ```ts
 import { KitaruAgent } from "@zenml-io/kitaru-mastra";
 

@@ -135,6 +135,14 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert worker_start["output_modes"] == ["auto", "text", "json", "jsonl"]
     assert worker_start["side_effects"]["executes_local_code"] is True
 
+    [annotation_create] = describe_schema(("annotation", "create"))
+    selector = next(
+        parameter
+        for parameter in annotation_create["parameters"]
+        if parameter["name"] == "--selector"
+    )
+    assert selector["description"] == "Optional node, JSON Pointer, or span selector."
+
     [job_watch] = describe_schema(("job", "watch"))
     assert job_watch["streams"] is True
     assert job_watch["output_modes"] == ["auto", "text", "json", "jsonl"]

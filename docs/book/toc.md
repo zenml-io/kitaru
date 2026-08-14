@@ -2,75 +2,57 @@
 
 ## Getting Started
 
-* [Welcome to Kitaru](README.md)
-* [Installation](getting-started/installation.md)
-* [Quickstart](getting-started/quickstart.md)
-* [Deploy](getting-started/deploy.md)
-* [Examples](getting-started/examples.md)
-* [Troubleshooting](getting-started/troubleshooting.md)
+- [Welcome to Kitaru](README.md)
+- [Installation](getting-started/installation.md)
+- [Quickstart](getting-started/quickstart.md)
+- [Import your traces](getting-started/import-your-traces.md)
+- [Drive it from your coding agent](agent-native/mcp-server.md)
+- [Agent skills](agent-native/skills.md)
+- [Deploy Kitaru](deploy/README.md)
+  - [Docker](deploy/docker.md)
+  - [Helm](deploy/helm.md)
+- [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Core Concepts
 
-* [Overview](concepts/README.md)
-* [Harness, Runtime, Platform](concepts/harness-runtime-platform.md)
-* [How It Works](concepts/how-it-works.md)
-* [Flows](concepts/flows.md)
-* [Deployments](concepts/deployments.md)
-* [Checkpoints](concepts/checkpoints.md)
-* [Wait, Input, and Resume](concepts/wait-and-input.md)
-* [Logging and Metadata](concepts/logging.md)
-
-## Adapters
-
-* [Overview](adapters/README.md)
-* [Choose an Adapter](guides/choose-an-adapter.md)
-* [Pydantic AI](adapters/pydantic-ai.md)
-* [OpenAI Agents](adapters/openai-agents.md)
-* [Claude Agent SDK](adapters/claude-agent-sdk.md)
-* [Gemini Interactions](adapters/gemini-interactions.md)
-* [Google ADK](adapters/google-adk.md)
-* [LangGraph](adapters/langgraph.md)
+- [Overview](concepts/README.md)
+- [Agents & Sessions](concepts/agents-and-sessions.md)
+- [Replay](concepts/replay.md)
+- [Evaluators & Evaluations](concepts/evaluators.md)
+- [Cohorts](concepts/cohorts.md)
+- [Experiments](concepts/experiments.md)
+- [Investigations & Annotations](concepts/investigations.md)
+- [Workers](concepts/workers.md)
+- [Under the Hood](concepts/under-the-hood.md)
 
 ## Guides
 
-* [Import Sessions](guides/importing-sessions.md)
-* [Replay and Overrides](guides/replay-and-overrides.md)
-* [Execution Management](guides/execution-management.md)
-* [Deterministic Evaluations](guides/deterministic-evaluations.md)
-* [Configuration](guides/configuration.md)
-* [Authentication](guides/authentication.md)
-* [Projects](guides/projects.md)
-* [Deploy and Invoke Flows](guides/deployments.md)
-* [Containerization](guides/containerization.md)
-* [View Execution Runtime Logs](guides/execution-logs.md)
-* [Checkpoint Live Events](guides/checkpoint-streaming.md)
-* [Wait, Input, and Resume](guides/wait-and-resume.md)
-* [Artifacts](guides/artifacts.md)
-* [Error Handling](guides/error-handling.md)
-* [Tracked LLM Calls](guides/llm-calls.md)
-* [Secrets and Model Registration](guides/secrets-and-model-registration.md)
-* [Secrets](guides/secrets.md)
+- [Replay a failure and fork it](guides/replay-and-overrides.md)
+- [Build a regression suite from production](guides/regression-suite.md)
+- [Write an evaluator](guides/write-an-evaluator.md)
+- [Import Langfuse traces](guides/import-langfuse-traces.md)
+- [Import any trace format](guides/importing-sessions.md)
+- [Deterministic evaluations](guides/deterministic-evaluations.md)
+- [Tool policies](guides/tool-policies.md)
+- [Track cost and model usage](guides/llm-calls.md)
 
-## Server Deployment
+## Adapters
 
-* [Docker](deploy/docker.md)
-* [Helm](deploy/helm.md)
+- [Overview](adapters/README.md)
+- [Pydantic AI](adapters/pydantic-ai.md)
+- [LangGraph](adapters/langgraph.md)
+- [OpenAI Agents SDK](adapters/openai-agents.md)
+- [Mastra](adapters/mastra.md)
+- [Vercel AI SDK](adapters/vercel-ai.md)
+- [No adapter for your framework](adapters/custom.md)
 
-## Agent Runtime (Stacks)
+## Running in production
 
-* [Overview](stacks/README.md)
-* [Kubernetes Stacks](stacks/kubernetes-stacks.md)
-* [Modal Stacks](stacks/modal-stacks.md)
-* [Vertex Stacks](stacks/vertex-stacks.md)
-* [SageMaker Stacks](stacks/sagemaker-stacks.md)
-* [AzureML Stacks](stacks/azureml-stacks.md)
-* [Log Store](stacks/log-store.md)
-
-## Agent Native
-
-* [MCP Server](agent-native/mcp-server.md)
-* [Agent Skills](agent-native/claude-code-skill.md)
+- [Workers in production](deploy/workers.md)
+- [Authentication & API keys](deploy/authentication.md)
+- [Secrets](deploy/secrets.md)
+- [Configuration](deploy/configuration.md)
 
 ## Project
 
-* [Contributing](contributing.md)
+- [Contributing](contributing.md)

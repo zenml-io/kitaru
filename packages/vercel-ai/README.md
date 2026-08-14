@@ -8,6 +8,12 @@ This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose 
 pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
 ```
 
+## Links
+
+- [Vercel AI SDK adapter documentation](https://docs.zenml.io/kitaru/adapters/vercel-ai)
+- [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
+- [Run the TypeScript returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver)
+
 ```ts
 import { openai } from "@ai-sdk/openai";
 import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";

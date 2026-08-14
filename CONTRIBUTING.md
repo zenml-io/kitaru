@@ -40,6 +40,14 @@ See `docs/README.md` for detailed documentation authoring guidelines.
 - **`main`** contains only released versions. Never push directly to `main`.
 - Feature branches should be created from `develop`.
 
+## Releasing the TypeScript Packages
+
+The three public packages, `@zenml-io/kitaru`, `@zenml-io/kitaru-mastra`, and `@zenml-io/kitaru-vercel-ai`, release in lockstep. Set the same stable or release-candidate version in all three manifests, including the adapters' workspace dependency on `@zenml-io/kitaru`.
+
+From the merged release commit on `develop`, manually run the **Release TypeScript packages** workflow with `package-tag` set to `typescript/kitaru/v<version>`. This rehearsal validates, tests, packs, and uploads the three tarballs and their checksums without publishing them. Inspect those artifacts, then push that exact tag at the rehearsed commit to publish the packages and create the GitHub release. The workflow rejects commits that are not contained in `develop`.
+
+Tags and npm versions are immutable. Never move or reuse `typescript/kitaru/v<version>`. Versions ending in `-rc.N` publish under the npm `rc` dist-tag and create a prerelease; stable versions publish under `latest`.
+
 ## Code Style
 
 - Python: `ruff` for formatting and linting, `ty` for type checking

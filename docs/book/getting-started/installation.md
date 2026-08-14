@@ -1,121 +1,147 @@
 ---
-description: Install Kitaru with uv or pip
+description: Install the Kitaru SDK and CLI, start a local server, and log in.
 icon: download
 ---
 
 # Installation
 
-Install Kitaru to run, replay, and improve agents from your own environment. One package gives you the SDK, the CLI, and an optional local server and UI, all running on the same stacks and dashboard as ZenML pipelines.
+Kitaru is three installable pieces: the **SDK + CLI** in your project, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. For a first session on one machine, all three run locally.
 
-Kitaru requires **Python 3.11 or newer**.
+The Kitaru CLI, server, and workers require **Python 3.11 or newer**. TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server.
 
-You can verify your interpreter with:
+## Install the Python SDK and CLI
+
+{% tabs %} {% tab title="uv (recommended)" %}
 
 ```bash
-python --version
+uv add "kitaru[cli,worker]" kitaru-pydantic-ai
 ```
 
-{% tabs %}
-{% tab title="uv (recommended)" %}
-```bash
-uv add kitaru
-```
 {% endtab %}
 
 {% tab title="pip" %}
+
 ```bash
-pip install kitaru
+pip install "kitaru[cli,worker]" kitaru-pydantic-ai
 ```
-{% endtab %}
-{% endtabs %}
 
-This gives you the full SDK, CLI, and everything you need to run flows locally.
-
-## Optional extras
+{% endtab %} {% endtabs %}
 
 | Extra | What it adds |
-|---|---|
-| `local` | Local server and UI for browsing executions in a local web UI |
-| `mcp` | MCP server for querying executions from AI assistants |
-| `modal` | Python dependencies needed to create and validate Modal-backed stacks |
-| `pydantic-ai` | PydanticAI adapter for wrapping agents in checkpoints |
-| `openai` | OpenAI SDK for `kitaru.llm()` calls to OpenAI models |
-| `anthropic` | Anthropic SDK for `kitaru.llm()` calls to Claude models |
-| `llm` | Both `openai` and `anthropic` provider packages in one install |
+| --- | --- |
+| `cli` | The `kitaru` command — the full loop: import, evaluate, cohorts, experiments, workers, jobs |
+| `worker` | Run a worker in this environment (`kitaru worker start`) |
+| `server` | Run the Kitaru server itself from this package |
+| `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/mcp-server.md) |
+| `otel` | OpenTelemetry export from the server |
 
-```bash
-uv add "kitaru[mcp,pydantic-ai,local]"
-# or: pip install "kitaru[mcp,pydantic-ai,local]"
+The plain `kitaru` package is the SDK alone — the async client and the API models — which is all a production service needs to record sessions.
 
-# Modal stacks: uv add "kitaru[modal]"
-# or: pip install "kitaru[modal]"
+Adapters are **not** extras — each ships as its own distribution, so you install the one your framework needs alongside Kitaru:
 
-# Provider extras: uv add "kitaru[openai]"
-# or: pip install "kitaru[openai]"
-```
+| Framework | Install |
+| --- | --- |
+| [PydanticAI](../adapters/pydantic-ai.md) | `kitaru-pydantic-ai` |
+| [LangGraph](../adapters/langgraph.md) (also LangChain agents, Deep Agents) | `kitaru-langgraph` |
+| [OpenAI Agents SDK](../adapters/openai-agents.md) | `kitaru-openai-agents` |
 
-The `modal` extra does not create Modal tokens, Docker registry logins, cloud
-credentials, buckets, or registries. It only installs the Python packages Kitaru
-needs to validate and create Modal stack components.
+## Install a TypeScript adapter
 
-If you use Claude Code or another MCP-capable assistant, install
-`kitaru[mcp]` so your assistant can query executions, inspect logs and
-artifacts, provide input to waiting runs, and drive replays and diffs through
-structured tool calls. This is what lets a coding agent hill-climb on your
-runs. See [MCP Server](../agent-native/mcp-server.md) for setup.
-
-## Verify Installation
+Install the adapter in the Node project that runs your agent. The packages are currently release candidates, so use the `rc` tag:
 
 {% tabs %}
-{% tab title="uv project" %}
+{% tab title="Mastra" %}
 ```bash
-uv run kitaru --version
-uv run kitaru --help
+pnpm add @zenml-io/kitaru-mastra@rc @mastra/core@1.51.0
+```
+
+See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior, and supported boundary.
+{% endtab %}
+
+{% tab title="Vercel AI SDK" %}
+```bash
+pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
+```
+
+See the [Vercel AI SDK adapter](../adapters/vercel-ai.md) for `generateText`, replay behavior, and supported boundary.
+{% endtab %}
+
+{% tab title="Build an adapter" %}
+```bash
+pnpm add @zenml-io/kitaru@rc
+```
+
+The core package provides the TypeScript client and adapter primitives. It does not provide a framework-neutral agent or streaming abstraction.
+{% endtab %}
+{% endtabs %}
+
+The Node agent still needs a reachable Kitaru server. Install the Python CLI and worker separately when you want to run the full loop locally, or connect the agent to your team's deployed server and workers.
+
+No adapter for your framework? You are not blocked — [import your traces instead, build a project-local adapter, or have Kitaru call your agent](../adapters/custom.md).
+
+## Install the agent skills
+
+Do this now rather than later. Kitaru is a loop with real judgment calls in it — which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result actually supports shipping — and the [agent skills](../agent-native/skills.md) teach your coding assistant how to make them with you:
+
+{% tabs %}
+{% tab title="Any skill-aware host" %}
+```bash
+npx skills add zenml-io/kitaru-skills
 ```
 {% endtab %}
 
-{% tab title="pip environment" %}
-```bash
-kitaru --version
-kitaru --help
+{% tab title="Claude Code plugin" %}
+```
+/plugin marketplace add zenml-io/kitaru-skills
+/plugin install kitaru@kitaru
 ```
 {% endtab %}
 {% endtabs %}
 
-## Local UI
+`kitaru-investigation` is the front door: point your assistant at it and it will walk you from the traces you have to a reviewed cohort, choosing the review batch and stopping at checkpoints you can resume from. The others cover [replay experiments](../adapters/README.md), [building an adapter](../adapters/custom.md), and building an importer.
 
-Install Docker with the Compose v2 plugin, then provision a local Kitaru server and PostgreSQL database:
+Pair them with the [MCP server](../agent-native/mcp-server.md) (`kitaru[mcp]`) so the assistant has bounded operations to go with the method. `kitaru` with no arguments tells you whether the skills are installed.
+
+## Start a local server
+
+The server is FastAPI + Postgres, and the CLI can run both for you — all it needs is Docker with the Compose v2 plugin:
 
 ```bash
 kitaru login --local
 ```
 
-The CLI runs the version-matched `zenmldocker/kitaru-server` image, waits for `http://localhost:8000` to become healthy, selects it, and opens the dashboard. On Apple Silicon, Docker runs the amd64 server image through emulation. If Docker is unavailable, install it from [Docker's installation guide](https://docs.docker.com/get-docker/) or sign up for [Kitaru Cloud](https://cloud.zenml.io/).
-
-The database persists when you stop the deployment:
+This provisions a server and PostgreSQL pinned to your installed Kitaru version, waits for `http://localhost:8000` to become healthy, selects it as your active server, and opens it in your browser. The lifecycle is three commands:
 
 ```bash
-kitaru local logs
-kitaru logout
+kitaru local logs            # inspect (add --service server --follow)
+kitaru logout                # stop the containers; the database persists
+kitaru logout --volumes      # stop and delete the database — a clean reset
 ```
 
-Delete the local PostgreSQL data only when you want a clean reset:
+After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade` — a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
+
+## Connect
+
+`kitaru login --local` already connected you — `kitaru status` confirms it.
+
+Against a shared server, log in — `kitaru login <url>` — or, for non-interactive use (CI, production services), create an API key and set two environment variables that the SDK, the CLI, and workers all read:
 
 ```bash
-kitaru logout --volumes
+export KITARU_API_URL="https://kitaru.your-team.example"
+export KITARU_API_KEY="KITKEY_..."
 ```
 
-After installing a newer Kitaru CLI, upgrade the local server explicitly:
+See [Authentication & API keys](../deploy/authentication.md) for how keys are issued and managed.
+
+## Verify
 
 ```bash
-kitaru login --local --upgrade
+kitaru version
+kitaru doctor
 ```
 
-Developers using an unpublished server image can set `KITARU_LOCAL_IMAGE` to the name of an image that already exists in the local Docker daemon.
+`kitaru doctor` checks the connection and reports what it finds.
 
-## Next Steps
+## Next steps
 
-Head to the [Quickstart](quickstart.md) to explore what's
-available, see [Execution management](../guides/execution-management.md)
-for lifecycle operations, or open [MCP Server](../agent-native/mcp-server.md)
-for assistant-native querying.
+Head to the [Quickstart](quickstart.md) to record and replay your first run — or, if you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).

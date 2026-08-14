@@ -1,50 +1,43 @@
 ---
-description: Use Kitaru with PydanticAI, OpenAI Agents, Claude Agent SDK, Gemini Interactions, Google ADK, and LangGraph.
+description: One wrapper, no rewrite — adapters record your existing agent's runs as replayable sessions.
 icon: puzzle-piece
 ---
 
 # Adapters
 
-Adapters let Kitaru record and replay an agent you built with another framework, without rewriting it. Your framework still runs the agent and decides how it thinks and calls tools. Depending on the adapter, Kitaru records replayable checkpoints or a v2 session with observed activity nodes.
+Adapters are the first of two ways into Kitaru: wrap the agent you already have, and every run is recorded natively. (The second — [importing the traces you already collect](../getting-started/import-your-traces.md) — needs no adapter at all.)
 
-That boundary is deliberate. Kitaru records what the framework exposes safely; it does not claim to replay work it never saw or to provide the same replay controls for every adapter.
+An adapter leaves your framework in charge of the agent loop while recording the model and tool activity that the integration exposes. The same adapter makes [replay](../concepts/replay.md) work: it applies supported overrides at the model boundary and answers tool calls per the [tool policy](../guides/tool-policies.md). Capabilities differ by integration. In particular, the current TypeScript adapters support non-streaming calls only; each adapter page states its exact boundary.
 
-## Choose an adapter
+## Available adapters
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>PydanticAI</strong></td><td>Wrap a pydantic_ai.Agent and record model, tool, MCP, and wait boundaries.</td><td><a href="pydantic-ai.md">pydantic-ai.md</a></td></tr><tr><td><strong>OpenAI Agents</strong></td><td>Record a non-streaming OpenAI Agents SDK run as a v2 session with model, tool, hosted-tool, and handoff nodes.</td><td><a href="openai-agents.md">openai-agents.md</a></td></tr><tr><td><strong>Claude Agent SDK</strong></td><td>Record one Claude Agent SDK invocation as one Kitaru checkpoint with usage and audit artifacts.</td><td><a href="claude-agent-sdk.md">claude-agent-sdk.md</a></td></tr><tr><td><strong>Gemini Interactions</strong></td><td>Record stable Gemini Interactions and Antigravity managed-agent responses as Kitaru checkpoints.</td><td><a href="gemini-interactions.md">gemini-interactions.md</a></td></tr><tr><td><strong>Google ADK</strong></td><td>Experimentally wrap Google ADK runner turns, or explicit ADK model/tool objects you control.</td><td><a href="google-adk.md">google-adk.md</a></td></tr><tr><td><strong>LangGraph</strong></td><td>Record invoke and ainvoke sessions; factory-built agents can apply live request overrides and supported tool substitution.</td><td><a href="langgraph.md">langgraph.md</a></td></tr></tbody></table>
+Each adapter ships as its own distribution, installed alongside Kitaru in the agent's environment.
 
-## How to pick the right page
+### Python
 
-Use the adapter that matches the framework object you already call:
+| Framework | Install | Entry point | Records | Replays |
+| --- | --- | --- | --- | --- |
+| [PydanticAI](pydantic-ai.md) | `kitaru-pydantic-ai` | `kitaru_pydantic_ai.KitaruAgent` | Yes | Yes |
+| [LangGraph](langgraph.md) | `kitaru-langgraph` | `kitaru_langgraph.KitaruGraphRunner` | Yes | Depends on construction |
+| [OpenAI Agents SDK](openai-agents.md) | `kitaru-openai-agents` | `kitaru_openai_agents.KitaruRunner` | Yes | Yes |
 
-- **PydanticAI** — your code has a `pydantic_ai.Agent` and you want Kitaru to record its model, tool, MCP, and wait boundaries.
-- **OpenAI Agents** — your agent is built on the OpenAI Agents SDK and you want non-streaming v2 session and node recording while retaining the native `RunResult`. This adapter is available only from a repository checkout.
-- **Claude Agent SDK** — your code invokes Claude through the Claude Agent SDK or Claude Code-style sessions and you want the full invocation saved as one durable step.
-- **Gemini Interactions** — your code calls Gemini Interactions, including Antigravity managed-agent calls, and you want the response captured as replayable output.
-- **Google ADK** — your code uses Google ADK, and you want experimental whole-runner checkpointing or explicit ADK model/tool checkpoints in an isolated no-dev ADK environment.
-- **LangGraph** — your code calls a compiled LangGraph runnable, a LangChain agent, or a Deep Agent and you want explicit recording and replay capability boundaries.
+LangChain agents and Deep Agents use the LangGraph adapter — their public factories return LangGraph runnables. What the LangGraph adapter can replay depends on how the graph was constructed; its [capability matrix](langgraph.md#capability-matrix) is the reference.
 
-## Migrating existing agent code
+### TypeScript
 
-If you already have framework-specific agent code, the [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills) package includes migration skills that walk your coding agent through the conservative adapter path.
+| Framework | Install | Entry point |
+|---|---|---|
+| [Vercel AI SDK](vercel-ai.md) | `@zenml-io/kitaru-vercel-ai` | `createKitaruGenerateText` |
+| [Mastra](mastra.md) | `@zenml-io/kitaru-mastra` | `KitaruAgent` |
 
-In Claude Code, invoke the skill that matches your current framework:
+Both build on `@zenml-io/kitaru`, the framework-neutral TypeScript client and adapter foundation. Its public client uses methods such as `createSession(...)` and `upsertSessionNodes(...)`; it deliberately does not provide a framework-neutral agent or streaming abstraction.
 
-- `/kitaru:kitaru-pydantic-ai-migration`
-- `/kitaru:kitaru-openai-agents-migration`
-- `/kitaru:kitaru-langgraph-migration`
-- `/kitaru:kitaru-claude-agent-sdk-migration`
-- `/kitaru:kitaru-gemini-interactions-migration`
-- Google ADK support is experimental; use the [Google ADK adapter page](google-adk.md) and runnable example first.
+If your framework isn't covered, see [No adapter for your framework](custom.md) for three options available today:
 
-For install instructions and the full skill list, see [Agent Skills](../agent-native/claude-code-skill.md).
+- **Import** — your framework already emits traces to Langfuse, LangSmith, Braintrust, or OpenTelemetry? [Import them](../getting-started/import-your-traces.md); sessions from imports can be replayed and evaluated like any other. Any other format converts to [Kitaru JSONL or OTLP](../guides/importing-sessions.md).
+- **Record directly** — create a session and ingest its nodes with the Python or TypeScript client. The `kitaru-adapter-builder` [agent skill](../agent-native/skills.md) will write that integration with you.
+- **Hand the run back to your own system** — register the agent version as a function instead of a command, and Kitaru calls you to run it. See [Let Kitaru call your agent](custom.md#let-kitaru-call-your-agent).
 
-## What adapters do not promise
+## Why the wrapper is enough
 
-Adapters record work that passes through the seam, not work the framework hides inside itself. If a framework makes an internal model call, shell command, browser step, or tool call without exposing it, Kitaru cannot replay that hidden step — it can only save the result that comes back out. Record at the boundary you control, and what you record replays faithfully.
-
-## Try one end to end
-
-The examples include small adapter scripts you can run locally, plus larger flows that show how adapters fit into a real workflow.
-
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Runnable examples</strong></td><td>Browse adapter examples and end-to-end agent workflows.</td><td><a href="../getting-started/examples.md">../getting-started/examples.md</a></td></tr></tbody></table>
+"One wrapper, no rewrite" means you keep the framework's agent loop and native result types. The Python adapters expose framework-shaped runner or agent objects. Mastra adds a `KitaruAgent(existingAgent, options)` with `generate(...)`; the Vercel AI SDK adapter returns a native-signature `generateText(...)` function. Under a [worker](../concepts/workers.md), the same entrypoint reads the replay task environment, substitutes the recorded inputs, and applies the supported replay configuration. Your application does not need a separate replay branch.
