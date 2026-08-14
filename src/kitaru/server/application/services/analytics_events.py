@@ -92,8 +92,14 @@ def build_session_completed_properties(session: Session) -> dict[str, Any]:
     properties: dict[str, Any] = {
         "origin": session.origin.value,
         "status": session.status.value,
+        "llm_call_count": session.llm_call_count,
+        "tool_call_count": session.tool_call_count,
         **_duration_properties(session.started_at, session.ended_at),
     }
+    if session.framework is not None:
+        properties["framework"] = session.framework
+    if session.adapter_version is not None:
+        properties["adapter_version"] = session.adapter_version
     if session.tokens is not None:
         if session.tokens.input_tokens is not None:
             properties["input_tokens"] = session.tokens.input_tokens
