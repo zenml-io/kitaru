@@ -13,7 +13,7 @@ Imports execute on a [worker](../concepts/workers.md) in your environment. The e
 
 ## 1. Register the agent the traces belong to
 
-Importers for **Langfuse, LangSmith, Braintrust, OpenTelemetry, and a native JSONL format** are built in — registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. Anything else comes in through a [custom importer](../guides/import-langfuse-traces.md#writing-your-own-importer).
+Importers for **Langfuse, LangSmith, Braintrust, and a native JSONL format** are built in — registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. Anything else comes in through a [custom importer](../guides/import-langfuse-traces.md#writing-your-own-importer).
 
 Register the agent these traces belong to, if you haven't:
 

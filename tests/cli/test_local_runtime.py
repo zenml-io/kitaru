@@ -18,6 +18,7 @@ import os
 from pathlib import Path
 
 import pytest
+from packaging.version import Version
 
 from kitaru.cli import local_runtime
 from kitaru.cli.local_runtime import (
@@ -285,6 +286,51 @@ def test_development_version_requires_an_override(monkeypatch) -> None:
     monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
     with pytest.raises(CLIError, match="development build"):
         local_runtime._get_server_image("0.22.0.dev1")
+
+
+@pytest.mark.parametrize(
+    ("package_version", "image_version"),
+    [
+        ("0.22.0a1", "0.22.0-a.1"),
+        ("0.22.0b3", "0.22.0-b.3"),
+        ("0.22.0rc5", "0.22.0-rc.5"),
+        ("0.22.0.post2", "0.22.0-post.2"),
+        ("0.22.0rc5.post2", "0.22.0-rc.5.post.2"),
+    ],
+)
+def test_release_suffix_uses_docker_image_tag(
+    monkeypatch, package_version: str, image_version: str
+) -> None:
+    """PEP 440 release suffixes map to the Docker tag format."""
+    monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
+
+    image, overridden = local_runtime._get_server_image(package_version)
+
+    assert image == f"zenmldocker/kitaru-server:{image_version}"
+    assert overridden is False
+
+
+@pytest.mark.parametrize(
+    ("package_version", "image_version"),
+    [
+        ("0.22.0", "0.22.0"),
+        ("0.22.0rc5.post2", "0.22.0-rc.5.post.2"),
+        ("0.22.0.dev3", "0.22.0-dev.3"),
+        ("0.22.0+macos.arm64", "0.22.0-local.macos.arm64"),
+        ("1!0.22.0rc5", "1.epoch.0.22.0-rc.5"),
+        (
+            "0.22.0rc5.post2.dev3+macos.arm64",
+            "0.22.0-rc.5.post.2.dev.3.local.macos.arm64",
+        ),
+    ],
+)
+def test_image_version_formatter_supports_pep440_suffixes(
+    package_version: str, image_version: str
+) -> None:
+    """All canonical PEP 440 suffixes produce Docker-compatible tags."""
+    assert (
+        local_runtime._format_image_version(Version(package_version)) == image_version
+    )
 
 
 def test_runtime_files_contain_no_world_readable_secrets(runtime_paths) -> None:

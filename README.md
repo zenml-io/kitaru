@@ -81,8 +81,8 @@ support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
 
 Already tracing elsewhere? Import instead of wrapping — same result.
-Importers for Langfuse, LangSmith, Braintrust, and OpenTelemetry are
-built in:
+Importers for Langfuse, LangSmith, Braintrust, and native Kitaru JSONL
+are built in:
 
 ```bash
 kitaru session import langfuse-export.jsonl \
@@ -138,9 +138,9 @@ Vercel AI SDK (`@zenml-io/kitaru-vercel-ai`) and Mastra
 TypeScript packages require Node 22.22 or later in the Node 22 release line. Start with the [Mastra adapter](https://docs.zenml.io/kitaru/adapters/mastra) or [Vercel AI SDK adapter](https://docs.zenml.io/kitaru/adapters/vercel-ai), then run the focused examples under [`v2_examples/`](https://github.com/zenml-io/kitaru/tree/develop/v2_examples).
 
 **Framework not on that list? You are not blocked.** Import the traces
-you already collect — Langfuse, LangSmith, Braintrust and OpenTelemetry
-importers are built in, and any other format converts to Kitaru JSONL or
-OTLP. Or write a project-local adapter: the recording API is two client
+you already collect from Langfuse, LangSmith, or Braintrust with the
+built-in importers, and convert any other format to Kitaru JSONL. Or
+write a project-local adapter: the recording API is two client
 calls, and an agent skill will draft it for you. Or wrap nothing at all —
 register the agent as a function, and Kitaru asks *your* system to run
 it, then adopts the trace you import. See

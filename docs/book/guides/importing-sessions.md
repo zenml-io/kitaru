@@ -207,7 +207,7 @@ The import job result reports created, skipped, and failed counts plus a bounded
 
 You have two ways in, and neither requires waiting for us to ship an importer.
 
-**Convert to a format Kitaru already reads.** Write out [Kitaru JSONL](#create-kitaru-jsonl) — one session object per line, exactly the contract above — or emit OTLP with `gen_ai.*` attributes and import with `kitaru/opentelemetry@latest`. This is the right choice for a one-off backfill or an export you can transform with a script. Nothing gets installed or registered.
+**Convert to Kitaru JSONL.** Write out [Kitaru JSONL](#create-kitaru-jsonl) — one session object per line, exactly the contract above. This is the right choice for a one-off backfill or an export you can transform with a script. Nothing gets installed or registered.
 
 **Write an importer.** Worth it when the conversion is ongoing, or when the source needs real normalization rather than a field rename. The contract is one function:
 
