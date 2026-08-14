@@ -60,6 +60,7 @@ describe("KitaruClient", () => {
     expect(url).toBe("https://explicit.example/v1/sessions");
     expect(init?.headers).toMatchObject({
       Authorization: "Bearer explicit-secret",
+      "X-Kitaru-Client": "kitaru-typescript",
     });
   });
 
