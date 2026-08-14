@@ -102,6 +102,41 @@ describe("createKitaruToolLoopAgent", () => {
     ).toMatchObject({ error: "provider failed", status: "failed" });
   });
 
+  it("stops before another model call after step recording fails", async () => {
+    const client = new FakeClient({
+      failNodeBatch: (_batch, index) => index === 1,
+    });
+    const model = new MockLanguageModelV4({
+      doGenerate: [
+        toolResponse([{ id: "call-1", name: "work" }]),
+        textResponse("should not run"),
+      ],
+    });
+    const agent = createKitaruToolLoopAgent(
+      {
+        model,
+        stopWhen: () => false,
+        tools: {
+          work: tool({
+            execute: async () => "done",
+            inputSchema: jsonSchema<Record<never, never>>({
+              additionalProperties: false,
+              properties: {},
+              type: "object",
+            }),
+          }),
+        },
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await expect(agent.generate({ prompt: "Work" })).rejects.toThrow(
+      "node upload failed",
+    );
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(client.updated.at(-1)?.status).toBe("failed");
+  });
+
   it("records the effective prepareCall model and preserves callbacks", async () => {
     const client = new FakeClient();
     const events: string[] = [];

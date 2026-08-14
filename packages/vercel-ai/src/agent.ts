@@ -22,7 +22,7 @@ import {
   type ToolLoopAgentSettings,
   type ToolSet,
 } from "ai";
-
+import { composeStopConditions } from "./failure.js";
 import {
   callerModelSettings,
   parseVercelReplayOverride,
@@ -279,6 +279,10 @@ export function createKitaruToolLoopAgent<
           tools: runtime.tools,
         });
         runtime.tools = wrappedTools;
+        runtime.stopWhen = composeStopConditions(
+          recorder.state,
+          runtime.stopWhen as never,
+        );
         runtime.onLanguageModelCallStart = async (
           event: LanguageModelCallStartEvent,
         ) => {
