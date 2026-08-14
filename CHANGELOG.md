@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc8]
+
+### Changed
+
+- Prepared the eighth Kitaru 0.22 release candidate with `kitaru-ui-v0.2.0-rc.4`.
+- Evaluation aggregates now report `mean`, `min`, and `max` scores instead of `average`.
+- Completed-session analytics now include the framework, adapter version, LLM call count, and tool call count.
+- Local server image conflicts now show the current and expected image tags and clarify that `kitaru login --local --upgrade` preserves the local database.
+
 ## [0.22.0rc7]
 
 ### Changed
