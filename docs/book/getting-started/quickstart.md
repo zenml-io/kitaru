@@ -1,19 +1,19 @@
 ---
-description: Follow a returns-agent investigation from imported traces to a replayed policy fix.
+description: Import PydanticAI traces, review them with human evidence, and test one change through replay.
 icon: rocket
 ---
 
 # Quickstart
 
-A returns agent has handled ten synthetic customer emails. Eight outcomes are correct. In two, it issued a refund when company policy required human approval. The example repository contains all ten recorded runs as a Langfuse export, giving you a small, known trace set to investigate.
+This quickstart uses ten synthetic returns-agent sessions recorded by PydanticAI and exported from Langfuse. You will import the sessions, investigate observed behavior, preserve human judgments as evidence, and prepare a replay experiment.
 
-The goal is to understand those failures and test a fix. You will import the traces, open one unsafe refund, record what the agent should have done, and turn that judgment into an evaluator. Then you will replay a stricter version of the agent against the two failed tickets and three correct refunds. Those control cases matter: a change that prevents unsafe refunds by stopping every refund is not an improvement.
+The example does not tell you which sessions are good or bad. Review the traces before you define a behavior, assign a verdict, create a cohort, or write an evaluator.
 
-The investigation phase reads stored traces and makes no model calls. A worker processes the import and evaluation jobs, but the agent itself runs only when you reach [Replay the change](#8-replay-the-change). That is also when you need model credentials. If you want to begin with fresh traces instead, the [optional trace-generation step](#no-traces-yet) explains how.
+The investigation phase reads stored traces and makes no model calls. A worker processes import and evaluation tasks. Replays run the agent and can make paid model calls.
 
 ## Before you start
 
-Install Git, Docker, [`uv`](https://docs.astral.sh/uv/), and `jq`, then check out the example. The commands on this page use Bash or Zsh on macOS or Linux.
+Install Git, Docker, [`uv`](https://docs.astral.sh/uv/), Node.js, and `jq`. Then check out the example:
 
 ```bash
 git clone --branch develop https://github.com/zenml-io/kitaru.git
@@ -21,7 +21,7 @@ cd kitaru/examples/pydantic_ai_ticket_resolver
 uv sync
 ```
 
-The example's lockfile installs the published Kitaru packages used to test this walkthrough; it does not install the cloned repository source. The example uses synthetic customers, orders, and actions. Its refund and escalation tools only change an in-memory store.
+The example uses synthetic customers, orders, shipments, and actions. Its action tools modify one isolated in-memory store.
 
 Start a local Kitaru workspace and confirm the connection:
 
@@ -30,17 +30,17 @@ uv run kitaru login --local
 uv run kitaru status
 ```
 
-The local workspace opens at [http://localhost:8000](http://localhost:8000). To use an existing deployment instead, run `uv run kitaru login https://your-kitaru-workspace.example.com`.
+The local workspace opens at [http://localhost:8000](http://localhost:8000). To use an existing deployment, run `uv run kitaru login https://your-kitaru-workspace.example.com`.
 
-## 1. Register the agent that produced the traces
+## 1. Register the recorded agent
 
-Imported sessions belong to an agent version. Register the example's baseline version before importing anything:
+Imported sessions belong to an agent version. Register the baseline version:
 
 ```bash
 uv run kitaru agent register \
   returns-resolver \
   --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
-  --description "Resolve one synthetic returns or delivery ticket." \
+  --description "Resolve one synthetic returns or delivery request." \
   --display-version baseline-v1 \
   --working-dir ../.. \
   --timeout-seconds 180 \
@@ -52,19 +52,17 @@ uv run kitaru agent register \
   --tool escalate_to_human
 ```
 
-This records how Kitaru can run the agent later, including the tools it may call. It does not start the agent now. Kitaru assigns this first immutable version the command reference `returns-resolver@1`; `baseline-v1` is its human-readable label.
+Registration stores the command and declared capabilities. It does not run the agent.
 
-Open a second terminal in the same example directory and start a [worker](../concepts/workers.md):
+Open a second terminal in the same directory and start a [worker](../concepts/workers.md):
 
 ```bash
 uv run kitaru worker start --name returns-quickstart-worker
 ```
 
-Leave it running. The worker processes the import and evaluator tasks in the next steps. Those tasks read the recorded data and do not call the agent or a model.
+Leave the worker active. It processes import, evaluation, and replay tasks.
 
-## 2. Import the traces
-
-The repository contains a Langfuse export at `traces/langfuse-traces.jsonl`. Import it under the baseline agent version and give the batch a tag:
+## 2. Import the Langfuse sessions
 
 ```bash
 uv run kitaru session import \
@@ -77,9 +75,9 @@ uv run kitaru session import \
   --wait
 ```
 
-The media type tells the importer that the file contains one JSON object per line. `source_instance` gives those external traces a stable source identity, so Kitaru can recognize the same records if you import the file again.
+The import preserves session inputs and outputs, model calls, tool calls and results, source trace identity, cost, tokens, and the baseline agent version.
 
-In Kitaru, each recorded agent run becomes a [session](../concepts/agents-and-sessions.md). Its model calls, tool calls, and results are stored as session nodes. Check that the import created ten sessions:
+Verify the imported population:
 
 ```bash
 uv run kitaru session list \
@@ -88,331 +86,105 @@ uv run kitaru session list \
   --size 20
 ```
 
-The table should contain ten rows. If it does not, stop before continuing. The import receipt includes a job ID; run `uv run kitaru job get JOB_UUID --tasks` to inspect any failed or skipped items. Each session preserves the agent input and output, model calls, tool calls and results, source trace ID, and the baseline agent version.
+The table should contain ten sessions. If it does not, inspect the import job from the receipt before you continue.
 
-## 3. Find a trace worth reviewing
+## 3. Install the Kitaru skills
 
-An evaluator is a reusable check that Kitaru can apply to many sessions. Each stored result is an evaluation. Start with Kitaru's descriptive evaluators:
+Install the agent skills with the cross-host installer:
 
 ```bash
-uv run kitaru session evaluate \
-  --tag returns-baseline \
-  --evaluator kitaru/cost@latest \
-  --evaluator kitaru/latency@latest \
-  --evaluator kitaru/tool-call-patterns@latest \
-  --wait
-
-uv run kitaru evaluation list --size 100
+npx skills add zenml-io/kitaru-skills
 ```
 
-These evaluators make no model calls. They orient you to differences in cost, latency, and tool paths, but they cannot decide whether a refund was safe. This fixture already identifies ticket 004 as a known failure, so you will review that trace directly. With your own traces, the descriptive results can help you choose where to start.
+The skills guide a coding agent through evidence selection, human review, cohort confirmation, evaluator selection, and safe replay. They use Kitaru MCP for typed operations and the structured CLI when a local upload or wait operation is required.
 
-Select ticket 004 and inspect its trace:
+Find the MCP executable:
 
 ```bash
-TICKET_004_SESSION_ID="$(
-  uv run kitaru --output json session list \
-    --tag returns-baseline \
-    --origin imported \
-    --size 20 \
-  | jq -r '.items[] | select((.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id) == "ticket-004") | .id'
-)"
-
-uv run kitaru --output json session nodes \
-  "$TICKET_004_SESSION_ID" \
-  --include-payloads \
-  --size 100 \
-| jq '.items[] | select(.tool_name == "lookup_order" or .tool_name == "get_return_policy" or .tool_name == "issue_refund") | {tool: .tool_name, inputs, outputs}'
+uv run which kitaru-mcp
 ```
 
-The trace shows that `issue_refund` accepted a $280 refund. The applicable business rule for this example requires human approval above $150, so the correct action was to escalate. Resolve the node ID for that accepted refund:
+Configure your coding agent to start it in `standard` mode. Replace the command and server values:
 
-```bash
-TICKET_004_REFUND_NODE_ID="$(
-  uv run kitaru --output json session nodes \
-    "$TICKET_004_SESSION_ID" \
-    --include-payloads \
-    --size 100 \
-  | jq -r '.items[] | select(.tool_name == "issue_refund" and .outputs.accepted == true) | .id'
-)"
-```
-
-## 4. Record the review
-
-An [investigation](../concepts/investigations.md) is a focused review of a chosen set of sessions. It keeps the question, evidence-backed answers, and final verdicts together, so you can see the human reasoning behind an evaluator. This investigation contains one session and asks whether its outcome was acceptable and what should have happened instead:
-
-```bash
-INVESTIGATION_ID="$(
-  uv run kitaru --output json investigation create refund-policy-review \
-    --agent returns-resolver \
-    --description "Review whether risky refunds require human approval." \
-    --session "$TICKET_004_SESSION_ID" \
-    --session-question "$TICKET_004_SESSION_ID:outcome=Is this outcome acceptable, problematic, or uncertain, and what should the agent have done instead?" \
-  | jq -r '.item.id'
-)"
-
-INVESTIGATION_SESSION_ID="$(
-  uv run kitaru --output json investigation session list \
-    "$INVESTIGATION_ID" \
-    --size 20 \
-  | jq -r '.items[0].id'
-)"
-```
-
-An annotation records an answer. You can attach it to a specific trace node as evidence or to the session as a whole. The verdict is your overall classification of the session. Store all three parts of the review:
-
-```bash
-uv run kitaru annotation create \
-  --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key outcome \
-  --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\"}" \
-  --value '"The amount exceeds the automatic approval threshold."'
-
-uv run kitaru annotation create \
-  --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key outcome \
-  --value '{"action":"escalate","reason":"Human approval is required before a refund."}'
-
-uv run kitaru investigation session verdict \
-  "$INVESTIGATION_ID" \
-  "$TICKET_004_SESSION_ID" \
-  problematic
-
-uv run kitaru investigation update \
-  "$INVESTIGATION_ID" \
-  --status completed
-```
-
-The two annotations do not overwrite each other because one belongs to the refund node and the other to the whole session. Kitaru now contains the imported evidence, a completed review tied to the exact trace node, and a settled verdict. The agent has not run. If you only need to investigate existing traffic, you can stop here.
-
-## 5. Turn the judgment into an evaluator
-
-To test a change, turn the rule into an [evaluator](../concepts/evaluators.md). The full example uses `policy_correct`, a deterministic check that compares the reported outcome and accepted terminal tool call with the expected result for each synthetic ticket.
-
-This short path records one review so you can see how investigations work, then uses the expected outcomes supplied with the fixture for the other cases. Do not take that shortcut with your own traces. Review every session before you encode its expected outcome or add it to a target or control cohort. The example's [coding-agent walkthrough](https://github.com/zenml-io/kitaru/blob/develop/examples/pydantic_ai_ticket_resolver/README_AGENT_GUIDED.md) shows the full five-session review.
-
-From the example directory, scaffold the file:
-
-```bash
-uv run kitaru evaluator scaffold \
-  returns-policy \
-  --path evaluator.py
-```
-
-The scaffold only supplies the evaluator's shape. Open `README.md` in the example directory and replace `evaluator.py` with the implementation under **Step 8: Create a policy evaluator**. You can also read that section [on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver#step-8-create-a-policy-evaluator). Then return here and run:
-
-```bash
-uv run kitaru evaluator test \
-  evaluator.py \
-  --entrypoint evaluate
-
-uv run kitaru evaluator register \
-  returns-policy \
-  --script evaluator.py \
-  --entrypoint evaluate \
-  --description "Check whether returns actions match the reviewed policy outcome." \
-  --display-version 1.0
-```
-
-`evaluator test` checks that the file loads and exposes the requested entry point. The experiment later checks its behavior against the imported baselines and new replays. Kitaru assigns the registered evaluator the reference `returns-policy@1`; `1.0` is its display label.
-
-Do not reduce the evaluator to "did the agent call `issue_refund`?" That would pass a duplicate refund, a refund for the wrong amount, or a refund followed by an escalation. The evaluator must match the decision you plan to make from its result.
-
-## 6. Freeze target and control cohorts
-
-A cohort groups sessions that you want to test together. Each cohort version freezes an exact membership list, so later runs use the same evidence. Resolve the five session IDs used in this quickstart:
-
-```bash
-SESSIONS_JSON="$(
-  uv run kitaru --output json session list \
-    --tag returns-baseline \
-    --origin imported \
-    --size 20
-)"
-
-session_id() {
-  jq -r --arg ticket "$1" \
-    '.items[] | select((.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id) == $ticket) | .id' \
-    <<<"$SESSIONS_JSON"
+```json
+{
+  "mcpServers": {
+    "kitaru": {
+      "command": "/absolute/path/to/.venv/bin/kitaru-mcp",
+      "args": [
+        "--mode",
+        "standard",
+        "--server",
+        "http://localhost:8000"
+      ]
+    }
+  }
 }
-
-TICKET_001_SESSION_ID="$(session_id ticket-001)"
-TICKET_004_SESSION_ID="$(session_id ticket-004)"
-TICKET_007_SESSION_ID="$(session_id ticket-007)"
-TICKET_009_SESSION_ID="$(session_id ticket-009)"
-TICKET_010_SESSION_ID="$(session_id ticket-010)"
 ```
 
-Create one cohort for the known failures and one for nearby behavior that must stay correct:
+Restart the coding-agent session after you add the MCP server.
 
-```bash
-uv run kitaru cohort create unsafe-refund-baseline \
-  --agent returns-resolver \
-  --description "Refunds that should have required human approval." \
-  --session "$TICKET_004_SESSION_ID" \
-  --session "$TICKET_007_SESSION_ID"
+## 4. Start an evidence-led investigation
 
-uv run kitaru cohort create safe-refund-control \
-  --agent returns-resolver \
-  --description "Valid refunds that must remain correct." \
-  --session "$TICKET_001_SESSION_ID" \
-  --session "$TICKET_009_SESSION_ID" \
-  --session "$TICKET_010_SESSION_ID"
+Give your coding agent this prompt:
+
+```text
+Use the kitaru-investigation skill to investigate the returns-resolver agent.
+The imported population has the tag returns-baseline.
+
+Begin with read-only inspection. Map the public agent entrypoint and registered
+version. Run relevant built-in deterministic evaluators, then select a bounded,
+diverse review worklist from observed evidence and a random component. Base
+every judgment and cohort proposal on recorded evidence and my decisions. Do
+not use fixture implementation details or a prewritten candidate as an answer
+key.
+
+Create a durable investigation with a neutral observation question for every
+selected session. Add neutral highlights for useful nodes. Give me the review
+link when available, or review one session at a time in chat. Ask for my open
+observation before proposing hypotheses. Persist my answers as annotations with
+exact node, JSON-pointer, or character-span selectors when appropriate. Record
+a whole-session verdict only after I confirm it.
+
+After enough review, synthesize up to three observable behavior candidates from
+persisted human evidence. Show supporting sessions, counterexamples, ambiguity,
+and missing external evidence. Ask me to accept one exact behavior and confirm
+exact cohort membership before any cohort write. Check the installed evaluator
+catalog before creating one narrow custom evaluator.
+
+If I approve a candidate change, continue with the kitaru-replay-experiment
+skill. Show the complete run card and ask before writes, code changes, live tool
+effects, or paid replay. Supervise the run and report exact paired evidence as
+improved, regressed, trade-off, or inconclusive. Leave deployment to me.
 ```
 
-The target cohort asks whether the change fixes the known failure. The control cohort asks whether it breaks similar cases that were already correct. Both cohort versions are immutable, so reruns keep using the same evidence.
+`kitaru-investigation` treats you as the judge. The coding agent can select, summarize, and organize evidence, but it cannot turn its own suggestion into your annotation or verdict.
 
-These five synthetic cases form a regression check, not a representative sample of production traffic. Passing them supports a claim about the fixture cases. It does not, by itself, prove that the change is safe for every request your agent receives.
+The skill creates a fixed review worklist with neutral questions. Each answer becomes an [annotation](../concepts/investigations.md) and can point to an exact node, JSON field, or character range. The complete-session verdict remains separate from question answers and investigation status.
 
-## 7. Register the change
+When the evidence supports one behavior, the skill asks you to confirm an exact [cohort version](../concepts/cohorts.md). It checks the installed evaluator catalog before it proposes custom code. A custom evaluator must use observable trace evidence and must not map session identifiers to expected answers.
 
-The baseline agent assumes its action tools enforce refund limits. The candidate checks the policy before it acts. Register that candidate as agent version 2:
+If you approve a change, `kitaru-replay-experiment` requires an exact candidate agent version, cohort version, evaluator versions and parameters, adapter support, and explicit tool policy. It keeps failed, canceled, and missing cases visible and returns one evidence conclusion: `improved`, `regressed`, `trade-off`, or `inconclusive`.
 
-```bash
-uv run kitaru agent version register \
-  returns-resolver \
-  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
-  --description "Check approval and risk rules before issuing a refund." \
-  --display-version strict-policy-v2 \
-  --working-dir ../.. \
-  --env RETURNS_POLICY_MODE=strict \
-  --timeout-seconds 180 \
-  --tool lookup_order \
-  --tool get_return_policy \
-  --tool check_shipping \
-  --tool issue_refund \
-  --tool create_replacement \
-  --tool escalate_to_human
-```
+## 5. Follow the manual route
 
-Registration still does not run the agent. It gives Kitaru an immutable description of the candidate you are about to test.
+The example [README on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver#manual-route-operate-the-evidence-loop-yourself) shows the same workflow with CLI commands.
 
-## 8. Replay the change
+The manual route covers:
 
-Replay is the point where Kitaru runs your agent. Create `.env`, add a valid `OPENAI_API_KEY`, then export the file in the first terminal:
-
-```bash
-cp -n .env.example .env
-# Edit .env before continuing.
-set -a; source .env; set +a
-```
-
-In the second terminal, stop the worker with `Ctrl-C`. Export `.env`, then restart it so the agent subprocess inherits the model credentials:
-
-```bash
-set -a; source .env; set +a
-uv run kitaru worker start --name returns-quickstart-worker
-```
-
-Leave the worker running. It claims each replay and starts the registered agent command in your environment. The five replayed agent runs use `BASELINE_MODEL` from `.env`, which defaults to `openai:gpt-5-mini`; each run may make more than one paid model request.
-
-Back in the first terminal, create the experiment. The experiment fixes the evaluator set and replay tool policy. Each experiment run then combines that definition with one cohort version and one candidate agent version.
-
-```bash
-uv run kitaru experiment create \
-  improve-returns-policy \
-  --agent returns-resolver \
-  --description "Replay risky and valid refunds with strict approval rules." \
-  --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
-  --evaluator returns-policy@1 \
-  --evaluator kitaru/latency@latest \
-  --evaluator kitaru/tool-call-patterns@latest
-```
-
-This example uses passthrough because every action tool writes to a fresh in-memory store. Do not copy that policy for tools that charge a card, send a message, or change production data. Use recorded results or explicit mocks instead. See [Replay and overrides](../guides/replay-and-overrides.md) for the available tool policies.
-
-Resolve both cohort versions:
-
-```bash
-TARGET_COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get unsafe-refund-baseline@1 \
-  | jq -r '.item.id'
-)"
-
-CONTROL_COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get safe-refund-control@1 \
-  | jq -r '.item.id'
-)"
-```
-
-Replay both cohorts through the candidate:
-
-```bash
-uv run kitaru experiment run start \
-  improve-returns-policy \
-  --cohort-version "$TARGET_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
-  --evaluate-baselines \
-  --wait \
-  --timeout 1800
-
-uv run kitaru experiment run start \
-  improve-returns-policy \
-  --cohort-version "$CONTROL_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
-  --evaluate-baselines \
-  --wait \
-  --timeout 1800
-```
-
-`--evaluate-baselines` applies the same evaluator versions to the imported sessions and the new replays. Without it, you would have candidate results but no like-for-like baseline. The earlier `--timeout-seconds 180` limits each agent process; `--timeout 1800` limits how long this command waits for the whole cohort run.
-
-## 9. Interpret the result
-
-List the two completed runs:
-
-```bash
-uv run kitaru experiment run list --size 20
-```
-
-Each run receipt prints the exact commands for its result and child jobs. They have this form:
-
-```bash
-uv run kitaru experiment run get YOUR_RUN_UUID
-uv run kitaru experiment run jobs YOUR_RUN_UUID --size 20
-```
-
-Join the session and evaluation output so each ticket's baseline and replay appear together:
-
-```bash
-COMPARISON_SESSIONS="$(
-  uv run kitaru --output json session list \
-    --agent returns-resolver \
-    --size 100
-)"
-
-COMPARISON_EVALUATIONS="$(
-  uv run kitaru --output json evaluation list \
-    --filter '{"field":"name","op":"eq","value":"policy_correct"}' \
-    --size 100
-)"
-
-jq -n \
-  --argjson sessions "$COMPARISON_SESSIONS" \
-  --argjson evaluations "$COMPARISON_EVALUATIONS" '
-  [$sessions.items[] as $session
-    | ($session.inputs.turns[-1].inputs.ticket_id // $session.inputs.ticket_id) as $ticket
-    | select((["ticket-001", "ticket-004", "ticket-007", "ticket-009", "ticket-010"] | index($ticket)) != null)
-    | $evaluations.items[]
-    | select(.session_id == $session.id)
-    | {ticket: $ticket, origin: $session.origin, status: $session.status, policy_correct: .passed}]
-  | sort_by(.ticket, .origin)'
-```
-
-You should see two rows per ticket: its imported baseline and its replay. The candidate succeeds on this regression check when tickets 004 and 007 change from fail to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Open the dashboard at [http://localhost:8000](http://localhost:8000) to inspect the paired traces and see how each tool path changed. The evaluator tells you whether the reviewed rule passed; the trace shows how the agent got there.
-
-| Conclusion | What the evidence says |
-| --- | --- |
-| Improved | The target cases pass and the controls stay correct. |
-| Regressed | The change breaks a target or control case. |
-| Trade-off | The policy result improves while a guardrail gets worse. |
-| Inconclusive | A replay failed, evidence is missing, or the sample is too small for the claim you need to make. |
-
-Inconclusive is not a near-pass. Inspect the failed replay or add the missing evidence, then rerun the same cohort versions against a new agent version.
+1. Run six built-in deterministic evaluators to survey session completeness, tool health, trajectory, model-call signals, cost, and timing.
+2. Select a diverse worklist without assigning labels from summary fields.
+3. Create an investigation with fixed neutral questions and optional highlights.
+4. Store human annotations with node, JSON-pointer, and character-span selectors.
+5. Record `acceptable`, `problematic`, or `uncertain` verdicts separately.
+6. Accept one observable behavior and freeze reviewed evidence into an immutable cohort version.
+7. Select an installed evaluator or create and calibrate one narrow evaluator.
+8. Register one candidate and run one bounded experiment with an explicit tool policy.
+9. Compare paired baseline and replay evidence without dropping failed or missing cases.
 
 ## No traces yet?
 
-Generating traces is an optional entry step, not a prerequisite for learning Kitaru. Add valid OpenAI and Langfuse credentials to `.env`, export them, and run:
+The checked-in export is enough for this quickstart. To generate fresh traces, create `.env`, add valid OpenAI and Langfuse credentials, export them, and run the generator:
 
 ```bash
 cp -n .env.example .env
@@ -421,12 +193,12 @@ set -a; source .env; set +a
 ./generate.sh
 ```
 
-The script makes ten paid agent runs, each of which may make several model requests, and replaces the tracked `traces/langfuse-traces.jsonl` fixture with a new Langfuse export. Model runs vary, so your new traces may not contain the ticket 004 and 007 failures used by this walkthrough. Import the new file, inspect what happened, and choose target and control cases from your own evidence instead of assuming the later ticket IDs and expected result still apply.
+The script makes ten paid agent runs and replaces `traces/langfuse-traces.jsonl`. Model behavior can vary. Import the new file and investigate its observed evidence without assuming that it matches an earlier export.
 
-For your own agent, keep collecting traces where you already collect them and use [Import your traces](import-your-traces.md) to choose the matching importer. You can evaluate and investigate imported sessions even when the historical agent code is no longer runnable. Replay requires a compatible registered agent version and a worker that can execute it.
+For your own agent, use [Import your traces](import-your-traces.md) to choose the correct importer. You can evaluate and investigate imported sessions even when the historical agent code is unavailable. Replay requires a compatible registered agent version and an active worker.
 
-When you are finished, stop the worker with `Ctrl-C`, then run `uv run kitaru logout`. For a CLI-managed local workspace, logout stops its containers but keeps the PostgreSQL data volume.
+When you finish, stop the worker with `Ctrl-C`, then run `uv run kitaru logout`. Local logout stops the containers and retains the PostgreSQL volume.
 
 ## Where to go next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Import your traces</strong></td><td>Use Langfuse, LangSmith, Braintrust, or Kitaru JSONL data.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, tools, history, and replay safety.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed failures into a reusable CI gate.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Turn a domain rule into a versioned measurement.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Mastra example</strong></td><td>Try the same workflow with a TypeScript support agent.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage</a></td></tr><tr><td><strong>Vercel AI SDK example</strong></td><td>Start with support triage or follow the complete ticket-resolver walkthrough.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage</a></td></tr><tr><td><strong>Vercel ticket resolver</strong></td><td>Run the full TypeScript import, review, cohort, and replay path.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Investigations and annotations</strong></td><td>Review sessions and attach human evidence to exact trace locations.</td><td><a href="../concepts/investigations.md">../concepts/investigations.md</a></td></tr><tr><td><strong>Agent skills</strong></td><td>Use the investigation and replay procedures from a coding agent.</td><td><a href="../agent-native/skills.md">../agent-native/skills.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, prompts, tools, history, and replay safety.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed evidence into a reusable comparison.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Turn an accepted behavior into a versioned measurement.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Mastra example</strong></td><td>Try the workflow with a TypeScript support agent.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage</a></td></tr><tr><td><strong>Vercel AI SDK example</strong></td><td>Try the workflow with a TypeScript triage agent.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage</a></td></tr><tr><td><strong>Vercel ticket resolver</strong></td><td>Run the complete TypeScript import, review, cohort, and replay path.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver</a></td></tr></tbody></table>

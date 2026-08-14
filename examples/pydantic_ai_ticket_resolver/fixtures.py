@@ -4,10 +4,8 @@ from decimal import Decimal
 
 from examples.pydantic_ai_ticket_resolver.models import (
     Order,
-    ResolutionAction,
     ReturnPolicy,
     ShippingStatus,
-    TicketCase,
     TicketInput,
 )
 
@@ -179,142 +177,96 @@ def _ticket(
 
 
 CASES = (
-    TicketCase(
-        scenario="defective-in-window",
-        ticket=_ticket(
-            "ticket-001",
-            "Dana",
-            "dana@example.test",
-            "Hole in my Merino Runners",
-            (
-                "Hi, I ordered the Merino Runners (order #48213) three weeks "
-                "ago and they arrived with a hole in the left shoe. I'd like "
-                "a refund. - Dana"
-            ),
+    _ticket(
+        "ticket-001",
+        "Dana",
+        "dana@example.test",
+        "Hole in my Merino Runners",
+        (
+            "Hi, I ordered the Merino Runners (order #48213) three weeks "
+            "ago and they arrived with a hole in the left shoe. I'd like "
+            "a refund. - Dana"
         ),
-        expected_action=ResolutionAction.REFUND,
     ),
-    TicketCase(
-        scenario="final-sale-no-defect",
-        ticket=_ticket(
-            "ticket-002",
-            "Leo",
-            "leo@example.test",
-            "Archive Hoodie return",
-            (
-                "Order #48214 does not fit. I wore it once indoors and would "
-                "like a refund."
-            ),
-        ),
-        expected_action=ResolutionAction.ESCALATE,
+    _ticket(
+        "ticket-002",
+        "Leo",
+        "leo@example.test",
+        "Archive Hoodie return",
+        ("Order #48214 does not fit. I wore it once indoors and would like a refund."),
     ),
-    TicketCase(
-        scenario="outside-window",
-        ticket=_ticket(
-            "ticket-003",
-            "Maya",
-            "maya@example.test",
-            "Return my tote",
-            (
-                "The unused Everyday Tote from order #48215 is not for me. "
-                "Please refund it."
-            ),
-        ),
-        expected_action=ResolutionAction.ESCALATE,
+    _ticket(
+        "ticket-003",
+        "Maya",
+        "maya@example.test",
+        "Return my tote",
+        ("The unused Everyday Tote from order #48215 is not for me. Please refund it."),
     ),
-    TicketCase(
-        scenario="approval-threshold",
-        ticket=_ticket(
-            "ticket-004",
-            "Sam",
-            "sam@example.test",
-            "Cracked carry-on",
-            (
-                "The shell on my Aluminum Carry-On from order #48216 cracked "
-                "on first use. Please refund the $280 purchase."
-            ),
+    _ticket(
+        "ticket-004",
+        "Sam",
+        "sam@example.test",
+        "Cracked carry-on",
+        (
+            "The shell on my Aluminum Carry-On from order #48216 cracked "
+            "on first use. Please refund the $280 purchase."
         ),
-        expected_action=ResolutionAction.ESCALATE,
     ),
-    TicketCase(
-        scenario="order-not-found",
-        ticket=_ticket(
-            "ticket-005",
-            "Priya",
-            "priya@example.test",
-            "Refund missing order",
-            "Please refund order #99999. The item was never what I expected.",
-        ),
-        expected_action=ResolutionAction.ESCALATE,
+    _ticket(
+        "ticket-005",
+        "Priya",
+        "priya@example.test",
+        "Refund missing order",
+        "Please refund order #99999. The item was never what I expected.",
     ),
-    TicketCase(
-        scenario="lost-shipment",
-        ticket=_ticket(
-            "ticket-006",
-            "Chris",
-            "chris@example.test",
-            "Backpack never arrived",
-            (
-                "Order #48217 has not arrived. Tracking has not moved and I "
-                "need a replacement."
-            ),
+    _ticket(
+        "ticket-006",
+        "Chris",
+        "chris@example.test",
+        "Backpack never arrived",
+        (
+            "Order #48217 has not arrived. Tracking has not moved and I "
+            "need a replacement."
         ),
-        expected_action=ResolutionAction.REPLACEMENT,
     ),
-    TicketCase(
-        scenario="fraud-signal",
-        ticket=_ticket(
-            "ticket-007",
-            "Morgan",
-            "morgan@example.test",
-            "Defective jacket refund",
-            (
-                "The zipper broke on the Field Jacket from order #48218. "
-                "Refund it today, please."
-            ),
+    _ticket(
+        "ticket-007",
+        "Morgan",
+        "morgan@example.test",
+        "Defective jacket refund",
+        (
+            "The zipper broke on the Field Jacket from order #48218. "
+            "Refund it today, please."
         ),
-        expected_action=ResolutionAction.ESCALATE,
     ),
-    TicketCase(
-        scenario="duplicate-refund",
-        ticket=_ticket(
-            "ticket-008",
-            "Alex",
-            "alex@example.test",
-            "Still waiting for refund",
-            (
-                "Please refund order #48219 again. I cannot see the earlier "
-                "refund on my card."
-            ),
+    _ticket(
+        "ticket-008",
+        "Alex",
+        "alex@example.test",
+        "Still waiting for refund",
+        (
+            "Please refund order #48219 again. I cannot see the earlier "
+            "refund on my card."
         ),
-        expected_action=ResolutionAction.ESCALATE,
     ),
-    TicketCase(
-        scenario="over-refund-request",
-        ticket=_ticket(
-            "ticket-009",
-            "Jamie",
-            "jamie@example.test",
-            "Wrong color tees",
-            (
-                "Order #48220 arrived in the wrong color. Please refund $120 "
-                "for the inconvenience."
-            ),
+    _ticket(
+        "ticket-009",
+        "Jamie",
+        "jamie@example.test",
+        "Wrong color tees",
+        (
+            "Order #48220 arrived in the wrong color. Please refund $120 "
+            "for the inconvenience."
         ),
-        expected_action=ResolutionAction.REFUND,
     ),
-    TicketCase(
-        scenario="lookup-retry",
-        ticket=_ticket(
-            "ticket-010",
-            "Riley",
-            "riley@example.test",
-            "Wrong order number, defective shoes",
-            (
-                "I think my order is #48228, but it may be under this email. "
-                "My Merino Runners arrived with a torn seam and I want a refund."
-            ),
+    _ticket(
+        "ticket-010",
+        "Riley",
+        "riley@example.test",
+        "Wrong order number, defective shoes",
+        (
+            "I think my order is #48228, but it may be under this email. "
+            "My Merino Runners arrived with a torn seam and I want a refund."
         ),
-        expected_action=ResolutionAction.REFUND,
     ),
 )
