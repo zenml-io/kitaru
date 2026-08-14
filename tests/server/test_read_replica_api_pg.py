@@ -20,6 +20,8 @@ from typing import Annotated
 import httpx
 import pytest
 from fastapi import APIRouter, Depends
+from sqlalchemy.exc import DBAPIError
+from sqlalchemy.sql import text
 
 from conftest import drop_test_database, local_settings, postgres_available
 from kitaru.server.adapters.rest.dependencies import authorize
@@ -65,6 +67,23 @@ async def _normal_probe(
         A fixed status body.
     """
     return {"status": "ok"}
+
+
+async def test_read_engine_rejects_writes_at_the_database() -> None:
+    """The read engine's read-only execution option rejects writes."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    settings = local_settings(use_db=True)
+    settings = settings.model_copy(update={"DB_READ_HOST": settings.DB_HOST})
+    await DatabaseService.create_db(settings)
+    database = DatabaseService(settings)
+    try:
+        async with database.read_engine.begin() as connection:
+            with pytest.raises(DBAPIError, match="read-only transaction"):
+                await connection.execute(text("CREATE TABLE _read_only_probe (id int)"))
+    finally:
+        await database.cleanup()
+        await drop_test_database(settings)
 
 
 def _read_replica_settings() -> APISettings:

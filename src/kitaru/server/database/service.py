@@ -56,6 +56,12 @@ class DatabaseService:
         logger.info("Initializing async database engine.")
         self.engine = self.create_async_engine(self.settings)
         self.read_engine = self.create_read_async_engine(self.settings) or self.engine
+        self._session_factory = self._build_session_factory(self.engine)
+        self._read_session_factory = (
+            self._session_factory
+            if self.read_engine is self.engine
+            else self._build_session_factory(self.read_engine)
+        )
         register_analytics_listeners()
 
     async def cleanup(self) -> None:
@@ -63,6 +69,26 @@ class DatabaseService:
         await self.engine.dispose()
         if self.read_engine is not self.engine:
             await self.read_engine.dispose()
+
+    def _build_session_factory(
+        self, engine: AsyncEngine
+    ) -> async_sessionmaker[AsyncSession]:
+        """Build a session factory bound to the given engine.
+
+        Args:
+            engine: Engine sessions from the factory bind to.
+
+        Returns:
+            Session factory sharing the service's list-query timeout.
+        """
+        return async_sessionmaker(
+            bind=engine,
+            class_=AsyncSession,
+            expire_on_commit=False,
+            info={
+                LIST_QUERY_TIMEOUT_INFO_KEY: self.settings.LIST_QUERY_TIMEOUT_SECONDS
+            },
+        )
 
     async def get_async_session(
         self, read_only: bool = False
@@ -75,13 +101,8 @@ class DatabaseService:
         Yields:
             Request- or task-scoped session bound to the service engine.
         """
-        session_factory = async_sessionmaker(
-            bind=self.read_engine if read_only else self.engine,
-            class_=AsyncSession,
-            expire_on_commit=False,
-            info={
-                LIST_QUERY_TIMEOUT_INFO_KEY: self.settings.LIST_QUERY_TIMEOUT_SECONDS
-            },
+        session_factory = (
+            self._read_session_factory if read_only else self._session_factory
         )
         async with session_factory() as session:
             yield session
@@ -213,11 +234,14 @@ class DatabaseService:
         uri = cls.generate_read_database_uri(settings)
         if uri is None:
             return None
-        return cls._create_engine_for_uri(uri, settings)
+        return cls._create_engine_for_uri(uri, settings, read_only=True)
 
     @classmethod
     def _create_engine_for_uri(
-        cls, uri: sqlalchemy.engine.url.URL, settings: Settings
+        cls,
+        uri: sqlalchemy.engine.url.URL,
+        settings: Settings,
+        read_only: bool = False,
     ) -> AsyncEngine:
         """Create an async engine bound to the given connection URL.
 
@@ -225,6 +249,7 @@ class DatabaseService:
             uri: SQLAlchemy connection URL.
             settings: Database connection settings supplying pool and SSL
                 options.
+            read_only: Reject data-changing statements on every connection.
 
         Returns:
             Configured asynchronous database engine.
@@ -240,6 +265,7 @@ class DatabaseService:
             # failing the next request.
             pool_pre_ping=True,
             echo=False,
+            execution_options={"postgresql_readonly": True} if read_only else {},
         )
 
     @staticmethod
