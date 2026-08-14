@@ -1,0 +1,55 @@
+{
+  "name": "@zenml-io/kitaru-vercel-ai",
+  "version": "0.1.0-rc.1",
+  "description": "Kitaru tracing and replay adapter for the Vercel AI SDK",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zenml-io/kitaru.git",
+    "directory": "packages/vercel-ai"
+  },
+  "homepage": "https://github.com/zenml-io/kitaru#readme",
+  "bugs": {
+    "url": "https://github.com/zenml-io/kitaru/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org/"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=22.22.0 <23"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "keywords": [
+    "kitaru",
+    "zenml",
+    "agents",
+    "tracing",
+    "replay",
+    "vercel-ai-sdk"
+  ],
+  "dependencies": {
+    "@zenml-io/kitaru": "workspace:0.1.0-rc.1"
+  },
+  "peerDependencies": {
+    "ai": ">=7.0.0 <8.0.0"
+  },
+  "devDependencies": {
+    "ai": "7.0.55"
+  },
+  "scripts": {
+    "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.build.json",
+    "lint": "biome check .",
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  }
+}

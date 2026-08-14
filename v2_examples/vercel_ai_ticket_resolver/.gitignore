@@ -1,0 +1,5 @@
+.env
+.state/
+dist/
+evaluator.py
+node_modules/
