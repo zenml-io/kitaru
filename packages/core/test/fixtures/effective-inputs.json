@@ -1,0 +1,180 @@
+{
+  "generated_by": "src/kitaru/server/domain/replay_config.py::effective_inputs",
+  "cases": [
+    {
+      "name": "no override",
+      "inputs": "baseline prompt",
+      "override": null,
+      "expected": "baseline prompt"
+    },
+    {
+      "name": "model-only override",
+      "inputs": "baseline prompt",
+      "override": {
+        "model": "replacement"
+      },
+      "expected": "baseline prompt"
+    },
+    {
+      "name": "prompt override on a string input",
+      "inputs": "baseline prompt",
+      "override": {
+        "prompt": "new prompt"
+      },
+      "expected": "new prompt"
+    },
+    {
+      "name": "system prompt override on a string input",
+      "inputs": "baseline prompt",
+      "override": {
+        "system_prompt": "new instructions"
+      },
+      "expected": {
+        "prompt": "baseline prompt",
+        "system_prompt": "new instructions"
+      }
+    },
+    {
+      "name": "both prompts on a string input",
+      "inputs": "baseline prompt",
+      "override": {
+        "prompt": "new prompt",
+        "system_prompt": "new instructions"
+      },
+      "expected": {
+        "prompt": "new prompt",
+        "system_prompt": "new instructions"
+      }
+    },
+    {
+      "name": "prompt override on a dict input",
+      "inputs": {
+        "locale": "nl",
+        "prompt": "baseline prompt"
+      },
+      "override": {
+        "prompt": "new prompt"
+      },
+      "expected": {
+        "locale": "nl",
+        "prompt": "new prompt"
+      }
+    },
+    {
+      "name": "system prompt override on a dict input",
+      "inputs": {
+        "locale": "nl",
+        "prompt": "baseline prompt"
+      },
+      "override": {
+        "system_prompt": "new instructions"
+      },
+      "expected": {
+        "locale": "nl",
+        "prompt": "baseline prompt",
+        "system_prompt": "new instructions"
+      }
+    },
+    {
+      "name": "system prompt override on a wrapper without a prompt",
+      "inputs": {
+        "locale": "nl",
+        "system_prompt": "old instructions"
+      },
+      "override": {
+        "system_prompt": "new instructions"
+      },
+      "expected": {
+        "locale": "nl",
+        "system_prompt": "new instructions"
+      }
+    },
+    {
+      "name": "no override on a wrapper without a prompt",
+      "inputs": {
+        "locale": "nl",
+        "system_prompt": "old instructions"
+      },
+      "override": null,
+      "expected": {
+        "locale": "nl",
+        "system_prompt": "old instructions"
+      }
+    },
+    {
+      "name": "no override on a recorded wrapper",
+      "inputs": {
+        "prompt": "baseline prompt",
+        "system_prompt": "old instructions"
+      },
+      "override": null,
+      "expected": {
+        "prompt": "baseline prompt",
+        "system_prompt": "old instructions"
+      }
+    },
+    {
+      "name": "system prompt override on a dict input without a prompt",
+      "inputs": {
+        "locale": "nl"
+      },
+      "override": {
+        "system_prompt": "new instructions"
+      },
+      "expected": {
+        "locale": "nl",
+        "system_prompt": "new instructions"
+      }
+    },
+    {
+      "name": "prompt override on a message-array input",
+      "inputs": [
+        {
+          "content": "hi",
+          "role": "user"
+        }
+      ],
+      "override": {
+        "prompt": "new prompt"
+      },
+      "expected": "new prompt"
+    },
+    {
+      "name": "system prompt override on a message-array input",
+      "inputs": [
+        {
+          "content": "hi",
+          "role": "user"
+        }
+      ],
+      "override": {
+        "system_prompt": "new instructions"
+      },
+      "expected": {
+        "prompt": [
+          {
+            "content": "hi",
+            "role": "user"
+          }
+        ],
+        "system_prompt": "new instructions"
+      }
+    },
+    {
+      "name": "no override on a message-array input",
+      "inputs": [
+        {
+          "content": "hi",
+          "role": "user"
+        }
+      ],
+      "override": null,
+      "expected": [
+        {
+          "content": "hi",
+          "role": "user"
+        }
+      ]
+    }
+  ]
+}
