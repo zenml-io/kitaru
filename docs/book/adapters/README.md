@@ -7,7 +7,7 @@ icon: puzzle-piece
 
 Adapters are the first of two ways into Kitaru: wrap the agent you already have, and every run is recorded natively. (The second — [importing the traces you already collect](../getting-started/import-your-traces.md) — needs no adapter at all.)
 
-An adapter leaves your framework in charge of the agent loop while recording the model and tool activity that the integration exposes. The same adapter makes [replay](../concepts/replay.md) work: it applies supported overrides at the model boundary and answers tool calls per the [tool policy](../guides/tool-policies.md). Capabilities differ by integration. The current TypeScript adapters record non-streaming calls only; the Vercel adapter also preserves Agent `stream()` as a native, recording-free passthrough. Each adapter page states its exact boundary.
+An adapter leaves your framework in charge of the agent loop while recording the model and tool activity that the integration exposes. The same adapter makes [replay](../concepts/replay.md) work: it applies supported overrides at the model boundary and answers tool calls per the [tool policy](../guides/tool-policies.md). Capabilities differ by integration. The current TypeScript adapters record non-streaming calls only; the Vercel adapter also preserves Agent `stream()` outside replay as a native, recording-free passthrough. Each adapter page states its exact boundary.
 
 ## Available adapters
 

@@ -8,7 +8,7 @@ icon: bolt
 `@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to the Vercel [AI SDK](https://ai-sdk.dev) 7 `ToolLoopAgent` and `generateText` APIs. Use `createKitaruToolLoopAgent(...)` for an AI SDK Agent object or `createKitaruGenerateText(...)` for the direct function API. Both return native AI SDK results.
 
 {% hint style="info" %}
-Version `0.1.0-rc.2` is a pre-1.0 compatibility preview. Kitaru records non-streaming Agent `generate()` and direct `generateText` calls. Agent `stream()` remains available as a native, recording-free passthrough; standalone `streamText` is not wrapped.
+Version `0.1.0-rc.2` is a pre-1.0 compatibility preview. Kitaru records non-streaming Agent `generate()` and direct `generateText` calls. Agent `stream()` remains available outside replay as a native, recording-free passthrough; standalone `streamText` is not wrapped.
 {% endhint %}
 
 ## Install
