@@ -24,7 +24,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Prepared the first Kitaru 0.22 release candidate with a selected frontend release and independently versioned plugin packages.
 ## [Unreleased]
 
+### Fixed
+
+- Fixed TypeScript replay and recording edge cases, aligned credential redaction and provider diagnostics across adapters, and made the adapter examples reproducible, rerunnable, and part of CI.
+
 ### Added
+- TypeScript SDK packages for the core client and replay runtime, with Mastra and Vercel AI SDK adapters and runnable examples.
+- TypeScript release packaging for the core, Mastra, and Vercel AI SDK packages, with lockstep release-candidate versions, clean-consumer tarball checks, npm publishing, and GitHub release artifacts.
 - Session lists filter by `experiment_run_id`, returning the sessions produced as the results of the run's replays. Baseline sessions do not match.
 - The PydanticAI adapter records estimated LLM costs from its bundled pricing catalog and accepts a custom cost calculator for private models or negotiated rates.
 - Service accounts, managed via `/v1/service-accounts`. A service account is created active without credentials and cannot be an admin, and admins update its metadata and active state. Account writes moved from `/v1/accounts` to `/v1/users` and `/v1/service-accounts`, leaving `/v1/accounts` read-only over both kinds with a new `is_service_account` filter and a `/v1/accounts/me` endpoint returning the calling account. Like all account management, service accounts require the `local` auth scheme and are unavailable when a control plane owns accounts.
@@ -92,6 +98,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - The checkpoint table in `kitaru executions diff` text output now includes replay-minus-original duration deltas and per-role artifact comparison states (`unchanged`/`changed`/`unavailable`) alongside token and cost deltas, without printing artifact hashes or values. (#520)
 
 ### Fixed
+- A Mastra replay no longer executes tools live after a tool-policy decision fails. Mastra swallowed the exception the policy hook raised, so a replay that could not find a recorded result ran the real tool and still recorded the session as completed. Replays now stop at the first policy failure, and the TypeScript core refuses every later tool call in the run rather than relying on each adapter to notice.
+- A Mastra replay now rejects tools it cannot intercept, and no longer reads or writes live Mastra memory threads, so recording state and replay state stay separate.
+- The Vercel AI adapter no longer fails a running agent because a model response or tool payload was too large to record. Recording bounds oversized values instead of raising, and the shared recorder used by the TypeScript core applies the same bound to tool results captured during replay.
+- The TypeScript adapters record the model identity the same way the Python adapters do: `requested_model` holds the requested identifier, `model` holds the identifier the provider served, `model_provider` holds the bare provider family, and the raw provider string is kept as a `provider_id` attribute. Both adapters accept a `costCalculator` and record the resulting cost with an explicit status attribute, so TypeScript sessions no longer report zero cost.
+- A `system_prompt` replay override now takes effect when the caller passes a message array containing a system message. Both TypeScript adapters previously left the original system message in place, so the replay silently ran the prompt it was meant to replace.
+- Replay model replacement, model-parameter overrides, and replay tool-policy support are now validated once in the TypeScript core rather than separately in each adapter, so the two adapters can no longer accept or reject the same replay specification differently.
+- TypeScript tool cache keys now escape the delete character the way Python does, so a tool input containing it resolves against recorded history instead of missing every lookup.
+- A TypeScript replay no longer resolves a tool call against recorded history when the call's arguments could not be recorded faithfully. Recording bounds long strings and large collections, replaces credential-named values, and cannot reproduce objects such as `URL`, and each of those turns two different calls into the same recorded value and so the same cache key, which made a replay return another call's result. Such a call now follows the policy's `on_miss` setting instead. This narrows what replays from history: a tool whose arguments are that large, or that carry a key named like a credential, no longer matches a recorded result.
+- A TypeScript cost calculator that returns a value the server cannot store, such as a currency-formatted string, is now reported as an unavailable cost instead of failing the run it was recording.
+- Replaying with a `system_prompt` override no longer drops the other keys of a structured input, and a replay of a replay no longer fails to start. The TypeScript core is pinned to the server's input rule by a shared fixture, the way cache keys already were.
+- The TypeScript client reports the server's error message instead of the bare HTTP status text, matching the Python SDK. Recorded nodes carry `started_at`, and a failed recording no longer leaves queued steps pending.
 - Default importers, the PydanticAI adapter, and deterministic evaluators now use the `model_provider` session-node field introduced by the consolidated v2 specification.
 - Importer output selectors now ignore reasoning, thinking, Gemini thought, Anthropic redacted-thinking, and tool-call parts, leaving the selector unset when a model response has no visible text.
 - Importer JSON Pointer grouping now rejects invalid array indices instead of accepting Python-specific negative, signed, whitespace-padded, leading-zero, or underscored forms.

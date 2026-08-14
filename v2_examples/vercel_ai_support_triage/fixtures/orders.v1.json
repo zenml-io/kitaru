@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "orders": [
+    {
+      "orderId": "ord-1001",
+      "accountId": "acct-1001",
+      "status": "delayed",
+      "expectedDelivery": "2026-07-20",
+      "chargeCount": 2,
+      "amountUsd": 89.5
+    }
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "policies": [
+    {
+      "category": "footwear",
+      "window_days": 30,
+      "defective_full_refund": true,
+      "unused_return": true,
+      "final_sale_defect_exception": true,
+      "human_approval_threshold": 150
+    },
+    {
+      "category": "apparel",
+      "window_days": 30,
+      "defective_full_refund": true,
+      "unused_return": true,
+      "final_sale_defect_exception": true,
+      "human_approval_threshold": 150
+    },
+    {
+      "category": "accessories",
+      "window_days": 14,
+      "defective_full_refund": true,
+      "unused_return": true,
+      "final_sale_defect_exception": false,
+      "human_approval_threshold": 100
+    },
+    {
+      "category": "luggage",
+      "window_days": 45,
+      "defective_full_refund": true,
+      "unused_return": true,
+      "final_sale_defect_exception": true,
+      "human_approval_threshold": 200
+    }
+  ]
+}
