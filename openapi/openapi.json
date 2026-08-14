@@ -13020,7 +13020,7 @@
     },
     "/v1/info": {
       "get": {
-        "description": "Report how this server identifies itself and authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present.\n\nArgs:\n    settings: Service settings governing auth behavior.\n    ui_version: UI version served by this process.\n\nReturns:\n    Server info.",
+        "description": "Report how this server identifies itself and authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present.\n\nArgs:\n    settings: Service settings governing auth behavior.\n    server_id: Persisted server id.\n    ui_version: UI version served by this process.\n\nReturns:\n    Server info.",
         "operationId": "get_info_v1_info_get",
         "responses": {
           "200": {

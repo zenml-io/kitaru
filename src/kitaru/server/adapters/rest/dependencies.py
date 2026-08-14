@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """FastAPI dependency providers."""
 
+import uuid
 from collections.abc import AsyncGenerator
 from typing import Annotated, NamedTuple
 
@@ -200,6 +201,19 @@ def get_app_settings(request: Request) -> APISettings:
     """
     settings: APISettings = request.app.state.settings
     return settings
+
+
+def get_server_id_state(request: Request) -> uuid.UUID | None:
+    """Return the persisted server id attached to the application state.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Server id for this process, or None before startup resolved it.
+    """
+    server_id: uuid.UUID | None = request.app.state.server_id
+    return server_id
 
 
 def get_ui_version_state(request: Request) -> str | None:

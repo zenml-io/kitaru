@@ -253,6 +253,7 @@ def create_app(settings: APISettings) -> FastAPI:
                 SQLServerSettingsRepository(session), settings.SERVER_ID
             )
             await session.commit()
+            app.state.server_id = server_id
             analytics.set_context(
                 build_analytics_context(
                     server_id=server_id,
@@ -307,6 +308,8 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.analytics = analytics
     # Replaced with a live client at startup under the control plane scheme.
     app.state.control_plane_client = None
+    # Replaced with the persisted server id at startup.
+    app.state.server_id = None
     _register_domain_exception_handlers(app)
     _register_deadlock_exception_handler(app)
     _register_pool_timeout_exception_handler(app)
