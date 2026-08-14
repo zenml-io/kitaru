@@ -20,8 +20,11 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.rest.request_state import attach_request_session
-from kitaru.server.adapters.rest.route import KitaruAPIRoute
+from kitaru.server.adapters.rest.request_state import (
+    attach_request_session,
+    request_uses_read_engine,
+)
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
 
 _SCOPE: dict[str, Any] = {
     "type": "http",
@@ -45,6 +48,26 @@ class _RecordingSession:
             events: Shared list commit and send events are appended to.
         """
         self.events = events
+
+    async def commit(self) -> None:
+        """Record a commit event."""
+        self.events.append("committed")
+
+
+class _DirtySession:
+    """Fake session exposing pending-write state like a real SQLAlchemy session."""
+
+    def __init__(self, events: list[str], new: bool = False) -> None:
+        """Record commits into the given event list, optionally starting dirty.
+
+        Args:
+            events: Shared list commit and send events are appended to.
+            new: Whether the session should report a pending new object.
+        """
+        self.events = events
+        self.new = {object()} if new else set()
+        self.dirty: set[object] = set()
+        self.deleted: set[object] = set()
 
     async def commit(self) -> None:
         """Record a commit event."""
@@ -148,3 +171,84 @@ async def test_route_without_session_returns_response() -> None:
     await app(scope, receive, send)
 
     assert events == ["response_sent"]
+
+
+async def test_route_marks_request_state_for_a_read_only_endpoint() -> None:
+    """KitaruAPIRoute exposes the read-only flag before the handler runs."""
+    seen: list[bool] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def probe_dependency(request: Request) -> None:
+        seen.append(request_uses_read_engine(request))
+
+    @router.get("/read-only", dependencies=[Depends(probe_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @router.get("/normal", dependencies=[Depends(probe_dependency)])
+    async def normal_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    for path in ("/read-only", "/normal"):
+        scope = {**_SCOPE, "method": "GET", "path": path, "raw_path": path.encode()}
+        receive, send = _drive(scope, events)
+        await app(scope, receive, send)
+
+    assert seen == [True, False]
+
+
+async def test_route_raises_when_a_read_only_route_has_pending_writes() -> None:
+    """A read-only route that dirties its session fails instead of committing."""
+    events: list[str] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
+        attach_request_session(
+            request, cast(AsyncSession, _DirtySession(events, new=True))
+        )
+        yield
+
+    @router.get("/read-only", dependencies=[Depends(session_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    scope = {**_SCOPE, "method": "GET", "path": "/read-only", "raw_path": b"/read-only"}
+    receive, send = _drive(scope, events)
+    with pytest.raises(RuntimeError, match="pending database writes"):
+        await app(scope, receive, send)
+
+    assert "committed" not in events
+
+
+async def test_route_commits_pending_writes_on_an_unmarked_route() -> None:
+    """The pending-writes guard only applies to routes marked read-only."""
+    events: list[str] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
+        attach_request_session(
+            request, cast(AsyncSession, _DirtySession(events, new=True))
+        )
+        yield
+
+    @router.get("/normal", dependencies=[Depends(session_dependency)])
+    async def normal_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    scope = {**_SCOPE, "method": "GET", "path": "/normal", "raw_path": b"/normal"}
+    receive, send = _drive(scope, events)
+    await app(scope, receive, send)
+
+    assert events == ["committed", "response_sent"]
