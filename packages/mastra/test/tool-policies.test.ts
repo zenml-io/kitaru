@@ -101,6 +101,38 @@ describe("replay tool policies", () => {
     });
   });
 
+  it("matches static cases against credentials before recording redacts them", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const originalInputs = {
+      authorization: "Bearer SECRET_SENTINEL",
+      query: "weather",
+    };
+    installTestApi({
+      replaySpec: replaySpec({
+        default: {
+          cases: [
+            {
+              match: originalInputs,
+              match_mode: "exact",
+              result: { source: "static" },
+            },
+          ],
+          on_miss: "passthrough",
+          type: "static",
+        },
+        tools: {},
+      }),
+    });
+    const execute = vi.fn(() => ({ source: "real" }));
+
+    const result = await wrapper(replayAgent(execute, originalInputs)).generate(
+      "run",
+    );
+
+    expect(result).toEqual({ source: "static" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("fails closed for an ambiguous found null history result", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi({

@@ -92,6 +92,46 @@ describe("replay tool policies", () => {
     expect(client.lookups).toEqual([]);
   });
 
+  it("matches static cases against arguments before recording truncates them", async () => {
+    const value = "a".repeat(4_097);
+    const client = new FakeClient({
+      replay: replaySpec({
+        cases: [
+          {
+            match: { value },
+            match_mode: "exact",
+            result: { source: "static" },
+          },
+        ],
+        on_miss: "passthrough",
+        type: "static",
+      }),
+    });
+    const execute = vi.fn(async () => ({ source: "live" }));
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    const result = await generate({
+      model: new MockLanguageModelV4({
+        doGenerate: toolResponse([
+          {
+            id: "call-long",
+            input: JSON.stringify({ value }),
+            name: "write",
+          },
+        ]),
+      }),
+      prompt: "go",
+      tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
+    });
+
+    expect(result.toolResults[0]?.output).toEqual({ source: "static" });
+    expect(execute).not.toHaveBeenCalled();
+  });
+
   it("rejects prepareStep before replay can replace the model or prompt", async () => {
     const client = new FakeClient({ replay: replaySpec() });
     const model = modelForValue();

@@ -325,6 +325,7 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
             callId,
             inputs: serializedInput,
             inputsLossy: convertedInput.lossy,
+            originalInputs: input,
             toolName,
           });
           if (decision.type === "mocked_error") {

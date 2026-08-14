@@ -104,6 +104,7 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
           callId,
           inputs: converted.value,
           inputsLossy: converted.lossy,
+          originalInputs: hookContext.input,
           toolName: hookContext.toolName,
         });
         if (decision.type !== "execute") {

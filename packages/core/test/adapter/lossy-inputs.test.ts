@@ -9,7 +9,7 @@ import {
 } from "../../src/adapter/index.js";
 import type { RunState } from "../../src/adapter/run-state.js";
 import { computeToolCacheKey } from "../../src/cache-key.js";
-import { ToolPolicyMissError } from "../../src/errors.js";
+import { ToolPolicyError, ToolPolicyMissError } from "../../src/errors.js";
 import { type FakeClient, runState } from "./helpers.js";
 
 type Converter = typeof boundedRecorderConversion;
@@ -190,5 +190,54 @@ describe("history lookup of lossily converted tool arguments", () => {
       ToolPolicyMissError,
     );
     expect(client.lookups).toEqual([]);
+  });
+});
+
+describe("static matching of lossily converted tool arguments", () => {
+  it("matches the untouched arguments while keeping credentials redacted in the ledger", async () => {
+    const originalInputs = {
+      authorization: "Bearer SECRET_SENTINEL",
+      query: "weather",
+    };
+    const call = toolInput(originalInputs);
+    const { run } = runState({
+      default: {
+        cases: [
+          {
+            match: originalInputs,
+            match_mode: "exact",
+            result: RECORDED,
+          },
+        ],
+        on_miss: "passthrough",
+        type: "static",
+      },
+      tools: {},
+    });
+
+    await expect(
+      decideToolCall(run, { ...call, originalInputs }),
+    ).resolves.toEqual({ output: RECORDED, type: "mocked_result" });
+    expect(run.getToolCall(call.callId)?.inputs).toEqual({
+      authorization: "[redacted]",
+      query: "weather",
+    });
+  });
+
+  it("fails closed when lossy arguments have no untouched value", async () => {
+    const call = toolInput({ authorization: "Bearer SECRET_SENTINEL" });
+    const { run } = runState({
+      default: {
+        cases: [],
+        on_miss: "passthrough",
+        type: "static",
+      },
+      tools: {},
+    });
+
+    await expect(decideToolCall(run, call)).rejects.toThrow(
+      "only a lossy recorded value was available",
+    );
+    expect(run.failure).toBeInstanceOf(ToolPolicyError);
   });
 });

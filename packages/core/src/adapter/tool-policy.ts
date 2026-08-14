@@ -19,6 +19,9 @@ export interface ToolCallInput {
   // of them. Set it from the converter rather than guessing: a value that lost
   // information no longer identifies the call it came from.
   inputsLossy?: boolean;
+  // The untouched arguments supplied by the framework. Static policies match
+  // these instead of the bounded/redacted ledger value.
+  originalInputs?: unknown;
   toolName: string;
 }
 
@@ -75,6 +78,19 @@ function staticCaseMatches(
       Object.hasOwn(input, key) &&
       deepJsonEqual(input[key] as JsonValue, value as JsonValue),
   );
+}
+
+function staticMatchingInput(input: ToolCallInput): JsonValue {
+  if (Object.hasOwn(input, "originalInputs")) {
+    return toRecorderJson(input.originalInputs);
+  }
+  if (input.inputsLossy === true) {
+    throw new ToolPolicyError(
+      `Tool '${input.toolName}' arguments could not be matched against static ` +
+        "cases because only a lossy recorded value was available",
+    );
+  }
+  return input.inputs;
 }
 
 export function selectToolPolicy(
@@ -185,8 +201,9 @@ export async function decideToolCall(
       return { type: "execute" };
     }
     if (policy.type === "static") {
+      const matchingInput = staticMatchingInput(input);
       const matchingCase = policy.cases.find((candidate) =>
-        staticCaseMatches(input.inputs, candidate.match, candidate.match_mode),
+        staticCaseMatches(matchingInput, candidate.match, candidate.match_mode),
       );
       if (matchingCase) {
         entry.mocked = true;
