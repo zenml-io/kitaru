@@ -108,6 +108,7 @@ def _compile_experiment_run_condition(
 
 
 EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": EvaluationORM.id,
     "session_id": EvaluationORM.session_id,
     "task_id": EvaluationORM.task_id,
     "evaluator_version_id": EvaluationORM.evaluator_version_id,

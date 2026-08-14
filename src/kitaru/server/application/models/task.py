@@ -38,6 +38,7 @@ class TaskFilter(ListFilter):
     """Task list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "job_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "kind": FilterField(value_type=TaskKind, ops=EQUALITY_OPS),
         "status": FilterField(value_type=TaskStatus, ops=EQUALITY_OPS),
@@ -52,6 +53,7 @@ class JobTasksFilter(TaskFilter):
     """Job tasks list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": TaskFilter.filterable_fields["id"],
         "kind": TaskFilter.filterable_fields["kind"],
         "status": TaskFilter.filterable_fields["status"],
     }

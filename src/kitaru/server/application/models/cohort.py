@@ -29,6 +29,7 @@ class CohortFilter(ListFilter):
     """Cohort list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
@@ -39,6 +40,7 @@ class CohortVersionFilter(ListFilter):
     """Cohort version list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "tag": FilterField(value_type=str, ops=frozenset({FilterOp.EQ, FilterOp.IN})),
     }
 

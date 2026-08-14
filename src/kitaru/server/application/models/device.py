@@ -26,6 +26,7 @@ class DeviceFilter(ListFilter):
     """Device list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "status": FilterField(value_type=DeviceStatus, ops=EQUALITY_OPS),
     }
 

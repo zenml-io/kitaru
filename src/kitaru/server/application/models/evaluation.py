@@ -33,6 +33,7 @@ class EvaluationFilter(ListFilter):
     """Evaluation list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "session_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "task_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
         "evaluator_version_id": FilterField(

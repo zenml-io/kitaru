@@ -35,6 +35,7 @@ class ReplayFilter(ListFilter):
     """Replay list filter."""
 
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
+        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "experiment_run_id": FilterField(
             value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS
         ),

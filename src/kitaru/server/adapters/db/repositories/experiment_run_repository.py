@@ -42,6 +42,7 @@ from kitaru.server.domain.experiment_run import (
 )
 
 EXPERIMENT_RUN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": ExperimentRunORM.id,
     "experiment_id": ExperimentRunORM.experiment_id,
     "cohort_version_id": ExperimentRunORM.cohort_version_id,
     # A run pins one cohort version, so a cohort-wide history spans every

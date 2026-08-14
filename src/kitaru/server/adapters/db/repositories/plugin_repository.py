@@ -49,6 +49,7 @@ from kitaru.server.domain.plugin import (
 )
 
 PLUGIN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": PluginORM.id,
     "name": PluginORM.name,
     "provider": PluginORM.provider,
 }

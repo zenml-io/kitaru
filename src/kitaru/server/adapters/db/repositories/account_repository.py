@@ -34,6 +34,7 @@ from kitaru.server.domain.account import (
 from kitaru.server.domain.base import NotFoundError
 
 ACCOUNT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
+    "id": AccountORM.id,
     "name": AccountORM.name,
     "active": AccountORM.active,
     "is_service_account": AccountORM.is_service_account,
