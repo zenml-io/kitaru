@@ -5,18 +5,11 @@ icon: rocket
 
 # Quickstart
 
-You will take an agent you already have, wrap it so every run becomes a
-[session](../concepts/agents-and-sessions.md), and then do the one thing
-Kitaru is for: **replay** that recording. Reproduce it, fork it with one
-thing changed, and read what the change did. One sitting, one ticket:
+You will take an agent you already have, wrap it so every run becomes a [session](../concepts/agents-and-sessions.md), and then do the one thing Kitaru is for: **replay** that recording. Reproduce it, fork it with one thing changed, and read what the change did. One sitting, one ticket:
 
 > Refund order #4821 — the card reader was double-charged.
 
-You need a running server and a connection, covered in
-[Installation](installation.md). Already collecting traces in Langfuse or
-elsewhere? You can skip wrapping entirely and start from
-[Import your traces](import-your-traces.md) — everything from
-[step 4](#4-write-the-evaluator) on works the same.
+You need a running server and a connection, covered in [Installation](installation.md). Already collecting traces in Langfuse or elsewhere? You can skip wrapping entirely and start from [Import your traces](import-your-traces.md) — everything from [step 4](#4-write-the-evaluator) on works the same.
 
 ## 1. Register the agent
 
@@ -29,9 +22,7 @@ kitaru agent register support-agent \
 export KITARU_AGENT_ID=<id from the output>
 ```
 
-The `--command` is the agent's run spec — how a
-[worker](../concepts/workers.md) will re-launch this exact agent when you
-replay. The agent calls an OpenAI model, so give it a key too:
+The `--command` is the agent's run spec — how a [worker](../concepts/workers.md) will re-launch this exact agent when you replay. The agent calls an OpenAI model, so give it a key too:
 
 ```bash
 export OPENAI_API_KEY=sk-...
@@ -39,8 +30,7 @@ export OPENAI_API_KEY=sk-...
 
 ## 2. Wrap the agent and record a run
 
-No decorators, no graph, no rewrite. Wrap the agent you already have with
-`KitaruAgent` and run it:
+No decorators, no graph, no rewrite. Wrap the agent you already have with `KitaruAgent` and run it:
 
 ```python
 # support.py
@@ -58,8 +48,8 @@ agent = Agent(
 
 @agent.tool_plain
 def refund_payment(order_id: str) -> str:
-    # Your real refund API. Returns a human-readable confirmation.
-    return payments.refund(order_id)
+    # Replace this deterministic stand-in with your real refund API.
+    return f"Refunded {order_id}"
 
 support = KitaruAgent(agent, agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
 
@@ -74,11 +64,7 @@ if __name__ == "__main__":
 python support.py
 ```
 
-That run left behind one session: the model requests, the
-`refund_payment` call with its arguments and result, token usage, and
-cost, recorded as the run progressed. This same script is also your replay
-target — under a worker, the adapter feeds it the recorded inputs
-automatically, so nothing about it changes.
+That run left behind one session: the model requests, the `refund_payment` call with its arguments and result, token usage, and cost, recorded as the run progressed. This same script is also your replay target — under a worker, the adapter feeds it the recorded inputs automatically, so nothing about it changes.
 
 ## 3. Look at the recording
 
@@ -87,8 +73,10 @@ The Python client is async and reads its connection from the environment:
 ```python
 # show_session.py
 import asyncio
+
 from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.session import SessionListParams
+from kitaru.api_models.v1.session_node import SessionNodeListParams
 
 async def main() -> None:
     client = KitaruAPIClient()
@@ -96,7 +84,9 @@ async def main() -> None:
     session = sessions.items[0]
     print(session.id, session.status, session.cost, session.tokens)
 
-    nodes = await client.sessions.list_nodes(session.id, include_payloads=True)
+    nodes = await client.sessions.list_nodes(
+        session.id, SessionNodeListParams(include_payloads=True)
+    )
     for node in nodes.items:
         print(f"{node.index:3} {node.node_type:12} {node.name}")
 
@@ -109,19 +99,19 @@ asyncio.run(main())
   2 llm_call     support-agent
 ```
 
-Keep the session id this prints — the replay snippets in steps 6 and 7
-refer to it as `SESSION_ID`.
+Keep the session ID this prints and export it for the replay snippets in steps 6 and 7:
 
-The recording is the whole conversation between your agent and the world:
-what the model saw, what the tool returned, what it cost.
+```bash
+export KITARU_SESSION_ID=<session-id>
+```
+
+The recording is the whole conversation between your agent and the world: what the model saw, what the tool returned, what it cost.
 
 <a id="write-the-evaluator"></a>
 
 ## 4. Write the evaluator
 
-A replay is always evaluated, so define what "good" means before replaying.
-Scaffold an [evaluator](../concepts/evaluators.md) — plain Python reading
-the session:
+A replay is always evaluated, so define what "good" means before replaying. Scaffold an [evaluator](../concepts/evaluators.md) — plain Python reading the session:
 
 ```bash
 kitaru evaluator scaffold refund-check
@@ -148,31 +138,28 @@ kitaru evaluator register refund-check \
   --script refund_check_evaluator.py --entrypoint evaluate
 ```
 
-(A suite of `kitaru/` evaluators comes built in — from `kitaru/cost` to
-deterministic checks like `kitaru/output-contract` — cheap triage before
-you write anything. The one you just wrote is the kind that encodes
-*your* definition of good.)
+(A suite of `kitaru/` evaluators comes built in — from `kitaru/cost` to deterministic checks like `kitaru/output-contract` — cheap triage before you write anything. The one you just wrote is the kind that encodes _your_ definition of good.)
 
 ## 5. Start a worker
 
-Replays execute in **your** environment, not on the server. Open a second
-terminal in the same directory and virtualenv:
+Replays execute in **your** environment, not on the server. Open a second terminal in the same directory and virtualenv:
 
 ```bash
 kitaru worker start
 ```
 
-Leave it running — it claims the replay you're about to create, re-runs
-`support.py` as a subprocess, and runs your evaluator.
+Leave it running — it claims the replay you're about to create, re-runs `support.py` as a subprocess, and runs your evaluator.
 
 ## 6. Replay it unchanged — the baseline
 
-First, prove the recording is faithful. Re-run the session with nothing
-changed and every tool call answered from the recording:
+First, prove the recording is faithful. Re-run the session with nothing changed and every tool call answered from the recording:
 
 ```python
 # replay.py
 import asyncio
+import os
+import uuid
+
 from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.replay import ReplayCreateRequest
 from kitaru.api_models.v1.replay_config import (
@@ -182,6 +169,7 @@ from kitaru.api_models.v1.replay_config import (
 )
 
 RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
+SESSION_ID = uuid.UUID(os.environ["KITARU_SESSION_ID"])
 
 async def main() -> None:
     client = KitaruAPIClient()
@@ -204,22 +192,33 @@ Watch it finish, then read the result:
 kitaru job watch <job-id>
 ```
 
-Your real code ran again — but `refund_payment` was answered from the
-recording, so no card was touched, and `on_miss="fail"` guarantees
-anything unrecorded stops the replay instead of reaching a live system.
-**This is the discipline: if the unchanged replay doesn't hold up, stop —
-nothing you fork from it can be trusted.** A faithful baseline is what
-makes the next step mean something.
+Your real code ran again — but `refund_payment` was answered from the recording, so no card was touched, and `on_miss="fail"` guarantees anything unrecorded stops the replay instead of reaching a live system. **This is the discipline: if the unchanged replay doesn't hold up, stop — nothing you fork from it can be trusted.** A faithful baseline is what makes the next step mean something.
 
 ## 7. Fork it with one thing changed
 
-Now ask the question you actually care about: *would the cheaper model
-have handled this ticket?* Same replay, one override:
+Now ask the question you actually care about: _would the cheaper model have handled this ticket?_ Create `fork.py` with the same recorded-tool policy and one override:
 
 ```python
-from kitaru.api_models.v1.replay_config import ReplayOverride
+import asyncio
+import os
+import uuid
 
-    fork = await client.replays.create(
+from kitaru.client import KitaruAPIClient
+from kitaru.api_models.v1.replay import ReplayCreateRequest
+from kitaru.api_models.v1.replay_config import (
+    EvaluatorConfig,
+    HistoryConfig,
+    ReplayOverride,
+    ToolPolicy,
+)
+
+SESSION_ID = uuid.UUID(os.environ["KITARU_SESSION_ID"])
+RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
+
+
+async def main() -> None:
+    client = KitaruAPIClient()
+    replay = await client.replays.create(
         ReplayCreateRequest(
             baseline_session_id=SESSION_ID,
             override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
@@ -227,15 +226,17 @@ from kitaru.api_models.v1.replay_config import ReplayOverride
             tool_policy=RECORDED_TOOLS,
         )
     )
+    print(replay.id, replay.job_id)
+
+
+asyncio.run(main())
 ```
 
-The agent re-runs from the top on the cheaper model, against the same
-recorded world. One run, one thing changed.
+The agent re-runs from the top on the cheaper model, against the same recorded world. One run, one thing changed.
 
 ## 8. Read the diff
 
-Each replay produced a new session (`origin: replay`), already evaluated.
-Compare the fork against the baseline:
+Each replay produced a new session (`origin: replay`), already evaluated. Compare the fork against the baseline:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationListParams
@@ -250,17 +251,11 @@ async def show(client: KitaruAPIClient, session_id) -> None:
         print(f"  {e.name}: score={e.score} passed={e.passed}")
 ```
 
-If `refund_issued` still passes and cost dropped, you just learned
-something real about a model swap — from a production run, without touching
-production.
+If `refund_issued` still passes and cost dropped, you just learned something real about a model swap — from a production run, without touching production.
 
 ## 9. Widen it into a regression suite
 
-One replay tells you about one ticket. Freeze a week of real runs into a
-[cohort](../concepts/cohorts.md), make the model swap an
-[experiment](../concepts/experiments.md), and replay the whole population —
-that's [Build a regression suite from production](../guides/regression-suite.md),
-and it's the loop that keeps a fixed failure fixed.
+One replay tells you about one ticket. Freeze a week of real runs into a [cohort](../concepts/cohorts.md), make the model swap an [experiment](../concepts/experiments.md), and replay the whole population — that's [Build a regression suite from production](../guides/regression-suite.md), and it's the loop that keeps a fixed failure fixed.
 
 ## Where to go next
 

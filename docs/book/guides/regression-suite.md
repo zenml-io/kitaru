@@ -5,21 +5,13 @@ icon: vials
 
 # Build a regression suite from production
 
-One replay tells you about one session. A hundred replays tell you whether a
-change is safe to ship. The insight this guide operationalizes: **your
-production traces are your test suite** — every recorded or imported
-session is a test case with real inputs, a real decision path, and a
-known outcome. You never have to write synthetic fixtures again; you have
-to *select* well.
+One replay tells you about one session. A hundred replays tell you whether a change is safe to ship. The insight this guide operationalizes: **your production traces are your test suite** — every recorded or imported session is a test case with real inputs, a real decision path, and a known outcome. You never have to write synthetic fixtures again; you have to _select_ well.
 
-The loop: select a cohort → freeze it → make the change an experiment →
-replay and score → keep the winner → gate on it.
+The loop: select a cohort → freeze it → make the change an experiment → replay and score → keep the winner → gate on it.
 
 ## 1. Select the population
 
-Pick the sessions that represent what you can't afford to break. List and
-filter by agent, status, or time; or start from the sessions a specific
-failure taught you about:
+Pick the sessions that represent what you can't afford to break. List and filter by agent, status, or time; or start from the sessions a specific failure taught you about:
 
 ```python
 import asyncio
@@ -38,22 +30,11 @@ async def main() -> None:
     ][:50]
 ```
 
-A good starting population is one week of traffic plus every session that
-ever triggered an incident. [Imported sessions](import-langfuse-traces.md)
-qualify exactly like recorded ones — your Langfuse history from before
-Kitaru existed is admissible evidence, and if you imported it with
-`--tag`, the tag *is* your selection
-(`kitaru session list --tag imported-baseline`). Recorded live rather
-than imported? Select by `--agent` or a `--filter` instead — any
-selection works.
+A good starting population is one week of traffic plus every session that ever triggered an incident. [Imported sessions](import-langfuse-traces.md) qualify exactly like recorded ones — your Langfuse history from before Kitaru existed is admissible evidence, and if you imported it with `--tag`, the tag _is_ your selection (`kitaru session list --tag imported-baseline`). Recorded live rather than imported? Select by `--agent` or a `--filter` instead — any selection works.
 
 ## 2. Freeze it into a cohort version
 
-From the CLI, one command — `cohort create` takes a session selection
-(`--tag`, `--session`, `--sessions-file`, `--filter` — the same surface
-`session evaluate` offers) and freezes the match into version 1.
-`--agent` is not a selector here; it names the agent the cohort belongs
-to:
+From the CLI, one command — `cohort create` takes a session selection (`--tag`, `--session`, `--sessions-file`, `--filter` — the same surface `session evaluate` offers) and freezes the match into version 1. `--agent` is not a selector here; it names the agent the cohort belongs to:
 
 ```bash
 kitaru cohort create refund-regression --agent support-agent \
@@ -75,16 +56,16 @@ version = await client.cohorts.create_version(
 )
 ```
 
-[Cohort versions are immutable](../concepts/cohorts.md). That's what makes
-week-over-week numbers comparable: version 1 is always the same 50
-sessions, and "the suite got harder" is an explicit new version, not a
-silent drift.
+[Cohort versions are immutable](../concepts/cohorts.md). That's what makes week-over-week numbers comparable: version 1 is always the same 50 sessions, and "the suite got harder" is an explicit new version, not a silent drift.
 
 ## 3. Make the change an experiment
 
-The experiment holds everything about the change *except* the population:
+The experiment holds everything about the change _except_ the population:
 
 ```python
+import os
+import uuid
+
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
 from kitaru.api_models.v1.replay_config import (
     EvaluatorConfig, HistoryConfig, ReplayOverride, ToolPolicy,
@@ -92,6 +73,7 @@ from kitaru.api_models.v1.replay_config import (
 
 experiment = await client.experiments.create(
     ExperimentCreateRequest(
+        agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]),
         name="cheaper-model",
         override=ReplayOverride(model={"openai:gpt-5.4": "openai:gpt-5-nano"}),
         tool_policy=ToolPolicy(
@@ -105,20 +87,15 @@ experiment = await client.experiments.create(
 )
 ```
 
-Both evaluators must already be registered — `tone-judge` stands in for
-whatever second lens you've written;
-[Write an evaluator](write-an-evaluator.md) is the recipe.
+Both evaluators must already be registered — `tone-judge` stands in for whatever second lens you've written; [Write an evaluator](write-an-evaluator.md) is the recipe.
 
-Testing a **code** change instead? Leave `override` out entirely and
-register your branch as a new agent version — the run supplies it next.
-The `history` policy scoped to `cohort_version` answers tool calls from
-any recording in the cohort, and `on_miss="fail"` keeps 50 replays from
-touching a single live system.
+Testing a **code** change instead? Leave `override` out entirely and register your branch as a new agent version — the run supplies it next. The `history` policy scoped to `cohort_version` answers tool calls from any recording in the cohort, and `on_miss="fail"` keeps 50 replays from touching a single live system.
 
 The CLI form takes the override and tool policy as JSON:
 
 ```bash
 kitaru experiment create cheaper-model \
+  --agent support-agent \
   --evaluator refund-check@latest --evaluator tone-judge@latest \
   --override '{"model": {"openai:gpt-5.4": "openai:gpt-5-nano"}}' \
   --tool-policy '{"default": {"type": "history", "scope": "cohort_version", "on_miss": "fail"}}'
@@ -126,8 +103,7 @@ kitaru experiment create cheaper-model \
 
 ## 4. Run it and read it
 
-Register the candidate first if it doesn't exist yet —
-`kitaru agent version register` is what mints `support-agent@2`:
+Register the candidate first if it doesn't exist yet — `kitaru agent version register` is what mints `support-agent@2`:
 
 ```bash
 kitaru experiment run start cheaper-model \
@@ -152,11 +128,7 @@ run = await client.experiments.start_run(
 )
 ```
 
-Workers fan out one replay per session; `run.progress` counts them
-through. When the run settles, every replay has a result session and both
-sides carry evaluations. Aggregate them the way the data types suggest —
-numbers average, booleans count into pass rates, labels diff as
-transitions:
+Workers fan out one replay per session; `run.progress` counts them through. When the run settles, every replay has a result session and both sides carry evaluations. Aggregate them the way the data types suggest — numbers average, booleans count into pass rates, labels diff as transitions:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationListParams
@@ -184,17 +156,11 @@ print(f"baseline: {sum(filter(None, baseline_pass))}/{len(replays)}")
 print(f"fork:     {sum(filter(None, fork_pass))}/{len(replays)}")
 ```
 
-Add cost from the result sessions' rollups and the headline writes
-itself: *"gpt-5-nano held on 47 of 50 refund tickets and cut cost 41%; the
-3 misses are sessions #…, #…, #… — read those."* The misses are the
-point: each one is a concrete recorded run you can
-[replay and step through](replay-and-overrides.md), not a percentage.
+Add cost from the result sessions' rollups and the headline writes itself: _"gpt-5-nano held on 47 of 50 refund tickets and cut cost 41%; the 3 misses are sessions #…, #…, #… — read those."_ The misses are the point: each one is a concrete recorded run you can [replay and step through](replay-and-overrides.md), not a percentage.
 
 ## 5. Gate on it
 
-The cohort that caught a failure becomes the gate that keeps it caught.
-In CI: register the PR's code as an agent version, start a run against
-the frozen cohort version, and fail the build on the result:
+The cohort that caught a failure becomes the gate that keeps it caught. In CI: register the PR's code as an agent version, start a run against the frozen cohort version, and fail the build on the result:
 
 ```bash
 kitaru agent version register support-agent --command "python support.py"
@@ -204,14 +170,6 @@ kitaru experiment run start cheaper-model \
   --evaluate-baselines --wait --timeout 1800
 ```
 
-`--wait` blocks until the run settles and exits nonzero on failure, so
-the command doubles as the CI gate; `--output jsonl` streams progress in
-a form your pipeline can parse. A worker executes the suite — either a
-long-running pool, or one started in the CI job itself
-(`kitaru worker start`).
+`--wait` blocks until the run settles and exits nonzero on failure, so the command doubles as the CI gate; `--output jsonl` streams progress in a form your pipeline can parse. A worker executes the suite — either a long-running pool, or one started in the CI job itself (`kitaru worker start`).
 
-Keep two shapes: a small cohort per PR (the incidents plus a dozen
-representative runs), and the wide week-of-traffic sweep nightly. When a
-new failure ships anyway, the postmortem's last step is one line: add its
-session to the cohort — that's a new version — and it can never ship
-again unnoticed.
+Keep two shapes: a small cohort per PR (the incidents plus a dozen representative runs), and the wide week-of-traffic sweep nightly. When a new failure ships anyway, the postmortem's last step is one line: add its session to the cohort — that's a new version — and it can never ship again unnoticed.

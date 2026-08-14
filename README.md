@@ -86,7 +86,7 @@ built in:
 
 ```bash
 kitaru session import langfuse-export.jsonl \
-  --importer kitaru/langfuse@latest --agent support-agent \
+  --importer kitaru/langfuse@latest --agent support-agent@latest \
   --media-type application/x-ndjson \
   --tag imported-baseline --wait
 ```

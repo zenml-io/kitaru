@@ -24,7 +24,11 @@ from conftest import (
     asgi_api_client,
     local_settings,
 )
-from kitaru.api_models.v1.account import AccountResponse, UserCreateRequest
+from kitaru.api_models.v1.account import (
+    AccountResponse,
+    UserActivationTokenResponse,
+    UserCreateRequest,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
@@ -59,10 +63,22 @@ async def test_create(api_client: KitaruAPIClient) -> None:
         UserCreateRequest(name="alice", email="alice@example.com", password="secret")
     )
     assert isinstance(account, AccountResponse)
+    assert not isinstance(account, UserActivationTokenResponse)
     assert account.name == "alice"
     assert account.email == "alice@example.com"
     assert account.is_service_account is False
     assert account.active is True
+
+
+async def test_create_without_password_returns_activation_token(
+    api_client: KitaruAPIClient,
+) -> None:
+    """Return the one-time activation token for an inactive user."""
+    account = await api_client.users.create(UserCreateRequest(name="alice"))
+
+    assert isinstance(account, UserActivationTokenResponse)
+    assert account.activation_token
+    assert account.active is False
 
 
 async def test_create_duplicate_name(api_client: KitaruAPIClient) -> None:
