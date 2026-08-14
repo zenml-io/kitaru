@@ -4868,6 +4868,9 @@ class FakeJobRepository:
             Page of matching jobs and the next cursor.
         """
         jobs = list(self._jobs.values())
+        if job_filter.job_ids is not None:
+            wanted = set(job_filter.job_ids)
+            jobs = [job for job in jobs if job.id in wanted]
         if job_filter.expression is not None:
             jobs = [
                 job

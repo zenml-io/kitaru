@@ -135,6 +135,41 @@ async def test_start_run_fans_out_one_replay_per_session(
     assert all(job["status"] == "pending" for job in jobs)
 
 
+async def test_list_run_jobs_scoped_to_the_run(
+    client: httpx.AsyncClient,
+) -> None:
+    """Listing a run's jobs excludes the jobs of other runs."""
+    setup = await _setup_run(client)
+    job_ids = []
+    for _ in range(2):
+        run = (
+            await client.post(
+                f"/v1/experiments/{setup['experiment_id']}/runs",
+                json={
+                    "cohort_version_id": setup["cohort_version_id"],
+                    "agent_version_id": setup["agent_version_id"],
+                },
+            )
+        ).json()
+        replays = (
+            await client.get(
+                "/v1/replays",
+                params={
+                    "filter": json.dumps(
+                        {"field": "experiment_run_id", "op": "eq", "value": run["id"]}
+                    )
+                },
+            )
+        ).json()["items"]
+        jobs = (await client.get(f"/v1/experiment-runs/{run['id']}/jobs")).json()[
+            "items"
+        ]
+        assert len(jobs) == 2
+        assert {job["id"] for job in jobs} == {replay["job_id"] for replay in replays}
+        job_ids.append({job["id"] for job in jobs})
+    assert job_ids[0].isdisjoint(job_ids[1])
+
+
 async def test_cancel_run_drains_pending_replicas_immediately(
     client: httpx.AsyncClient,
 ) -> None:
