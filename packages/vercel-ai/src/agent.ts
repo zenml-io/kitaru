@@ -64,6 +64,7 @@ type RuntimeSettings = Record<string, unknown> & {
 
 interface InvocationState {
   currentModelSettings?: Record<string, JsonValue>;
+  includeOutput?: boolean;
   pendingModelCall?: Pick<
     LanguageModelCallStartEvent,
     "callId" | "modelId" | "provider"
@@ -245,6 +246,7 @@ export function createKitaruToolLoopAgent<
             tools: runtime.tools,
           });
         }
+        state.includeOutput = runtime.output !== undefined;
 
         const recorder = await RunRecorder.create({
           adapterVersion: ADAPTER_VERSION,
@@ -357,7 +359,7 @@ export function createKitaruToolLoopAgent<
           return result;
         }
         await state.recorder.complete(
-          resultSummary(result, settings.output !== undefined),
+          resultSummary(result, state.includeOutput === true),
         );
         return result;
       } catch (error) {

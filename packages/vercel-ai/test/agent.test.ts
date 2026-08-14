@@ -1,4 +1,4 @@
-import { jsonSchema, tool } from "ai";
+import { jsonSchema, Output, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it } from "vitest";
 
@@ -178,6 +178,45 @@ describe("createKitaruToolLoopAgent", () => {
     expect(preparedModel.doGenerateCalls).toHaveLength(1);
     expect(events).toEqual(["configured:end", "call:end"]);
     expect(client.created[0]?.inputs).toBe("Help acme");
+  });
+
+  it("records structured output configured by prepareCall", async () => {
+    const client = new FakeClient();
+    const answerSchema = jsonSchema<{ answer: string }>(
+      {
+        additionalProperties: false,
+        properties: { answer: { type: "string" } },
+        required: ["answer"],
+        type: "object",
+      },
+      {
+        validate: (value) =>
+          typeof value === "object" &&
+          value !== null &&
+          typeof (value as { answer?: unknown }).answer === "string"
+            ? { success: true, value: value as { answer: string } }
+            : { success: false, error: new TypeError("invalid answer") },
+      },
+    );
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({
+          doGenerate: textResponse('{"answer":"yes"}'),
+        }),
+        prepareCall: (call) => ({
+          ...call,
+          output: Output.object({ schema: answerSchema }),
+        }),
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    const result = await agent.generate({ prompt: "Answer" });
+
+    expect(result.output).toEqual({ answer: "yes" });
+    expect(client.updated.at(-1)?.outputs).toMatchObject({
+      object: { answer: "yes" },
+    });
   });
 
   it("keeps recorder state separate for concurrent generate calls", async () => {
