@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Prepared the sixth Kitaru 0.22 release candidate with the local prerelease image-tag fix and `kitaru-ui-v0.2.0-rc.4`.
+- Prepared the sixth Kitaru 0.22 release candidate with the local prerelease image-tag fix and `kitaru-ui-v0.2.0-rc.3`.
 
 ## [0.22.0rc5]
 
