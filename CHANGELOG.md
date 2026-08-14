@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc4]
+
+### Changed
+
+- Prepared the fourth Kitaru 0.22 release candidate with TypeScript publishing fixes and simplified deployable release publishing.
+
 ## [0.22.0rc3]
 
 ### Changed
