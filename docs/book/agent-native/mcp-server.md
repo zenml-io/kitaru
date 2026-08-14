@@ -127,22 +127,17 @@ shape coding assistants are good at.
 
 ## Agent skills
 
-MCP gives an assistant the *interface*; skills give it the *judgment* —
-which questions are worth asking of a session, where a cohort earns its
-keep, what a trustworthy replay looks like. They ship separately, as
-Markdown procedures in
+MCP gives an assistant the *interface*; [agent skills](skills.md) give
+it the *judgment* — which sessions are worth reviewing, when a behavior
+is real enough to freeze into a cohort, what a replay result does and
+does not prove. They ship separately, as Markdown procedures in
 [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills):
 
 ```bash
 npx skills add zenml-io/kitaru-skills
 ```
 
-The CLI knows whether they are present. `kitaru` with no arguments
-discovers installed Kitaru skills — in project and user locations, and
-those installed through the Claude marketplace — and, when it finds
-none, offers the install command as a next action. The machine-readable
-output reports the same under a `skills` key, so an assistant can check
-its own footing before it starts.
-
 Skills and MCP are complementary, not alternatives: the skills say how
-to work, the server bounds what can be touched.
+to work, the server bounds what can be touched. Start with
+`kitaru-investigation`, the front door — see [Agent skills](skills.md)
+for what each one is for.
