@@ -50,7 +50,7 @@ See `docs/README.md` for detailed documentation authoring guidelines.
 ## Running Checks
 
 ```bash
-just check  # Format, lint, typecheck, typos, YAML, links
+just check  # Format, lint, OpenAPI, typecheck, typos, YAML, actions, links
 just test   # Run all tests
 just fix    # Auto-fix formatting and lint issues
 ```
