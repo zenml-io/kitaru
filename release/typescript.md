@@ -9,9 +9,9 @@ The TypeScript SDK is one release set for now. `@zenml-io/kitaru`, `@zenml-io/ki
 3. Run `pnpm run pack:check` locally.
 4. Run the **Release TypeScript packages** workflow manually with `typescript/kitaru/v<VERSION>`. A manual run builds and tests the artifacts but cannot publish them.
 5. Download the `typescript-distributions` artifact from the rehearsal, verify `SHA256SUMS`, inspect the three tarballs, and smoke-test their public exports in a clean project.
-6. After the change is on `develop`, create the immutable tag on the exact rehearsed commit and push it. The tag-triggered run publishes core first, then the two adapters, verifies a clean registry install, and creates a GitHub release.
+6. After the change is on `develop` or `main`, create the immutable tag on the exact rehearsed commit and push it. The release tag router then starts the publishing workflow, which publishes core first, then the two adapters, verifies a clean registry install, and creates a GitHub release.
 
-Do not publish these packages from a local checkout. The workflow requires the tagged commit to be part of `develop` and publishes only the tarballs produced by its build job.
+Do not publish these packages from a local checkout. The router requires the tagged commit to be part of `develop` or `main`, and the release workflow publishes only the tarballs produced by its build job.
 
 ## Verify and recover a release
 

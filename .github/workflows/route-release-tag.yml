@@ -1,0 +1,45 @@
+---
+name: Route release tag
+on:
+  push:
+    tags: [python/**, typescript/kitaru/v*]
+permissions: {}
+jobs:
+  route:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check release branch
+        id: source
+        run: |
+          set -euo pipefail
+          git fetch origin develop main
+          release_sha=$(git rev-parse HEAD)
+          if git merge-base --is-ancestor "$release_sha" origin/develop || \
+            git merge-base --is-ancestor "$release_sha" origin/main; then
+            echo 'eligible=true' >> "$GITHUB_OUTPUT"
+          else
+            echo "Skipping $GITHUB_REF_NAME because $release_sha is not on develop or main."
+          fi
+      - name: Dispatch release workflow
+        if: steps.source.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |-
+          set -euo pipefail
+          case "$GITHUB_REF_NAME" in
+            python/kitaru/v*) event_type=release-kitaru ;;
+            python/*) event_type=release-kitaru-plugin ;;
+            typescript/kitaru/v*) event_type=release-kitaru-typescript ;;
+            *) echo "::error::Unsupported release tag $GITHUB_REF_NAME"; exit 1 ;;
+          esac
+          jq -n \
+            --arg event_type "$event_type" \
+            --arg package_tag "$GITHUB_REF_NAME" \
+            '{event_type: $event_type, client_payload: {"package-tag": $package_tag}}' | \
+            gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches" --input -

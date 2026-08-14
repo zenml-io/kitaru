@@ -49,7 +49,7 @@ Use the PostgreSQL-backed tests for transaction, locking, migration, or cross-re
 - Run `just plugin-artifact-smoke` after changing plugin package metadata, default definitions, requirement pins, or release installation paths.
 - The smoke builds Kitaru and every selected plugin as wheels, installs them into a clean environment, loads each configured package entrypoint, and verifies idempotent default registration.
 - CI runs plugin distributions as a package matrix. Keep the matrix aligned with `plugins/packages/` and the choices in `.github/workflows/release-plugins.yml`.
-- Plugin workflow dispatches are dry-runs. A package tag triggers publishing only when its commit is contained in `main`.
+- Plugin workflow dispatches are dry-runs. A package tag triggers publishing only when its commit is contained in `develop` or `main`.
 - Kitaru release dry-runs build plugin-owned candidate images from `plugins/candidate-wheels`; production release Dockerfiles continue to install exact versions from PyPI.
 - Commit `plugins/candidate.Dockerfile` and `plugins/docker-compose.candidate.yml`. Do not commit generated files under `plugins/candidate-wheels/`.
 - Keep production release Dockerfiles unchanged when a plugin change only needs local candidate-wheel testing.
@@ -99,7 +99,7 @@ Do not describe the inherited `llm-integration.yml` provider markers or absent `
 
 ## Release Workflows
 
-`.github/workflows/release-plugins.yml` publishes one Python distribution from an immutable namespaced tag. A core tag such as `python/kitaru/v0.22.0rc1` publishes Kitaru to PyPI and creates its GitHub Release. Plugin tags publish independently and do not gate the core release.
+`.github/workflows/route-release-tag.yml` accepts release tags only when their commits are contained in `develop` or `main`, then dispatches the matching release workflow. `.github/workflows/release-plugins.yml` publishes one Python distribution from an immutable namespaced tag. A core tag such as `python/kitaru/v0.22.0rc1` publishes Kitaru to PyPI and creates its GitHub Release. Plugin tags publish independently and do not gate the core release.
 
 After a successful core Python workflow, `.github/workflows/release.yml` automatically publishes the matching client, server, worker, and managed images plus the Helm chart. It converts Python RC versions such as `0.22.0rc1` to deployable tags such as `0.22.0-rc.1`. No separate bundle tag is used. A manual dispatch with the existing core package tag is the recovery path.
 

@@ -1,17 +1,17 @@
 ---
 name: Release Kitaru
 on:
+  repository_dispatch:
+    types: [release-kitaru]
   workflow_dispatch:
     inputs:
       package-tag:
         description: Core package tag to rehearse, such as python/kitaru/v0.22.0rc4.
         required: true
         type: string
-  push:
-    tags: [python/kitaru/v*]
 permissions: {}
 concurrency:
-  group: release-kitaru-${{ github.ref_name }}
+  group: release-kitaru-${{ github.event.client_payload['package-tag'] || inputs.package-tag }}
   cancel-in-progress: false
 jobs:
   build:
@@ -26,6 +26,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          ref: ${{ github.event.client_payload['package-tag'] || inputs.package-tag }}
           fetch-depth: 0
           persist-credentials: false
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
@@ -35,16 +36,10 @@ jobs:
       - name: Resolve release metadata
         id: metadata
         env:
-          DISPATCH_TAG: ${{ inputs.package-tag }}
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_TAG: ${{ github.ref_name }}
+          DISPATCH_TAG: ${{ github.event.client_payload['package-tag'] || inputs.package-tag }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = push ]; then
-            package_tag="$PUSH_TAG"
-          else
-            package_tag="$DISPATCH_TAG"
-          fi
+          package_tag="$DISPATCH_TAG"
           unit=$(uv run --no-project --with packaging==26.2 python scripts/release_units.py resolve --tag "$package_tag" --format json)
           distribution=$(jq -r '.unit.distribution' <<<"$unit")
           version=$(jq -r '.unit.version' <<<"$unit")
@@ -77,10 +72,11 @@ jobs:
       - name: Validate release source
         run: |
           set -euo pipefail
-          git fetch origin develop
+          git fetch origin develop main
           release_sha=$(git rev-parse HEAD)
-          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
-            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
+          if ! git merge-base --is-ancestor "$release_sha" origin/develop && \
+            ! git merge-base --is-ancestor "$release_sha" origin/main; then
+            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop or main."
             exit 1
           fi
       - name: Resolve exact frontend artifact
@@ -128,7 +124,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
   publish-python:
-    if: github.event_name == 'push'
+    if: github.event_name == 'repository_dispatch'
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -278,7 +274,7 @@ jobs:
   create-release:
     if: >-
       always() &&
-      github.event_name == 'push' &&
+      github.event_name == 'repository_dispatch' &&
       needs.publish-python.result == 'success' &&
       needs.publish-deployables.result == 'success' &&
       (needs.build.outputs.is-prerelease == 'true' ||

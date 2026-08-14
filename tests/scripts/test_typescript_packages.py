@@ -141,8 +141,8 @@ def test_typescript_release_workflow_contract() -> None:
         "\n  verify-and-release:\n", maxsplit=1
     )
 
-    assert "typescript/kitaru/v*" in workflow_source
-    assert "if: github.event_name == 'push'" in publish_source
+    assert "types: [release-kitaru-typescript]" in workflow_source
+    assert "if: github.event_name == 'repository_dispatch'" in publish_source
     assert "needs: build" in publish_source
     assert "needs: [build, publish]" in verify_source
     assert "node scripts/typescript-packages.mjs --tag" in workflow_source

@@ -108,7 +108,7 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     ).read_text()
 
     assert "workflow_run:" not in workflow
-    assert "python/kitaru/v*" in workflow
+    assert "types: [release-kitaru]" in workflow
     assert "bundle/kitaru/v*" not in workflow
     assert "publish-deployables:" in workflow
     assert "plugins/default-requirements.txt" not in workflow
@@ -121,7 +121,26 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     )
     assert "promote-latest:" in workflow
     assert "publish-deployables:" not in plugin_workflow
-    assert "!python/kitaru/**" in plugin_workflow
+    assert "types: [release-kitaru-plugin]" in plugin_workflow
+
+
+def test_release_tags_are_routed_only_from_release_branches() -> None:
+    router = (REPO_ROOT / ".github" / "workflows" / "route-release-tag.yml").read_text()
+    release_workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml", "release-typescript.yml")
+    ]
+
+    assert "tags: [python/**, typescript/kitaru/v*]" in router
+    assert "git fetch origin develop main" in router
+    assert 'git merge-base --is-ancestor "$release_sha" origin/develop' in router
+    assert 'git merge-base --is-ancestor "$release_sha" origin/main' in router
+    assert "if: steps.source.outputs.eligible == 'true'" in router
+    assert 'gh api --method POST "repos/$GITHUB_REPOSITORY/dispatches"' in router
+    for workflow in release_workflows:
+        assert "repository_dispatch:" in workflow
+        assert "  push:\n" not in workflow
+        assert "github.event_name == 'repository_dispatch'" in workflow
 
 
 def test_managed_image_failure_does_not_block_the_release() -> None:
@@ -328,8 +347,7 @@ def test_plugin_matrix_is_generated_from_the_nine_plugin_units() -> None:
 def test_plugin_release_workflow_resolves_plugin_tags_from_the_inventory() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
 
-    assert "python/**" in workflow
-    assert "!python/kitaru/**" in workflow
+    assert "types: [release-kitaru-plugin]" in workflow
     assert "scripts/release_units.py resolve --tag" in workflow
     assert "scripts/release_ui.py --version" not in workflow
     assert "uv version" not in workflow

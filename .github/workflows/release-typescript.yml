@@ -1,17 +1,17 @@
 ---
 name: Release TypeScript packages
 on:
+  repository_dispatch:
+    types: [release-kitaru-typescript]
   workflow_dispatch:
     inputs:
       package-tag:
         description: Namespaced package tag to rehearse, such as typescript/kitaru/v0.1.0-rc.1.
         required: true
         type: string
-  push:
-    tags: [typescript/kitaru/v*]
 permissions: {}
 concurrency:
-  group: release-typescript-${{ github.ref_name }}
+  group: release-typescript-${{ github.event.client_payload['package-tag'] || inputs.package-tag }}
   cancel-in-progress: false
 env:
   KITARU_ANALYTICS_OPT_IN: false
@@ -40,6 +40,7 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
         with:
+          ref: ${{ github.event.client_payload['package-tag'] || inputs.package-tag }}
           fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
@@ -56,16 +57,10 @@ jobs:
       - name: Resolve package metadata
         id: metadata
         env:
-          DISPATCH_TAG: ${{ inputs.package-tag }}
-          EVENT_NAME: ${{ github.event_name }}
-          PUSH_TAG: ${{ github.ref_name }}
+          DISPATCH_TAG: ${{ github.event.client_payload['package-tag'] || inputs.package-tag }}
         run: |
           set -euo pipefail
-          if [ "$EVENT_NAME" = push ]; then
-            package_tag="$PUSH_TAG"
-          else
-            package_tag="$DISPATCH_TAG"
-          fi
+          package_tag="$DISPATCH_TAG"
           metadata=$(node scripts/typescript-packages.mjs --tag "$package_tag")
           version=$(jq -r '.version' <<<"$metadata")
           npm_tag=$(jq -r '.npm_tag' <<<"$metadata")
@@ -85,10 +80,11 @@ jobs:
       - name: Validate release source
         run: |
           set -euo pipefail
-          git fetch origin develop
+          git fetch origin develop main
           release_sha=$(git rev-parse HEAD)
-          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
-            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
+          if ! git merge-base --is-ancestor "$release_sha" origin/develop && \
+            ! git merge-base --is-ancestor "$release_sha" origin/main; then
+            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop or main."
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
@@ -114,7 +110,7 @@ jobs:
           if-no-files-found: error
           retention-days: 90
   publish:
-    if: github.event_name == 'push'
+    if: github.event_name == 'repository_dispatch'
     needs: build
     runs-on: ubuntu-latest
     environment: npm-publish
@@ -195,7 +191,7 @@ jobs:
             npm publish "$tarball" --access public --tag "$NPM_TAG" --provenance
           done
   verify-and-release:
-    if: github.event_name == 'push'
+    if: github.event_name == 'repository_dispatch'
     needs: [build, publish]
     runs-on: ubuntu-latest
     permissions:
