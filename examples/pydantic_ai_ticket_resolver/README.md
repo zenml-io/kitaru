@@ -37,21 +37,6 @@ The walkthrough produces durable Kitaru objects instead of a one-time report:
 uv sync
 ```
 
-Create and load the environment file in each terminal:
-
-```bash
-cp .env.example .env
-set -a; source .env; set +a
-```
-
-The model and Langfuse values are required only when you regenerate traces. Keep `KITARU_API_URL` and `KITARU_API_KEY` out of `.env` because they override the workspace selected by `kitaru login`.
-
-The checked-in trace export is enough to complete the walkthrough. To generate a fresh export with paid OpenAI calls, add the required credentials to `.env` and run:
-
-```bash
-./generate.sh
-```
-
 ### 2. Connect to a workspace
 
 Start and select a CLI-managed local workspace:
@@ -71,7 +56,7 @@ uv run kitaru status
 Confirm the official Langfuse importer and the built-in evaluator catalog:
 
 ```bash
-uv run kitaru importer get kitaru/langfuse
+uv run kitaru importer list
 uv run kitaru evaluator list
 ```
 
@@ -106,10 +91,9 @@ uv run kitaru agent register \
 
 ### 4. Start a worker
 
-Open a second terminal in this directory. Load `.env`, then keep the worker active:
+Open a second terminal in this directory:
 
 ```bash
-set -a; source .env; set +a
 uv run kitaru worker start --name returns-example-worker
 ```
 
