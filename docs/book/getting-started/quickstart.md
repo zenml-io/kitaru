@@ -54,15 +54,20 @@ uv run kitaru agent register \
 
 Registration stores the command and declared capabilities. It does not run the agent.
 
-Replays use `openai:gpt-5-nano` and make paid OpenAI API calls. If you plan to run a replay, make `OPENAI_API_KEY` available to the worker process through your preferred secret-management method.
+The receipt's `Parent ID` identifies the agent across versions. Its `Version ID` identifies the exact registered version. This quickstart uses `returns-resolver@1`, so you do not need to copy either UUID.
 
-Open a second terminal in the same directory and start a [worker](../concepts/workers.md):
+Imports and deterministic evaluations do not need an OpenAI key. Replays use `openai:gpt-5-nano`, make paid OpenAI API calls, and require `OPENAI_API_KEY`.
+
+For this local walkthrough, open a second terminal in the same directory. Export the key in that shell, then start a [worker](../concepts/workers.md):
 
 ```bash
+export OPENAI_API_KEY="your-openai-key"
 uv run kitaru worker start --name returns-quickstart-worker
 ```
 
-Leave the worker active. It processes import, evaluation, and replay tasks.
+You can also use a secret manager that injects `OPENAI_API_KEY` into the worker process. For a deployed worker, configure the environment in your deployment system or attach a [Kitaru secret](../deploy/secrets.md) to the agent version.
+
+The worker runs in the foreground. The `starting: {...}` message means that it is ready and waiting for tasks. Leave this terminal open and run the remaining commands in your first terminal. Press Ctrl-C to stop the worker.
 
 ## 2. Import the Langfuse sessions
 

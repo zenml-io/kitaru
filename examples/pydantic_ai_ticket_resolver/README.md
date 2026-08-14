@@ -89,15 +89,27 @@ uv run kitaru agent register \
   --tool escalate_to_human
 ```
 
+This command creates the agent and its first immutable version. The receipt shows two UUIDs:
+
+- `Parent ID` identifies the agent across all versions.
+- `Version ID` identifies the exact registered version.
+
+The commands below use `returns-resolver@1`, so you do not need to copy either UUID. If a command or API asks for an agent-version ID, use `Version ID`.
+
 ### 4. Start a worker
 
-Replays use `openai:gpt-5-nano` and make paid OpenAI API calls. If you plan to run a replay, make `OPENAI_API_KEY` available to the worker process through your preferred secret-management method.
+Imports and deterministic evaluations do not need an OpenAI key. Replays use `openai:gpt-5-nano`, make paid OpenAI API calls, and require `OPENAI_API_KEY`.
 
-Open a second terminal in this directory and start the worker:
+For this local walkthrough, open a second terminal in this directory. Export the key in that shell, then start the worker:
 
 ```bash
+export OPENAI_API_KEY="your-openai-key"
 uv run kitaru worker start --name returns-example-worker
 ```
+
+You can also use a secret manager that injects `OPENAI_API_KEY` into the worker process. For a deployed worker, configure the environment in your deployment system or attach a [Kitaru secret](../../docs/book/deploy/secrets.md) to the agent version.
+
+The worker runs in the foreground. The `starting: {...}` message means that it is ready and waiting for tasks. Leave this terminal open and run the remaining commands in your first terminal. Press Ctrl-C to stop the worker.
 
 Confirm that Kitaru can see it:
 
@@ -401,7 +413,79 @@ If no installed evaluator fits, create one narrow evaluator:
 uv run kitaru evaluator scaffold returns-behavior --path evaluator.py
 ```
 
-Implement the accepted binary definition from observable session outputs and node evidence. Treat missing evidence explicitly. Do not map session or ticket identifiers to expected answers.
+Replace the scaffolded `evaluator.py` with an implementation of the behavior that you accepted during review. For example, this evaluator checks that the final structured action matches the one accepted terminal tool call:
+
+```python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Evaluate consistency between an accepted action and the final output."""
+
+from typing import Any
+
+from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.session_node import NodeType
+from kitaru.task.evaluator import SessionView
+
+ACTION_BY_TOOL = {
+    "issue_refund": "refund",
+    "create_replacement": "replacement",
+    "escalate_to_human": "escalate",
+}
+
+
+def _get_outputs(value: Any) -> dict[str, Any] | None:
+    """Return final outputs from a native or imported session."""
+    if isinstance(value, dict) and isinstance(value.get("turns"), list):
+        turns = value["turns"]
+        value = turns[-1].get("outputs") if turns else None
+    return value if isinstance(value, dict) else None
+
+
+def evaluate(session: SessionView) -> EvaluationResult:
+    """Check that one accepted terminal tool matches the final action."""
+    accepted_tools = [
+        node.tool_name
+        for node in session.nodes
+        if node.node_type is NodeType.TOOL_CALL
+        and node.tool_name in ACTION_BY_TOOL
+        and isinstance(node.outputs, dict)
+        and node.outputs.get("accepted") is True
+    ]
+    outputs = _get_outputs(session.session.outputs)
+
+    if not accepted_tools or outputs is None:
+        return EvaluationResult(
+            name="terminal_action_consistency",
+            value="unknown",
+            passed=None,
+            explanation="The trace does not contain enough recorded action evidence.",
+        )
+
+    if len(accepted_tools) != 1:
+        return EvaluationResult(
+            name="terminal_action_consistency",
+            value="fail",
+            passed=False,
+            explanation=f"The trace contains {len(accepted_tools)} accepted actions.",
+        )
+
+    accepted_action = ACTION_BY_TOOL[accepted_tools[0]]
+    reported_action = outputs.get("action")
+    passed = reported_action == accepted_action
+    return EvaluationResult(
+        name="terminal_action_consistency",
+        value="pass" if passed else "fail",
+        passed=passed,
+        explanation=(
+            f"Accepted action: {accepted_action!r}; "
+            f"reported action: {reported_action!r}."
+        ),
+    )
+```
+
+This example uses structured output and recorded tool results. It does not search the customer reply for words such as `refund`, and it does not map ticket IDs to expected answers. Adapt the rule to the behavior and missing-evidence policy that you confirmed during review.
 
 Validate and register the implementation:
 
