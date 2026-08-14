@@ -239,6 +239,7 @@ class ControlPlaneAuthenticator:
         account_repository: AccountRepository,
         server_id: uuid.UUID,
         analytics: ServerAnalytics | None = None,
+        account_writer_repository: AccountRepository | None = None,
     ) -> None:
         """Create a control plane authenticator.
 
@@ -247,9 +248,14 @@ class ControlPlaneAuthenticator:
             account_repository: Account repository holding mirrored accounts.
             server_id: Server instance this API represents.
             analytics: Analytics tracker, None skips tracking.
+            account_writer_repository: Repository account mirroring writes
+                go through, defaults to the account repository.
         """
         self._client = client
         self._account_repository = account_repository
+        self._account_writer_repository = (
+            account_writer_repository or account_repository
+        )
         self._server_id = server_id
         self._analytics = analytics
 
@@ -286,14 +292,14 @@ class ControlPlaneAuthenticator:
         account.update_identity(name, user.email)
         account.update_active(True)
         try:
-            return await self._account_repository.update(account)
+            return await self._account_writer_repository.update(account)
         except DuplicateAccountName as exc:
             raise ControlPlaneError(self._get_name_taken_message(name)) from exc
 
     async def _create_account(self, user: ControlPlaneUser, name: str) -> Account:
         logger.info("Creating account mirroring control plane user %s.", user.id)
         try:
-            account = await self._account_repository.create(
+            account = await self._account_writer_repository.create(
                 Account(
                     is_service_account=user.is_service_account,
                     external_id=user.id,
