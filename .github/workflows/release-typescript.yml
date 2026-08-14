@@ -237,12 +237,12 @@ jobs:
             "@zenml-io/kitaru-mastra@$VERSION" \
             "@zenml-io/kitaru-vercel-ai@$VERSION" \
             "@mastra/core@1.51.0" \
-            "ai@7.0.55"
+            "ai@7.0.65"
           node --input-type=module <<'NODE'
           import { KitaruClient } from "@zenml-io/kitaru";
           import { KitaruAgent } from "@zenml-io/kitaru-mastra";
-          import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
-          if (![KitaruClient, KitaruAgent, createKitaruGenerateText].every(Boolean)) {
+          import { createKitaruGenerateText, createKitaruToolLoopAgent } from "@zenml-io/kitaru-vercel-ai";
+          if (![KitaruClient, KitaruAgent, createKitaruGenerateText, createKitaruToolLoopAgent].every(Boolean)) {
             throw new Error("Published package exports are missing");
           }
           NODE

@@ -120,10 +120,24 @@ function applyOverride(
   }
 }
 
-function hasApprovalRequest(result: {
-  content: readonly { type: string }[];
+function hasUnresolvedApprovalRequest(result: {
+  content: readonly {
+    approvalId?: string;
+    isAutomatic?: boolean;
+    type: string;
+  }[];
 }): boolean {
-  return result.content.some((part) => part.type === "tool-approval-request");
+  const resolvedApprovalIds = new Set(
+    result.content
+      .filter((part) => part.type === "tool-approval-response")
+      .map((part) => part.approvalId),
+  );
+  return result.content.some(
+    (part) =>
+      part.type === "tool-approval-request" &&
+      part.isAutomatic !== true &&
+      !resolvedApprovalIds.has(part.approvalId),
+  );
 }
 
 function resultSummary(result: unknown, includeOutput: boolean): JsonValue {
@@ -137,6 +151,28 @@ function resultSummary(result: unknown, includeOutput: boolean): JsonValue {
 
 /** Create an AI SDK ToolLoopAgent whose non-streaming calls are recorded by Kitaru. */
 export function createKitaruToolLoopAgent<
+  CALL_OPTIONS = never,
+  TOOLS extends ToolSet = Record<never, never>,
+  RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
+  OUTPUT extends Output.Output = never,
+>(
+  settings: ToolLoopAgentSettings<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>,
+  adapterOptions: KitaruVercelAIOptions,
+): KitaruToolLoopAgent<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT, OUTPUT>;
+export function createKitaruToolLoopAgent(
+  settings: ToolLoopAgentSettings,
+  adapterOptions: KitaruVercelAIOptions,
+): KitaruToolLoopAgent;
+export function createKitaruToolLoopAgent(
+  // biome-ignore lint/suspicious/noExplicitAny: overload implementation erases generic settings
+  settings: any,
+  adapterOptions: KitaruVercelAIOptions,
+  // biome-ignore lint/suspicious/noExplicitAny: overload implementation erases generic result types
+): any {
+  return createKitaruToolLoopAgentImpl(settings, adapterOptions);
+}
+
+function createKitaruToolLoopAgentImpl<
   CALL_OPTIONS = never,
   TOOLS extends ToolSet = Record<never, never>,
   RUNTIME_CONTEXT extends Record<string, unknown> = Record<string, unknown>,
@@ -187,10 +223,15 @@ export function createKitaruToolLoopAgent<
       },
       onStepFinish: undefined,
       prepareCall: async (baseCall: unknown) => {
-        const prepared = callerPrepareCall
-          ? await callerPrepareCall.call(settings, baseCall as never)
-          : baseCall;
+        const prepared =
+          (callerPrepareCall
+            ? await callerPrepareCall.call(settings, baseCall as never)
+            : baseCall) ?? baseCall;
         const runtime = { ...(prepared as RuntimeSettings) };
+        const sandbox = (baseCall as RuntimeSettings).experimental_sandbox;
+        if (sandbox !== undefined) {
+          runtime.experimental_sandbox = sandbox;
+        }
         const requestedModelId =
           adapterOptions.requestedModelId ?? readableModelId(runtime.model);
         if (!requestedModelId) {
@@ -352,7 +393,7 @@ export function createKitaruToolLoopAgent<
         if (state.recorder.state.spec) {
           state.tickets.assertConsumed();
         }
-        if (hasApprovalRequest(result)) {
+        if (hasUnresolvedApprovalRequest(result)) {
           await state.recorder.fail(
             new Error("manual_approval_continuation_unsupported"),
           );
@@ -381,10 +422,13 @@ export function createKitaruToolLoopAgent<
         state.tickets?.cancel(new Error("Kitaru generation finished"));
       }
     },
-    stream(
+    async stream(
       options: AgentStreamParameters<CALL_OPTIONS, TOOLS, RUNTIME_CONTEXT>,
-    ): PromiseLike<StreamTextResult<TOOLS, RUNTIME_CONTEXT, OUTPUT>> {
-      return new ToolLoopAgent(settings).stream(options);
+    ): Promise<StreamTextResult<TOOLS, RUNTIME_CONTEXT, OUTPUT>> {
+      if (environment.KITARU_REPLAY_ID !== undefined) {
+        throw new TypeError("Agent stream replay is not supported");
+      }
+      return await new ToolLoopAgent(settings).stream(options);
     },
   };
 }

@@ -3,6 +3,7 @@ import {
   assertSafeKeys,
   MODEL_SETTING_KEYS,
   parseModelSettings,
+  recordedPayloadJson,
   strictRecordedJson,
 } from "@zenml-io/kitaru/adapter";
 
@@ -122,9 +123,10 @@ export function callerModelSettings(
   const values = Object.fromEntries(
     [...MODEL_SETTING_KEYS]
       .filter((key) => options[key] !== undefined)
-      .map((key) => [key, options[key]]),
+      .map((key) => [
+        key,
+        recordedPayloadJson(options[key], `model setting '${key}'`),
+      ]),
   );
-  return Object.keys(values).length === 0
-    ? undefined
-    : parseModelSettings(values);
+  return Object.keys(values).length === 0 ? undefined : values;
 }

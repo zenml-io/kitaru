@@ -52,6 +52,16 @@ describe("ToolLoopAgent replay safety", () => {
     ],
     ["sandbox", {}, { experimental_sandbox: {} }],
     [
+      "sandbox omitted by prepareCall",
+      {
+        prepareCall: (call: Record<string, unknown>) => {
+          const { experimental_sandbox: _sandbox, ...prepared } = call;
+          return prepared;
+        },
+      },
+      { experimental_sandbox: {} },
+    ],
+    [
       "pre-supplied approval message",
       {},
       {
@@ -225,5 +235,42 @@ describe("ToolLoopAgent manual approval", () => {
       error: "manual_approval_continuation_unsupported",
       status: "failed",
     });
+  });
+
+  it("completes the session after an automatic approval", async () => {
+    const client = new FakeClient();
+    const execute = vi.fn(async () => "live");
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({
+          doGenerate: [
+            toolResponse([
+              { id: "call-1", input: '{"value":"a"}', name: "write" },
+            ]),
+            textResponse("done"),
+          ],
+        }),
+        toolApproval: { write: async () => "approved" as const },
+        tools: {
+          write: tool({ execute, inputSchema: VALUE_INPUT }),
+        },
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    const result = await agent.generate({ prompt: "go" });
+
+    expect(result.text).toBe("done");
+    expect(result.content).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          isAutomatic: true,
+          type: "tool-approval-request",
+        }),
+        expect.objectContaining({ type: "tool-approval-response" }),
+      ]),
+    );
+    expect(execute).toHaveBeenCalledOnce();
+    expect(client.updated.at(-1)?.status).toBe("completed");
   });
 });

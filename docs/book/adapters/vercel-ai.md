@@ -16,7 +16,7 @@ Version `0.1.0-rc.2` is a pre-1.0 compatibility preview. Kitaru records non-stre
 Use Node 22.22 or later in the Node 22 release line. Install the adapter with AI SDK 7 and the provider package used by your agent. This OpenAI example uses the versions verified in the repository:
 
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@0.1.0-rc.2 ai@7.0.65 @ai-sdk/openai@4.0.20
+pnpm add @zenml-io/kitaru-vercel-ai@0.1.0-rc.2 ai@7.0.65 @ai-sdk/openai@4.0.20 zod@4.4.3
 ```
 
 The adapter includes `@zenml-io/kitaru`, the framework-neutral TypeScript SDK, as a dependency.
@@ -61,7 +61,7 @@ console.log(result.text);
 
 The returned object implements AI SDK's public `Agent` interface. `version`, `id`, typed `tools`, all four Agent generic parameters, call-option validation, `prepareCall`, callbacks, runtime context, structured output, retries, timeouts, abort signals, and the native result object remain available. Each overlapping `generate()` invocation gets an independent Kitaru recorder and tool state.
 
-AI SDK's `Agent` interface also requires `stream()`. The adapter delegates that method directly to a native `ToolLoopAgent` without starting a Kitaru session. This preserves compatibility with native consumers, but Kitaru does not record the stream.
+AI SDK's `Agent` interface also requires `stream()`. During ordinary execution, the adapter delegates that method directly to a native `ToolLoopAgent` without starting a Kitaru session. This preserves compatibility with native consumers, but Kitaru does not record the stream. When `KITARU_REPLAY_ID` is set, `stream()` rejects before provider or tool execution because streaming replay is unsupported.
 
 ## Record a direct generation
 
@@ -132,7 +132,7 @@ Model replacement is opt-in. Set `allowedReplayModels` and provide `resolveModel
 const replayOptions = {
   agentId,
   allowedReplayModels: ["openai/gpt-5-nano"],
-  resolveModel: (modelId) => {
+  resolveModel: (modelId: string) => {
     if (modelId === "openai/gpt-5-nano") {
       return openai("gpt-5-nano");
     }
@@ -200,7 +200,7 @@ Version `0.1.0-rc.2` supports:
 
 - AI SDK `>=7.0.60 <8.0.0`;
 - non-streaming `ToolLoopAgent.generate()` with the public AI SDK Agent type;
-- native, recording-free Agent `stream()` passthrough;
+- native, recording-free Agent `stream()` passthrough outside replay;
 - non-streaming `generateText`;
 - prompt strings and message arrays;
 - local tools with an `execute` function;
@@ -208,9 +208,9 @@ Version `0.1.0-rc.2` supports:
 - `history`, `static`, and `passthrough` replay policies; and
 - bounded prompt, instruction, model-setting, and allowlisted model replacement during replay.
 
-It does not record streaming generation and does not wrap standalone `streamText`. Provider-executed tools, dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, and the `llm` tool policy are unsupported in replay. Async-iterable local tools remain native during baseline recording, but cannot be replayed.
+It does not record streaming generation and does not wrap standalone `streamText`. Agent `stream()` rejects when replay is active. Provider-executed tools, dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, and the `llm` tool policy are unsupported in replay. Async-iterable local tools remain native during baseline recording, but cannot be replayed.
 
-Manual approval is a two-call workflow in AI SDK, but Kitaru cannot persist a waiting Agent run without server and worker changes. When baseline `generate()` returns an approval request, the adapter returns the native result unchanged and marks the Kitaru session failed with `manual_approval_continuation_unsupported`. Agent replay rejects approval configuration and approval messages before any provider or tool side effect.
+Manual approval is a two-call workflow in AI SDK, but Kitaru cannot persist a waiting Agent run without server and worker changes. When baseline `generate()` returns an unresolved manual approval request, the adapter returns the native result unchanged and marks the Kitaru session failed with `manual_approval_continuation_unsupported`. Automatic approval decisions complete normally. Agent replay rejects approval configuration and approval messages before any provider or tool side effect.
 
 ## Runnable examples
 

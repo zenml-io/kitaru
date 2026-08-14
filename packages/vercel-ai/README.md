@@ -67,9 +67,9 @@ Each LLM node carries a `cost` attribute recording where the number came from: `
 
 ## Current scope
 
-This experimental release supports AI SDK `>=7.0.60 <8` for non-streaming `ToolLoopAgent.generate()` and `generateText` calls with local executable tools. The Agent's required `stream()` method remains a native, recording-free passthrough. Kitaru does not record streaming calls.
+This experimental release supports AI SDK `>=7.0.60 <8` for non-streaming `ToolLoopAgent.generate()` and `generateText` calls with local executable tools. The Agent's required `stream()` method remains a native, recording-free passthrough during ordinary execution. Kitaru does not record streaming calls, and `stream()` rejects before provider or tool execution when `KITARU_REPLAY_ID` is set.
 
-Durable manual approval continuation is not supported. If `generate()` returns a tool approval request, the native result is returned but the Kitaru session is marked failed with an unsupported-continuation diagnostic. Agent replay rejects approval configuration or approval messages before model or tool execution. Replay also rejects provider-executed or dynamic tools, sandboxed tools, per-step overrides through `prepareStep`, async-iterable tools, and the LLM tool policy.
+Durable manual approval continuation is not supported. If `generate()` returns an unresolved manual tool approval request, the native result is returned but the Kitaru session is marked failed with an unsupported-continuation diagnostic. Automatic approval decisions complete normally. Agent replay rejects approval configuration or approval messages before model or tool execution. Replay also rejects provider-executed or dynamic tools, sandboxed tools, per-step overrides through `prepareStep`, async-iterable tools, and the LLM tool policy.
 
 Replay runs tools one at a time in model-output order. `ticketTimeoutMs` (30 seconds by default) bounds how long a queued tool waits for its predecessor to *start*, not how long that predecessor runs, so a slow passthrough tool does not fail the calls queued behind it.
 

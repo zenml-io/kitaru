@@ -1,9 +1,16 @@
 import { jsonSchema, Output, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createKitaruToolLoopAgent } from "../src/index.js";
-import { AGENT_ID, FakeClient, textResponse, toolResponse } from "./helpers.js";
+import {
+  AGENT_ID,
+  FakeClient,
+  replayEnvironment,
+  replaySpec,
+  textResponse,
+  toolResponse,
+} from "./helpers.js";
 
 describe("createKitaruToolLoopAgent", () => {
   it("records generate calls and returns the native result", async () => {
@@ -73,6 +80,32 @@ describe("createKitaruToolLoopAgent", () => {
       { temperature: 0.2 },
       { temperature: 0.7 },
     ]);
+  });
+
+  it("records caller model settings without applying replay bounds", async () => {
+    const client = new FakeClient();
+    const onLanguageModelCallStart = vi.fn();
+    const agent = createKitaruToolLoopAgent(
+      {
+        model: new MockLanguageModelV4({ doGenerate: textResponse("done") }),
+        prepareCall: (call) => ({
+          ...call,
+          onLanguageModelCallStart,
+        }),
+        prepareStep: () => ({ temperature: 3, topK: 0 }),
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    await agent.generate({ prompt: "Help" });
+
+    expect(onLanguageModelCallStart).toHaveBeenCalledOnce();
+    expect(
+      client.nodeBatches
+        .flatMap((batch) => batch.nodes)
+        .find((node) => node.node_type === "llm_call"),
+    ).toMatchObject({ model_params: { temperature: 3, topK: 0 } });
+    expect(client.updated.at(-1)?.status).toBe("completed");
   });
 
   it("preserves provider error identity and fails the Kitaru session", async () => {
@@ -212,6 +245,24 @@ describe("createKitaruToolLoopAgent", () => {
     expect(client.created[0]?.inputs).toBe("Help acme");
   });
 
+  it("uses the native call settings when prepareCall returns undefined", async () => {
+    const client = new FakeClient();
+    const model = new MockLanguageModelV4({ doGenerate: textResponse("done") });
+    const agent = createKitaruToolLoopAgent(
+      {
+        model,
+        prepareCall: (() => undefined) as never,
+      },
+      { agentId: AGENT_ID, client, environment: {} },
+    );
+
+    const result = await agent.generate({ prompt: "Help" });
+
+    expect(result.text).toBe("done");
+    expect(model.doGenerateCalls).toHaveLength(1);
+    expect(client.updated.at(-1)?.status).toBe("completed");
+  });
+
   it("records structured output configured by prepareCall", async () => {
     const client = new FakeClient();
     const answerSchema = jsonSchema<{ answer: string }>(
@@ -320,5 +371,35 @@ describe("createKitaruToolLoopAgent", () => {
     await expect(result.text).resolves.toBe("streamed");
     expect(client.created).toHaveLength(0);
     expect(client.replayReads).toBe(0);
+  });
+
+  it("rejects stream calls when replay is active", async () => {
+    const client = new FakeClient({ replay: replaySpec() });
+    const execute = vi.fn(async () => "live");
+    const model = new MockLanguageModelV4();
+    const agent = createKitaruToolLoopAgent(
+      {
+        model,
+        tools: {
+          work: tool({
+            execute,
+            inputSchema: jsonSchema<Record<never, never>>({
+              additionalProperties: false,
+              properties: {},
+              type: "object",
+            }),
+          }),
+        },
+      },
+      { agentId: AGENT_ID, client, environment: replayEnvironment() },
+    );
+
+    await expect(agent.stream({ prompt: "Help" })).rejects.toThrow(
+      "Agent stream replay is not supported",
+    );
+    expect(client.created).toHaveLength(0);
+    expect(client.replayReads).toBe(0);
+    expect(model.doStreamCalls).toHaveLength(0);
+    expect(execute).not.toHaveBeenCalled();
   });
 });

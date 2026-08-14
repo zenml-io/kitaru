@@ -18,6 +18,7 @@ import { describe, expectTypeOf, it } from "vitest";
 import {
   createKitaruGenerateText,
   createKitaruToolLoopAgent,
+  type KitaruToolLoopAgentSettings,
 } from "../src/index.js";
 import { AGENT_ID, FakeClient } from "./helpers.js";
 
@@ -122,5 +123,17 @@ describe("declaration compatibility", () => {
         ],
       });
     expectTypeOf(createResponse).returns.toEqualTypeOf<Promise<Response>>();
+  });
+
+  it("accepts the exported settings alias with default generics", () => {
+    const settings: KitaruToolLoopAgentSettings = {
+      model: new MockLanguageModelV4(),
+    };
+
+    createKitaruToolLoopAgent(settings, {
+      agentId: AGENT_ID,
+      client: new FakeClient(),
+      environment: {},
+    });
   });
 });
