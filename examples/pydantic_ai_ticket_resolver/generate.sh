@@ -4,11 +4,11 @@ set -euo pipefail
 
 example_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repository_root="$(cd "${example_dir}/../.." && pwd)"
-env_file="${KITARU_EXAMPLE_ENV_FILE:-${example_dir}/.env}"
+env_file="${example_dir}/.env"
 trace_file="${example_dir}/traces/langfuse-traces.jsonl"
 
 if [[ ! -f "${env_file}" ]]; then
-  printf '%s\n' 'Copy .env.example to .env and add your credentials first.' >&2
+  printf '%s\n' 'Create .env in the example directory and add your credentials first.' >&2
   exit 2
 fi
 

@@ -10,7 +10,6 @@ Run every command from `examples/pydantic_ai_ticket_resolver` and follow its [RE
 
 The adapter examples use packages from the independent plugin workspace:
 
-- [`pydantic_ai_ticket_resolver/`](pydantic_ai_ticket_resolver/) uses `kitaru-pydantic-ai`.
 - [`integrations/openai_agents_v2/`](integrations/openai_agents_v2/) uses `kitaru-openai-agents`.
 - [`integrations/langgraph_v2/`](integrations/langgraph_v2/) uses `kitaru-langgraph`.
 

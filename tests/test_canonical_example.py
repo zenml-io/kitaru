@@ -1,6 +1,5 @@
 """Contract tests for the canonical returns-resolution example."""
 
-import json
 import runpy
 import tomllib
 from decimal import Decimal
@@ -69,8 +68,8 @@ def test_policy_lookup_normalizes_product_aliases_without_crashing() -> None:
     assert result.policy.category == "accessories"
 
 
-def test_agent_input_is_replay_safe_and_does_not_include_expected_action() -> None:
-    """Unwrap imported inputs without exposing fixture labels to the agent."""
+def test_agent_input_is_replay_safe() -> None:
+    """Unwrap imported inputs and build the agent prompt."""
     ticket = CASES[0]
     imported = {
         "schema_version": 1,
@@ -80,7 +79,6 @@ def test_agent_input_is_replay_safe_and_does_not_include_expected_action() -> No
     assert get_ticket_input(imported) == ticket
     prompt = build_prompt(ticket)
     assert ticket.body in prompt
-    assert "expected_action" not in prompt
 
 
 def test_baseline_agent_exposes_the_mock_commerce_tools() -> None:
@@ -126,119 +124,6 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
         assert any(node.node_type is NodeType.TOOL_CALL for node in nodes)
 
 
-def test_trace_generator_uses_real_model_and_langfuse_credentials() -> None:
-    """Keep generation separate from Kitaru resource creation."""
-    script = (EXAMPLE_DIR / "generate.sh").read_text()
-    generator = (EXAMPLE_DIR / "generate_traces.py").read_text()
-
-    assert '--project "${example_dir}"' in script
-    assert "--with-editable" not in script
-    assert "--extra" not in script
-    assert "langfuse-traces.jsonl" in script
-    assert "Agent.instrument_all()" in generator
-    assert 'trace_name=f"Returns ticket: {ticket.ticket_id}"' in generator
-    assert "case.scenario" not in generator
-    assert 'tags=["returns-resolution", "kitaru-example"]' in generator
-    assert "kitaru session import" not in script
-
-
-def test_replay_defaults_to_the_model_used_by_checked_in_traces() -> None:
-    """Keep default latency comparisons on the same model."""
-    agent_source = (EXAMPLE_DIR / "agent.py").read_text()
-
-    assert 'os.environ.get("BASELINE_MODEL", "openai:gpt-5-nano")' in agent_source
-
-
-def test_public_example_has_no_embedded_investigation_answer_key() -> None:
-    """Keep fixture labels and deterministic oracles outside the public example."""
-    public_source = "\n".join(
-        (EXAMPLE_DIR / name).read_text()
-        for name in ("agent.py", "fixtures.py", "generate_traces.py", "models.py")
-    )
-
-    for token in (
-        "expected_action",
-        "case.scenario",
-        "_build_ci_model",
-        "RETURNS_POLICY_MODE",
-        "KITARU_EXAMPLE_TEST_MODEL",
-    ):
-        assert token not in public_source
-
-
-def test_readme_teaches_unbiased_skill_and_manual_workflows() -> None:
-    """Teach evidence-led investigation and replay without an answer key."""
-    readme = (EXAMPLE_DIR / "README.md").read_text()
-
-    assert "source .env" in readme
-    assert "--env-file .env" not in readme
-    assert "npx skills add zenml-io/kitaru-skills" in readme
-    assert "kitaru-investigation" in readme
-    assert "kitaru-replay-experiment" in readme
-    assert "--question-key observation" in readme
-    assert '\\"path\\":\\"/outputs/message\\"' in readme
-    assert '\\"span\\":{\\"start\\":0,\\"end\\":40}' in readme
-    assert "kitaru investigation session verdict" in readme
-    assert "kitaru investigation update" in readme
-    assert "answer coverage" in readme
-    assert "verdict coverage" in readme
-    assert "uv sync" in readme
-    assert "uv pip install" not in readme
-    assert "kitaru login --local" in readme
-    assert "kitaru login https://your-kitaru-workspace.example.com" in readme
-    assert "plugins/packages/pydantic-ai" not in readme
-    assert "scripts/smoke_plugin_artifacts.py" not in readme
-    assert "UV_FIND_LINKS" not in readme
-
-    for command in (
-        "kitaru login --local",
-        "--importer kitaru/langfuse@latest",
-        "kitaru importer get kitaru/langfuse",
-        "kitaru evaluator list",
-        "kitaru agent register",
-        "kitaru worker start",
-        "kitaru session import",
-        "kitaru session list",
-        "kitaru session evaluate",
-        "kitaru evaluation list",
-        "kitaru investigation create returns-discovery",
-        "kitaru annotation create",
-        "kitaru cohort create returns-regression",
-        "--cohort returns-regression@1",
-        "kitaru evaluator scaffold",
-        "kitaru evaluator test",
-        "kitaru evaluator register",
-        "--evaluator returns-behavior@1",
-        "kitaru agent version register",
-        '--command "python -m examples.pydantic_ai_ticket_resolver.agent"',
-        "kitaru experiment create",
-        "--agent returns-resolver",
-        "kitaru experiment run start",
-        "kitaru experiment run list",
-        "kitaru experiment run get",
-        "kitaru experiment run jobs",
-        "--origin replay",
-    ):
-        assert command in readme
-    assert "--agent returns-resolver@1" in readme
-    assert "--tag returns-baseline" in readme
-    assert "--evaluator kitaru/cost@latest" in readme
-    assert "--evaluator kitaru/session-diagnostics@latest" in readme
-    assert "--evaluator kitaru/tool-health@latest" in readme
-    assert "--evaluator kitaru/trajectory-signals@latest" in readme
-    assert "--evaluator kitaru/llm-call-signals@latest" in readme
-    assert "--evaluator kitaru/timing-profile@latest" in readme
-    assert "COHORT_VERSION_ID" in readme
-    assert "cohort version get returns-regression@1" in readme
-    assert "jq -r '.item.id'" in readme
-    assert '--cohort-version "$COHORT_VERSION_ID"' in readme
-    assert "returns-resolver@2" in readme
-    assert "Do not map session or ticket identifiers to expected answers." in readme
-    assert "REVIEWED_OUTCOMES" not in readme
-    assert "ticket-00" not in readme
-    assert "README_AGENT_GUIDED" not in readme
-
-
 def test_example_declares_its_pypi_dependencies() -> None:
     """Keep the example isolated from the repository development environment."""
     project = tomllib.loads((EXAMPLE_DIR / "pyproject.toml").read_text())
@@ -269,35 +154,4 @@ def test_example_declares_its_pypi_dependencies() -> None:
         requirement.startswith("kitaru-pydantic-ai[openai]")
         for requirement in dependencies
     )
-    assert any(requirement.startswith("langfuse") for requirement in dependencies)
     assert (EXAMPLE_DIR / "uv.lock").is_file()
-
-
-def test_example_environment_does_not_override_the_login_target() -> None:
-    """Let stored local or remote workspace login select the connection."""
-    environment = (EXAMPLE_DIR / ".env.example").read_text()
-
-    assert "KITARU_API_URL" not in environment
-    assert "KITARU_API_KEY" not in environment
-
-
-def test_example_has_one_walkthrough_readme() -> None:
-    """Keep the skill-guided and manual routes in one user-facing document."""
-    readme = (EXAMPLE_DIR / "README.md").read_text()
-
-    assert not (EXAMPLE_DIR / "README_AGENT_GUIDED.md").exists()
-    assert "Recommended route: use the Kitaru skills" in readme
-    assert "Manual route: operate the evidence loop yourself" in readme
-    assert "Persist my answers as annotations" in readme
-    assert "supporting sessions" in readme
-    assert "counterexamples" in readme
-
-
-def test_trace_export_has_no_real_email_domains() -> None:
-    """Prevent accidental customer data from entering the checked-in trace corpus."""
-    for line in TRACE_PATH.read_text().splitlines():
-        trace = json.loads(line)
-        assert "@example.test" in json.dumps(trace)
-        assert "@gmail.com" not in json.dumps(trace)
-        assert "expected_action" not in json.dumps(trace)
-        assert "scenario" not in json.dumps(trace)

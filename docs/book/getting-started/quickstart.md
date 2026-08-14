@@ -54,6 +54,8 @@ uv run kitaru agent register \
 
 Registration stores the command and declared capabilities. It does not run the agent.
 
+Replays use `openai:gpt-5-nano` and make paid OpenAI API calls. If you plan to run a replay, make `OPENAI_API_KEY` available to the worker process through your preferred secret-management method.
+
 Open a second terminal in the same directory and start a [worker](../concepts/workers.md):
 
 ```bash
@@ -182,20 +184,9 @@ The manual route covers:
 8. Register one candidate and run one bounded experiment with an explicit tool policy.
 9. Compare paired baseline and replay evidence without dropping failed or missing cases.
 
-## No traces yet?
+## Use your own traces
 
-The checked-in export is enough for this quickstart. To generate fresh traces, create `.env`, add valid OpenAI and Langfuse credentials, export them, and run the generator:
-
-```bash
-cp -n .env.example .env
-# Edit .env before continuing.
-set -a; source .env; set +a
-./generate.sh
-```
-
-The script makes ten paid agent runs and replaces `traces/langfuse-traces.jsonl`. Model behavior can vary. Import the new file and investigate its observed evidence without assuming that it matches an earlier export.
-
-For your own agent, use [Import your traces](import-your-traces.md) to choose the correct importer. You can evaluate and investigate imported sessions even when the historical agent code is unavailable. Replay requires a compatible registered agent version and an active worker.
+The checked-in Langfuse export is the input for this quickstart. To investigate your own agent, use [Import your traces](import-your-traces.md) to choose the correct importer. You can evaluate and investigate imported sessions even when the historical agent code is unavailable. Replay requires a compatible registered agent version, its runtime credentials, and an active worker.
 
 When you finish, stop the worker with `Ctrl-C`, then run `uv run kitaru logout`. Local logout stops the containers and retains the PostgreSQL volume.
 

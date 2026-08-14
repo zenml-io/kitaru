@@ -1,9 +1,8 @@
 """PydanticAI returns resolver run directly or by a Kitaru worker."""
 
 import asyncio
-import os
 from decimal import Decimal
-from typing import Any, cast
+from typing import Any
 
 from pydantic_ai import Agent
 from pydantic_ai.models import KnownModelName, Model
@@ -13,7 +12,7 @@ from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
 from kitaru.task import get_task_inputs
 from kitaru_pydantic_ai import KitaruAgent
 
-MODEL = cast(KnownModelName, os.environ.get("BASELINE_MODEL", "openai:gpt-5-nano"))
+MODEL: KnownModelName = "openai:gpt-5-nano"
 
 _TASK_INSTRUCTIONS = (
     "You autonomously resolve one customer return or delivery ticket.\n\n"

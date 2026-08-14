@@ -91,7 +91,9 @@ uv run kitaru agent register \
 
 ### 4. Start a worker
 
-Open a second terminal in this directory:
+Replays use `openai:gpt-5-nano` and make paid OpenAI API calls. If you plan to run a replay, make `OPENAI_API_KEY` available to the worker process through your preferred secret-management method.
+
+Open a second terminal in this directory and start the worker:
 
 ```bash
 uv run kitaru worker start --name returns-example-worker

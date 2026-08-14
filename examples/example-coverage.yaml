@@ -27,7 +27,7 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: tests/test_canonical_example.py
-        notes: provider-free contracts for the agent, checked-in traces, evaluator, investigation walkthrough, and replay
+        notes: provider-free contracts for the agent, mock store, checked-in traces, and locked dependencies
       local_smoke:
         status: covered
         command: KITARU_CANONICAL_E2E=1 KITARU_CANONICAL_SERVER_URL=http://127.0.0.1:8000 KITARU_CANONICAL_API_KEY=local-development-worker uv run pytest -q tests/integration/test_canonical_example_e2e.py
@@ -42,7 +42,6 @@ examples:
           - OPENAI_API_KEY
           - LANGFUSE_PUBLIC_KEY
           - LANGFUSE_SECRET_KEY
-          - LANGFUSE_HOST
         timeout_seconds: 900
         cost_class: low
         command: cd examples/pydantic_ai_ticket_resolver && ./generate.sh
