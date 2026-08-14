@@ -17,6 +17,9 @@ extend-exclude = [
 HashiCorp = "HashiCorp"
 # OpenAI Agents SDK stream event name is misspelled in the public SDK.
 handoff_occured = "handoff_occured"
+# Deliberate misspelling in a test asserting that an unknown replay model
+# setting is rejected rather than silently ignored.
+temprature = "temprature"
 MockValSer = "MockValSer"
 
 [default.extend-words]

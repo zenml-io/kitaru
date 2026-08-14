@@ -1,0 +1,30 @@
+{
+  "name": "kitaru-workspace",
+  "private": true,
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.22.0 <23"
+  },
+  "scripts": {
+    "build": "pnpm run build:packages && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage build && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage build",
+    "build:packages": "pnpm --filter @zenml-io/kitaru build && pnpm --filter @zenml-io/kitaru-mastra build && pnpm --filter @zenml-io/kitaru-vercel-ai build",
+    "generate": "pnpm --filter @zenml-io/kitaru generate",
+    "generate:check": "pnpm --filter @zenml-io/kitaru generate:check",
+    "lint": "pnpm --filter @zenml-io/kitaru lint && pnpm --filter @zenml-io/kitaru-mastra lint && pnpm --filter @zenml-io/kitaru-vercel-ai lint && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage lint && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage lint",
+    "pack:check": "pnpm run build && node scripts/smoke-typescript-packages.mjs",
+    "pack:check:built": "node scripts/smoke-typescript-packages.mjs",
+    "pack:release": "pnpm run build:packages && node scripts/smoke-typescript-packages.mjs --output-dir typescript-dist",
+    "pack:release:built": "node scripts/smoke-typescript-packages.mjs --output-dir typescript-dist",
+    "test": "pnpm --filter @zenml-io/kitaru test && pnpm --filter @zenml-io/kitaru build && pnpm --filter @zenml-io/kitaru-mastra test && pnpm --filter @zenml-io/kitaru-vercel-ai test",
+    "test:built": "pnpm --filter @zenml-io/kitaru test && pnpm --filter @zenml-io/kitaru-mastra test && pnpm --filter @zenml-io/kitaru-vercel-ai test",
+    "typecheck": "pnpm --filter @zenml-io/kitaru typecheck && pnpm --filter @zenml-io/kitaru build && pnpm --filter @zenml-io/kitaru-mastra typecheck && pnpm --filter @zenml-io/kitaru-mastra build && pnpm --filter @zenml-io/kitaru-vercel-ai typecheck && pnpm --filter @zenml-io/kitaru-vercel-ai build && pnpm --filter @zenml-io/kitaru-example-mastra-support-triage typecheck && pnpm --filter @zenml-io/kitaru-example-vercel-ai-support-triage typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.3.11",
+    "@types/node": "22.20.1",
+    "ai": "7.0.55",
+    "openapi-typescript": "7.13.0",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

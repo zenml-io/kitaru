@@ -1,0 +1,271 @@
+---
+name: Release TypeScript packages
+on:
+  workflow_dispatch:
+    inputs:
+      package-tag:
+        description: Namespaced package tag to rehearse, such as typescript/kitaru/v0.1.0-rc.1.
+        required: true
+        type: string
+  push:
+    tags: [typescript/kitaru/v*]
+permissions: {}
+concurrency:
+  group: release-typescript-${{ github.ref_name }}
+  cancel-in-progress: false
+env:
+  KITARU_ANALYTICS_OPT_IN: false
+  ZENML_ANALYTICS_OPT_IN: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: password
+        ports: [5433:5432]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    outputs:
+      is-prerelease: ${{ steps.metadata.outputs.is-prerelease }}
+      npm-tag: ${{ steps.metadata.outputs.npm-tag }}
+      package-tag: ${{ steps.metadata.outputs.package-tag }}
+      version: ${{ steps.metadata.outputs.version }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0  # v7.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
+        with:
+          run_install: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Resolve package metadata
+        id: metadata
+        env:
+          DISPATCH_TAG: ${{ inputs.package-tag }}
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = push ]; then
+            package_tag="$PUSH_TAG"
+          else
+            package_tag="$DISPATCH_TAG"
+          fi
+          metadata=$(node scripts/typescript-packages.mjs --tag "$package_tag")
+          version=$(jq -r '.version' <<<"$metadata")
+          npm_tag=$(jq -r '.npm_tag' <<<"$metadata")
+          is_prerelease=$(jq -r '.prerelease' <<<"$metadata")
+          {
+            printf 'IS_PRERELEASE=%s\n' "$is_prerelease"
+            printf 'NPM_TAG=%s\n' "$npm_tag"
+            printf 'PACKAGE_TAG=%s\n' "$package_tag"
+            printf 'VERSION=%s\n' "$version"
+          } >> "$GITHUB_ENV"
+          {
+            printf 'is-prerelease=%s\n' "$is_prerelease"
+            printf 'npm-tag=%s\n' "$npm_tag"
+            printf 'package-tag=%s\n' "$package_tag"
+            printf 'version=%s\n' "$version"
+          } >> "$GITHUB_OUTPUT"
+      - name: Validate release source
+        run: |
+          set -euo pipefail
+          git fetch origin develop
+          release_sha=$(git rev-parse HEAD)
+          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
+            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run test:built
+      - name: Build and test exact package tarballs
+        run: pnpm run pack:release:built
+      - run: uv sync --frozen --extra server
+      - name: Test compiled TypeScript adapters through Worker
+        run: uv run pytest -q tests/typescript
+      - name: Record artifact checksums
+        run: |
+          mkdir evidence
+          sha256sum -- typescript-dist/*.tgz > evidence/SHA256SUMS
+          cat evidence/SHA256SUMS
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: typescript-distributions
+          path: |
+            typescript-dist/*.tgz
+            evidence/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 90
+  publish:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: typescript-distributions
+          path: .
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Install npm with trusted publishing support
+        run: npm install --global npm@11.17.0  # zizmor: ignore[adhoc-packages] trusted publishing requires this npm version
+      - name: Publish exact package tarballs
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_TAG: ${{ needs.build.outputs.npm-tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -euo pipefail
+          publish_npmrc="$RUNNER_TEMP/kitaru-publish.npmrc"
+          trap 'rm -f "$publish_npmrc"' EXIT
+          export NPM_CONFIG_USERCONFIG="$publish_npmrc"
+          if [ -n "$NPM_TOKEN" ]; then
+            npm config set //registry.npmjs.org/:_authToken "$NPM_TOKEN"
+          fi
+          tarballs_to_publish=()
+          preflight_package() {
+            local package_name="$1"
+            local tarball="$2"
+            local remote_url
+            local view_error="$RUNNER_TEMP/npm-view-error.log"
+            local view_status=0
+            remote_url=""
+            for attempt in $(seq 1 5); do
+              if remote_url=$(npm view "$package_name@$VERSION" dist.tarball 2>"$view_error"); then
+                view_status=0
+                break
+              else
+                view_status=$?
+              fi
+              if grep -q 'E404' "$view_error"; then
+                remote_url=""
+                view_status=0
+                break
+              fi
+              if [ "$attempt" -lt 5 ]; then
+                sleep 5
+              fi
+            done
+            if [ "$view_status" -ne 0 ]; then
+              cat "$view_error" >&2
+              return "$view_status"
+            fi
+            if [ -n "$remote_url" ]; then
+              local remote_tarball
+              remote_tarball="$RUNNER_TEMP/$(basename "$tarball")"
+              curl --fail --silent --show-error --location \
+                --connect-timeout 10 --max-time 120 --retry 3 --retry-all-errors \
+                "$remote_url" --output "$remote_tarball"
+              if cmp --silent "$tarball" "$remote_tarball"; then
+                echo "$package_name@$VERSION already contains this exact tarball; skipping."
+                return
+              fi
+              echo "::error::$package_name@$VERSION already exists with different contents."
+              exit 1
+            fi
+            tarballs_to_publish+=("$tarball")
+          }
+          preflight_package "@zenml-io/kitaru" "typescript-dist/zenml-io-kitaru-${VERSION}.tgz"
+          preflight_package "@zenml-io/kitaru-mastra" "typescript-dist/zenml-io-kitaru-mastra-${VERSION}.tgz"
+          preflight_package "@zenml-io/kitaru-vercel-ai" "typescript-dist/zenml-io-kitaru-vercel-ai-${VERSION}.tgz"
+          for tarball in "${tarballs_to_publish[@]}"; do
+            npm publish "$tarball" --access public --tag "$NPM_TAG" --provenance
+          done
+  verify-and-release:
+    if: github.event_name == 'push'
+    needs: [build, publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8.0.1
+        with:
+          name: typescript-distributions
+          path: .
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7.0.0
+        with:
+          node-version: 22.22.3
+          package-manager-cache: false
+      - name: Verify registry installation
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |  # zizmor: ignore[adhoc-packages] verifies the packages just published by this workflow
+          set -euo pipefail
+          verification_dir="$RUNNER_TEMP/kitaru-npm-verification"
+          mkdir "$verification_dir"
+          cd "$verification_dir"
+          npm init --yes
+          installed=false
+          for _ in $(seq 1 10); do
+            if npm install --ignore-scripts \
+              "@zenml-io/kitaru@$VERSION" \
+              "@zenml-io/kitaru-mastra@$VERSION" \
+              "@zenml-io/kitaru-vercel-ai@$VERSION" \
+              "@mastra/core@1.51.0" \
+              "ai@7.0.55"; then
+              installed=true
+              break
+            fi
+            rm -rf node_modules package-lock.json
+            sleep 10
+          done
+          test "$installed" = true
+          node --input-type=module <<'NODE'
+          import { KitaruClient } from "@zenml-io/kitaru";
+          import { KitaruAgent } from "@zenml-io/kitaru-mastra";
+          import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
+          if (![KitaruClient, KitaruAgent, createKitaruGenerateText].every(Boolean)) {
+            throw new Error("Published package exports are missing");
+          }
+          NODE
+      - name: Create package GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          IS_PRERELEASE: ${{ needs.build.outputs.is-prerelease }}
+          PACKAGE_TAG: ${{ needs.build.outputs.package-tag }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |-
+          set -euo pipefail
+          prerelease=()
+          if [ "$IS_PRERELEASE" = true ]; then
+            prerelease+=(--prerelease)
+          fi
+          if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
+            gh release upload "$PACKAGE_TAG" typescript-dist/*.tgz evidence/SHA256SUMS --clobber
+            gh release edit "$PACKAGE_TAG" \
+              --latest=false \
+              --prerelease="$IS_PRERELEASE" \
+              --title "Kitaru TypeScript $VERSION" \
+              --verify-tag
+          else
+            gh release create "$PACKAGE_TAG" typescript-dist/*.tgz evidence/SHA256SUMS \
+              "${prerelease[@]}" \
+              --verify-tag \
+              --latest=false \
+              --title "Kitaru TypeScript $VERSION" \
+              --generate-notes
+          fi

@@ -1,0 +1,63 @@
+# `@zenml-io/kitaru-vercel-ai`
+
+`@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to the non-streaming AI SDK 7 `generateText` function.
+
+This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. Release candidates use npm's `rc` tag and remain pre-1.0 compatibility previews.
+
+```bash
+pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.55
+```
+
+```ts
+import { openai } from "@ai-sdk/openai";
+import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
+
+const generateText = createKitaruGenerateText({
+  agentId: "your-agent-id",
+});
+
+const result = await generateText({
+  model: openai("gpt-5"),
+  prompt: "Triage this support request",
+});
+```
+
+The returned function has the native AI SDK `generateText` signature and returns its native result object. The adapter calls AI SDK's public `generateText`, callback, and local tool `execute` APIs; it does not reproduce the SDK's generation loop.
+
+Replay supports local executable tools with passthrough, static, and history policies. Static and history hits return the configured value without calling the original `execute`; passthrough calls the original function. Replay registers tool calls in model-output order before local execution begins, so a failing earlier policy prevents later queued local side effects. Baseline execution retains AI SDK concurrency. Recorded node indexes represent completed adapter callbacks and parent-before-child storage, not provider-side start order or wall-clock order among concurrent work.
+
+Successful static and history values are validated against a tool's `outputSchema`. A schema supplied with `jsonSchema()` must include its optional runtime `validate` callback so replay can enforce it; replay fails closed when a declared output schema has no runtime validator. An `error_result` miss is a deliberate error sentinel, not a successful tool value, so it bypasses that schema, records a failed tool node, and lets the generation continue.
+
+History matching is guaranteed only for traces recorded and replayed through this Vercel AI SDK adapter. Another framework may validate, default, or serialize the same logical tool input differently, so cross-framework history replay is not a compatibility promise.
+
+Kitaru looks recorded tool results up by tool name and arguments. When one run calls the same tool twice with identical arguments, both replayed calls resolve to the last recorded result for that pair, so a polling loop replays differently from its baseline. The adapter writes a `console.warn` the first time a run repeats a call, because nothing else can tell you the replayed trajectory diverged.
+
+## Model identity
+
+Each LLM node records `requested_model` (the Kitaru model id the run asked for, before any replay override), `model` (the model id the provider says it served, such as `gpt-5-nano-2026-08-07`), and `model_provider` (the bare provider family, such as `openai`). The AI SDK reports transport-qualified provider strings such as `openai.responses`; the adapter keeps that original string as the `provider_id` attribute so evaluator model policies can match one exact provider family.
+
+## Cost
+
+The adapter records the model, provider, and token usage of every step, and Kitaru stores whatever cost the adapter sends. Nothing computes a price server-side, so cost stays `null` and a session totals `$0` unless you pass `costCalculator`:
+
+```ts
+const generateText = createKitaruGenerateText({
+  agentId: "your-agent-id",
+  costCalculator: ({ model, tokens }) =>
+    priceFor(model, tokens?.input_tokens ?? 0, tokens?.output_tokens ?? 0),
+});
+```
+
+Each LLM node carries a `cost` attribute recording where the number came from: `disabled` with no calculator, `estimated` for a calculated value, and `unavailable` when the calculator throws or returns nothing. A throwing calculator never fails the run.
+
+## Data boundary
+
+`KITARU_TASK_INPUTS` must contain a JSON prompt string or message array, and prompt strings Kitaru injects are limited to 4,096 characters. Replay prompt and instruction overrides must also be bounded strings. Values the caller supplies and values the run produces are not held to that bound: recorded inputs, model text, tool arguments, and tool results are recorded in full up to 1 MiB per payload. A payload beyond that ceiling is replaced with a `{"kitaru_recording": "degraded"}` marker, and a single value that cannot be converted, such as a circular reference or a function, is replaced in place with `[circular]`, `[truncated]`, or `[unsupported]`; recording never aborts a generation the caller's own code handled. The adapter never records provider request data and sets LLM-node inputs to `null`. Tool arguments and results replace values under the credential keys `authorization`, `token`, `secret`, `password`, `api_key`, `apikey`, and `cookie` with `[redacted]`; redacted arguments are not eligible for history lookup because they no longer identify the original call. This key-name rule is only a safety net, so keep secrets and unnecessary personal data out of recorded values.
+
+## Current scope
+
+This experimental release supports AI SDK 7 non-streaming `generateText` with local executable tools. It does not support streaming generation, provider-executed or dynamic tools, tool approval, sandboxed replay, per-step overrides through `prepareStep`, async-iterable tools during replay, or the LLM tool policy.
+
+Replay runs tools one at a time in model-output order. `ticketTimeoutMs` (30 seconds by default) bounds how long a queued tool waits for its predecessor to *start*, not how long that predecessor runs, so a slow passthrough tool does not fail the calls queued behind it.
+
+The adapter disables generation retries. Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure. The adapter reports that failure, but it cannot roll back the completed effect. Use application-level idempotency keys for side-effecting tools, or prefer static/history replay when execution must be suppressed.
