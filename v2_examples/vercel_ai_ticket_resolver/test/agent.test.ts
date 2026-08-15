@@ -19,7 +19,7 @@ describe("Vercel returns resolver", () => {
   });
 
   it("loads the source-checkout adapter dist entrypoint", async () => {
-    const adapter = await import("../../../packages/vercel-ai/dist/index.js");
+    const adapter = await import("@zenml-io/kitaru-vercel-ai");
 
     expect(adapter.createKitaruGenerateText).toBeTypeOf("function");
   });
@@ -64,6 +64,29 @@ describe("Vercel returns resolver", () => {
     expect(client.updated.at(-1)?.outputs).toMatchObject({
       text: result.text,
     });
+    const llmNodes = client.nodeBatches
+      .flatMap(({ nodes }) => nodes)
+      .filter(({ node_type }) => node_type === "llm_call");
+    expect(llmNodes.length).toBeGreaterThanOrEqual(2);
+    expect(
+      llmNodes.every(
+        ({ attributes }) =>
+          JSON.stringify(
+            (attributes as { provider_metadata?: unknown }).provider_metadata,
+          ) ===
+          JSON.stringify({
+            kitaru: {
+              execution: "scripted_fixture",
+              fixture_version: "returns-v1",
+              policy_mode: "baseline",
+              provider_call: false,
+              requested_model: "openai/gpt-5-nano",
+              served_model: "kitaru-returns-scripted-fixture",
+              synthetic_usage: true,
+            },
+          }),
+      ),
+    ).toBe(true);
   });
 
   it.each(

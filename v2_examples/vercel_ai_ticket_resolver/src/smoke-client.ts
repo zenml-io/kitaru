@@ -1,4 +1,3 @@
-import type { AdapterClient } from "../../../packages/core/dist/adapter/index.js";
 import type {
   ReplayResponse,
   SessionCreateRequest,
@@ -9,7 +8,8 @@ import type {
   TaskSpecResponse,
   ToolLookupRequest,
   ToolLookupResponse,
-} from "../../../packages/core/dist/index.js";
+} from "@zenml-io/kitaru";
+import type { AdapterClient } from "@zenml-io/kitaru/adapter";
 
 function sessionId(index: number): string {
   return `018f0000-0000-7000-8000-${String(index + 201).padStart(12, "0")}`;

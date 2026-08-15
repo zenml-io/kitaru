@@ -20,6 +20,7 @@ import type {
 } from "./types.js";
 
 interface ToolHookOptions {
+  abortReplay?: (reason: unknown) => void;
   callerHooks?: ToolHooks;
   configuredAfterToolCall?: ConfiguredAfterToolCall;
   configuredBeforeToolCall?: ConfiguredBeforeToolCall;
@@ -81,6 +82,7 @@ async function invokePassthroughBeforeHooks(
 
 export function createToolHooks(options: ToolHookOptions): ToolHooks {
   const {
+    abortReplay,
     callerHooks,
     configuredAfterToolCall,
     configuredBeforeToolCall,
@@ -89,45 +91,50 @@ export function createToolHooks(options: ToolHookOptions): ToolHooks {
 
   return {
     beforeToolCall: async (hookContext) => {
-      // Mastra keeps the loop alive after a rejected hook, so every later tool
-      // has to refuse to run rather than fire its side effect for real.
-      if (state.failure !== undefined) {
-        throw state.failure;
-      }
-      const callId = toolCallId(hookContext.context);
-      const converted = boundedRecorderConversion(
-        hookContext.input,
-        `tool '${hookContext.toolName}' input`,
-      );
-      if (state.spec) {
-        const decision = await decideToolCall(state, {
-          callId,
-          inputs: converted.value,
-          inputsLossy: converted.lossy,
-          originalInputs: hookContext.input,
-          toolName: hookContext.toolName,
-        });
-        if (decision.type !== "execute") {
-          return { output: decision.output, proceed: false };
+      try {
+        // Mastra keeps the loop alive after a rejected hook, so every later tool
+        // has to refuse to run rather than fire its side effect for real.
+        if (state.failure !== undefined) {
+          throw state.failure;
         }
-      } else {
-        state.setToolCall({
+        const callId = toolCallId(hookContext.context);
+        const converted = boundedRecorderConversion(
+          hookContext.input,
+          `tool '${hookContext.toolName}' input`,
+        );
+        if (state.spec) {
+          const decision = await decideToolCall(state, {
+            callId,
+            inputs: converted.value,
+            inputsLossy: converted.lossy,
+            originalInputs: hookContext.input,
+            toolName: hookContext.toolName,
+          });
+          if (decision.type !== "execute") {
+            return { output: decision.output, proceed: false };
+          }
+        } else {
+          state.setToolCall({
+            callId,
+            inputs: converted.value,
+            inputsLossy: converted.lossy,
+            mocked: false,
+            outcome: "pending",
+            startedAt: new Date().toISOString(),
+            toolName: hookContext.toolName,
+          });
+        }
+        return invokePassthroughBeforeHooks(
+          state,
           callId,
-          inputs: converted.value,
-          inputsLossy: converted.lossy,
-          mocked: false,
-          outcome: "pending",
-          startedAt: new Date().toISOString(),
-          toolName: hookContext.toolName,
-        });
+          hookContext,
+          configuredBeforeToolCall,
+          callerHooks?.beforeToolCall,
+        );
+      } catch (error) {
+        abortReplay?.(error);
+        throw error;
       }
-      return invokePassthroughBeforeHooks(
-        state,
-        callId,
-        hookContext,
-        configuredBeforeToolCall,
-        callerHooks?.beforeToolCall,
-      );
     },
     afterToolCall: async (hookContext: ToolAfterHookContext) => {
       const callId = toolCallId(hookContext.context);

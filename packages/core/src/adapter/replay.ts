@@ -1,14 +1,8 @@
 import type { KitaruEnvironmentVariables } from "../environment.js";
 import { toRecorderJson } from "../json.js";
 import type { JsonValue, ReplayOverride, ReplaySpec } from "../types.js";
+import { isRecord, isUuid } from "../validation.js";
 import type { AdapterClient } from "./run-state.js";
-
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function parseUuidEnvironment(
   name: string,
@@ -17,7 +11,7 @@ function parseUuidEnvironment(
   if (value === undefined) {
     return undefined;
   }
-  if (!UUID_PATTERN.test(value)) {
+  if (!isUuid(value)) {
     throw new TypeError(`${name} must be a UUID`);
   }
   return value;

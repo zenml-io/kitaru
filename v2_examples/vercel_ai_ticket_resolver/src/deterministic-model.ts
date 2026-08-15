@@ -150,7 +150,27 @@ function ticketIdFromPrompt(prompt: unknown): string {
   return match[1];
 }
 
-function toolResult(ticketId: string, step: number, call: ToolCall) {
+function provenance(mode: PolicyMode, requestedModel: string) {
+  return {
+    kitaru: {
+      execution: "scripted_fixture",
+      fixture_version: "returns-v1",
+      policy_mode: mode,
+      provider_call: false,
+      requested_model: requestedModel,
+      served_model: "kitaru-returns-scripted-fixture",
+      synthetic_usage: true,
+    },
+  };
+}
+
+function toolResult(
+  ticketId: string,
+  step: number,
+  call: ToolCall,
+  mode: PolicyMode,
+  requestedModel: string,
+) {
   return {
     content: [
       {
@@ -161,7 +181,7 @@ function toolResult(ticketId: string, step: number, call: ToolCall) {
       },
     ],
     finishReason: { raw: "tool_calls", unified: "tool-calls" as const },
-    providerMetadata: { fixture: { scriptedStep: step + 1 } },
+    providerMetadata: provenance(mode, requestedModel),
     request: { body: { scriptedStep: step + 1 } },
     response: {
       id: `${ticketId}-response-${step + 1}`,
@@ -173,11 +193,16 @@ function toolResult(ticketId: string, step: number, call: ToolCall) {
   };
 }
 
-function textResult(ticketId: string, value: Resolution) {
+function textResult(
+  ticketId: string,
+  value: Resolution,
+  mode: PolicyMode,
+  requestedModel: string,
+) {
   return {
     content: [{ text: JSON.stringify(value), type: "text" as const }],
     finishReason: { raw: "stop", unified: "stop" as const },
-    providerMetadata: { fixture: { scriptedStep: "resolution" } },
+    providerMetadata: provenance(mode, requestedModel),
     request: { body: { scriptedStep: "resolution" } },
     response: {
       id: `${ticketId}-response-resolution`,
@@ -215,13 +240,13 @@ export function createDeterministicModel(
       script ??= scriptFor(ticketId, mode);
       const call = script.tools[step];
       if (call !== undefined) {
-        const result = toolResult(ticketId, step, call);
+        const result = toolResult(ticketId, step, call, mode, modelId);
         step += 1;
         return result;
       }
       if (step === script.tools.length) {
         step += 1;
-        return textResult(ticketId, script.resolution);
+        return textResult(ticketId, script.resolution, mode, modelId);
       }
       throw new Error("Deterministic model received too many generation calls");
     },
