@@ -1,15 +1,19 @@
 import { createOpenAI } from "@ai-sdk/openai";
+import type { KitaruEnvironmentVariables } from "@zenml-io/kitaru";
+import type { AdapterClient } from "@zenml-io/kitaru/adapter";
+import { createKitaruGenerateText } from "@zenml-io/kitaru-vercel-ai";
 import type { LanguageModel, ToolSet } from "ai";
 import { jsonSchema, Output, stepCountIs } from "ai";
-import type { AdapterClient } from "../../../packages/core/dist/adapter/index.js";
-import type { KitaruEnvironmentVariables } from "../../../packages/core/dist/index.js";
-import { createKitaruGenerateText } from "../../../packages/vercel-ai/dist/index.js";
 import { createDeterministicModel } from "./deterministic-model.js";
 import { type Resolution, resolutionActions } from "./models.js";
+import {
+  type ModelProvider,
+  validateWorkflowEnvironment,
+} from "./preflight.js";
 import { createCommerceTools } from "./tools.js";
 
 export type PolicyMode = "baseline" | "strict";
-export type ModelProvider = "deterministic" | "openai";
+export type { ModelProvider } from "./preflight.js";
 
 export const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
 
@@ -77,21 +81,6 @@ function requiredEnvironment(
   return value;
 }
 
-export function validateModelProviderEnvironment(
-  provider: ModelProvider,
-  environment: Readonly<Record<string, string | undefined>>,
-): void {
-  if (provider === "deterministic") {
-    return;
-  }
-  if (environment.RETURNS_ALLOW_PAID_MODEL !== "1") {
-    throw new Error(
-      "Set RETURNS_ALLOW_PAID_MODEL=1 to approve the optional paid model call",
-    );
-  }
-  requiredEnvironment(environment, "OPENAI_API_KEY");
-}
-
 function providerModel(options: {
   environment: KitaruEnvironmentVariables;
   mode: PolicyMode;
@@ -100,7 +89,7 @@ function providerModel(options: {
   if (options.provider === "deterministic") {
     return createDeterministicModel(options.mode, REQUESTED_MODEL_ID);
   }
-  validateModelProviderEnvironment(options.provider, options.environment);
+  validateWorkflowEnvironment(options.provider, options.environment);
   const apiKey = requiredEnvironment(options.environment, "OPENAI_API_KEY");
   return createOpenAI({ apiKey })("gpt-5-nano");
 }

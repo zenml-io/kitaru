@@ -147,6 +147,8 @@ def test_typescript_release_workflow_contract() -> None:
     assert "needs: [build, publish]" in verify_source
     assert "node scripts/typescript-packages.mjs --tag" in workflow_source
     assert "run: pnpm run pack:release:built" in build_source
+    assert "uv sync --frozen --extra server --extra cli --extra worker" in build_source
+    assert "run: uv run pytest -q tests/typescript" in build_source
     assert "environment: npm-publish" in publish_source
     assert "contents: read\n      id-token: write" in publish_source
     assert "permissions:\n      contents: write" in verify_source
@@ -188,6 +190,9 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
 
     assert base_matrix.count("--ignore=tests/typescript") == 4
     assert "run: uv run pytest -q tests/typescript" in typescript_job
+    assert (
+        "uv sync --frozen --extra server --extra cli --extra worker" in typescript_job
+    )
 
 
 def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:

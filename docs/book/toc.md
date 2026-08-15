@@ -4,6 +4,7 @@
 
 - [Welcome to Kitaru](README.md)
 - [Installation](getting-started/installation.md)
+- [TypeScript SDK](typescript-sdk.md)
 - [Quickstart](getting-started/quickstart.md)
 - [Import your traces](getting-started/import-your-traces.md)
 - [Drive it from your coding agent](agent-native/mcp-server.md)

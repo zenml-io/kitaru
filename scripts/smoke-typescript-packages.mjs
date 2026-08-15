@@ -67,9 +67,10 @@ try {
   writeFileSync(
     join(consumerRoot, "index.mjs"),
     `import { KitaruClient } from "@zenml-io/kitaru";
+import { createKitaruClient } from "@zenml-io/kitaru/node";
 import { KitaruAgent } from "@zenml-io/kitaru-mastra";
 import { createKitaruGenerateText, createKitaruToolLoopAgent } from "@zenml-io/kitaru-vercel-ai";
-if (![KitaruClient, KitaruAgent, createKitaruGenerateText, createKitaruToolLoopAgent].every(Boolean)) {
+if (![KitaruClient, createKitaruClient, KitaruAgent, createKitaruGenerateText, createKitaruToolLoopAgent].every(Boolean)) {
   throw new Error("Packed package exports are missing");
 }
 `,
@@ -77,10 +78,12 @@ if (![KitaruClient, KitaruAgent, createKitaruGenerateText, createKitaruToolLoopA
   writeFileSync(
     join(consumerRoot, "packages.ts"),
     `import { KitaruClient, type KitaruEnvironmentVariables } from "@zenml-io/kitaru";
+import { createKitaruClient } from "@zenml-io/kitaru/node";
 import { KitaruAgent, type KitaruAgentOptions } from "@zenml-io/kitaru-mastra";
 import { createKitaruGenerateText, createKitaruToolLoopAgent, type KitaruToolLoopAgentSettings, type KitaruVercelAIOptions } from "@zenml-io/kitaru-vercel-ai";
 const environment: KitaruEnvironmentVariables = { KITARU_API_URL: "http://localhost" };
 new KitaruClient({ apiUrl: environment.KITARU_API_URL });
+void createKitaruClient({ apiKey: "package-smoke", apiUrl: environment.KITARU_API_URL });
 const mastraOptions: KitaruAgentOptions = {
   agentId: "package-smoke",
   requestedModelId: "package-smoke-model",

@@ -44,6 +44,7 @@ export type MastraAgent = Agent;
 export type GenerateMethod<TAgent extends GenerateCapable> = TAgent["generate"];
 
 export interface RuntimeGenerateOptions {
+  abortSignal?: AbortSignal;
   hooks?: ToolHooks;
   instructions?: unknown;
   model?: unknown;

@@ -1,6 +1,6 @@
 {
   "name": "@zenml-io/kitaru",
-  "version": "0.1.0-rc.2",
+  "version": "0.1.0-rc.3",
   "description": "TypeScript SDK and adapter foundation for Kitaru agent tracing and replay",
   "license": "Apache-2.0",
   "repository": {
@@ -36,6 +36,10 @@
     "./errors": {
       "types": "./dist/errors.d.ts",
       "import": "./dist/errors.js"
+    },
+    "./node": {
+      "types": "./dist/node/index.d.ts",
+      "import": "./dist/node/index.js"
     },
     "./adapter": {
       "types": "./dist/adapter/index.d.ts",
