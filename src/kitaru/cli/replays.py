@@ -10,12 +10,13 @@ from collections.abc import Sequence
 from typing import Any
 
 from kitaru.api_models.v1.replay import ReplayCreateRequest
-from kitaru.cli.experiments import parse_replay_override, parse_tool_policy
 from kitaru.cli.output import CommandResult
 from kitaru.cli.registration import (
     get_agent_version,
     list_params,
     page_result,
+    parse_replay_override,
+    parse_tool_policy,
     resolve_evaluator_configs,
 )
 

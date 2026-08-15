@@ -14,6 +14,7 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
     InvestigationSessionVerdict,
+    InvestigationStatus,
 )
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.mcp.models.common import MCPModel, PageOptions
@@ -77,7 +78,7 @@ class InvestigationUpdate(MCPModel):
     name: str | None = None
     description: str | None = None
     clear_description: bool = False
-    status: Literal["pending", "in_progress", "completed"] | None = None
+    status: InvestigationStatus | None = None
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InvestigationUpdate":

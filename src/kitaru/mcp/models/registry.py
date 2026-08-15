@@ -13,14 +13,13 @@ from kitaru.mcp.models.common import MCPModel, PageOptions
 from kitaru.mcp.references import ParentKind
 
 VersionedKind = Literal["agent", "cohort", "importer", "evaluator"]
-RegistryListKind = ParentKind | Literal["tag", "worker"]
 
 
 class RegistryListRequest(PageOptions):
     """List one page of registry parents, tags, or workers."""
 
     operation: Literal["list"]
-    kind: RegistryListKind
+    kind: ParentKind | Literal["tag", "worker"]
     filter: Filter | None = None
 
 

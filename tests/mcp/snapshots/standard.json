@@ -7898,6 +7898,16 @@
           "title": "InvestigationSessionVerdict",
           "type": "string"
         },
+        "InvestigationStatus": {
+          "description": "Investigation status.",
+          "enum": [
+            "pending",
+            "in_progress",
+            "completed"
+          ],
+          "title": "InvestigationStatus",
+          "type": "string"
+        },
         "InvestigationUpdate": {
           "additionalProperties": false,
           "description": "Sparsely update investigation metadata.",
@@ -7944,19 +7954,13 @@
             "status": {
               "anyOf": [
                 {
-                  "enum": [
-                    "pending",
-                    "in_progress",
-                    "completed"
-                  ],
-                  "type": "string"
+                  "$ref": "#/$defs/InvestigationStatus"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "default": null,
-              "title": "Status"
+              "default": null
             }
           },
           "required": [

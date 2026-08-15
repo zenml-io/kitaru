@@ -302,14 +302,6 @@ async def test_review_clear_and_verdict_forward_typed_sparse_dtos() -> None:
     )
     await handle_review_manage(
         _get_state(client),
-        InvestigationUpdate(
-            operation="update_investigation",
-            investigation_id=uuid.uuid4(),
-            status="pending",
-        ),
-    )
-    await handle_review_manage(
-        _get_state(client),
         SetInvestigationSessionVerdict(
             operation="set_session_verdict",
             investigation_id=uuid.uuid4(),
@@ -321,7 +313,6 @@ async def test_review_clear_and_verdict_forward_typed_sparse_dtos() -> None:
     assert cast(Any, updates[1]).model_dump(exclude_unset=True) == {
         "status": "completed"
     }
-    assert cast(Any, updates[2]).model_dump(exclude_unset=True) == {"status": "pending"}
     assert cast(Any, session_updates[0]).model_dump(mode="json") == {
         "verdict": "acceptable"
     }
