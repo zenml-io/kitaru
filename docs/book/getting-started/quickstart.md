@@ -146,12 +146,26 @@ every judgment and cohort proposal on recorded evidence and my decisions. Do
 not use fixture implementation details or a prewritten candidate as an answer
 key.
 
-Create a durable investigation with a neutral observation question for every
-selected session. Add neutral highlights for useful nodes. Give me the review
-link when available, or review one session at a time in chat. Ask for my open
-observation before proposing hypotheses. Persist my answers as annotations with
-exact node, JSON-pointer, or character-span selectors when appropriate. Record
-a whole-session verdict only after I confirm it.
+Inspect the complete trace for each selected session before writing its
+question. Create one distinct, neutral question per session about a concrete
+decision, tool interaction, inconsistency, operational signal, or missing piece
+of evidence visible in that trace. Make each question concise and
+self-contained for a reviewer using the Kitaru frontend without this chat. Do
+not assume an expected outcome, reveal a verdict, repeat generic wording, or use
+fixture knowledge.
+
+Attach neutral highlights to the exact nodes, JSON fields, or character spans
+that help answer each question. Give every highlight a specific description
+that explains why the evidence is relevant without stating a conclusion. Before
+creation, show me the ordered sessions, selection reasons, questions, and
+highlights. Ask me to confirm the complete review plan.
+
+Create the durable investigation from the confirmed plan. Give me its frontend
+review link and ask me to complete the questions and verdicts there. After I
+return, read the persisted annotations and verdicts before continuing. Do not
+ask the same questions again in chat. If no review link is available, review one
+session at a time in chat. Record a whole-session verdict only after I confirm
+it.
 
 After enough review, synthesize up to three observable behavior candidates from
 persisted human evidence. Show supporting sessions, counterexamples, ambiguity,
@@ -167,7 +181,7 @@ improved, regressed, trade-off, or inconclusive. Leave deployment to me.
 
 `kitaru-investigation` treats you as the judge. The coding agent can select, summarize, and organize evidence, but it cannot turn its own suggestion into your annotation or verdict.
 
-The skill creates a fixed review worklist with neutral questions. Each answer becomes an [annotation](../concepts/investigations.md) and can point to an exact node, JSON field, or character range. The complete-session verdict remains separate from question answers and investigation status.
+The skill creates a fixed review worklist with a distinct question for each session. The question and highlights use the recorded trace evidence and stand alone in the frontend review. Each answer becomes an [annotation](../concepts/investigations.md) and can point to an exact node, JSON field, or character range. The complete-session verdict remains separate from question answers and investigation status.
 
 When the evidence supports one behavior, the skill asks you to confirm an exact [cohort version](../concepts/cohorts.md). It checks the installed evaluator catalog before it proposes custom code. A custom evaluator must use observable trace evidence and must not map session identifiers to expected answers.
 

@@ -189,14 +189,29 @@ from observed behavior, operational signals, and a random component. Base every
 judgment and cohort proposal on recorded evidence and my decisions. Do not use
 fixture implementation details or a prewritten candidate as an answer key.
 
-Create one durable Kitaru investigation with a neutral observation question for
-every selected session. Add neutral highlights that point to useful trace
-evidence. Give me the investigation review link when available. If no review
-link is available, review one session at a time in chat. Ask for my observation
-before proposing a hypothesis. Persist my answers as annotations and attach
-them to exact nodes, JSON fields, or character spans when appropriate. Record a
-whole-session verdict only after I confirm it. Keep answer coverage, verdict
-coverage, and investigation status separate.
+Inspect the complete trace for each selected session before you write its
+question. Create one distinct, neutral question per session about a concrete
+decision, tool interaction, inconsistency, operational signal, or missing piece
+of evidence visible in that trace. Make every question concise and
+self-contained so a reviewer can answer it in the Kitaru frontend without this
+chat. Do not assume an expected outcome, reveal a verdict, repeat generic
+wording across sessions, or use fixture knowledge.
+
+Attach neutral highlights to the exact nodes, JSON fields, or character spans
+that help the reviewer answer each question. Give every highlight a specific,
+self-contained description of why that evidence is relevant without stating a
+conclusion. Before you create the investigation, show me the ordered worklist,
+the reason each session was selected, every proposed question, and its
+highlights. Ask me to confirm the complete review plan.
+
+Create one durable Kitaru investigation from the confirmed plan. Give me its
+frontend review link and use the frontend as the primary review path when it is
+available. Ask me to complete the questions and verdicts there. After I return,
+read the persisted annotations and verdicts before you summarize or continue.
+Do not ask the same questions again in chat. If no review link is available,
+review one session at a time in chat. Ask for my observation before proposing a
+hypothesis. Record a whole-session verdict only after I confirm it. Keep answer
+coverage, verdict coverage, and investigation status separate.
 
 After enough open review, synthesize at most three observable behavior
 candidates from persisted human evidence. Include supporting sessions,
@@ -277,7 +292,18 @@ uv run kitaru session nodes \
   --size 100
 ```
 
-Record the node IDs that contain useful evidence. A useful highlight can identify a model response, tool input, tool result, or final output. Keep the description neutral before review.
+Record the node IDs that contain useful evidence. A useful highlight can identify a model response, tool input, tool result, or final output.
+
+Inspect each selected trace before you write its question. Give each session a distinct question about a concrete decision, tool interaction, inconsistency, operational signal, or missing piece of evidence visible in that trace. Keep the question neutral. Do not assume an expected outcome or repeat generic wording. The question and each highlight description must make sense in the frontend without this walkthrough as context.
+
+Before you create the investigation, review the complete plan:
+
+| Field | Requirement |
+| --- | --- |
+| Session | Exact session ID and review position. |
+| Selection reason | Evidence-based reason for including this session. |
+| Question | One concise, session-specific question that requires human judgment. |
+| Highlights | Exact nodes or fields that help answer the question without stating the conclusion. |
 
 ### 3. Create an investigation
 
@@ -287,15 +313,21 @@ Create the complete fixed worklist in one command. Repeat `--session`, `--sessio
 SESSION_A="YOUR_FIRST_SESSION_UUID"
 SESSION_B="YOUR_SECOND_SESSION_UUID"
 NODE_A="A_RELEVANT_NODE_UUID"
+NODE_B="A_RELEVANT_NODE_UUID"
+QUESTION_A="WRITE_A_QUESTION_FROM_SESSION_A_EVIDENCE"
+QUESTION_B="WRITE_A_DIFFERENT_QUESTION_FROM_SESSION_B_EVIDENCE"
+HIGHLIGHTS_A="[{\"selector\":{\"node_id\":\"$NODE_A\"},\"description\":\"DESCRIBE_WHY_THIS_NODE_IS_RELEVANT\"}]"
+HIGHLIGHTS_B="[{\"selector\":{\"node_id\":\"$NODE_B\"},\"description\":\"DESCRIBE_WHY_THIS_NODE_IS_RELEVANT\"}]"
 
 uv run kitaru investigation create returns-discovery \
   --agent returns-resolver \
   --description "Open review of diverse imported returns sessions." \
   --session "$SESSION_A" \
-  --session-question "$SESSION_A:observation=What do you observe in this run? Describe the user outcome and the evidence that supports your view." \
-  --session-highlights "$SESSION_A:observation=[{\"selector\":{\"node_id\":\"$NODE_A\"},\"description\":\"Recorded action evidence\"}]" \
+  --session-question "$SESSION_A:observation=$QUESTION_A" \
+  --session-highlights "$SESSION_A:observation=$HIGHLIGHTS_A" \
   --session "$SESSION_B" \
-  --session-question "$SESSION_B:observation=What do you observe in this run? Describe the user outcome and the evidence that supports your view."
+  --session-question "$SESSION_B:observation=$QUESTION_B" \
+  --session-highlights "$SESSION_B:observation=$HIGHLIGHTS_B"
 ```
 
 Save the returned investigation ID. List its ordered review queue:
@@ -309,6 +341,8 @@ uv run kitaru investigation session list \
 ```
 
 Each linked record has its own investigation-session ID. Use that ID when you answer a question.
+
+Open the investigation from the agent's **Investigations** page. The frontend presents each question beside its highlighted trace evidence. Complete the question and verdict for each session there. The persisted answers and verdicts are available to the coding agent and CLI after you finish.
 
 ### 4. Store a precise human annotation
 
