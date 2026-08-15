@@ -84,7 +84,7 @@ def _annotations(
 async def registry_read_tool(
     request: RegistryReadRequest, context: Context
 ) -> RegistryReadResult:
-    """Read Kitaru registry parents and versions using bounded exact operations."""
+    """Read registry parents, versions, tags, and workers with bounded operations."""
     return cast(
         RegistryReadResult,
         await _invoke(context, request, RegistryReadResult, handle_registry_read),

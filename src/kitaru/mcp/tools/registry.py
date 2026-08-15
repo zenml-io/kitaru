@@ -13,12 +13,15 @@ from kitaru.api_models.v1.cohort_version import CohortVersionListParams
 from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.experiment import ExperimentListParams
 from kitaru.api_models.v1.importer import ImporterListParams
+from kitaru.api_models.v1.tag import TagListParams
+from kitaru.api_models.v1.worker import WorkerListParams
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData, PageMetadata, RegistryItem
 from kitaru.mcp.models.registry import (
     RegistryGetRequest,
     RegistryGetVersionRequest,
+    RegistryGetWorkerRequest,
     RegistryListRequest,
     RegistryListVersionsRequest,
     RegistryReadRequest,
@@ -36,11 +39,17 @@ async def handle_registry_read(
 ) -> object:
     """Execute one bounded registry operation."""
     client = state.client
+    if isinstance(request, RegistryGetWorkerRequest):
+        return await client.workers.get(request.worker_id)
     if isinstance(request, RegistryGetRequest):
         return await resolve_parent(client, request.kind, request.reference)
     if isinstance(request, RegistryListRequest):
         common = request.model_dump(include={"cursor", "size", "sort", "filter"})
-        if request.kind is ParentKind.AGENT:
+        if request.kind == "tag":
+            page = await client.tags.list(TagListParams.model_validate(common))
+        elif request.kind == "worker":
+            page = await client.workers.list(WorkerListParams.model_validate(common))
+        elif request.kind is ParentKind.AGENT:
             page = await client.agents.list(AgentListParams.model_validate(common))
         elif request.kind is ParentKind.COHORT:
             page = await client.cohorts.list(CohortListParams.model_validate(common))
@@ -60,7 +69,7 @@ async def handle_registry_read(
     if isinstance(request, RegistryListVersionsRequest):
         kind = ParentKind(request.kind)
         parent = await resolve_parent(client, kind, request.parent_reference)
-        common = request.model_dump(include={"cursor", "size", "sort"})
+        common = request.model_dump(include={"cursor", "size", "sort", "filter"})
         if request.kind == "agent":
             page = await client.agents.list_versions(
                 parent.id, AgentVersionListParams.model_validate(common)
@@ -70,10 +79,12 @@ async def handle_registry_read(
                 parent.id, CohortVersionListParams.model_validate(common)
             )
         elif request.kind == "importer":
+            common.pop("filter", None)
             page = await client.importers.list_versions(
                 parent.id, ListParams.model_validate(common)
             )
         else:
+            common.pop("filter", None)
             page = await client.evaluators.list_versions(
                 parent.id, ListParams.model_validate(common)
             )

@@ -103,6 +103,20 @@ async def test_activity_child_schema_exposes_only_kind_specific_fields() -> None
     assert "include_payloads" not in sorted_fields
 
 
+async def test_registry_schema_exposes_only_supported_tag_and_worker_reads() -> None:
+    tools = await create_server(MCPSettings()).list_tools()
+    registry = next(tool for tool in tools if tool.name == "kitaru_registry_read")
+    schema = json.dumps(registry.input_schema, sort_keys=True)
+
+    assert '"tag"' in schema
+    assert '"worker"' in schema
+    assert '"get_worker"' in schema
+    assert '"get_tag"' not in schema
+    assert '"list_tag_links"' not in schema
+    for unsupported in ("create_worker", "update_worker", "delete_worker"):
+        assert f'"{unsupported}"' not in schema
+
+
 def test_success_and_error_structured_text_parity_and_redaction() -> None:
     now = datetime.now(UTC)
     agent = AgentResponse(
