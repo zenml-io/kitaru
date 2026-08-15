@@ -463,6 +463,30 @@ async def test_version_create_preserves_order_and_empty_delta() -> None:
     assert request.baseline_id is None
 
 
+async def test_version_create_empty_delta_copies_explicit_baseline() -> None:
+    """An empty delta against an explicit baseline reports copied membership."""
+    client = StubCohortClient()
+    baseline_id = uuid.uuid4()
+
+    result = await cohorts.create_cohort_version(
+        client,
+        "regression",
+        add_session_ids=None,
+        remove_session_ids=None,
+        display_version=None,
+        baseline_id=baseline_id,
+    )
+
+    assert result.warnings == [
+        "No sessions were added or removed; the new version copies "
+        f"the membership of baseline {baseline_id}."
+    ]
+    _, request = client.created_versions[-1]
+    assert request.baseline_id == baseline_id
+    assert request.add_session_ids == []
+    assert request.remove_session_ids == []
+
+
 async def test_version_create_rejects_overlap_before_lookup() -> None:
     """The same session cannot appear in both sides of a membership delta."""
     client = StubCohortClient()

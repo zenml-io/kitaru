@@ -245,9 +245,15 @@ async def create_cohort_version(
     )
     warnings = []
     if not additions and not removals:
-        warnings.append(
-            "No sessions were added or removed; cohort membership is unchanged."
-        )
+        if baseline_id is None:
+            warnings.append(
+                "No sessions were added or removed; cohort membership is unchanged."
+            )
+        else:
+            warnings.append(
+                "No sessions were added or removed; the new version copies "
+                f"the membership of baseline {baseline_id}."
+            )
     return CommandResult(item=version.model_dump(mode="json"), warnings=warnings)
 
 
