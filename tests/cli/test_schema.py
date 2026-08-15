@@ -253,6 +253,12 @@ def test_cohort_schema_describes_exact_and_destructive_commands() -> None:
     assert commands["cohort.version.create"]["idempotency"] == (
         "non_idempotent_server_assigned_version"
     )
+    parameters = {
+        parameter["name"]: parameter
+        for parameter in commands["cohort.version.create"]["parameters"]
+    }
+    assert parameters["--baseline"]["type"] == "UUID"
+    assert parameters["--baseline"]["required"] is False
     assert commands["cohort.update"]["idempotency"] == "idempotent replacement"
     assert commands["cohort.version.update"]["idempotency"] == (
         "idempotent replacement"

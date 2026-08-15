@@ -22,6 +22,7 @@ from kitaru.api_models.v1.evaluator import (
 from kitaru.api_models.v1.investigation import InvestigationSessionVerdict
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource
+from kitaru.client.exceptions import APIError
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData
@@ -207,10 +208,28 @@ async def test_review_annotation_list_routes_to_annotations() -> None:
     assert result.page.size == 3
 
 
-def test_review_management_rejects_noop_and_unknown_verdict() -> None:
+@pytest.mark.parametrize("status", ["pending", "in_progress", "completed"])
+def test_review_management_accepts_every_investigation_status(status: str) -> None:
+    request = InvestigationUpdate.model_validate(
+        {
+            "operation": "update_investigation",
+            "investigation_id": uuid.uuid4(),
+            "status": status,
+        }
+    )
+    assert request.status == status
+
+
+def test_review_management_rejects_noop_null_status_and_unknown_verdict() -> None:
     with pytest.raises(ValidationError, match="change at least one"):
         InvestigationUpdate(
             operation="update_investigation", investigation_id=uuid.uuid4()
+        )
+    with pytest.raises(ValidationError, match="status cannot be null"):
+        InvestigationUpdate(
+            operation="update_investigation",
+            investigation_id=uuid.uuid4(),
+            status=None,
         )
     adapter = TypeAdapter(ReviewManageRequest)
     with pytest.raises(ValidationError):
@@ -270,6 +289,14 @@ async def test_review_clear_and_verdict_forward_typed_sparse_dtos() -> None:
     )
     await handle_review_manage(
         _get_state(client),
+        InvestigationUpdate(
+            operation="update_investigation",
+            investigation_id=uuid.uuid4(),
+            status="pending",
+        ),
+    )
+    await handle_review_manage(
+        _get_state(client),
         SetInvestigationSessionVerdict(
             operation="set_session_verdict",
             investigation_id=uuid.uuid4(),
@@ -281,9 +308,30 @@ async def test_review_clear_and_verdict_forward_typed_sparse_dtos() -> None:
     assert cast(Any, updates[1]).model_dump(exclude_unset=True) == {
         "status": "completed"
     }
+    assert cast(Any, updates[2]).model_dump(exclude_unset=True) == {"status": "pending"}
     assert cast(Any, session_updates[0]).model_dump(mode="json") == {
         "verdict": "acceptable"
     }
+
+
+async def test_investigation_pending_preserves_downstream_transition_error() -> None:
+    error = APIError(409, "Cannot move a completed investigation to pending.")
+
+    async def update(_id: uuid.UUID, _request: object) -> object:
+        raise error
+
+    client = SimpleNamespace(investigations=SimpleNamespace(update=update))
+    with pytest.raises(APIError) as raised:
+        await handle_review_manage(
+            _get_state(client),
+            InvestigationUpdate(
+                operation="update_investigation",
+                investigation_id=uuid.uuid4(),
+                status="pending",
+            ),
+        )
+
+    assert raised.value is error
 
 
 async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:

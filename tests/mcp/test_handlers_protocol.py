@@ -38,7 +38,10 @@ class UpdateClient:
     def __init__(self) -> None:
         self.cohort_updates: list[object] = []
         self.experiment_updates: list[object] = []
-        self.cohorts = SimpleNamespace(update=self._update_cohort)
+        self.cohort_version_creates: list[object] = []
+        self.cohorts = SimpleNamespace(
+            update=self._update_cohort, create_version=self._create_cohort_version
+        )
         self.experiments = SimpleNamespace(update=self._update_experiment)
 
     async def _update_cohort(self, _item_id: uuid.UUID, request: object) -> object:
@@ -47,6 +50,12 @@ class UpdateClient:
 
     async def _update_experiment(self, _item_id: uuid.UUID, request: object) -> object:
         self.experiment_updates.append(request)
+        return SimpleNamespace()
+
+    async def _create_cohort_version(
+        self, _item_id: uuid.UUID, request: object
+    ) -> object:
+        self.cohort_version_creates.append(request)
         return SimpleNamespace()
 
 
@@ -388,3 +397,28 @@ async def test_clear_flags_forward_explicit_null_update_fields() -> None:
         "override": None,
         "tool_policy": None,
     }
+
+
+async def test_cohort_version_create_forwards_optional_baseline() -> None:
+    client = UpdateClient()
+    state = MCPServerState(MCPSettings(), cast(Any, client))
+    baseline_id = uuid.uuid4()
+
+    await handle_cohorts_manage(
+        state,
+        CohortVersionCreate(
+            operation="create_version",
+            cohort_id=uuid.uuid4(),
+            baseline_id=baseline_id,
+        ),
+    )
+    await handle_cohorts_manage(
+        state,
+        CohortVersionCreate(
+            operation="create_version",
+            cohort_id=uuid.uuid4(),
+        ),
+    )
+
+    assert cast(Any, client.cohort_version_creates[0]).baseline_id == baseline_id
+    assert cast(Any, client.cohort_version_creates[1]).baseline_id is None

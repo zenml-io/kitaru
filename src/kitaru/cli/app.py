@@ -1642,6 +1642,13 @@ async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult
                 "Ordered session IDs to remove.",
             ),
             ParameterSpec(
+                "--baseline",
+                "UUID",
+                "option",
+                False,
+                "Exact cohort version the membership delta applies to.",
+            ),
+            ParameterSpec(
                 "--display-version",
                 "string",
                 "option",
@@ -1661,6 +1668,7 @@ async def cohort_version_create(
     *,
     add_session: list[uuid.UUID] | None = None,
     remove_session: list[uuid.UUID] | None = None,
+    baseline: uuid.UUID | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
@@ -1670,6 +1678,7 @@ async def cohort_version_create(
             cohort,
             add_session_ids=add_session,
             remove_session_ids=remove_session,
+            baseline_id=baseline,
             display_version=display_version,
         )
 

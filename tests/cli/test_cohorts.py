@@ -431,6 +431,7 @@ async def test_version_create_preserves_order_and_empty_delta() -> None:
     first = uuid.uuid4()
     second = uuid.uuid4()
     removed = uuid.uuid4()
+    baseline_id = uuid.uuid4()
 
     result = await cohorts.create_cohort_version(
         client,
@@ -438,8 +439,10 @@ async def test_version_create_preserves_order_and_empty_delta() -> None:
         add_session_ids=[first, second],
         remove_session_ids=[removed],
         display_version="candidate",
+        baseline_id=baseline_id,
     )
     _, request = client.created_versions[-1]
+    assert request.baseline_id == baseline_id
     assert request.add_session_ids == [first, second]
     assert request.remove_session_ids == [removed]
     assert request.display_version == "candidate"
@@ -451,11 +454,13 @@ async def test_version_create_preserves_order_and_empty_delta() -> None:
         add_session_ids=None,
         remove_session_ids=None,
         display_version=None,
+        baseline_id=None,
     )
     assert "membership is unchanged" in empty.warnings[0]
     _, request = client.created_versions[-1]
     assert request.add_session_ids == []
     assert request.remove_session_ids == []
+    assert request.baseline_id is None
 
 
 async def test_version_create_rejects_overlap_before_lookup() -> None:
@@ -470,6 +475,7 @@ async def test_version_create_rejects_overlap_before_lookup() -> None:
             add_session_ids=[session_id],
             remove_session_ids=[session_id],
             display_version=None,
+            baseline_id=None,
         )
 
     assert error.value.kind == "invalid_arguments"
@@ -491,6 +497,7 @@ async def test_version_create_rejects_duplicates_before_lookup(option: str) -> N
             add_session_ids=[session_id, session_id] if option == "add" else None,
             remove_session_ids=[session_id, session_id] if option == "remove" else None,
             display_version=None,
+            baseline_id=None,
         )
 
     assert client.cohort_lookups == 0
@@ -660,6 +667,7 @@ def test_public_cohort_version_argv_covers_all_commands(
     client = argv_client
     added_session_id = uuid.uuid4()
     removed_session_id = uuid.uuid4()
+    baseline_id = uuid.uuid4()
 
     assert (
         app_module.main(
@@ -672,6 +680,8 @@ def test_public_cohort_version_argv_covers_all_commands(
                 str(added_session_id),
                 "--remove-session",
                 str(removed_session_id),
+                "--baseline",
+                str(baseline_id),
             ]
         )
         == 0
@@ -681,6 +691,7 @@ def test_public_cohort_version_argv_covers_all_commands(
     _, request = client.created_versions[-1]
     assert request.add_session_ids == [added_session_id]
     assert request.remove_session_ids == [removed_session_id]
+    assert request.baseline_id == baseline_id
 
     assert (
         app_module.main(["cohort", "version", "list", "regression", "--size", "1"]) == 0

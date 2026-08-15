@@ -40,6 +40,7 @@ async def handle_cohorts_manage(
         )
     if isinstance(request, CohortVersionCreate):
         dto = CohortVersionCreateRequest(
+            baseline_id=request.baseline_id,
             add_session_ids=request.add_session_ids,
             remove_session_ids=request.remove_session_ids,
             display_version=request.display_version,

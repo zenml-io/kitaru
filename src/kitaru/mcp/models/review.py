@@ -76,7 +76,7 @@ class InvestigationUpdate(MCPModel):
     name: str | None = None
     description: str | None = None
     clear_description: bool = False
-    status: Literal["in_progress", "completed"] | None = None
+    status: Literal["pending", "in_progress", "completed"] | None = None
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InvestigationUpdate":
