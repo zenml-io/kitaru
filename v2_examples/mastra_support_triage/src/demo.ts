@@ -2,9 +2,11 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isDeepStrictEqual } from "node:util";
 
 import type {
   AgentResponse,
+  AgentVersionCreateRequest,
   AgentVersionResponse,
   BlobResponse,
   EvaluationResponse,
@@ -368,6 +370,35 @@ function createRecoveryOptions<T>(
   };
 }
 
+function normalizeAgentVersion(
+  value: Pick<
+    AgentVersionCreateRequest,
+    "capabilities" | "description" | "display_version" | "run_spec"
+  >,
+) {
+  const capabilities = value.capabilities ?? {};
+  const runSpec = value.run_spec;
+  return {
+    capabilities: {
+      mcp_servers: capabilities.mcp_servers ?? [],
+      skills: capabilities.skills ?? [],
+      tools: capabilities.tools ?? [],
+    },
+    description: value.description ?? null,
+    display_version: value.display_version ?? null,
+    run_spec:
+      runSpec == null
+        ? null
+        : {
+            command: runSpec.command,
+            env: runSpec.env ?? {},
+            secret_ids: runSpec.secret_ids ?? [],
+            timeout_seconds: runSpec.timeout_seconds,
+            working_dir: runSpec.working_dir ?? null,
+          },
+  };
+}
+
 async function getEvaluatorVersionById(
   client: KitaruClient,
   evaluatorId: string,
@@ -479,42 +510,51 @@ async function runLockedDemo(
   if (options.testModel) {
     runEnvironment.KITARU_MASTRA_TEST_MODEL = "1";
   }
+  const agentVersionRequest: AgentVersionCreateRequest = {
+    capabilities: {
+      tools: ["lookupAccount", "lookupOrder", "queueRefundReview"],
+    },
+    description: "OpenAI gpt-5-nano support triage.",
+    display_version: "v1",
+    run_spec: {
+      command: RUN_COMMAND,
+      env: runEnvironment,
+      timeout_seconds: 120,
+      working_dir: REPO_ROOT,
+    },
+  };
+  const validateAgentVersion = (version: AgentVersionResponse): void => {
+    if (
+      version.owner_id !== account.id ||
+      version.agent_id !== agentId ||
+      !isDeepStrictEqual(
+        normalizeAgentVersion(version),
+        normalizeAgentVersion(agentVersionRequest),
+      )
+    ) {
+      throw new Error("Agent version does not match this run");
+    }
+  };
   if (manifest.resources.agent_version_id === undefined) {
-    const request = {
-      capabilities: {
-        tools: ["lookupAccount", "lookupOrder", "queueRefundReview"],
-      },
-      description: "OpenAI gpt-5-nano support triage.",
-      display_version: "v1",
-      run_spec: {
-        command: RUN_COMMAND,
-        env: runEnvironment,
-        timeout_seconds: 120,
-        working_dir: REPO_ROOT,
-      },
-    };
     await store.createRemote(
       "create_agent_version",
-      operationFingerprint({ agentId, request }),
-      () => client.agents.createVersion(agentId, request),
+      operationFingerprint({ agentId, request: agentVersionRequest }),
+      () => client.agents.createVersion(agentId, agentVersionRequest),
       createRecoveryOptions<AgentVersionResponse>(
         options,
         "create_agent_version",
         (id) => client.agents.getVersion(id),
-        (version) => {
-          if (
-            version.owner_id !== account.id ||
-            version.agent_id !== agentId ||
-            version.display_version !== request.display_version
-          ) {
-            throw new Error("Adopted agent version does not match this run");
-          }
-        },
+        validateAgentVersion,
         (current, version) => {
           current.resources.agent_version_id = version.id;
         },
       ),
     );
+  } else {
+    const storedVersion = await client.agents.getVersion(
+      manifest.resources.agent_version_id,
+    );
+    validateAgentVersion(storedVersion);
   }
   manifest = await store.read();
   if (manifest.resources.evaluator_id === undefined) {

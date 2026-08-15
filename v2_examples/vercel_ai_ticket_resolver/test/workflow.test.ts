@@ -38,6 +38,7 @@ import {
   TARGET_TICKETS,
   TOOLS,
   validateAdoptedAnnotation,
+  validateBaselineSession,
   verifyCompletedJob,
   workflowRequests,
 } from "../src/workflow-runner.js";
@@ -437,6 +438,92 @@ describe("canonical workflow manifest", () => {
     expect(create).toHaveBeenCalledOnce();
   });
 
+  it.each<{
+    label: string;
+    recovery: Parameters<typeof runJournaledMutation>[1];
+  }>([
+    {
+      label: "adoption",
+      recovery: { adoptions: { agent: id(60) }, retries: new Set<string>() },
+    },
+    {
+      label: "retry",
+      recovery: {
+        adoptions: {},
+        retries: new Set(["agent"]),
+      },
+    },
+  ])("rejects $label recovery when no operation is pending", async ({
+    recovery,
+  }) => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    await store.save(state);
+    const create = vi.fn(async () => ({ id: id(60) }));
+
+    await expect(
+      runJournaledMutation(
+        {
+          adopt: create,
+          commit: () => {},
+          create,
+          fingerprintInput: { name: "fresh-operation" },
+          key: "agent",
+          kind: "agent",
+          manifest: state,
+          stage: "baseline",
+          store,
+          validate: () => {},
+        },
+        recovery,
+      ),
+    ).rejects.toThrow("requires an existing pending operation");
+    expect(create).not.toHaveBeenCalled();
+    expect((await store.load())?.pending_operation).toBeNull();
+  });
+
+  it("rejects a recovery key that does not match the pending operation", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
+    const store = new WorkflowManifestStore(directory);
+    const state = manifest();
+    await store.save(state);
+    const remote = { id: id(61) };
+    const create = vi.fn(async () => remote);
+    const input = {
+      commit: () => {},
+      create,
+      fingerprintInput: { name: "pending-operation" },
+      key: "agent",
+      kind: "agent",
+      manifest: state,
+      stage: "baseline" as const,
+      store,
+      validate: () => {},
+    };
+
+    await expect(
+      runJournaledMutation(
+        {
+          ...input,
+          afterRemoteCommit: async () => {
+            throw new Error("lost response");
+          },
+        },
+        { adoptions: {}, retries: new Set() },
+      ),
+    ).rejects.toThrow("lost response");
+    create.mockClear();
+
+    await expect(
+      runJournaledMutation(input, {
+        adoptions: {},
+        retries: new Set(["agnet"]),
+      }),
+    ).rejects.toThrow("does not match pending operation agent");
+    expect(create).not.toHaveBeenCalled();
+  });
+
   it("reconciles one exact candidate before honoring retry", async () => {
     const directory = await mkdtemp(join(tmpdir(), "kitaru-workflow-"));
     const store = new WorkflowManifestStore(directory);
@@ -474,15 +561,14 @@ describe("canonical workflow manifest", () => {
       ),
     ).rejects.toThrow("lost response");
 
-    await expect(
-      runJournaledMutation(input, {
-        adoptions: {},
-        retries: new Set(["agent"]),
-      }),
-    ).resolves.toEqual(orphan);
+    const recovery = { adoptions: {}, retries: new Set(["agent"]) };
+    await expect(runJournaledMutation(input, recovery)).resolves.toEqual(
+      orphan,
+    );
     expect(reconcile).toHaveBeenCalledOnce();
     expect(create).toHaveBeenCalledOnce();
     expect((await store.load())?.ids.agent_id).toBe(orphan.id);
+    expect(recovery.retries).toEqual(new Set());
   });
 
   it("keeps multiple reconciliation candidates ambiguous despite retry", async () => {
@@ -778,13 +864,15 @@ describe("canonical workflow manifest", () => {
       ),
     ).rejects.toThrow("lost response");
 
-    await expect(
-      runJournaledMutation(input, {
-        adoptions: { evaluator_version: remote.id },
-        retries: new Set(),
-      }),
-    ).resolves.toEqual(remote);
+    const recovery = {
+      adoptions: { evaluator_version: remote.id },
+      retries: new Set<string>(),
+    };
+    await expect(runJournaledMutation(input, recovery)).resolves.toEqual(
+      remote,
+    );
     expect((await store.load())?.ids.evaluator_version_id).toBe(remote.id);
+    expect(recovery.adoptions).toEqual({});
   });
 
   it("adopts cohort versions after response loss", async () => {
@@ -916,6 +1004,32 @@ describe("review annotation recovery", () => {
         expected,
       ),
     ).toThrow("does not match the investigation question");
+  });
+});
+
+describe("baseline session recovery", () => {
+  const expected = {
+    agentId: id(80),
+    agentVersionId: id(81),
+    prompt: "Ticket ID: ticket-001\nCustomer: Alex\n\nWhere is my order?",
+    ticketId: "ticket-001",
+  };
+  const session = {
+    agent_id: expected.agentId,
+    agent_version_id: expected.agentVersionId,
+    id: id(82),
+    inputs: expected.prompt,
+    status: "completed" as const,
+  };
+
+  it("accepts only a completed session recorded for the exact ticket prompt", () => {
+    expect(() => validateBaselineSession(session, expected)).not.toThrow();
+    expect(() =>
+      validateBaselineSession(
+        { ...session, inputs: "Ticket ID: ticket-002" },
+        expected,
+      ),
+    ).toThrow("does not match completed baseline ticket-001");
   });
 });
 

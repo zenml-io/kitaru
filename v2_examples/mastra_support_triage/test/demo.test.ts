@@ -1,8 +1,13 @@
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
-import type { KitaruClient, ReplayResponse } from "@zenml-io/kitaru";
+import type {
+  AgentVersionResponse,
+  KitaruClient,
+  ReplayResponse,
+} from "@zenml-io/kitaru";
 import { describe, expect, it, vi } from "vitest";
 
 import { parseArguments, runDemo } from "../src/demo.js";
@@ -27,6 +32,36 @@ const INITIAL_REQUEST = {
     "The customer reports a suspected duplicate charge.",
   name: "Mastra support triage baseline",
 };
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+
+function agentVersion(stateDir: string): AgentVersionResponse {
+  return {
+    agent_id: AGENT_ID,
+    capabilities: {
+      mcp_servers: [],
+      skills: [],
+      tools: ["lookupAccount", "lookupOrder", "queueRefundReview"],
+    },
+    created: "2026-08-14T10:00:00Z",
+    description: "OpenAI gpt-5-nano support triage.",
+    display_version: "v1",
+    id: AGENT_VERSION_ID,
+    owner_id: OWNER_ID,
+    run_spec: {
+      command: "node v2_examples/mastra_support_triage/dist/main.js",
+      env: {
+        KITARU_AGENT_ID: AGENT_ID,
+        KITARU_MASTRA_TEST_MODEL: "1",
+        KITARU_SUPPORT_TRIAGE_STATE_DIR: stateDir,
+      },
+      secret_ids: [],
+      timeout_seconds: 120,
+      working_dir: REPO_ROOT,
+    },
+    updated: "2026-08-14T10:00:00Z",
+    version: 1,
+  };
+}
 
 describe("runDemo recovery", () => {
   it("fails worker authentication before creating remote resources", async () => {
@@ -197,6 +232,58 @@ describe("runDemo recovery", () => {
     expect(runWorker).not.toHaveBeenCalled();
   });
 
+  it("rejects a changed stored agent version before starting jobs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "kitaru-mastra-version-"));
+    const store = await RunManifestStore.create({
+      ownerId: OWNER_ID,
+      rootDir: root,
+      runId: RUN_ID,
+      serverUrl: "https://kitaru.example.test",
+    });
+    const manifest = await store.read();
+    manifest.resources = {
+      agent_id: AGENT_ID,
+      agent_version_id: AGENT_VERSION_ID,
+    };
+    await store.save(manifest);
+
+    const expectedVersion = agentVersion(store.stateDir);
+    if (expectedVersion.run_spec === null) {
+      throw new Error("Agent version fixture must include a run spec");
+    }
+    const storedVersion: AgentVersionResponse = {
+      ...expectedVersion,
+      run_spec: {
+        ...expectedVersion.run_spec,
+        command: "node changed-entrypoint.js",
+      },
+    };
+    const createInitialJob = vi.fn();
+    const runWorker = vi.fn();
+    const fakeClient = {
+      accounts: { getCurrent: vi.fn().mockResolvedValue({ id: OWNER_ID }) },
+      agents: {
+        getVersion: vi.fn().mockResolvedValue(storedVersion),
+      },
+      sessionRuns: { create: createInitialJob },
+    } as unknown as KitaruClient;
+
+    await expect(
+      runDemo(
+        {
+          apiUrl: "https://kitaru.example.test",
+          resumeStateDir: store.stateDir,
+          testModel: true,
+        },
+        { client: fakeClient, runWorker },
+      ),
+    ).rejects.toThrow("Agent version does not match this run");
+
+    expect(fakeClient.agents.getVersion).toHaveBeenCalledWith(AGENT_VERSION_ID);
+    expect(createInitialJob).not.toHaveBeenCalled();
+    expect(runWorker).not.toHaveBeenCalled();
+  });
+
   it("forwards an explicit retry to an ambiguous paid create", async () => {
     const root = await mkdtemp(join(tmpdir(), "kitaru-mastra-retry-"));
     const store = await RunManifestStore.create({
@@ -237,6 +324,9 @@ describe("runDemo recovery", () => {
     const createInitialJob = vi.fn().mockResolvedValue(initialJob);
     const fakeClient = {
       accounts: { getCurrent: vi.fn().mockResolvedValue({ id: OWNER_ID }) },
+      agents: {
+        getVersion: vi.fn().mockResolvedValue(agentVersion(store.stateDir)),
+      },
       jobs: {
         cancel: vi.fn().mockResolvedValue({
           ...initialJob,

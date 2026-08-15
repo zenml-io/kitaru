@@ -22,6 +22,7 @@ import type {
   KitaruClient,
   KitaruEnvironmentVariables,
   ReplayResponse,
+  SessionResponse,
 } from "@zenml-io/kitaru";
 import {
   createKitaruClient,
@@ -280,6 +281,8 @@ export async function runJournaledMutation<T>(
     input.manifest.pending_operation = null;
     input.manifest.stages[input.stage].status = "committed";
     await input.store.save(input.manifest);
+    delete recovery.adoptions[input.key];
+    recovery.retries.delete(input.key);
     return value;
   };
   const pending: PendingOperation = {
@@ -290,6 +293,31 @@ export async function runJournaledMutation<T>(
     status: "submitted",
   };
   const existing = input.manifest.pending_operation;
+  const recoveryKeys = new Set([
+    ...Object.keys(recovery.adoptions),
+    ...recovery.retries,
+  ]);
+  if (recoveryKeys.size > 0) {
+    if (existing === null) {
+      throw new Error(
+        "A recovery argument requires an existing pending operation",
+      );
+    }
+    const mismatchedKey = [...recoveryKeys].find((key) => key !== existing.key);
+    if (mismatchedKey !== undefined) {
+      throw new Error(
+        `Recovery operation ${mismatchedKey} does not match pending operation ${existing.key}`,
+      );
+    }
+    if (
+      recovery.adoptions[existing.key] !== undefined &&
+      recovery.retries.has(existing.key)
+    ) {
+      throw new Error(
+        `Choose either adoption or retry for pending operation ${existing.key}`,
+      );
+    }
+  }
   if (existing !== null) {
     if (!samePending(existing, pending)) {
       throw new Error(
@@ -522,6 +550,30 @@ async function ensureAgentVersion(
   );
 }
 
+export function validateBaselineSession(
+  value: Pick<
+    SessionResponse,
+    "agent_id" | "agent_version_id" | "id" | "inputs" | "status"
+  >,
+  expected: {
+    agentId: string;
+    agentVersionId: string;
+    prompt: string;
+    ticketId: string;
+  },
+): void {
+  if (
+    value.agent_id !== expected.agentId ||
+    value.agent_version_id !== expected.agentVersionId ||
+    value.status !== "completed" ||
+    createFingerprint(value.inputs) !== createFingerprint(expected.prompt)
+  ) {
+    throw new Error(
+      `Session ${value.id} does not match completed baseline ${expected.ticketId}`,
+    );
+  }
+}
+
 async function recordBaselines(
   client: KitaruClient,
   manifest: WorkflowManifest,
@@ -607,17 +659,13 @@ async function recordBaselines(
         parentIds: { agent_id: agentId, agent_version_id: versionId },
         stage: "baseline",
         store,
-        validate: (value) => {
-          if (
-            value.agent_id !== agentId ||
-            value.agent_version_id !== versionId ||
-            value.status !== "completed"
-          ) {
-            throw new Error(
-              `Session ${value.id} does not match completed baseline ${ticket.ticket_id}`,
-            );
-          }
-        },
+        validate: (value) =>
+          validateBaselineSession(value, {
+            agentId,
+            agentVersionId: versionId,
+            prompt: renderTicketPrompt(ticket),
+            ticketId: ticket.ticket_id,
+          }),
       },
       recovery,
     );

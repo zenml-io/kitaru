@@ -65,20 +65,3 @@ One process holds an exclusive lock on the run directory from before the first m
 If the dedicated worker fails to start or exits unsuccessfully, the driver verifies the exact job, account, kind, and agent version before sending one cancellation request. A `409` or lost cancellation response triggers one exact job read. Terminal state or `cancel_requested_at` confirms the result; any other result remains ambiguous in the manifest. The original worker failure remains the primary error.
 
 The JSON fixtures are never changed.
-
-## Focused validation
-
-The TypeScript unit tests exercise state isolation, ambiguous-operation recovery, exact worker scoping, cancellation races, and completed-run resume behavior:
-
-```bash
-PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @zenml-io/kitaru-example-mastra-support-triage test
-PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @zenml-io/kitaru-example-mastra-support-triage typecheck
-PATH=/opt/homebrew/opt/node@22/bin:$PATH pnpm --filter @zenml-io/kitaru-example-mastra-support-triage build
-```
-
-The cross-language integration test uses the deterministic public Mastra model test utility while still running the compiled agent, tools, HTTP API, exact-job worker, history replay, and Python evaluator path. It needs the repository PostgreSQL test service on port 5433:
-
-```bash
-docker compose up -d db
-PATH=/opt/homebrew/opt/node@22/bin:$PATH uv run --extra server pytest tests/typescript/test_mastra_adapter.py
-```
