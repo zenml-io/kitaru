@@ -13,6 +13,21 @@ The discipline comes first: **replay unchanged before you change anything.** An 
 
 A replay names a **baseline session**, the **agent version** to run (by default, the version the baseline was recorded with), an optional **override**, a **tool policy**, and at least one [evaluator](evaluators.md). The server turns it into a job; a [worker](workers.md) in your environment starts your agent from its run spec, feeding it the baseline's inputs. The re-run records a fresh session (`origin: replay`), and the evaluators score it as soon as it completes.
 
+For a one-off replay, the CLI exposes the same create, list, and get flow:
+
+```bash
+kitaru replay create <baseline-session-id> \
+  --evaluator refund-check@1 \
+  --tool-policy '{"default":{"type":"history","scope":"baseline","on_miss":"fail"}}' \
+  --evaluate-baselines --output json
+kitaru replay list --output json
+kitaru replay get <replay-id> --output json
+```
+
+Creation returns immediately with the replay and its job. Use `kitaru job watch <job-id>` to follow it, `kitaru job get <job-id> --tasks` to inspect task failures, or `kitaru job cancel <job-id>` to request cancellation.
+
+{% hint style="warning" %} `kitaru replay create` is not idempotent. If the command fails after the server accepted it, retrying can create another replay and job. Run `kitaru replay list` and check for the first replay before retrying. Omitting `--tool-policy` uses the server default, which may execute live tools. {% endhint %}
+
 ```python
 import asyncio
 from kitaru.client import KitaruAPIClient
@@ -75,7 +90,7 @@ The tool policy decides what happens when the re-running agent calls a tool. The
 | --- | --- |
 | `history` | The recorded result for the same call, matched by tool name and arguments, from the baseline (or a wider scope). `on_miss` decides what an unrecorded call does: `fail`, `passthrough`, or `error_result`. |
 | `static` | A canned result you define per case — exact or subset argument matching. |
-| `passthrough` | The real tool, live. This is the default when you set no policy. |
+| `passthrough` | The real tool, live. This is the current server default when you set no policy. |
 | `llm` | A model answers the tool call in-distribution. The API accepts it, but adapter support varies; PydanticAI, Mastra, and Vercel AI SDK currently reject it. |
 
 For the "nothing touches real systems" guarantee, set `default=HistoryConfig(scope="baseline", on_miss="fail")` — recorded calls are answered from the recording and anything novel stops the replay instead of hitting production. The full matrix, including per-tool overrides and history scopes, is in [Tool policies](../guides/tool-policies.md).
