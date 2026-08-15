@@ -117,6 +117,35 @@ async def test_registry_schema_exposes_only_supported_tag_and_worker_reads() -> 
         assert f'"{unsupported}"' not in schema
 
 
+async def test_capability_schemas_place_tag_mutations_by_risk() -> None:
+    read_only = await create_server(
+        MCPSettings(mode=CapabilityMode.READ_ONLY)
+    ).list_tools()
+    standard = await create_server(
+        MCPSettings(mode=CapabilityMode.STANDARD)
+    ).list_tools()
+    destructive = await create_server(
+        MCPSettings(mode=CapabilityMode.DESTRUCTIVE)
+    ).list_tools()
+
+    assert "kitaru_review_manage" not in {tool.name for tool in read_only}
+    standard_by_name = {tool.name: tool for tool in standard}
+    assert "kitaru_delete" not in standard_by_name
+    review_schema = json.dumps(
+        standard_by_name["kitaru_review_manage"].input_schema, sort_keys=True
+    )
+    for operation in ("create_tag", "update_tag", "link_tag"):
+        assert f'"{operation}"' in review_schema
+
+    destructive_by_name = {tool.name: tool for tool in destructive}
+    delete_tool = destructive_by_name["kitaru_delete"]
+    assert delete_tool.annotations is not None
+    assert delete_tool.annotations.destructive_hint is True
+    delete_schema = json.dumps(delete_tool.input_schema, sort_keys=True)
+    assert '"tag"' in delete_schema
+    assert '"tag_link"' in delete_schema
+
+
 def test_success_and_error_structured_text_parity_and_redaction() -> None:
     now = datetime.now(UTC)
     agent = AgentResponse(

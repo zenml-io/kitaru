@@ -22,6 +22,14 @@ from kitaru.api_models.v1.evaluator import (
 from kitaru.api_models.v1.investigation import InvestigationSessionVerdict
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagLinkResponse,
+    TagResourceType,
+    TagResponse,
+    TagUpdateRequest,
+)
 from kitaru.client.exceptions import APIError
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
@@ -44,11 +52,16 @@ from kitaru.mcp.models.review import (
     ReviewListSessions,
     ReviewManageRequest,
     SetInvestigationSessionVerdict,
+    TagCreate,
+    TagLink,
+    TagUpdate,
 )
 from kitaru.mcp.models.workflows import (
     DeleteRequest,
     EvaluationStart,
     ExperimentRunStart,
+    ResourceDelete,
+    TagLinkDelete,
 )
 from kitaru.mcp.server import create_server
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
@@ -414,6 +427,178 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
         == "root-cause"
     )
     assert cast(Any, annotation_updates[0]).model_dump(mode="json") == {"value": True}
+
+
+async def test_review_tag_mutations_forward_typed_sdk_dtos() -> None:
+    calls: list[tuple[str, object, object | None]] = []
+    now = datetime.now(UTC)
+    tag_id = uuid.uuid4()
+    resource_id = uuid.uuid4()
+    tag = TagResponse(
+        id=tag_id,
+        owner_id=uuid.uuid4(),
+        name="regression",
+        created=now,
+        updated=now,
+    )
+    link = TagLinkResponse(
+        id=uuid.uuid4(),
+        tag_id=tag_id,
+        resource_type=TagResourceType.SESSION,
+        resource_id=resource_id,
+        created=now,
+        updated=now,
+    )
+
+    async def create(request: TagCreateRequest) -> TagResponse:
+        calls.append(("create", request, None))
+        return tag
+
+    async def update(
+        received_tag_id: uuid.UUID, request: TagUpdateRequest
+    ) -> TagResponse:
+        calls.append(("update", received_tag_id, request))
+        return tag
+
+    async def create_link(
+        received_tag_id: uuid.UUID, request: TagLinkCreateRequest
+    ) -> TagLinkResponse:
+        calls.append(("link", received_tag_id, request))
+        return link
+
+    state = _get_state(
+        SimpleNamespace(
+            tags=SimpleNamespace(create=create, update=update, create_link=create_link)
+        )
+    )
+    assert (
+        await handle_review_manage(
+            state, TagCreate(operation="create_tag", name="regression")
+        )
+        is tag
+    )
+    assert (
+        await handle_review_manage(
+            state,
+            TagUpdate(operation="update_tag", tag_id=tag_id, name="known-failure"),
+        )
+        is tag
+    )
+    assert (
+        await handle_review_manage(
+            state,
+            TagLink(
+                operation="link_tag",
+                tag_id=tag_id,
+                resource_type=TagResourceType.SESSION,
+                resource_id=resource_id,
+            ),
+        )
+        is link
+    )
+
+    assert isinstance(calls[0][1], TagCreateRequest)
+    assert calls[0][1].model_dump() == {"name": "regression"}
+    assert calls[1][1] == tag_id
+    assert isinstance(calls[1][2], TagUpdateRequest)
+    assert calls[1][2].model_dump() == {"name": "known-failure"}
+    assert calls[2][1] == tag_id
+    assert isinstance(calls[2][2], TagLinkCreateRequest)
+    assert calls[2][2].model_dump(mode="json") == {
+        "resource_type": "session",
+        "resource_id": str(resource_id),
+    }
+
+
+async def test_review_tag_create_has_typed_protocol_result() -> None:
+    now = datetime.now(UTC)
+    tag = TagResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        name="regression",
+        created=now,
+        updated=now,
+    )
+
+    async def create(request: TagCreateRequest) -> TagResponse:
+        assert isinstance(request, TagCreateRequest)
+        return tag
+
+    server, context = _get_context(
+        SimpleNamespace(tags=SimpleNamespace(create=create)), CapabilityMode.STANDARD
+    )
+    result = await server.call_tool(
+        "kitaru_review_manage",
+        {"request": {"operation": "create_tag", "name": "regression"}},
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["id"] == str(tag.id)
+    assert json.loads(cast(TextContent, result.content[0]).text) == (
+        result.structured_content
+    )
+
+
+@pytest.mark.parametrize(
+    ("status_code", "code", "message"),
+    [
+        (409, "conflict", "conflicts with current remote state"),
+        (404, "not_found", "was not found"),
+    ],
+)
+async def test_review_tag_api_errors_use_redacted_protocol_envelope(
+    status_code: int, code: str, message: str
+) -> None:
+    async def create(_request: TagCreateRequest) -> TagResponse:
+        raise APIError(status_code, "Bearer sensitive-token")
+
+    server, context = _get_context(
+        SimpleNamespace(tags=SimpleNamespace(create=create)), CapabilityMode.STANDARD
+    )
+    result = await server.call_tool(
+        "kitaru_review_manage",
+        {"request": {"operation": "create_tag", "name": "regression"}},
+        context,
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is True
+    assert result.structured_content is not None
+    assert result.structured_content["error"]["code"] == code
+    assert message in result.structured_content["error"]["message"]
+    assert "sensitive-token" not in cast(TextContent, result.content[0]).text
+
+
+@pytest.mark.parametrize("resource_type", list(TagResourceType))
+def test_tag_link_accepts_every_public_resource_type(
+    resource_type: TagResourceType,
+) -> None:
+    request = TypeAdapter(ReviewManageRequest).validate_python(
+        {
+            "operation": "link_tag",
+            "tag_id": uuid.uuid4(),
+            "resource_type": resource_type.value,
+            "resource_id": uuid.uuid4(),
+        }
+    )
+    assert isinstance(request, TagLink)
+    assert request.resource_type is resource_type
+
+
+def test_tag_mutations_reject_unknown_resource_type_before_handler() -> None:
+    adapter = TypeAdapter(ReviewManageRequest)
+    with pytest.raises(ValidationError):
+        adapter.validate_python(
+            {
+                "operation": "link_tag",
+                "tag_id": uuid.uuid4(),
+                "resource_type": "worker",
+                "resource_id": uuid.uuid4(),
+            }
+        )
 
 
 def test_evaluation_start_caps_pairs_and_rejects_duplicates() -> None:
@@ -872,8 +1057,19 @@ async def test_script_evaluator_version_rejects_mismatched_blob() -> None:
     assert create_calls == []
 
 
-@pytest.mark.parametrize("kind", ["investigation", "annotation", "evaluator"])
-async def test_delete_supports_new_exact_resources(kind: str) -> None:
+@pytest.mark.parametrize(
+    "kind",
+    [
+        "cohort",
+        "cohort_version",
+        "experiment",
+        "experiment_run",
+        "investigation",
+        "annotation",
+        "evaluator",
+    ],
+)
+async def test_existing_delete_payloads_keep_exact_resource_behavior(kind: str) -> None:
     deleted: list[tuple[str, uuid.UUID]] = []
 
     def delete_resource(resource: str) -> Any:
@@ -883,6 +1079,10 @@ async def test_delete_supports_new_exact_resources(kind: str) -> None:
         return delete
 
     client = SimpleNamespace(
+        cohorts=SimpleNamespace(delete=delete_resource("cohort")),
+        cohort_versions=SimpleNamespace(delete=delete_resource("cohort_version")),
+        experiments=SimpleNamespace(delete=delete_resource("experiment")),
+        experiment_runs=SimpleNamespace(delete=delete_resource("experiment_run")),
         investigations=SimpleNamespace(delete=delete_resource("investigation")),
         annotations=SimpleNamespace(delete=delete_resource("annotation")),
         evaluators=SimpleNamespace(delete=delete_resource("evaluator")),
@@ -892,8 +1092,69 @@ async def test_delete_supports_new_exact_resources(kind: str) -> None:
         dict[str, Any],
         await handle_delete(
             _get_state(client),
-            DeleteRequest(kind=cast(Any, kind), id=item_id),
+            ResourceDelete(kind=cast(Any, kind), id=item_id),
         ),
     )
     assert deleted == [(kind, item_id)]
     assert result == {"kind": kind, "id": str(item_id), "deleted": True}
+
+
+async def test_delete_supports_tag_and_exact_tag_link_receipts() -> None:
+    calls: list[tuple[object, ...]] = []
+    tag_id = uuid.uuid4()
+    resource_id = uuid.uuid4()
+
+    async def delete(received_tag_id: uuid.UUID) -> None:
+        calls.append(("tag", received_tag_id))
+
+    async def delete_link(
+        received_tag_id: uuid.UUID,
+        resource_type: TagResourceType,
+        received_resource_id: uuid.UUID,
+    ) -> None:
+        calls.append(("tag_link", received_tag_id, resource_type, received_resource_id))
+
+    state = _get_state(
+        SimpleNamespace(tags=SimpleNamespace(delete=delete, delete_link=delete_link))
+    )
+    deleted = await handle_delete(state, ResourceDelete(kind="tag", id=tag_id))
+    unlinked = await handle_delete(
+        state,
+        TagLinkDelete(
+            kind="tag_link",
+            tag_id=tag_id,
+            resource_type=TagResourceType.COHORT_VERSION,
+            resource_id=resource_id,
+        ),
+    )
+
+    assert calls == [
+        ("tag", tag_id),
+        ("tag_link", tag_id, TagResourceType.COHORT_VERSION, resource_id),
+    ]
+    assert deleted == {"kind": "tag", "id": str(tag_id), "deleted": True}
+    assert unlinked == {
+        "kind": "tag_link",
+        "tag_id": str(tag_id),
+        "resource_type": "cohort_version",
+        "resource_id": str(resource_id),
+        "deleted": True,
+    }
+
+
+def test_tag_link_delete_requires_exact_valid_tuple() -> None:
+    adapter = TypeAdapter(DeleteRequest)
+    base = {
+        "kind": "tag_link",
+        "tag_id": uuid.uuid4(),
+        "resource_type": "session",
+        "resource_id": uuid.uuid4(),
+    }
+    assert isinstance(adapter.validate_python(base), TagLinkDelete)
+    for field in ("tag_id", "resource_type", "resource_id"):
+        with pytest.raises(ValidationError):
+            adapter.validate_python(
+                {key: value for key, value in base.items() if key != field}
+            )
+    with pytest.raises(ValidationError):
+        adapter.validate_python({**base, "resource_type": "worker"})

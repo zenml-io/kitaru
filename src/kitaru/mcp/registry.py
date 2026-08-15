@@ -146,7 +146,7 @@ async def session_import_tool(
 async def review_manage_tool(
     request: ReviewManageRequest, context: Context
 ) -> ReviewManageResult:
-    """Create or update investigations, linked statuses, and annotations."""
+    """Create or update investigations, annotations, tags, and tag links."""
     return cast(
         ReviewManageResult,
         await _invoke(context, request, ReviewManageResult, handle_review_manage),
@@ -186,7 +186,7 @@ async def workflow_cancel_tool(
 
 
 async def delete_tool(request: DeleteRequest, context: Context) -> DeleteResult:
-    """Delete one exact allowlisted registry, review, or run resource."""
+    """Delete one exact allowlisted resource or tag link."""
     return cast(
         DeleteResult, await _invoke(context, request, DeleteResult, handle_delete)
     )

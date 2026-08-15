@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
+from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.mcp.models.common import DeleteKind, MCPModel
 from kitaru.mcp.models.management import EvaluatorSelection
 
@@ -77,8 +78,23 @@ WorkflowCancelRequest = Annotated[
 ]
 
 
-class DeleteRequest(MCPModel):
+class ResourceDelete(MCPModel):
     """Delete one allowlisted exact resource."""
 
     kind: DeleteKind
     id: uuid.UUID
+
+
+class TagLinkDelete(MCPModel):
+    """Delete one exact tag-to-resource link."""
+
+    kind: Literal["tag_link"]
+    tag_id: uuid.UUID
+    resource_type: TagResourceType
+    resource_id: uuid.UUID
+
+
+DeleteRequest = Annotated[
+    ResourceDelete | TagLinkDelete,
+    Field(discriminator="kind"),
+]
