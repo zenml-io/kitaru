@@ -19,7 +19,9 @@ import json
 from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
+import httpx
 import pytest
 
 import kitaru.cli
@@ -504,6 +506,99 @@ def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:
     assert error.kind == "invalid_arguments"
     assert error.message == "payload exceeds configured cap"
     assert error.details == {"status_code": 413}
+
+
+def test_transport_error_falls_back_to_secret_safe_request_origin() -> None:
+    """A transport error without invocation state omits paths and query values."""
+    request = httpx.Request(
+        "GET",
+        "https://user:password@api.example.com/v1/workers?credential=secret#token",
+    )
+
+    error = app_module._convert_error(
+        httpx.ConnectError("connection refused", request=request)
+    )
+
+    assert error.message == (
+        "The server at https://api.example.com is unavailable: connection refused"
+    )
+    assert error.details == {"server_url": "https://api.example.com"}
+    assert "credential" not in error.message
+    assert "secret" not in error.message
+    assert "user" not in error.message
+    assert "password" not in error.message
+    assert "token" not in error.message
+
+
+def test_transport_error_reports_different_failed_request_origin() -> None:
+    """A request to another service is not attributed to the selected server."""
+    request = httpx.Request("GET", "https://control.example.com/v1/token")
+
+    error = app_module._convert_error(
+        httpx.ConnectError("connection refused", request=request),
+        server_url="https://api.example.com/kitaru",
+    )
+
+    assert error.message == (
+        "The server at https://control.example.com is unavailable: connection refused"
+    )
+    assert error.details == {"server_url": "https://control.example.com"}
+
+
+def test_transport_error_without_request_uses_selected_server() -> None:
+    """Resolved invocation state identifies errors without request metadata."""
+    error = app_module._convert_error(
+        httpx.ConnectError("connection refused"),
+        server_url="https://api.example.com/kitaru",
+    )
+
+    assert error.message == (
+        "The server at https://api.example.com/kitaru is unavailable: "
+        "connection refused"
+    )
+    assert error.details == {"server_url": "https://api.example.com/kitaru"}
+
+
+def test_login_network_error_preserves_selected_server_path(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A login transport failure identifies the full selected server URL."""
+    server = "https://api.example.com/kitaru"
+
+    async def fail_login(**options: Any) -> CommandResult:
+        request = httpx.Request("GET", f"{options['server']}/v1/info")
+        raise httpx.ConnectError("connection refused", request=request)
+
+    monkeypatch.setattr(app_module.auth_commands, "login", fail_login)
+
+    assert app_module.main(["login", server, "--output", "json"]) == 6
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert payload["error"]["message"] == (
+        f"The server at {server} is unavailable: connection refused"
+    )
+    assert payload["error"]["details"] == {"server_url": server}
+
+
+def test_login_timeout_identifies_selected_server(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A login timeout identifies the full selected server URL."""
+    server = "https://api.example.com/kitaru"
+
+    async def fail_login(**options: Any) -> CommandResult:
+        request = httpx.Request("GET", f"{options['server']}/v1/info")
+        raise httpx.ReadTimeout("read timed out", request=request)
+
+    monkeypatch.setattr(app_module.auth_commands, "login", fail_login)
+
+    assert app_module.main(["login", server, "--output", "json"]) == 6
+
+    captured = capsys.readouterr()
+    payload = json.loads(captured.err)
+    assert payload["error"]["message"] == f"The request to {server} timed out."
+    assert payload["error"]["details"] == {"server_url": server}
 
 
 def test_lazy_entry_point_reports_missing_cli_extra(monkeypatch, capsys) -> None:

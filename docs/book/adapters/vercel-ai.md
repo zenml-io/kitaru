@@ -8,7 +8,7 @@ icon: bolt
 `@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to the Vercel [AI SDK](https://ai-sdk.dev) 7 `ToolLoopAgent` and `generateText` APIs. Use `createKitaruToolLoopAgent(...)` for an AI SDK Agent object or `createKitaruGenerateText(...)` for the direct function API. Both return native AI SDK results.
 
 {% hint style="info" %}
-Version `0.1.0-rc.2` is a pre-1.0 compatibility preview. Kitaru records non-streaming Agent `generate()` and direct `generateText` calls. Agent `stream()` remains available outside replay as a native, recording-free passthrough; standalone `streamText` is not wrapped.
+Version `0.1.0-rc.3` is a pre-1.0 compatibility preview. Kitaru records non-streaming Agent `generate()` and direct `generateText` calls. Agent `stream()` remains available outside replay as a native, recording-free passthrough; standalone `streamText` is not wrapped.
 {% endhint %}
 
 ## Install
@@ -16,7 +16,7 @@ Version `0.1.0-rc.2` is a pre-1.0 compatibility preview. Kitaru records non-stre
 Use Node 22.22 or later in the Node 22 release line. Install the adapter with AI SDK 7 and the provider package used by your agent. This OpenAI example uses the versions verified in the repository:
 
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@0.1.0-rc.2 ai@7.0.65 @ai-sdk/openai@4.0.20 zod@4.4.3
+pnpm add @zenml-io/kitaru-vercel-ai@0.1.0-rc.3 ai@7.0.65 @ai-sdk/openai@4.0.20 zod@4.4.3
 ```
 
 The adapter includes `@zenml-io/kitaru`, the framework-neutral TypeScript SDK, as a dependency.
@@ -86,7 +86,7 @@ const result = await generateText({
 console.log(result.text);
 ```
 
-Configure the Kitaru connection with `KITARU_API_URL` and either `KITARU_API_TOKEN` or `KITARU_API_KEY`. You can also pass `apiUrl` and `apiKey` to `createKitaruGenerateText`.
+Configure the adapter subprocess with `KITARU_API_URL` and either `KITARU_API_TOKEN` or `KITARU_API_KEY`. You can also pass `apiUrl` and `apiKey` to `createKitaruGenerateText`. A separate Node management process can use [`createKitaruClient()`](../typescript-sdk.md#reuse-a-developer-login) to reuse `kitaru login` without exporting a token.
 
 The direct wrapper calls AI SDK's public `generateText`, callbacks, and local tool `execute` functions. It does not reproduce the AI SDK generation loop. Native options, callbacks, generic types, and return behavior therefore remain available. The direct wrapper sets `maxRetries` to `0` so Kitaru records one provider attempt rather than hiding retries inside a node. The Agent API preserves native retry settings.
 
@@ -196,7 +196,7 @@ The program should call the wrapped `generateText` function normally. It does no
 
 ## Supported boundary
 
-Version `0.1.0-rc.2` supports:
+Version `0.1.0-rc.3` supports:
 
 - AI SDK `>=7.0.60 <8.0.0`;
 - non-streaming `ToolLoopAgent.generate()` with the public AI SDK Agent type;

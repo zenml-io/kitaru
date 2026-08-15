@@ -37,10 +37,23 @@ function jsonResponse(value: unknown, status = 200): Response {
 
 afterEach(() => {
   vi.unstubAllEnvs();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
 describe("KitaruClient", () => {
+  it("accepts explicit configuration when process is unavailable", () => {
+    vi.stubGlobal("process", undefined);
+
+    expect(
+      () =>
+        new KitaruClient({
+          apiKey: "explicit-secret",
+          apiUrl: "https://api.example",
+        }),
+    ).not.toThrow();
+  });
+
   it("prefers explicit configuration, normalizes the URL, and authenticates", async () => {
     vi.stubEnv("KITARU_API_URL", "https://environment.example");
     vi.stubEnv("KITARU_API_KEY", "environment-secret");
@@ -314,6 +327,7 @@ describe("KitaruClient", () => {
         jsonResponse({
           baseline_session_id: ORIGINAL_SESSION_ID,
           id: "not-a-uuid",
+          job_id: SESSION_ID,
           status: "pending",
           tool_policy: { default: { type: "passthrough" } },
         }),
@@ -347,6 +361,7 @@ describe("KitaruClient", () => {
       jsonResponse({
         baseline_session_id: ORIGINAL_SESSION_ID,
         id: REPLAY_ID,
+        job_id: SESSION_ID,
         status: "pending",
         tool_policy: toolPolicy,
       }),
@@ -371,5 +386,107 @@ describe("KitaruClient", () => {
       status: 503,
     });
     expect(fetch).toHaveBeenCalledOnce();
+  });
+
+  it("keeps all six adapter requests route- and body-compatible", async () => {
+    const nodeResponse = {
+      id: NODE_ID,
+      node_type: "span",
+      status: "completed",
+    };
+    const replayResponse = {
+      baseline_session_id: ORIGINAL_SESSION_ID,
+      id: REPLAY_ID,
+      job_id: SESSION_ID,
+      status: "pending",
+      tool_policy: { default: { type: "passthrough" } },
+    };
+    const taskSpec = {
+      details: { inputs: null, kind: "agent" },
+      env: {},
+      kind: "agent",
+      secret_env: {},
+      task_id: TASK_ID,
+      timeout_seconds: 60,
+    };
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(jsonResponse(sessionResponse, 201))
+      .mockResolvedValueOnce(jsonResponse(sessionResponse))
+      .mockResolvedValueOnce(jsonResponse([nodeResponse]))
+      .mockResolvedValueOnce(jsonResponse(replayResponse))
+      .mockResolvedValueOnce(jsonResponse(taskSpec))
+      .mockResolvedValueOnce(jsonResponse({ found: true, result: null }));
+    const client = new KitaruClient({
+      apiKey: "secret",
+      apiUrl: "https://api.example",
+      fetch,
+    });
+    const update = { outputs: { ok: true }, status: "completed" } as const;
+    const nodes = { nodes: [] } as SessionNodeBatchRequest;
+    const lookup = {
+      cache_key: "a".repeat(64),
+      tool_name: "normalize",
+    } satisfies ToolLookupRequest;
+
+    await client.createSession(createRequest);
+    await client.updateSession(SESSION_ID, update);
+    await client.upsertSessionNodes(SESSION_ID, nodes);
+    await client.getReplay(REPLAY_ID);
+    await client.getTaskSpec(TASK_ID);
+    await client.lookupToolResult(REPLAY_ID, lookup);
+
+    expect(
+      fetch.mock.calls.map(([url, init]) => ({
+        authorization: (init?.headers as Record<string, string>).Authorization,
+        body: init?.body,
+        contentType: (init?.headers as Record<string, string>)["Content-Type"],
+        method: init?.method,
+        url,
+      })),
+    ).toEqual([
+      {
+        authorization: "Bearer secret",
+        body: JSON.stringify(createRequest),
+        contentType: "application/json",
+        method: "POST",
+        url: "https://api.example/v1/sessions",
+      },
+      {
+        authorization: "Bearer secret",
+        body: JSON.stringify(update),
+        contentType: "application/json",
+        method: "PATCH",
+        url: `https://api.example/v1/sessions/${SESSION_ID}`,
+      },
+      {
+        authorization: "Bearer secret",
+        body: JSON.stringify(nodes),
+        contentType: "application/json",
+        method: "POST",
+        url: `https://api.example/v1/sessions/${SESSION_ID}/nodes`,
+      },
+      {
+        authorization: "Bearer secret",
+        body: undefined,
+        contentType: undefined,
+        method: "GET",
+        url: `https://api.example/v1/replays/${REPLAY_ID}`,
+      },
+      {
+        authorization: "Bearer secret",
+        body: undefined,
+        contentType: undefined,
+        method: "GET",
+        url: `https://api.example/v1/tasks/${TASK_ID}/spec`,
+      },
+      {
+        authorization: "Bearer secret",
+        body: JSON.stringify(lookup),
+        contentType: "application/json",
+        method: "POST",
+        url: `https://api.example/v1/replays/${REPLAY_ID}/tool-lookup`,
+      },
+    ]);
   });
 });

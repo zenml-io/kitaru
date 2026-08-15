@@ -15,6 +15,7 @@
 
 import io
 from dataclasses import dataclass
+from pathlib import Path
 
 import pytest
 
@@ -25,7 +26,7 @@ from kitaru.cli.output import CLIError
 from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.credentials import ApiToken
-from kitaru.client.exceptions import AuthenticationError
+from kitaru.client.exceptions import AuthenticationError, NotFoundError
 
 
 @dataclass
@@ -48,7 +49,12 @@ class FakeAuthResource:
 class FakeClient:
     """Minimal client exposing info, auth, and close behavior."""
 
-    def __init__(self, scheme: AuthScheme, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        scheme: AuthScheme,
+        error: Exception | None = None,
+        info_error: Exception | None = None,
+    ) -> None:
         """Initialize the fake client."""
         self.auth = FakeAuthResource(error)
         self.closed = False
@@ -56,6 +62,8 @@ class FakeClient:
 
         class InfoResource:
             async def get(self) -> ServerInfoResponse:
+                if info_error:
+                    raise info_error
                 return info
 
         self.info = InfoResource()
@@ -63,6 +71,44 @@ class FakeClient:
     async def close(self) -> None:
         """Record client closure."""
         self.closed = True
+
+
+async def test_login_explains_when_kitaru_is_not_available(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A missing info endpoint identifies the unavailable Kitaru deployment."""
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    server = "https://preview.example.com"
+    client = FakeClient(
+        AuthScheme.NONE,
+        info_error=NotFoundError(404, "Not found"),
+    )
+    monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
+
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            server=server,
+            local=False,
+            username=None,
+            password_stdin=False,
+            api_key_stdin=False,
+            credential_store=credential_store,
+            timeout=30,
+            non_interactive=True,
+            no_browser=True,
+            stdin=io.StringIO(),
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert str(raised.value) == (
+        f"Kitaru is not available at {server}. Check the URL or deployment."
+    )
+    assert raised.value.details == {
+        "status_code": 404,
+        "server_url": server,
+    }
+    assert credential_store.list() == []
+    assert client.closed is True
 
 
 async def test_api_key_is_validated_before_replacing_stored_credential(

@@ -50,6 +50,18 @@ print(issued.key)        # shown once — store it in your secret manager
 
 Keys can be rotated in place — `client.api_keys.rotate(key_id)` returns a fresh plaintext (again, exactly once), with an optional `retain_period_minutes` grace window during which the old key still works, so a worker fleet can pick up the new key without a stop-the-world cutover. Keys can also be deactivated (`update` with `active=False`) and deleted; `last_used` on the key tells you which ones are dead. Give each consumer its own named key so revocation is surgical.
 
+## TypeScript developer authentication
+
+The Node-only `@zenml-io/kitaru/node` entry can reuse the server and renewable credential selected by `kitaru login`:
+
+```ts
+import { createKitaruClient } from "@zenml-io/kitaru/node";
+
+const client = await createKitaruClient();
+```
+
+This is intended for local developer workflows. It reads the CLI store without modifying it and renews credentials only in process memory. The Node reader accepts HTTPS servers and cleartext HTTP only on loopback addresses, even if the CLI has stored another HTTP URL. After running `kitaru login` again, create a new Node client; a client that was already active rejects a changed stored identity instead of silently switching accounts. The runtime-neutral package entries never access the filesystem. CI and production services should use explicit `KITARU_API_URL` plus `KITARU_API_KEY`, or the `KITARU_API_TOKEN` supplied to a worker task. See the [TypeScript SDK](../typescript-sdk.md) for precedence and recovery behavior.
+
 ## Workers and tasks get scoped tokens
 
 An API key is the only long-lived credential a worker holds. It uses the key to register and again whenever it re-registers to renew its worker token. Credentials narrow for task execution:
