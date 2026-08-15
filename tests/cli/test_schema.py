@@ -70,6 +70,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "login",
         "local",
         "logout",
+        "replay",
         "schema",
         "session",
         "status",
@@ -94,6 +95,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     )
     assert descriptions["evaluator"] == "Develop, register, and inspect evaluators."
     assert descriptions["session"] == "Import and inspect sessions and their nodes."
+    assert descriptions["replay"] == "Create and inspect standalone replays."
 
 
 def test_command_schema_contains_behavior_and_error_contracts() -> None:
@@ -134,6 +136,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert worker_start["streams"] is True
     assert worker_start["output_modes"] == ["auto", "text", "json", "jsonl"]
     assert worker_start["side_effects"]["executes_local_code"] is True
+
+    replay_commands = {item["command"]: item for item in describe_schema(("replay",))}
+    assert set(replay_commands) == {"replay.create", "replay.get", "replay.list"}
+    replay_create = replay_commands["replay.create"]
+    assert replay_create["read_only"] is False
+    assert replay_create["side_effects"]["creates_remote_state"] is True
+    assert replay_create["idempotency"] == "non_idempotent_replay_created_per_request"
+    policy = next(
+        parameter
+        for parameter in replay_create["parameters"]
+        if parameter["name"] == "--tool-policy"
+    )
+    assert "server default" in policy["description"]
+    assert "live tools" in policy["description"]
 
     [annotation_create] = describe_schema(("annotation", "create"))
     selector = next(

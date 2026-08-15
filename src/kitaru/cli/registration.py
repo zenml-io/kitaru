@@ -44,6 +44,7 @@ from kitaru.api_models.v1.importer import (
 )
 from kitaru.api_models.v1.investigation import InvestigationListParams
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
+from kitaru.api_models.v1.replay import ReplayListParams
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.config import build_api_client, resolve_credential
@@ -657,6 +658,7 @@ def list_params(
         "experiment_run",
         "importer",
         "investigation",
+        "replay",
         "session",
     ],
     *,
@@ -676,6 +678,7 @@ def list_params(
         "experiment_run": ExperimentRunListParams,
         "importer": ImporterListParams,
         "investigation": InvestigationListParams,
+        "replay": ReplayListParams,
         "session": SessionListParams,
     }[kind]
     return build_list_params(

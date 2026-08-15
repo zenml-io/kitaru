@@ -48,6 +48,7 @@ from kitaru.cli import (
     jobs,
     local_runtime,
     registration,
+    replays,
     scaffold,
     sessions,
     workers,
@@ -199,6 +200,11 @@ job_app = App(
     help=GROUP_DESCRIPTIONS["job"],
     default_parameter=Parameter(negative=False),
 )
+replay_app = App(
+    name="replay",
+    help=GROUP_DESCRIPTIONS["replay"],
+    default_parameter=Parameter(negative=False),
+)
 local_app = App(
     name="local",
     help=GROUP_DESCRIPTIONS["local"],
@@ -222,6 +228,7 @@ app.command(session_app, name="session")
 app.command(evaluation_app, name="evaluation")
 app.command(worker_app, name="worker")
 app.command(job_app, name="job")
+app.command(replay_app, name="replay")
 app.command(local_app, name="local")
 
 
@@ -2470,6 +2477,126 @@ async def experiment_delete(
     """Delete one exact experiment."""
     async with _open_asset_client() as client:
         return await experiments.delete_experiment(client, experiment, force=force)
+
+
+@_register(
+    replay_app,
+    _spec(
+        ("replay", "create"),
+        "Create one standalone replay from an exact baseline session.",
+        parameters=(
+            ParameterSpec("BASELINE", "UUID", "argument", True, "Baseline session ID."),
+            ParameterSpec(
+                "--evaluator",
+                "EVALUATOR@VERSION[]",
+                "option",
+                True,
+                "Exact evaluator version; repeat for additional evaluators.",
+            ),
+            ParameterSpec(
+                "--evaluator-params",
+                "EVALUATOR@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected evaluator token.",
+            ),
+            ParameterSpec(
+                "--agent",
+                "AGENT@VERSION",
+                "option",
+                False,
+                "Exact agent version; omit to use the baseline's recorded version.",
+            ),
+            ParameterSpec(
+                "--override",
+                "JSON object",
+                "option",
+                False,
+                "Replay model, prompt, or model-parameter override.",
+            ),
+            ParameterSpec(
+                "--tool-policy",
+                "JSON object",
+                "option",
+                False,
+                "Tool policy; omitting it uses the server default and may execute "
+                "live tools.",
+            ),
+            ParameterSpec(
+                "--evaluate-baselines",
+                "boolean",
+                "option",
+                False,
+                "Also score the baseline session.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_replay_created_per_request",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def replay_create(
+    baseline: uuid.UUID,
+    /,
+    *,
+    evaluator: list[str],
+    evaluator_params: list[str] | None = None,
+    agent: str | None = None,
+    override: str | None = None,
+    tool_policy: str | None = None,
+    evaluate_baselines: bool = False,
+) -> CommandResult:
+    """Create one standalone replay without waiting for its job."""
+    async with _open_asset_client() as client:
+        return await replays.create_replay(
+            client,
+            baseline,
+            evaluators=evaluator,
+            evaluator_params=evaluator_params,
+            agent=agent,
+            override=override,
+            tool_policy=tool_policy,
+            evaluate_baselines=evaluate_baselines,
+        )
+
+
+@_register(
+    replay_app,
+    _spec(
+        ("replay", "list"),
+        "List standalone and experiment-created replays.",
+        parameters=_LIST_PARAMETERS,
+        errors=_COLLECTION_READ_ERRORS,
+    ),
+)
+async def replay_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of replays."""
+    async with _open_asset_client() as client:
+        return await replays.list_replays(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    replay_app,
+    _spec(
+        ("replay", "get"),
+        "Get one replay by exact UUID.",
+        parameters=(ParameterSpec("REPLAY", "UUID", "argument", True, "Replay ID."),),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def replay_get(replay: uuid.UUID, /) -> CommandResult:
+    """Get one replay without remapping its status."""
+    async with _open_asset_client() as client:
+        return await replays.get_replay(client, replay)
 
 
 @_register(
