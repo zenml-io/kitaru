@@ -44,6 +44,7 @@ from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
+from kitaru.server.application.events import ReplaysSettled
 from kitaru.server.application.models.auth import (
     AuthContext,
 )
@@ -514,15 +515,19 @@ async def test_continue_replay_on_import_completed_with_no_evaluators_settles_th
     assert replay_after.status is ReplayStatus.COMPLETED
 
 
-async def test_continue_replay_on_import_failed_fails_the_job_with_the_sessions_error(
+async def test_continue_replay_on_import_failed_fails_the_replay_with_session_error(
     services: ReplayServices,
 ) -> None:
-    """A failed import fails the job with the session's error."""
+    """A failed import fails the replay directly and finalizes the job completed."""
     agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
     baseline = await _baseline_session(services, agent_version)
 
     bundle = await services.replay_service.create_replay(
-        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
         actor=ACTOR,
     )
 
@@ -540,13 +545,101 @@ async def test_continue_replay_on_import_failed_fails_the_job_with_the_sessions_
         actor=ACTOR,
     )
 
+    replay_after = await services.replays.get(bundle.replay.id)
+    assert replay_after.status is ReplayStatus.FAILED
+    assert replay_after.error == "no import arrived"
+
     job_after = await services.jobs.get(bundle.replay.job_id)
-    assert job_after.status is JobStatus.FAILED
-    assert job_after.error == "no import arrived"
+    assert job_after.status is JobStatus.COMPLETED
+    assert job_after.provisional is False
+
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert not any(isinstance(task, EvaluationTask) for task in tasks_after)
+
+
+async def test_continue_replay_on_import_failed_while_a_baseline_evaluator_runs(
+    services: ReplayServices,
+) -> None:
+    """A failed import fails the replay immediately without canceling the evaluator."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            evaluate_baselines=True,
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_task = next(task for task in tasks if isinstance(task, EvaluationTask))
+
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    await services.task_service.update_task(
+        baseline_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
+    )
+
+    settlements: list[ReplaysSettled] = []
+
+    async def record(event: ReplaysSettled) -> None:
+        settlements.append(event)
+
+    services.task_service._transitions._dispatcher.register(ReplaysSettled, record)
+
+    await services.session_service.update_session(
+        placeholder.id,
+        SessionUpdate(status=SessionStatus.FAILED, error="no import arrived"),
+        actor=ACTOR,
+    )
 
     replay_after = await services.replays.get(bundle.replay.id)
     assert replay_after.status is ReplayStatus.FAILED
     assert replay_after.error == "no import arrived"
+
+    running_evaluator = await services.tasks.get(baseline_task.id)
+    assert running_evaluator.status is TaskStatus.RUNNING
+    assert running_evaluator.cancel_requested_at is None
+
+    job_mid = await services.jobs.get(bundle.replay.job_id)
+    assert not job_mid.settled
+
+    await services.task_service.update_task(
+        baseline_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
+    )
+
+    job_after = await services.jobs.get(bundle.replay.job_id)
+    assert job_after.status is JobStatus.COMPLETED
+
+    settled_replay = await services.replays.get(bundle.replay.id)
+    assert settled_replay.status is ReplayStatus.FAILED
+    assert settled_replay.error == "no import arrived"
+
+    replay_settlements = [
+        replay
+        for event in settlements
+        for replay in event.replays
+        if replay.id == bundle.replay.id
+    ]
+    assert len(replay_settlements) == 1
 
 
 async def test_continue_replay_on_import_without_a_producer_task_is_a_noop(

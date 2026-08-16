@@ -198,16 +198,22 @@ async def continue_replay_on_import(
     experiment_repository: ExperimentRepository,
     job_repository: JobRepository,
     transitions: TaskTransitions,
+    dispatcher: EventDispatcher,
 ) -> None:
-    """Finalize or fail a replay's provisional job when its placeholder finalizes.
+    """Continue or fail a replay's provisional job when its placeholder finalizes.
 
     A no-op when the finalized session was not produced by a task, the
-    task's job belongs to no replay, or the replay already settled. A
-    completed import locks the job row before the replay row, re-checking
-    both for settlement under the job lock, then appends the replay's
-    result evaluator tasks before finalizing the job, so its drained scan
-    reads every task including these. A failed import fails the job with
-    the session's error.
+    task's job belongs to no replay, or the replay already settled. Locks
+    the job row before the replay row, the order the settlement path takes
+    them in, and re-checks both for settlement under the job lock so a
+    cancel that settled first is seen instead of acting on its job. A
+    completed import appends the replay's result evaluator tasks before
+    finalizing the job, so its drained scan reads every task including
+    these. A failed import fails the replay with the session's error and
+    finalizes the job, which settles completed since its tasks completed.
+    The replay is failed and persisted before the job is finalized, so the
+    JobsSettled-driven settlement sees an already-settled replay and skips
+    it.
 
     Args:
         event: SessionImportFinalized event.
@@ -216,6 +222,7 @@ async def continue_replay_on_import(
         experiment_repository: Experiment repository, for the replay config.
         job_repository: Job repository.
         transitions: Task transition dispatch.
+        dispatcher: Event dispatcher, for ReplaysSettled on a failed import.
     """
     session = event.session
     if session.task_id is None:
@@ -226,17 +233,17 @@ async def continue_replay_on_import(
     replay = await replay_repository.get_by_job_id(producer.job_id)
     if replay is None or replay.settled:
         return
-    if session.status is not SessionStatus.COMPLETED:
-        await transitions.fail_job(producer.job_id, session.error)
-        return
-    # Lock the job row before writing the replay row, the order the
-    # settlement path takes them in, and re-check both for settlement so a
-    # cancel that settled first is seen instead of appending to its job.
     job = await job_repository.get(producer.job_id, exclusive=True)
     if job.settled:
         return
     replay = await replay_repository.get_by_job_id(producer.job_id)
     if replay is None or replay.settled:
+        return
+    if session.status is not SessionStatus.COMPLETED:
+        replay.fail(session.error)
+        stored = await replay_repository.update(replay)
+        await dispatcher.dispatch(ReplaysSettled(replays=[stored]))
+        await transitions.finalize_job(producer.job_id)
         return
     config = await experiment_repository.get_replay_config(replay.replay_config_id)
     evaluator_tasks: list[Task] = [
@@ -284,8 +291,8 @@ async def settle_replays(
 ) -> None:
     """Map settled jobs' outcomes onto their replays and emit ReplaysSettled.
 
-    A job holding no replay is skipped. The updated replays publish a
-    single ``ReplaysSettled``.
+    A job holding no replay, or whose replay already settled, is skipped.
+    The updated replays publish a single ``ReplaysSettled``.
 
     Args:
         event: JobsSettled event.
@@ -298,7 +305,7 @@ async def settle_replays(
     changed: list[Replay] = []
     for job in event.jobs:
         replay = replays_by_job_id.get(job.id)
-        if replay is None:
+        if replay is None or replay.settled:
             continue
         if not _apply_job_settlement(replay, job):
             continue

@@ -125,7 +125,7 @@ async def test_create_replay_with_no_evaluators(
 ) -> None:
     """Create a replay with an empty evaluators list and observe HTTP 201."""
     response = await client.post(
-        "/v1/replays",
+        "/api/v1/replays",
         json={
             "baseline_session_id": str(baseline_session_id),
             "evaluators": [],
@@ -167,7 +167,7 @@ async def test_create_function_mode_replay_reports_pending_status(
     )
 
     created = await client.post(
-        "/v1/replays",
+        "/api/v1/replays",
         json={
             "baseline_session_id": str(session.id),
             "evaluators": [{"evaluator": "accuracy"}],
@@ -178,7 +178,7 @@ async def test_create_function_mode_replay_reports_pending_status(
     assert body["status"] == "pending"
     assert body["result_session_id"] is None
 
-    response = await client.get(f"/v1/replays/{body['id']}")
+    response = await client.get(f"/api/v1/replays/{body['id']}")
     assert response.status_code == 200
     assert response.json()["status"] == "pending"
 
@@ -216,7 +216,7 @@ async def test_create_replay_rejects_a_non_terminal_baseline(
         origin=SessionOrigin.RECORDED,
     )
     response = await client.post(
-        "/v1/replays",
+        "/api/v1/replays",
         json={
             "baseline_session_id": str(session.id),
             "evaluators": [],

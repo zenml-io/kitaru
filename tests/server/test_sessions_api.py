@@ -262,7 +262,7 @@ async def test_list_sessions_filters_by_origin_and_status(
 async def test_create_pending_import_session(client: httpx.AsyncClient) -> None:
     """A placeholder response carries its pending-import status and external id."""
     response = await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(
             origin="replay", status="pending_import", external_id="run-1"
         ),
@@ -278,16 +278,16 @@ async def test_list_sessions_filters_by_pending_import_status(
 ) -> None:
     """Filter sessions by the pending-import status."""
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(
             origin="replay", status="pending_import", external_id="run-1"
         ),
     )
-    await client.post("/v1/sessions", json=_session_body())
+    await client.post("/api/v1/sessions", json=_session_body())
 
     filter_expression = {"field": "status", "op": "eq", "value": "pending_import"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]

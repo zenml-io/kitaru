@@ -389,13 +389,22 @@ function normalizeAgentVersion(
     run_spec:
       runSpec == null
         ? null
-        : {
-            command: runSpec.command,
-            env: runSpec.env ?? {},
-            secret_ids: runSpec.secret_ids ?? [],
-            timeout_seconds: runSpec.timeout_seconds,
-            working_dir: runSpec.working_dir ?? null,
-          },
+        : runSpec.type === "function"
+          ? {
+              type: "function",
+              entrypoint: runSpec.entrypoint,
+              env: runSpec.env ?? {},
+              secret_ids: runSpec.secret_ids ?? [],
+              timeout_seconds: runSpec.timeout_seconds,
+            }
+          : {
+              type: "command",
+              command: runSpec.command,
+              env: runSpec.env ?? {},
+              secret_ids: runSpec.secret_ids ?? [],
+              timeout_seconds: runSpec.timeout_seconds,
+              working_dir: runSpec.working_dir ?? null,
+            },
   };
 }
 
@@ -517,6 +526,7 @@ async function runLockedDemo(
     description: "OpenAI gpt-5-nano support triage.",
     display_version: "v1",
     run_spec: {
+      type: "command",
       command: RUN_COMMAND,
       env: runEnvironment,
       timeout_seconds: 120,

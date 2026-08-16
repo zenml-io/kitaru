@@ -39,7 +39,9 @@ async def agent_id(client: httpx.AsyncClient) -> str:
 async def cohort_id(client: httpx.AsyncClient, agent_id: str) -> str:
     """Provide the id of a cohort to version."""
     created = (
-        await client.post("/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+        )
     ).json()
     return created["id"]
 
@@ -101,7 +103,9 @@ async def test_delete_persists_across_requests(
     client: httpx.AsyncClient, cohort_id: str
 ) -> None:
     """Persist a deletion across requests."""
-    created = (await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})).json()
+    created = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
     response = await client.delete(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 204
 
@@ -114,7 +118,9 @@ async def test_delete_does_not_lower_latest_version(
 ) -> None:
     """Keep the cohort's latest_version high-water mark after a delete."""
     await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
-    second = (await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})).json()
+    second = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
     await client.delete(f"/api/v1/cohort-versions/{second['id']}")
 
     response = await client.get(f"/api/v1/cohorts/{cohort_id}")
@@ -144,7 +150,9 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
         )
     ).json()
     evaluator = (
-        await client.post("/api/v1/evaluators", json={"name": "accuracy", "metadata": {}})
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
     ).json()
     await client.post(
         f"/api/v1/evaluators/{evaluator['id']}/versions",

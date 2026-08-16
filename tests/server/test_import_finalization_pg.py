@@ -24,12 +24,16 @@ from typing import NamedTuple
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from conftest import pg_session_with_engine, postgres_available
+from conftest import (
+    UNSCOPED_WORKER_SCOPE,
+    pg_session_with_engine,
+    postgres_available,
+)
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskStatus
-from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -190,7 +194,7 @@ async def _seed_static(session: AsyncSession) -> PipelineSeed:
         Worker(
             owner_id=owner.id,
             name="worker",
-            scope=WorkerScope(),
+            scope=UNSCOPED_WORKER_SCOPE,
             runtime=WorkerRuntime(platform="bare"),
             last_seen_at=now,
         )

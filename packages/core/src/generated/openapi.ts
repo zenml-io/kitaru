@@ -3644,27 +3644,7 @@ export interface components {
              */
             updated: string;
         };
-        /**
-         * AgentTaskDetails
-         * @description Agent task details.
-         */
-        AgentTaskDetails: {
-            /**
-             * Inputs
-             * @description Inputs passed to the agent's command.
-             */
-            inputs: unknown;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            kind: "agent";
-            /**
-             * Replay Id
-             * @description Replay the task runs for.
-             */
-            replay_id?: string | null;
-        };
+        AgentTaskDetails: components["schemas"]["CommandAgentTaskDetails"] | components["schemas"]["FunctionAgentTaskDetails"];
         /**
          * AgentUpdateRequest
          * @description Agent update request.
@@ -3698,8 +3678,11 @@ export interface components {
              * @description Human-readable designator.
              */
             display_version?: string | null;
-            /** @description Run spec. */
-            run_spec?: components["schemas"]["RunSpec"] | null;
+            /**
+             * Run Spec
+             * @description Run spec.
+             */
+            run_spec?: (components["schemas"]["CommandRunSpec"] | components["schemas"]["FunctionRunSpec"]) | null;
         };
         /**
          * AgentVersionResponse
@@ -3741,8 +3724,11 @@ export interface components {
              * @description Id of the owning account.
              */
             owner_id: string;
-            /** @description Run spec. */
-            run_spec: components["schemas"]["RunSpec"] | null;
+            /**
+             * Run Spec
+             * @description Run spec.
+             */
+            run_spec: (components["schemas"]["CommandRunSpec"] | components["schemas"]["FunctionRunSpec"]) | null;
             /**
              * Updated
              * Format: date-time
@@ -3772,8 +3758,11 @@ export interface components {
              * @description New human-readable designator.
              */
             display_version?: string | null;
-            /** @description New run spec. */
-            run_spec?: components["schemas"]["RunSpec"] | null;
+            /**
+             * Run Spec
+             * @description New run spec.
+             */
+            run_spec?: (components["schemas"]["CommandRunSpec"] | components["schemas"]["FunctionRunSpec"]) | null;
         };
         /**
          * AndFilter
@@ -4288,6 +4277,72 @@ export interface components {
              * @description New human-readable designator.
              */
             display_version?: string | null;
+        };
+        /**
+         * CommandAgentTaskDetails
+         * @description Command agent task details.
+         */
+        CommandAgentTaskDetails: {
+            /**
+             * Inputs
+             * @description Inputs passed to the agent's command.
+             */
+            inputs: unknown;
+            /**
+             * Kind
+             * @default agent
+             * @constant
+             */
+            kind: "agent";
+            /**
+             * Replay Id
+             * @description Replay the task runs for.
+             */
+            replay_id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "command";
+        };
+        /**
+         * CommandRunSpec
+         * @description Command run spec.
+         */
+        CommandRunSpec: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * Env
+             * @description Process environment.
+             */
+            env?: {
+                [key: string]: string;
+            };
+            /**
+             * Secret Ids
+             * @description Secrets merged into the process environment.
+             */
+            secret_ids?: string[];
+            /**
+             * Timeout Seconds
+             * @description Process timeout.
+             * @default 3600
+             */
+            timeout_seconds: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "command";
+            /**
+             * Working Dir
+             * @description Working directory.
+             */
+            working_dir?: string | null;
         };
         /**
          * DeviceAuthorizationResponse
@@ -5172,6 +5227,72 @@ export interface components {
          * @enum {string}
          */
         FilterOp: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "in" | "is_null" | "startswith" | "endswith" | "contains";
+        /**
+         * FunctionAgentTaskDetails
+         * @description Function agent task details.
+         */
+        FunctionAgentTaskDetails: {
+            /**
+             * Entrypoint
+             * @description Run function to load, as module:attribute.
+             */
+            entrypoint: string;
+            /**
+             * Inputs
+             * @description Inputs passed to the run function.
+             */
+            inputs: unknown;
+            /**
+             * Kind
+             * @default agent
+             * @constant
+             */
+            kind: "agent";
+            /**
+             * Replay Id
+             * @description Replay the task runs for.
+             */
+            replay_id?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "function";
+        };
+        /**
+         * FunctionRunSpec
+         * @description Function run spec.
+         */
+        FunctionRunSpec: {
+            /**
+             * Entrypoint
+             * @description Run function to load, as module:attribute.
+             */
+            entrypoint: string;
+            /**
+             * Env
+             * @description Process environment.
+             */
+            env?: {
+                [key: string]: string;
+            };
+            /**
+             * Secret Ids
+             * @description Secrets merged into the process environment.
+             */
+            secret_ids?: string[];
+            /**
+             * Timeout Seconds
+             * @description Process timeout.
+             * @default 3600
+             */
+            timeout_seconds: number;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "function";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -5771,6 +5892,11 @@ export interface components {
              * @description Id of the owning account.
              */
             owner_id: string;
+            /**
+             * Provisional
+             * @description Whether the job's task set is not final yet.
+             */
+            provisional: boolean;
             /**
              * Started At
              * @description Time the job started.
@@ -6444,40 +6570,6 @@ export interface components {
          * @enum {string}
          */
         ReplayStatus: "pending" | "evaluating" | "completed" | "failed" | "canceled";
-        /**
-         * RunSpec
-         * @description Run spec.
-         */
-        RunSpec: {
-            /**
-             * Command
-             * @description Shell command to run.
-             */
-            command: string;
-            /**
-             * Env
-             * @description Process environment.
-             */
-            env?: {
-                [key: string]: string;
-            };
-            /**
-             * Secret Ids
-             * @description Secrets merged into the process environment.
-             */
-            secret_ids?: string[];
-            /**
-             * Timeout Seconds
-             * @description Process timeout.
-             * @default 3600
-             */
-            timeout_seconds: number;
-            /**
-             * Working Dir
-             * @description Working directory.
-             */
-            working_dir?: string | null;
-        };
         /**
          * ScriptPluginSource
          * @description Script plugin source.
@@ -7286,7 +7378,7 @@ export interface components {
          * @description Session status.
          * @enum {string}
          */
-        SessionStatus: "in_progress" | "completed" | "failed";
+        SessionStatus: "in_progress" | "pending_import" | "completed" | "failed";
         /**
          * SessionUpdateRequest
          * @description Session update request.

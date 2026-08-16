@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Function run specs.
 
-Revision ID: 002_function_run_specs
-Revises: 001_initial
+Revision ID: 003_function_run_specs
+Revises: 002_task_claim_indexes
 Create Date: 2026-08-07
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "002_function_run_specs"
-down_revision = "001_initial"
+revision = "003_function_run_specs"
+down_revision = "002_task_claim_indexes"
 branch_labels = None
 depends_on = None
 

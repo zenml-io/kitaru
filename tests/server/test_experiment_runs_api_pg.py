@@ -55,7 +55,9 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
         )
     ).json()
     evaluator = (
-        await client.post("/api/v1/evaluators", json={"name": "accuracy", "metadata": {}})
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
     ).json()
     await client.post(
         f"/api/v1/evaluators/{evaluator['id']}/versions",
@@ -139,7 +141,9 @@ async def test_start_run_fans_out_one_replay_per_session(
     ).json()["items"]
     assert len(replays) == 2
 
-    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
+        "items"
+    ]
     assert len(jobs) == 2
     assert all(job["status"] == "pending" for job in jobs)
 
@@ -151,7 +155,7 @@ async def test_start_run_with_a_non_terminal_cohort_session_leaves_no_state(
     setup = await _setup_run(client)
     in_progress = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": setup["agent_id"],
                 "agent_version_id": setup["agent_version_id"],
@@ -163,13 +167,13 @@ async def test_start_run_with_a_non_terminal_cohort_session_leaves_no_state(
     ).json()
     mixed_cohort_version = (
         await client.post(
-            f"/v1/cohorts/{setup['cohort_id']}/versions",
+            f"/api/v1/cohorts/{setup['cohort_id']}/versions",
             json={"add_session_ids": [in_progress["id"]]},
         )
     ).json()
 
     response = await client.post(
-        f"/v1/experiments/{setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{setup['experiment_id']}/runs",
         json={
             "cohort_version_id": mixed_cohort_version["id"],
             "agent_version_id": setup["agent_version_id"],
@@ -177,10 +181,10 @@ async def test_start_run_with_a_non_terminal_cohort_session_leaves_no_state(
     )
     assert response.status_code == 409
 
-    assert (await client.get("/v1/experiment-runs")).json()["items"] == []
-    assert (await client.get("/v1/replays")).json()["items"] == []
-    assert (await client.get("/v1/jobs")).json()["items"] == []
-    assert (await client.get("/v1/tasks")).json()["items"] == []
+    assert (await client.get("/api/v1/experiment-runs")).json()["items"] == []
+    assert (await client.get("/api/v1/replays")).json()["items"] == []
+    assert (await client.get("/api/v1/jobs")).json()["items"] == []
+    assert (await client.get("/api/v1/tasks")).json()["items"] == []
 
 
 async def test_list_run_jobs_scoped_to_the_run(
@@ -257,7 +261,9 @@ async def test_delete_run_cascades_its_jobs_and_replays(
             },
         )
     ).json()
-    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
+        "items"
+    ]
     replays = (
         await client.get(
             "/api/v1/replays",

@@ -245,7 +245,7 @@ async def test_aggregates_ignore_a_replay_without_a_result_session(
     )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200

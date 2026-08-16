@@ -24,6 +24,7 @@ from conftest import db_settings, lifespan_client
 from kitaru.cache_keys import compute_tool_cache_key
 
 RUNTIME = {"platform": "bare"}
+SCOPE = {"claims": [{"kind": "agent"}, {"kind": "evaluator"}, {"kind": "importer"}]}
 
 
 @pytest.fixture
@@ -111,7 +112,12 @@ async def test_replay_pipeline_completes_through_the_api(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}

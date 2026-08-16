@@ -123,6 +123,7 @@ def register_subscribers(
                 dispatcher=dispatcher,
                 analytics=analytics,
             ),
+            dispatcher=dispatcher,
         ),
     )
     dispatcher.register(

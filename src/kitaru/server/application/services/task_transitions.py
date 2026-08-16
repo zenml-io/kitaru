@@ -392,34 +392,6 @@ class TaskTransitions:
         tasks = await self._tasks.list_by_job(job_id)
         return await self._settle_drained_job(job, tasks)
 
-    async def fail_job(self, job_id: uuid.UUID, error: str | None) -> Job:
-        """Fail an unsettled job as if an aborting task failed.
-
-        Locks the job's live task rows in one id-ordered acquisition, then
-        the job row. A job that still has live tasks takes the same
-        cancellation stamps as a plain job cancel and settles through
-        their transitions, dropping the error for a cancellation outcome.
-
-        Args:
-            job_id: Id of the job.
-            error: Error to settle the job with when already drained.
-
-        Raises:
-            JobNotFound: No job has this id.
-
-        Returns:
-            Job, settled if this call drained it.
-        """
-        await self._tasks.lock_by_jobs([job_id])
-        job = await self._jobs.get(job_id, exclusive=True)
-        if job.settled:
-            return job
-        tasks = await self._tasks.list_by_job(job_id)
-        if tasks and all(task.terminal for task in tasks):
-            return await self._settle_job(job, JobStatus.FAILED, error, tasks)
-        await self.request_jobs_cancel([job_id])
-        return await self.settle_job_if_drained(job_id)
-
     def _track_task_terminal(self, task: Task, job: Job) -> None:
         """Track a task's transition to a terminal status by kind.
 

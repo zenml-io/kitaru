@@ -1189,52 +1189,6 @@ async def test_finalize_job_settles_a_drained_provisional_job_completed() -> Non
     assert dispatched[0].jobs == [finalized]
 
 
-async def test_fail_job_settles_a_drained_provisional_job_failed() -> None:
-    """Failing a drained provisional job settles it failed with the given error."""
-    transitions, tasks, jobs = _build_transitions(None)
-    job = await create_job(jobs, ACTOR.account.id, provisional=True)
-    await tasks.create(
-        AgentTask(
-            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
-        )
-    )
-
-    failed = await transitions.fail_job(job.id, "external failure")
-
-    assert failed.status is JobStatus.FAILED
-    assert failed.error == "external failure"
-
-
-async def test_fail_job_with_pending_tasks_settles_through_their_cancellation() -> None:
-    """Failing a job whose pending tasks cancel in place settles it canceled."""
-    transitions, tasks, jobs = _build_transitions(None)
-    job = await create_job(jobs, ACTOR.account.id, provisional=True)
-    await tasks.create(
-        AgentTask(
-            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
-        )
-    )
-    evaluator = await create_evaluation_task(tasks, job.id)
-
-    failed = await transitions.fail_job(job.id, "external failure")
-
-    canceled = await tasks.get(evaluator.id)
-    assert canceled.status is TaskStatus.CANCELED
-    assert failed.status is JobStatus.CANCELED
-    assert failed.settled
-
-
-async def test_fail_job_on_a_settled_job_is_a_no_op() -> None:
-    """Failing an already settled job leaves it unchanged."""
-    transitions, _tasks, jobs = _build_transitions(None)
-    job = await create_job(jobs, ACTOR.account.id, status=JobStatus.COMPLETED)
-
-    result = await transitions.fail_job(job.id, "ignored")
-
-    assert result.status is JobStatus.COMPLETED
-    assert result.error is None
-
-
 async def test_finalize_job_settlement_tracks_job_completed() -> None:
     """Track one job_completed event when finalizing settles a provisional job."""
     analytics = _RecordingAnalytics()
