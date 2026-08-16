@@ -1,5 +1,5 @@
 ---
-description: Register the baseline returns agent, import its traces, and inspect one unsafe refund.
+description: Register the returns agent, import its traces, and select evidence for human review.
 icon: eye
 ---
 
@@ -7,11 +7,11 @@ icon: eye
 
 **Observe → Judge → Define → Replay → Compare**
 
-The first task is factual: preserve what the agent did before deciding whether it was correct. By the end of this page, Kitaru will know which agent produced the supplied traces, store all ten runs as sessions, and expose the exact tool call behind one unsafe refund.
+The first task is factual: preserve what the agent did and inspect the population before deciding what was right or wrong. By the end of this page, Kitaru will store all ten supplied runs as sessions and you will have a bounded, varied worklist for human review.
 
-## Register the baseline agent version
+## Register the recorded agent
 
-Every [session](../../concepts/agents-and-sessions.md) belongs to an **agent version**. The agent identifies the logical system, `returns-resolver`. The immutable version records the run specification Kitaru can use to execute one particular implementation later.
+Every [session](../../concepts/agents-and-sessions.md) belongs to an **agent version**. The agent identifies the logical system, `returns-resolver`. Its immutable version stores the command, working directory, timeout, and declared tools that Kitaru can use for later replay.
 
 In Terminal 1, register the baseline:
 
@@ -19,7 +19,7 @@ In Terminal 1, register the baseline:
 uv run kitaru agent register \
   returns-resolver \
   --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
-  --description "Resolve one synthetic returns or delivery ticket." \
+  --description "Resolve one synthetic returns or delivery request." \
   --display-version baseline-v1 \
   --working-dir ../.. \
   --timeout-seconds 180 \
@@ -31,13 +31,11 @@ uv run kitaru agent register \
   --tool escalate_to_human
 ```
 
-This command records the agent's run command, working directory, timeout, and declared tools. It does **not** run the agent. Kitaru assigns the first immutable version the command reference `returns-resolver@1`; `baseline-v1` is its human-readable label.
-
-Why register code that produced traces in the past? The version gives imported evidence a stable identity now and gives later replay commands an explicit baseline and candidate to compare.
+Registration does not run the agent. Kitaru assigns the first version the reference `returns-resolver@1`. The receipt's `Parent ID` identifies the agent across versions; its `Version ID` identifies this exact run specification.
 
 ## Import the supplied traces
 
-The repository contains a Langfuse export at `traces/langfuse-traces.jsonl`. Import it under the baseline agent version:
+The repository contains a Langfuse export at `traces/langfuse-traces.jsonl`. Import it under the baseline version:
 
 ```bash
 uv run kitaru session import \
@@ -45,22 +43,12 @@ uv run kitaru session import \
   --importer kitaru/langfuse@latest \
   --agent returns-resolver@1 \
   --tag returns-baseline \
-  --params '{"source_instance":"returns-tutorial"}' \
+  --params '{"source_instance":"canonical-returns-example"}' \
   --media-type application/x-ndjson \
   --wait
 ```
 
-The CLI submits an import job. The worker in Terminal 2 reads each JSONL record, converts it into Kitaru's session structure, and stores the result. `--wait` keeps Terminal 1 attached until the job reaches a terminal state.
-
-The details have specific purposes:
-
-- `--importer` selects the translation from Langfuse data to Kitaru sessions.
-- `--agent` attaches the imported sessions to the baseline version you registered.
-- `--tag` gives this batch a convenient filter before you create durable cohorts.
-- `source_instance` supplies a stable identity for the external trace source, which helps Kitaru recognize the same records on a later import.
-- `application/x-ndjson` says the file contains one JSON object per line.
-
-In Kitaru, one complete recorded run becomes a **session**. Model calls, tool calls, tool results, and other events inside it become **session nodes**. Importing creates a runnable copy of the evidence; it does not call the historical agent.
+The worker translates each JSONL record into Kitaru's session structure. One complete recorded run becomes a **session**; model calls, tool calls, tool results, and other events inside it become **session nodes**. Importing preserves the evidence and its source identity. It does not call the historical agent.
 
 Confirm that the tag resolves to ten imported sessions:
 
@@ -71,85 +59,81 @@ uv run kitaru session list \
   --size 20
 ```
 
-Stop here if the table does not contain ten rows. The import receipt includes a job ID; inspect it with:
+Stop if the table does not contain ten rows. Use the job ID from the import receipt to inspect failed or skipped tasks:
 
 ```bash
 uv run kitaru job get JOB_UUID --tasks
 ```
 
-Each successful session preserves the agent input and output, model calls, tool calls and results, source trace ID, and baseline agent version.
+## Survey before judging
 
-## Add descriptive measurements
+An [**evaluator**](../../concepts/evaluators.md) is a reusable measurement. An **evaluation** is one stored result from applying a particular evaluator version to one session.
 
-An [**evaluator**](../../concepts/evaluators.md) is a reusable check that Kitaru can apply to sessions. An **evaluation** is one stored result from applying it. Run three built-in evaluators across the imported batch:
+Run low-cost deterministic evaluators across the population:
 
 ```bash
 uv run kitaru session evaluate \
   --tag returns-baseline \
+  --evaluator kitaru/session-diagnostics@latest \
+  --evaluator kitaru/tool-health@latest \
+  --evaluator kitaru/trajectory-signals@latest \
+  --evaluator kitaru/llm-call-signals@latest \
   --evaluator kitaru/cost@latest \
-  --evaluator kitaru/latency@latest \
-  --evaluator kitaru/tool-call-patterns@latest \
+  --evaluator kitaru/timing-profile@latest \
   --wait
 
 uv run kitaru evaluation list --size 100
 ```
 
-These evaluators read stored nodes and make no model calls. They describe cost, latency, and tool paths. They can help you notice unusual behavior, but they cannot decide whether a refund was allowed. That requires the business judgment you will record in the next phase.
+These evaluators read stored nodes and make no model calls. They can reveal missing data, failed tools, unusual trajectories, model-call patterns, cost, and timing. They cannot decide whether a refund, replacement, or escalation was correct.
 
-The fixture already identifies ticket 004 as a known failure, so this tutorial goes directly to that trace. With your own traffic, descriptive evaluations and domain context help you choose a bounded set to review.
-
-## Inspect ticket 004
-
-First resolve the session ID from the business identifier inside the stored input:
+Print a compact inventory:
 
 ```bash
-TICKET_004_SESSION_ID="$(
-  uv run kitaru --output json session list \
-    --tag returns-baseline \
-    --origin imported \
-    --size 20 \
-  | jq -r '.items[] | select((.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id) == "ticket-004") | .id'
-)"
+uv run kitaru --output json session list \
+  --tag returns-baseline \
+  --origin imported \
+  --size 20 \
+| jq -r '.items[] | [.id, .name, .status, .outputs.action, .cost, .llm_call_count, .tool_call_count] | @tsv'
 ```
 
-The long `jq` selector bridges two kinds of identity. `ticket-004` is meaningful to the example business. `TICKET_004_SESSION_ID` is Kitaru's UUID for this particular recorded run. Later commands use the UUID so they cannot accidentally attach a review to a different trace with the same display data.
+Select a bounded worklist that you can review carefully. Include different final actions and tool paths, at least one operational outlier, and at least one random session. Summary fields help choose where to look; they are not verdicts.
 
-Now inspect the nodes that establish the order, policy, and action:
+## Inspect complete traces
+
+Set the UUID of one selected session and inspect every node with its payload:
 
 ```bash
-uv run kitaru --output json session nodes \
-  "$TICKET_004_SESSION_ID" \
+SESSION_ID="YOUR_SESSION_UUID"
+
+uv run kitaru session nodes \
+  "$SESSION_ID" \
   --include-payloads \
-  --size 100 \
-| jq '.items[] | select(.tool_name == "lookup_order" or .tool_name == "get_return_policy" or .tool_name == "issue_refund") | {tool: .tool_name, inputs, outputs}'
+  --size 100
 ```
 
-The trace shows that `lookup_order` found order `48216`, a $280 luggage purchase. The agent then passed the product name, `Aluminum Carry-On`, to `get_return_policy` instead of the `luggage` category, so the policy lookup failed. The fixture's luggage policy requires human approval above $200, but `issue_refund` still returned `accepted: true`. The action node is stronger evidence than the final message because it shows what the tool actually accepted.
+Repeat this command for each selected session. Read the input, model decisions, tool inputs, tool results, and final output together. A final response may claim that an action happened while the tool result proves otherwise; a tool failure may explain behavior that looks irrational in the summary.
 
-Resolve that exact node's ID:
+Record the session UUIDs and any node UUIDs that contain useful evidence. A node ID is an address for a recorded event, not a judgment about that event.
 
-```bash
-TICKET_004_REFUND_NODE_ID="$(
-  uv run kitaru --output json session nodes \
-    "$TICKET_004_SESSION_ID" \
-    --include-payloads \
-    --size 100 \
-  | jq -r '.items[] | select(.tool_name == "issue_refund" and .outputs.accepted == true) | .id'
-)"
-```
+For each session, write down:
 
-An **evidence node ID** is therefore not another kind of verdict or evaluation result. It is the address of the recorded event that supports your judgment. On the next page, an annotation will use this address to say, “this accepted refund is the evidence.”
+| Field | What to capture |
+| --- | --- |
+| Selection reason | Why this trace belongs in a varied review worklist. |
+| Open question | One concrete point that requires human judgment. |
+| Evidence | Exact nodes or fields that help answer the question without stating the answer. |
+
+Keep each question neutral and specific to its trace. “Was this handled correctly?” is too generic. “Given the policy result and accepted action shown here, was escalation required?” identifies the decision without supplying its verdict.
 
 ## Checkpoint
 
 You now have:
 
-- `returns-resolver@1`, an immutable description of the baseline agent;
+- `returns-resolver@1`, the registered baseline agent version;
 - ten imported sessions tagged `returns-baseline`;
-- descriptive evaluations over those sessions;
-- `TICKET_004_SESSION_ID`, the recorded failure under review; and
-- `TICKET_004_REFUND_NODE_ID`, the exact accepted refund that supports the review.
+- deterministic survey evaluations;
+- a bounded, varied worklist chosen from observed evidence; and
+- complete trace notes with exact session and node UUIDs.
 
-The worker should still be running in Terminal 2. The agent itself has not run and no model call has occurred.
-
-Continue to [2. Judge what should have happened](judge.md).
+The agent itself has not run and no model call has occurred. Continue to [2. Judge the selected behavior](judge.md).

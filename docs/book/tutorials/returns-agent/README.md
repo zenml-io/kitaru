@@ -1,36 +1,27 @@
 ---
-description: Complete a guided investigation and replay experiment with a synthetic returns agent.
+description: Investigate supplied returns-agent traces and test one evidence-led improvement.
 icon: graduation-cap
 ---
 
-# Improve a returns agent
+# Investigate and improve a returns agent
 
-This tutorial applies Kitaru's complete method to a small, controlled customer-support agent. The agent looks up orders and return policies, then chooses whether to refund, replace, or escalate each request. You will start with ten recorded support sessions, review an unsafe refund, turn the policy into a regression test, replay changed agent code, and compare the original and new behavior.
+This tutorial applies Kitaru's complete method to a small customer-support agent. The agent looks up orders, return policies, and shipments, then chooses whether to refund, replace, or escalate each request.
 
-The tutorial is intentionally more detailed than the [Quickstart](../../getting-started/quickstart.md). It explains what each command creates, why the resource exists, and how the pieces connect. You will make model calls only during replay. The earlier investigation and evaluation steps operate on supplied traces.
+You begin with ten recorded PydanticAI sessions exported from Langfuse. The walkthrough does not reveal or use the example's test-only expected outcomes. You will survey the population, inspect complete traces, record your own judgments, define one observable behavior, freeze its reviewed evidence, and test one bounded agent change.
 
-## The scenario
-
-A returns agent handled ten synthetic customer emails. Eight outcomes are correct. In two sessions, it issued a refund when company policy required human approval. The repository includes the ten runs as a Langfuse export, so everyone begins with the same evidence.
-
-The proposed change makes the agent check the policy before acting. A useful test must show both sides of that claim:
-
-- The two unsafe refunds should change to escalations.
-- Three valid refunds should remain refunds.
-
-If the agent prevents unsafe refunds by escalating every request, it has not passed the test.
+The tutorial is intentionally more detailed than the [Quickstart](../../getting-started/quickstart.md). It explains what each resource preserves and why each command is part of the evidence chain. Your exact sessions, questions, evaluator, candidate, and result will depend on what you observe.
 
 ## What you will build
 
 | Phase | You will create | Why it exists |
 | --- | --- | --- |
-| [1. Observe](observe.md) | An [agent version](../../concepts/agents-and-sessions.md#agents-and-agent-versions), ten imported [sessions](../../concepts/agents-and-sessions.md), and descriptive [evaluations](../../concepts/evaluators.md) | Preserve what happened and find evidence worth reviewing. |
-| [2. Judge](judge.md) | An [investigation](../../concepts/investigations.md), annotations, and a verdict | Record what should have happened and why. |
-| [3. Define](define.md) | A policy evaluator plus target and control [cohort versions](../../concepts/cohorts.md) | Turn the judgment into a repeatable test. |
-| [4. Replay](replay.md) | A candidate agent version, [experiment](../../concepts/experiments.md), and two experiment runs | Run changed code against the same recorded situations. |
-| [5. Compare](compare.md) | A baseline-versus-replay result | Decide what the evidence supports and what remains uncertain. |
+| [1. Observe](observe.md) | A registered [agent version](../../concepts/agents-and-sessions.md#agents-and-agent-versions), ten imported [sessions](../../concepts/agents-and-sessions.md), and descriptive [evaluations](../../concepts/evaluators.md) | Preserve what happened and select a bounded, varied review worklist. |
+| [2. Judge](judge.md) | An [investigation](../../concepts/investigations.md), evidence-linked annotations, and verdicts | Store what a human concluded without rewriting the trace. |
+| [3. Define](define.md) | One accepted behavior, an immutable [cohort version](../../concepts/cohorts.md), and an evaluator version | Turn reviewed evidence into a repeatable measurement. |
+| [4. Replay](replay.md) | A candidate agent version, [experiment](../../concepts/experiments.md), and experiment run | Run one bounded change against the frozen population under an explicit tool policy. |
+| [5. Compare](compare.md) | Paired baseline and replay evidence | Decide whether the result is improved, regressed, a trade-off, or inconclusive. |
 
-Each page begins with the same map and marks your current phase. Each ends with a **Checkpoint** that lists the state you should have before continuing. If you lose track, return to that checkpoint rather than re-running earlier commands.
+Each page begins with the same five-step map. The first four phase pages end with a **Checkpoint**, and the final page summarizes the complete evidence chain. Because this is evidence-led, placeholders such as `YOUR_SESSION_UUID` are deliberate: substitute IDs produced by your own review rather than copying a predetermined ticket list.
 
 ## Before you start
 
@@ -44,7 +35,7 @@ cd kitaru/examples/pydantic_ai_ticket_resolver
 uv sync
 ```
 
-The lockfile installs the published Kitaru packages used to test this tutorial; it does not install the cloned repository source. The agent uses synthetic customers, orders, and actions. Its refund and escalation tools modify only an in-memory store.
+The example uses synthetic customers, orders, shipments, and actions. Refund and replacement tools modify only an isolated in-memory store.
 
 Start a local Kitaru workspace and confirm the connection:
 
@@ -55,17 +46,17 @@ uv run kitaru status
 
 The workspace opens at [http://localhost:8000](http://localhost:8000). To use an existing deployment instead, run `uv run kitaru login https://your-kitaru-workspace.example.com`.
 
-You do not need an OpenAI API key yet. The supplied traces let you complete Observe, Judge, and Define without calling the model. Replay explains when to add credentials and which commands incur cost.
+This tutorial uses stable names and assumes a fresh workspace in which `returns-resolver`, `returns-discovery`, `returns-regression`, `returns-behavior`, and `returns-candidate` do not already exist. Stop if `kitaru status` selects a workspace containing an earlier run. Use another workspace, or, only if you intend to erase all data in the CLI-managed local workspace, run `uv run kitaru logout --volumes` and then log in locally again.
+
+{% hint style="danger" %} `kitaru logout --volumes` permanently deletes the CLI-managed local PostgreSQL volume, including unrelated Kitaru data in that workspace. Do not run it against data you need. {% endhint %}
 
 ## Keep two terminals open
 
-Some Kitaru commands create jobs. A [worker](../../concepts/workers.md) in your environment claims those jobs and performs the work. This separation lets Kitaru's server coordinate work without receiving your agent code or model credentials.
-
-Use the terminals for different jobs:
+Some commands create jobs. A [worker](../../concepts/workers.md) claims those jobs and performs the work in your environment. This lets the Kitaru server coordinate work without receiving your agent code or model credentials.
 
 | Terminal | Purpose |
 | --- | --- |
-| **Terminal 1** | Run the tutorial's CLI commands and inspect results. |
+| **Terminal 1** | Run CLI commands and inspect results. |
 | **Terminal 2** | Keep the worker running and watch task output. |
 
 In Terminal 2, from `examples/pydantic_ai_ticket_resolver`, start the worker:
@@ -74,7 +65,11 @@ In Terminal 2, from `examples/pydantic_ai_ticket_resolver`, start the worker:
 uv run kitaru worker start --name returns-tutorial-worker
 ```
 
-Leave it running. For now, it will process imports and evaluations over recorded data. It will not execute the agent or call a model until the Replay phase.
+Leave it running. Imports and deterministic evaluations use recorded data and do not need an OpenAI key. In the Replay phase you will restart the worker with `OPENAI_API_KEY` before any paid model call.
+
+## Prefer a coding agent?
+
+The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/skills.md) and use the short `kitaru-investigation` prompt from the [Quickstart](../../getting-started/quickstart.md#use-kitaru-on-your-agent).
 
 ## Start the investigation
 

@@ -1,108 +1,101 @@
 ---
-description: Compare baseline and replay evaluations and decide what the returns-agent experiment supports.
+description: Compare baseline and replay evidence and state the result at the size the cohort supports.
 icon: code-compare
 ---
 
-# 5. Compare the evidence
+# 5. Compare the paired evidence
 
 **Observe → Judge → Define → Replay → Compare**
 
-The experiment is useful only if you compare the original and changed behavior on the same cases with the same evaluator versions. In this final phase, you will inspect run health, join each ticket's baseline and replay evaluations, and state the narrow conclusion supported by the fixture.
+A conclusive improvement or regression claim requires every expected original-and-replay comparison under the same evaluator versions. An incomplete run is still useful evidence for diagnosing an inconclusive result. In this final phase, you will inspect run health, read the available pairs, preserve failures and missing results, and state the narrow conclusion supported by your reviewed cohort.
 
-## Confirm both runs completed
+## Confirm the run completed
 
-List the experiment runs:
+List experiment runs and inspect the exact run receipt:
 
 ```bash
 uv run kitaru experiment run list --size 20
+uv run kitaru experiment run get "$RUN_ID"
+uv run kitaru experiment run jobs "$RUN_ID" --size 100
 ```
 
-Each run receipt prints exact commands for the run and its child jobs. They have this form:
+Confirm that the run attempted every member of `$COHORT_REFERENCE` and that every expected replay has an explicit terminal state. A failed, canceled, or missing replay makes the result incomplete. Do not silently remove it and reduce the denominator.
+
+## Inspect replay sessions and evaluations
 
 ```bash
-uv run kitaru experiment run get YOUR_RUN_UUID
-uv run kitaru experiment run jobs YOUR_RUN_UUID --size 20
+uv run kitaru session list \
+  --agent returns-resolver \
+  --origin replay \
+  --size 20
+
+uv run kitaru evaluation list --size 100
 ```
 
-Confirm that both runs completed and every expected replay produced a result session. A missing or failed replay makes the comparison inconclusive; it must not silently reduce the denominator.
+For every cohort member, put the imported baseline and replay beside one another. Compare:
 
-## Join the policy results by ticket
+- the result from `$BEHAVIOR_EVALUATOR`;
+- the accepted terminal tool calls and their results;
+- the final structured output;
+- tool-health and timing measurements;
+- cost and token use; and
+- replay, evaluation, or job failures.
 
-Fetch the relevant sessions and `policy_correct` evaluations:
+Open [http://localhost:8000](http://localhost:8000) to inspect paired traces. The evaluator tells you whether its encoded rule passed. The trace shows how the agent reached the outcome and whether the measurement missed important evidence.
 
-```bash
-COMPARISON_SESSIONS="$(
-  uv run kitaru --output json session list \
-    --agent returns-resolver \
-    --size 100
-)"
+## Classify each transition
 
-COMPARISON_EVALUATIONS="$(
-  uv run kitaru --output json evaluation list \
-    --filter '{"field":"name","op":"eq","value":"policy_correct"}' \
-    --size 100
-)"
-```
+Use the human-reviewed role of each session when interpreting the transition:
 
-Join each evaluation to its session, then sort the imported baseline and replay rows beside one another:
+| Baseline | Replay | Interpretation to investigate |
+| --- | --- | --- |
+| Fail | Pass | The target case may have improved. Check the trace and operational measurements. |
+| Pass | Pass | The reviewed behavior was preserved for this case. Check for other regressions. |
+| Pass | Fail | The candidate regressed on this reviewed case. |
+| Fail | Fail | The candidate did not fix this case, or the evaluator still lacks required evidence. |
+| Known result | Unknown or missing | The comparison is inconclusive for this case. |
 
-```bash
-jq -n \
-  --argjson sessions "$COMPARISON_SESSIONS" \
-  --argjson evaluations "$COMPARISON_EVALUATIONS" '
-  [$sessions.items[] as $session
-    | ($session.inputs.turns[-1].inputs.ticket_id // $session.inputs.ticket_id) as $ticket
-    | select((["ticket-001", "ticket-004", "ticket-007", "ticket-009", "ticket-010"] | index($ticket)) != null)
-    | $evaluations.items[]
-    | select(.session_id == $session.id)
-    | {ticket: $ticket, origin: $session.origin, status: $session.status, policy_correct: .passed}]
-  | sort_by(.ticket, .origin)'
-```
-
-You should see two rows per ticket: one with `origin: imported` and one with `origin: replay`. The expected policy result is:
-
-| Tickets | Imported baseline | Strict-policy replay | Meaning |
-| --- | --- | --- | --- |
-| 004 and 007 | Fail | Pass | The candidate fixes both fixture-defined unsafe-refund cases. |
-| 001, 009, and 010 | Pass | Pass | The candidate preserves the three valid-refund controls. |
-
-Open [http://localhost:8000](http://localhost:8000) to inspect the paired traces and see how each tool path changed. The evaluator tells you whether the reviewed policy passed. The trace tells you how the agent arrived at the outcome. Read both when the result is surprising.
+Do not force every change into pass or fail. A candidate can improve the primary behavior while increasing tool failures, latency, or cost enough to create a real trade-off.
 
 ## State the conclusion at the right size
 
-If all five replays completed with the expected results, the experiment supports this conclusion:
-
-> On the human-reviewed ticket 004 and fixture-defined ticket 007, the strict-policy agent escalated instead of refunding. It preserved the fixture-defined correct refund behavior on the three selected controls.
-
-It does **not** support “the returns agent is now safe.” Five synthetic sessions do not represent every amount, policy, tool failure, or conversation the agent may encounter.
-
-Use these four outcomes when reading any experiment:
+Use one overall evidence conclusion:
 
 | Conclusion | What the evidence says | What to do next |
 | --- | --- | --- |
-| **Improved** | Target cases pass and controls stay correct. | Expand the reviewed population or use the frozen cohorts as a regression gate. |
-| **Regressed** | The change breaks a target or control case. | Inspect the paired traces, revise the change, and register a new agent version. |
-| **Trade-off** | The policy result improves while an important guardrail gets worse. | Decide whether the trade-off is acceptable or change the candidate. |
-| **Inconclusive** | A replay failed, evidence is missing, or the population cannot support the needed claim. | Repair the replay or add the missing evidence before deciding. |
+| **Improved** | Target cases improved and reviewed counterexamples remained acceptable. | Expand the reviewed population or preserve this cohort as a regression check. |
+| **Regressed** | A target or counterexample became worse. | Inspect the paired traces, revise the change, and register a new agent version. |
+| **Trade-off** | One important measure improved while another became worse. | Decide whether the trade-off is acceptable or change the candidate. |
+| **Inconclusive** | A replay failed, required evidence is missing, or the population cannot support the needed claim. | Repair execution or add reviewed evidence before deciding. |
 
-An inconclusive result is not a near-pass. It identifies a gap in execution or evidence. Keep the same cohort versions when the population should remain fixed, and use a new immutable agent or evaluator version when their implementations change.
+Your statement should name the exact cohort and behavior. A defensible form is:
 
-## Optional: start from fresh traces
+> On `$COHORT_REFERENCE`, candidate `$CANDIDATE_AGENT` [improved, regressed, traded off, or produced inconclusive evidence for] the reviewed behavior measured by `$BEHAVIOR_EVALUATOR`. This result applies to the frozen reviewed sessions; it does not establish general safety or production readiness.
 
-The supplied export makes the tutorial repeatable. If you want to generate new traces, add valid OpenAI and Langfuse credentials to `.env`, export them, and run:
+The ten supplied traces are a small synthetic population. Your selected worklist is also adaptive: you chose it partly because the traces looked interesting. Do not infer production prevalence or general agent quality from this experiment.
+
+## If the result is inconclusive
+
+Inconclusive is not a near-pass. Preserve the reason:
+
+- If a replay failed, inspect its child job and rerun only after correcting the execution problem.
+- If tool evidence is missing, change the replay policy or instrumentation rather than guessing the outcome.
+- If the evaluator is wrong, register a new evaluator version and apply it consistently to both sides.
+- If the cohort lacks a necessary counterexample, create a new cohort version with reviewed membership.
+
+Keep the old versions. Their immutability makes it possible to explain why two experiment runs reached different conclusions.
+
+## Optional: generate fresh traces
+
+The supplied export makes setup repeatable, but its model outputs are not an answer key. To create a new export, create `.env` in the example directory with valid `OPENAI_API_KEY`, `LANGFUSE_PUBLIC_KEY`, and `LANGFUSE_SECRET_KEY`, then run:
 
 ```bash
-cp -n .env.example .env
-# Edit .env before continuing.
-set -a; source .env; set +a
 ./generate.sh
 ```
 
-The script makes ten paid agent runs, each of which may make several model requests, and replaces the tracked `traces/langfuse-traces.jsonl` fixture with a new Langfuse export. Model runs vary, so the new traces may not contain the ticket 004 and 007 failures used by this tutorial.
+The script makes ten paid agent runs, waits for the Langfuse observations, and replaces `traces/langfuse-traces.jsonl`. Model behavior varies. Import the new file, inspect what actually happened, and build a new review worklist from that evidence.
 
-Import the new file, inspect what actually happened, and choose target and control cases from that evidence. Do not assume the fixture ticket IDs or expected results still apply.
-
-For your own agent, keep collecting traces where you already collect them and use [Import your traces](../../getting-started/import-your-traces.md) to choose the matching importer. You can evaluate and investigate imported sessions even when the historical agent code is no longer runnable. Replay requires a compatible registered agent version and a worker that can execute it.
+For your own agent, keep collecting traces where you already collect them and use [Import your traces](../../getting-started/import-your-traces.md) to select the matching importer. Historical investigation does not require the original code to remain runnable. Replay does require a compatible registered candidate and a worker that can execute it.
 
 ## Clean up
 
@@ -118,14 +111,14 @@ For a CLI-managed local workspace, logout stops its containers but keeps the Pos
 
 You followed the full evidence chain:
 
-1. **Observed** a recorded failure as a session and exact evidence node.
-2. **Judged** the behavior and stored the human reasoning.
-3. **Defined** a versioned evaluator with frozen target and control cohorts.
-4. **Replayed** a registered candidate under an explicit tool policy.
-5. **Compared** original and changed behavior with the same evaluator.
+1. **Observed** a trace population before assigning labels.
+2. **Judged** selected sessions and stored human reasoning beside exact evidence.
+3. **Defined** one behavior with a frozen reviewed cohort and evaluator version.
+4. **Replayed** one candidate under an explicit tool policy.
+5. **Compared** complete baseline and replay evidence without hiding failures or uncertainty.
 
-The durable result is not just a passing demo. It is a reviewed behavior, a repeatable population, and an experiment you can rerun against the next candidate.
+The durable result is not a predetermined passing demo. It is an auditable claim about one reviewed behavior, one frozen population, and one candidate.
 
 ## Where to go next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Use kitaru-investigation</strong></td><td>Apply this method to the agent in your own repository.</td><td><a href="../../agent-native/skills.md#the-investigation-skill">../../agent-native/skills.md#the-investigation-skill</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed failures into a reusable CI gate.</td><td><a href="../../guides/regression-suite.md">../../guides/regression-suite.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, tools, history, and replay safety.</td><td><a href="../../guides/replay-and-overrides.md">../../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Design and calibrate a domain-specific evaluator.</td><td><a href="../../guides/write-an-evaluator.md">../../guides/write-an-evaluator.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Use kitaru-investigation</strong></td><td>Apply this method to the agent in your own repository.</td><td><a href="../../agent-native/skills.md#the-investigation-skill">../../agent-native/skills.md#the-investigation-skill</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed evidence into a reusable comparison.</td><td><a href="../../guides/regression-suite.md">../../guides/regression-suite.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, tools, history, and replay safety.</td><td><a href="../../guides/replay-and-overrides.md">../../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Design and calibrate a domain-specific evaluator.</td><td><a href="../../guides/write-an-evaluator.md">../../guides/write-an-evaluator.md</a></td></tr></tbody></table>

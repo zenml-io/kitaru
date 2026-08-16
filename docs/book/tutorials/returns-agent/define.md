@@ -1,123 +1,132 @@
 ---
-description: Convert the reviewed refund policy into an evaluator with target and control cohorts.
+description: Turn accepted human evidence into one frozen cohort and evaluator version.
 icon: list-check
 ---
 
-# 3. Define the regression test
+# 3. Define one behavior to test
 
 **Observe → Judge → Define → Replay → Compare**
 
-A human judgment applies to the reviewed session. A regression test needs two additional pieces: a reusable check that recognizes the behavior and a frozen population that includes both failures and nearby successes.
+A verdict says what a reviewer concluded about one complete session. A repeatable test needs a more precise behavior definition, a frozen population, and a measurement that reads observable trace evidence.
 
-## Turn the rule into an evaluator
+## Accept one observable behavior
 
-The reviewed rule is:
+Use only the persisted annotations and confirmed verdicts from your investigation. Write one binary definition that answers:
 
-> When policy requires human approval, the agent must escalate before any refund is accepted.
+1. Under which observable conditions does the behavior matter?
+2. Which recorded agent action passes?
+3. Which recorded agent action fails?
+4. Which tool or external outcome evidence is required?
+5. What result should the evaluator return when evidence is missing?
+6. Which reviewed counterexamples limit the definition?
 
-An [**evaluator**](../../concepts/evaluators.md) is the reusable implementation of that rule. Each time it runs on a session, Kitaru stores an **evaluation** containing the result.
+For example, “the agent should handle refunds correctly” is too broad. A usable definition names the required recorded conditions and distinguishes an accepted action from a claim in the final response.
 
-This tutorial uses a deterministic evaluator named `returns-policy`. It compares the ticket's expected outcome with the agent's reported outcome and accepted terminal tool calls. It also verifies the refund amount where a refund is expected.
+Keep agent behavior separate from a tool or provider failure. If a trace lacks the external evidence required to judge an outcome, record that uncertainty instead of turning absence into a pass.
 
-From the example directory, scaffold the file:
+## Freeze the reviewed population
+
+A [**cohort**](../../concepts/cohorts.md) is a named population of sessions. A **cohort version** freezes one exact membership list so later experiment runs use the same evidence.
+
+Before creating it, list the exact reviewed target cases that exercise the behavior you want to change and the reviewed counterexamples that could expose overcorrection. Confirm the membership, then create the cohort:
+
+```bash
+uv run kitaru cohort create returns-regression \
+  --agent returns-resolver \
+  --description "Human-reviewed sessions for one accepted returns behavior." \
+  --display-version initial-review \
+  --session YOUR_REVIEWED_SESSION_UUID \
+  --session YOUR_COUNTEREXAMPLE_SESSION_UUID
+```
+
+Verify the immutable version and its members:
+
+```bash
+uv run kitaru cohort version get returns-regression@1
+uv run kitaru session list --cohort returns-regression@1 --size 20
+
+COHORT_REFERENCE="returns-regression@1"
+```
+
+The cohort should contain only sessions whose role in this behavior is supported by the review. Testing only problematic sessions can make a blunt change look successful. Counterexamples test whether nearby behavior that was already acceptable remains acceptable.
+
+Create a new cohort version when membership changes. Existing versions remain unchanged. Set `COHORT_REFERENCE` to the exact accepted version before continuing.
+
+## Select or create an evaluator
+
+Inspect the installed [evaluator](../../concepts/evaluators.md) catalog before writing code:
+
+```bash
+uv run kitaru evaluator list
+```
+
+Use an installed evaluator when it expresses the accepted behavior. Pin its exact version and parameters, then save the reference for the remaining pages:
+
+```bash
+BEHAVIOR_EVALUATOR="NAME@VERSION"
+```
+
+If no installed evaluator fits, scaffold a narrow deterministic evaluator:
 
 ```bash
 uv run kitaru evaluator scaffold \
-  returns-policy \
+  returns-behavior \
   --path evaluator.py
 ```
 
-The scaffold supplies the evaluator's shape, not the policy logic. Open the example's `README.md` and replace `evaluator.py` with the implementation under **Step 8: Create a policy evaluator**. You can also read that section [on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver#step-8-create-a-policy-evaluator).
+Replace the scaffold with code that implements the behavior you accepted during review. The canonical example README includes a [generic terminal-action consistency evaluator](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver#7-select-or-create-an-evaluator) to demonstrate the `SessionView` and `EvaluationResult` contracts. Adapt the rule, required evidence, and missing-evidence result to your accepted behavior.
 
-Test that the file loads and exposes the requested entry point:
+If you want coding-agent help, ask it to implement only the accepted behavior from the persisted investigation and show you how each branch follows from recorded evidence. Tell it not to read or use the example's test-only expected outcomes. Review the resulting code before registering it.
+
+Do not map ticket or session identifiers to expected answers. Do not search the customer reply for words such as `refund` when tool results provide stronger evidence. A useful evaluator distinguishes, for example, an accepted refund from a claimed refund, multiple accepted terminal actions from one, and missing action evidence from a pass.
+
+Validate and register the implementation:
 
 ```bash
 uv run kitaru evaluator test \
   evaluator.py \
   --entrypoint evaluate
-```
 
-Then register an immutable evaluator version:
-
-```bash
 uv run kitaru evaluator register \
-  returns-policy \
+  returns-behavior \
   --script evaluator.py \
   --entrypoint evaluate \
-  --description "Check whether returns actions match the reviewed policy outcome." \
-  --display-version 1.0
+  --description "Evaluate one human-reviewed returns behavior from trace evidence." \
+  --display-version initial-review
 ```
 
-Kitaru assigns the registered version the command reference `returns-policy@1`; `1.0` is its display label. `evaluator test` checks that the script can execute. The experiment will check its behavior against both the imported sessions and the new replays.
+Kitaru assigns the first version the reference `returns-behavior@1`. The version pins the evaluator code and parameters used by later comparisons.
 
-Do not reduce this rule to “did the agent call `issue_refund`?” That check would accept a refund for the wrong amount, a duplicate refund, or a refund followed by an escalation. The evaluator must distinguish the outcomes that matter to the decision you plan to make.
-
-{% hint style="info" %} This short tutorial records one investigation so you can see the human-review mechanism, then uses expected outcomes supplied with the synthetic fixture for the remaining cases. With your own traces, review every session before encoding its expected result or placing it in a target or control cohort. The example's [coding-agent walkthrough](https://github.com/zenml-io/kitaru/blob/develop/examples/pydantic_ai_ticket_resolver/README_AGENT_GUIDED.md) performs the complete five-session review. {% endhint %}
-
-## Resolve the test population
-
-The fixture contains two failures and three nearby successes that exercise the same refund behavior. Resolve their Kitaru session IDs:
+Save that reference:
 
 ```bash
-SESSIONS_JSON="$(
-  uv run kitaru --output json session list \
-    --tag returns-baseline \
-    --origin imported \
-    --size 20
-)"
-
-session_id() {
-  jq -r --arg ticket "$1" \
-    '.items[] | select((.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id) == $ticket) | .id' \
-    <<<"$SESSIONS_JSON"
-}
-
-TICKET_001_SESSION_ID="$(session_id ticket-001)"
-TICKET_004_SESSION_ID="$(session_id ticket-004)"
-TICKET_007_SESSION_ID="$(session_id ticket-007)"
-TICKET_009_SESSION_ID="$(session_id ticket-009)"
-TICKET_010_SESSION_ID="$(session_id ticket-010)"
+BEHAVIOR_EVALUATOR="returns-behavior@1"
 ```
 
-The helper converts each business ticket ID into the UUID of the imported session. Keeping the selection explicit makes it possible to inspect the exact population before freezing it.
+## Calibrate against human evidence
 
-## Freeze target and control cohorts
-
-A [**cohort**](../../concepts/cohorts.md) is a named population of sessions. Each **cohort version** freezes one exact membership list, so later experiment runs use the same evidence even if the named cohort evolves.
-
-Create a target cohort for behavior that must change:
+Apply the evaluator to the frozen baseline cohort:
 
 ```bash
-uv run kitaru cohort create unsafe-refund-baseline \
-  --agent returns-resolver \
-  --description "Refunds that should have required human approval." \
-  --session "$TICKET_004_SESSION_ID" \
-  --session "$TICKET_007_SESSION_ID"
+uv run kitaru session evaluate \
+  --cohort "$COHORT_REFERENCE" \
+  --evaluator "$BEHAVIOR_EVALUATOR" \
+  --wait
+
+uv run kitaru evaluation list --size 100
 ```
 
-Create a control cohort for behavior that must remain correct:
+Compare each evaluation with the investigation's annotations and verdicts. Report agreement, disagreement, and unknown results. A script that loads successfully is not necessarily a valid measurement, and agreement on a small reviewed sample does not make the evaluator production-ready.
 
-```bash
-uv run kitaru cohort create safe-refund-control \
-  --agent returns-resolver \
-  --description "Valid refunds that must remain correct." \
-  --session "$TICKET_001_SESSION_ID" \
-  --session "$TICKET_009_SESSION_ID" \
-  --session "$TICKET_010_SESSION_ID"
-```
-
-The target detects a candidate that fails to fix the unsafe refunds. The control detects an overcorrection that escalates valid refunds. Testing only the target would let “never refund anyone” look successful.
-
-These five synthetic cases form a regression check, not a representative sample of production traffic. Passing them supports a claim about these reviewed fixture cases. It does not prove that every request your agent may receive is safe.
+When the evaluator disagrees with a human judgment, inspect the trace and the rule. The correct response may be to fix the evaluator, refine the behavior, mark the case uncertain, or create a new cohort version. Register changed evaluator code as a new version, then update `BEHAVIOR_EVALUATOR`. Update `COHORT_REFERENCE` whenever you accept a newer cohort version. Do not change the expected label merely to make the metric pass.
 
 ## Checkpoint
 
 You now have:
 
-- `returns-policy@1`, an immutable evaluator version;
-- `unsafe-refund-baseline@1`, containing tickets 004 and 007; and
-- `safe-refund-control@1`, containing tickets 001, 009, and 010.
+- one precise behavior accepted from persisted human evidence;
+- `COHORT_REFERENCE`, set to the exact accepted cohort version;
+- `BEHAVIOR_EVALUATOR`, set to the exact installed or custom evaluator version; and
+- baseline evaluations checked against the human review.
 
-The test now states both what must improve and what must not regress. No agent or model has run yet.
-
-Continue to [4. Replay the changed agent](replay.md).
+No agent or model has run yet. Continue to [4. Replay one bounded change](replay.md).

@@ -5,127 +5,129 @@ icon: rocket
 
 # Quickstart
 
-Kitaru helps you move from **“something went wrong in this agent trace”** to **“I understand the failure, I can reproduce it, and I know whether my change improved it.”**
+Kitaru helps you move from **“something went wrong in this agent trace”** to **“I understand the behavior, I can test a change against it, and I know what the evidence supports.”**
 
-An observability tool records what happened. Kitaru starts with that trace, helps you inspect and judge the behavior, turns the judgment into a reusable test, and re-runs changed agent code against the same evidence. You can debug a specific failure and improve the agent without guessing from a new demo prompt or losing sight of behavior that already worked.
+An observability tool records what happened. Kitaru starts with those traces, helps you inspect and judge the behavior, turns accepted judgments into repeatable measurements, and re-runs changed agent code against the same reviewed situations. You can improve an agent without guessing from a new demo prompt or losing sight of behavior that already worked.
 
-You do not need to install or run anything to follow this page. The example uses a customer-support agent that looks up orders and policies, then decides whether to refund, replace, or escalate a return request. We call it the **returns agent**. When the method makes sense, you can [use it on your own agent](#use-kitaru-on-your-agent) or [follow the complete hands-on tutorial](../tutorials/returns-agent/README.md).
+You do not need to install or run anything to follow this page. The example below is illustrative rather than an answer key for the [hands-on returns-agent tutorial](../tutorials/returns-agent/README.md). That tutorial asks you to inspect its supplied traces and reach your own judgments.
 
 ## The method in five steps
 
 | Step | Question | What Kitaru adds |
 | --- | --- | --- |
-| **1. Observe** | What happened, and where did the behavior go wrong? | A trace becomes a session that preserves the agent input, output, model calls, tool calls, and tool results. |
+| **1. Observe** | What happened, and where might the behavior have gone wrong? | A trace becomes a session that preserves the agent input, output, model calls, tool calls, and tool results. |
 | **2. Judge** | What should have happened? | A human judgment is stored beside the exact evidence that supports it. |
-| **3. Define** | How will we recognize the behavior again? | The judgment becomes an evaluator, with failure cases and controls frozen into cohorts. |
-| **4. Replay** | What would the changed agent do in the same situation? | Kitaru runs the changed agent while controlling how tool calls interact with the outside world. |
-| **5. Compare** | Did the change fix the failure without causing a regression? | The same evaluator checks the original and replayed sessions so improvements, regressions, trade-offs, and missing evidence stay visible. |
+| **3. Define** | How will we recognize the behavior again? | The accepted judgment becomes an evaluator, with reviewed cases and counterexamples frozen into a cohort. |
+| **4. Replay** | What would the changed agent do in the same situations? | Kitaru runs the candidate while controlling how tool calls interact with the outside world. |
+| **5. Compare** | Did the change improve the behavior without causing a regression? | The same evaluator checks the original and replayed sessions so improvements, regressions, trade-offs, and missing evidence stay visible. |
 
-The five steps are a loop rather than a one-time pipeline. A replay may expose a new failure, which becomes the next observation to judge and preserve as a regression case.
+The five steps form a loop rather than a one-time pipeline. A replay may expose a new failure, which becomes the next observation to review and preserve.
 
-## 1. Observe one recorded failure
+## 1. Observe a recorded behavior
 
-A customer asks a returns agent to refund a $280 order. The stored trace contains this path:
+Imagine a customer-support agent that looks up orders and policies, then decides whether to refund, replace, or escalate a return request. One recorded trace contains this path:
 
 | Trace node | Result |
 | --- | --- |
-| Customer request | “Please refund order 004.” |
-| `lookup_order` | The order exists and the customer paid $280. |
-| `get_return_policy` | No policy matched because the agent passed the product name instead of the `luggage` category returned by `lookup_order`. |
-| `issue_refund` | The tool accepts a $280 refund. |
-| Agent response | “Your refund has been issued.” |
+| Customer request | The customer asks for a high-value refund. |
+| `lookup_order` | The order exists and its amount and product category are returned. |
+| `get_return_policy` | The policy lookup does not return a usable approval rule. |
+| `issue_refund` | The tool accepts the refund. |
+| Agent response | The agent says that the refund was issued. |
 
-Kitaru stores one complete agent run as a [**session**](../concepts/agents-and-sessions.md). Each model call, tool call, tool result, and other event inside it is a **session node**. The order belongs to the `luggage` category, whose fixture policy requires human approval above $200. The `issue_refund` node matters because it proves that the unsafe action occurred; the final message alone would only tell us what the agent claimed.
+Kitaru stores one complete agent run as a [**session**](../concepts/agents-and-sessions.md). Each model call, tool call, tool result, and other event inside it is a **session node**. The `issue_refund` node matters because it proves that the action occurred; the final message alone only tells you what the agent claimed.
 
-At this point, Kitaru has preserved the behavior. It has not decided whether that behavior was good.
+At this point, Kitaru has preserved the behavior. It has not decided whether the behavior was acceptable.
 
 ## 2. Judge what should have happened
 
-A domain expert reviews the trace and states:
+A domain expert reviews the trace and might conclude:
 
-> This outcome is problematic. The amount exceeds the automatic refund threshold, so the agent should have escalated for human approval instead of issuing the refund.
+> This outcome is problematic. When the agent cannot establish whether approval is required, it should escalate instead of issuing the refund.
 
-Kitaru records the overall verdict in an [**investigation**](../concepts/investigations.md) and stores the answer as an **annotation**. The annotation can point to the exact `issue_refund` node as evidence.
+Kitaru records the verdict in an [**investigation**](../concepts/investigations.md) and stores the answer as an **annotation**. The annotation can point to the exact policy lookup and accepted refund nodes as evidence.
 
-This human step is deliberate. Cost, latency, and tool-call statistics can help you find an unusual trace, but they cannot infer your refund policy or decide which trade-off your business accepts. Kitaru keeps the human judgment so the later automated check has an auditable reason to exist.
+This human step is deliberate. Cost, latency, and tool-call statistics can help you find an unusual trace, but they cannot infer your business policy or decide which trade-off you accept. Kitaru keeps the judgment so the later automated check has an auditable reason to exist.
 
 ## 3. Define the behavior to test
 
-The judgment becomes a deterministic [**evaluator**](../concepts/evaluators.md) named `returns-policy`. An evaluator is a reusable check. An **evaluation** is the stored result of applying that evaluator to one session.
+After reviewing enough evidence, the team accepts a precise behavior:
 
-For this example, the evaluator checks the accepted terminal action and refund amount. It should reject a refund that needed approval, including a misleading sequence where the agent issues a refund and then escalates.
+> When required approval cannot be established from the recorded evidence, no refund should be accepted before escalation.
 
-One failure case is not enough. We also preserve a nearby success:
+That behavior becomes a deterministic [**evaluator**](../concepts/evaluators.md). An evaluator is a reusable check. An **evaluation** is the stored result of applying one evaluator version to one session.
 
-| Case | Expected behavior | Role in the test |
+One problematic case is not enough. The review also preserves a nearby counterexample:
+
+| Reviewed case | Expected behavior | Role in the test |
 | --- | --- | --- |
-| $280 refund request | Escalate for approval | **Target:** behavior that must change. |
-| Valid $98 refund request | Issue the refund | **Control:** behavior that must remain correct. |
+| Approval cannot be established | Escalate without an accepted refund | **Target:** behavior that should change. |
+| A valid low-risk refund | Issue the refund | **Counterexample:** behavior that should remain correct. |
 
-Kitaru stores each group as a [**cohort**](../concepts/cohorts.md). A cohort version freezes the exact sessions used in the test. The target catches a fix that does nothing. The control catches a blunt fix such as “never issue refunds.”
+Kitaru stores the reviewed population as a [**cohort**](../concepts/cohorts.md). A cohort version freezes the exact sessions used in the test. The target catches a change that does nothing. The counterexample catches a blunt change such as “never issue refunds.”
 
 ## 4. Replay the changed agent
 
-The developer changes the agent so it checks the policy before choosing an action, then registers a new [**agent version**](../concepts/agents-and-sessions.md#agents-and-agent-versions). Registration describes how a worker can run the agent; it does not execute the code or snapshot the source tree.
+The developer makes one bounded change, then registers a new [**agent version**](../concepts/agents-and-sessions.md#agents-and-agent-versions). Registration describes how a worker can run the candidate; it does not execute the code or snapshot a mutable source directory.
 
-Kitaru then [**replays**](../concepts/replay.md) both recorded situations against the new version. Each replay starts from the original input and produces a new session. An [**experiment**](../concepts/experiments.md) fixes the replay configuration and evaluator versions for an agent. Each experiment run supplies the candidate agent version and frozen cohort version, making the comparison repeatable.
+Kitaru then [**replays**](../concepts/replay.md) the frozen cohort against that candidate. Each replay starts from the recorded session input and produces a new session. An [**experiment**](../concepts/experiments.md) fixes the replay configuration and evaluator versions for the agent. Each experiment run supplies the candidate agent version and frozen cohort version.
 
 ### Replay safety
 
-Re-running an agent can re-run its tools. That is safe only when the replay policy says what should happen for each tool call.
+Re-running an agent can re-run its tools. The replay policy must therefore say what happens for each tool call.
 
 - **Recorded history** returns a stored result instead of calling the live tool. This is the usual choice for payments, messages, database writes, and other side effects.
-- **Static results** return a result you specify for the test.
-- **Passthrough** calls the tool for real. Use it only when the tool is intentionally safe, such as this tutorial's isolated in-memory fixture.
-- **Fail on a missing result** stops the replay when Kitaru cannot safely answer a tool call.
+- **Static results** return a result supplied for the test.
+- **Passthrough** calls the tool for real. Use it only when the tool is intentionally safe, such as an isolated in-memory example.
+- **Fail on a missing result** stops the replay when Kitaru cannot answer a tool call safely.
 
-The right policy depends on the agent. “Replay” does not mean “repeat every production side effect.” It means run the agent code again while making the outside world explicit and controlled.
+“Replay” does not mean “repeat every production side effect.” It means run the agent code again while making its interaction with the outside world explicit and controlled.
 
 ## 5. Compare the evidence
 
-Kitaru applies the same evaluator version to the original sessions and the new replay sessions:
+Kitaru applies the same evaluator version to the original and replayed sessions:
 
-| Case | Original | Changed agent | Conclusion |
+| Reviewed case | Original | Candidate | Possible conclusion |
 | --- | --- | --- | --- |
-| $280 request | Refund, fail | Escalate, pass | The known failure improved. |
-| $98 request | Refund, pass | Refund, pass | The control behavior was preserved. |
+| Approval cannot be established | Refund accepted, fail | Escalation, pass | The reviewed failure improved. |
+| Valid low-risk refund | Refund accepted, pass | Refund accepted, pass | The counterexample was preserved. |
 
-That supports a narrow claim: the change fixes the reviewed failure without breaking this control. It does not prove that every refund request is safe. More reviewed traces make the claim broader.
+That would support a narrow claim: the candidate improved the behavior on this frozen reviewed population without breaking its included counterexample. It would not prove that every refund request is safe. More varied reviewed evidence supports a broader claim.
 
 Kitaru keeps four honest outcomes available:
 
 | Outcome | Meaning |
 | --- | --- |
-| **Improved** | Target cases improve and controls remain correct. |
-| **Regressed** | A target or control gets worse. |
-| **Trade-off** | One measure improves while another important measure gets worse. |
-| **Inconclusive** | A replay failed, evidence is missing, or the test population cannot support the claim. |
+| **Improved** | The target behavior improves and reviewed counterexamples remain correct. |
+| **Regressed** | A target or counterexample gets worse. |
+| **Trade-off** | One important measure improves while another gets worse. |
+| **Inconclusive** | A replay failed, evidence is missing, or the population cannot support the claim. |
 
-Inconclusive is useful information. It tells you what evidence or replay control is missing before you trust the change.
+Inconclusive is useful information. It identifies what execution control or evidence is missing before you trust the change.
 
 ## The concepts, in context
 
 | Term | Plain meaning in this example |
 | --- | --- |
-| **Agent / agent version** | The returns agent, and one immutable description of how to run a particular version of it. |
-| **Session / session node** | One complete run, and one event inside that run such as `issue_refund`. |
-| **Investigation / annotation** | The organized human review, and an answer attached to the session or exact evidence node. |
-| **Evaluator / evaluation** | The reusable policy check, and its result on one session. |
+| **Agent / agent version** | The support agent, and one immutable run specification for a particular version. |
+| **Session / session node** | One complete run, and one event inside it such as `issue_refund`. |
+| **Investigation / annotation** | The organized human review, and an answer attached to the session or exact evidence. |
+| **Evaluator / evaluation** | The reusable behavior check, and its result on one session. |
 | **Cohort / cohort version** | A named test population, and one frozen membership list. |
-| **Replay** | A new run of agent code based on a recorded situation and an explicit tool policy. |
-| **Experiment / experiment run** | The reusable change-and-measurement definition, and one execution against a cohort version and agent version. |
+| **Replay** | A new run of candidate code from a recorded input under an explicit tool policy. |
+| **Experiment / experiment run** | The reusable replay-and-measurement definition, and one execution against a cohort version and agent version. |
 
-You do not need to memorize these nouns before using Kitaru. Each exists to preserve one part of the reasoning: what ran, what evidence you reviewed, what rule you derived, what population you tested, and what changed.
+You do not need to memorize these nouns before using Kitaru. Each preserves one part of the reasoning: what ran, what evidence was reviewed, what behavior was accepted, which population was tested, and what changed.
 
 ## Use Kitaru on your agent
 
 If you already have an agent, start there. Install the [Kitaru agent skills](../agent-native/skills.md), open your agent repository in Codex, Claude Code, or Cursor, and ask it to use [`kitaru-investigation`](../agent-native/skills.md#the-investigation-skill):
 
-> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Explain each concept when it becomes useful, and ask me for one judgment at a time.
+> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Explain each concept when it becomes useful, show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
 
-The coding agent can inspect your framework, connect or import traces, and guide the review. You still provide the domain judgment about what should have happened, and you approve any cohort writes, agent changes, or paid replay calls.
+The coding agent can inspect your framework, connect or import traces, and guide the review. You still supply the domain judgments and approve consequential actions.
 
-If you prefer to learn every command in a controlled example first, follow [Improve a returns agent](../tutorials/returns-agent/README.md). It implements all five steps with ten supplied traces, two known failures, three controls, and a real replay.
+If you prefer to learn each command in a controlled synthetic environment, follow [Investigate and improve a returns agent](../tutorials/returns-agent/README.md). The walkthrough does not reveal or use the example's test-only expected outcomes: it teaches you how to inspect the traces and reach a bounded conclusion.
 
 ## Where to go next
 

@@ -1,28 +1,29 @@
 ---
-description: Register the stricter returns agent and replay the frozen target and control cohorts.
+description: Register one investigation-derived candidate and replay the frozen cohort safely.
 icon: rotate-left
 ---
 
-# 4. Replay the changed agent
+# 4. Replay one bounded change
 
 **Observe → Judge → Define → Replay → Compare**
 
-This is the first phase that executes the agent. You will register the candidate code, make model credentials available to the worker, define how replayed tools behave, and run the target and control cohorts.
+This is the first phase that runs the agent and can make paid model calls. You will make one change justified by the investigation, register its run specification, review tool safety, and replay the frozen cohort.
 
-## Register the candidate agent version
+## Make one investigation-derived change
 
-The baseline agent assumes its action tools enforce refund limits. The candidate checks the policy before it chooses an action. The example selects this behavior with the `RETURNS_POLICY_MODE` environment variable.
+Change `agent.py` only after the review has identified one behavior worth changing. Keep the candidate narrow enough that you can explain how it is expected to affect the evaluator and counterexamples.
 
-Register the candidate as version 2:
+The example does not include a prewritten candidate or environment switch. That is intentional: the candidate should follow from the behavior you accepted, not from a hidden fixture answer key. If you want coding-agent help, ask it for the smallest code change that implements only that behavior, require it to explain the expected effect on every reviewed target and counterexample, and review the patch before registering it.
+
+Record the source revision or working-tree state you intend the worker to execute. Then register version 2:
 
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
   --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
-  --description "Check approval and risk rules before issuing a refund." \
-  --display-version strict-policy-v2 \
+  --description "Test one investigation-derived behavior change." \
+  --display-version candidate-v1 \
   --working-dir ../.. \
-  --env RETURNS_POLICY_MODE=strict \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \
@@ -32,123 +33,107 @@ uv run kitaru agent version register \
   --tool escalate_to_human
 ```
 
-Registration still does not run the agent. It creates `returns-resolver@2`, an immutable run specification for the candidate that the worker will execute. It does not snapshot the source tree at `--working-dir`, so a reproducible experiment also requires the worker to use the intended checkout, commit, or container image.
+Registration does not run the agent. It creates `returns-resolver@2`, an immutable run specification. The specification does not snapshot a mutable `--working-dir`, so reproducibility also requires the worker to use the intended checkout, commit, or container image.
+
+Save the exact candidate reference:
+
+```bash
+CANDIDATE_AGENT="returns-resolver@2"
+```
 
 ## Give the worker model credentials
 
-Create `.env`, add a valid `OPENAI_API_KEY`, and export it in Terminal 1:
+The agent uses `openai:gpt-5-nano`. Each replay may make more than one paid OpenAI API request.
+
+In Terminal 2, stop the existing worker with `Ctrl-C`. Export the key in that same shell, then restart the worker:
 
 ```bash
-cp -n .env.example .env
-# Edit .env before continuing.
-set -a; source .env; set +a
-```
-
-In Terminal 2, stop the existing worker with `Ctrl-C`. Export the same file, then restart the worker:
-
-```bash
-set -a; source .env; set +a
+printf 'OpenAI API key: '
+IFS= read -r -s OPENAI_API_KEY
+printf '\n'
+export OPENAI_API_KEY
 uv run kitaru worker start --name returns-tutorial-worker
 ```
 
-Restarting matters because the worker launches the registered agent as a subprocess. A process cannot inherit environment variables that were added to another terminal after it started.
+Restarting matters because the worker launches the registered agent as a subprocess. A running process cannot inherit environment variables added to another terminal later.
 
-The five replayed agent runs use `BASELINE_MODEL` from `.env`, which defaults to `openai:gpt-5-mini`. Each agent run may make more than one paid model request.
+{% hint style="warning" %} The commands below create remote Kitaru resources and paid model calls. Confirm the candidate version, cohort membership, evaluator versions, and expected number of replays before starting the run. {% endhint %}
 
 ## Choose the replay tool policy
 
-When agent code runs again, its tool calls need an explicit relationship to the outside world. Kitaru's tool policy determines whether each call uses recorded history, a supplied result, a mock, or the real tool.
+When agent code runs again, its tools need an explicit relationship to the outside world. The tool policy determines whether a call uses recorded history, a static result, or the live tool.
 
-This tutorial uses passthrough:
+This synthetic example uses passthrough:
 
 ```json
 {"default":{"type":"passthrough"},"tools":{}}
 ```
 
-That is safe here because every action tool writes only to a new in-memory store created for the replay. Do **not** copy this choice for a tool that charges a card, sends a message, modifies production data, or triggers another irreversible action. For those tools, use recorded history or an explicit mock and fail when a safe result is unavailable. See [Replay and overrides](../../guides/replay-and-overrides.md) for the available policies.
+Passthrough is safe here because every action tool writes only to a fresh in-memory store created for the replay. Do not copy this choice for tools that charge cards, send messages, change production data, or trigger other side effects. For those, prefer recorded history with `on_miss=fail` or a reviewed static result. See [Replay and overrides](../../guides/replay-and-overrides.md).
 
-{% hint style="warning" %} Replay safety comes from the configured tool policy and the tool implementations, not from the word “replay.” Review both before starting a run. {% endhint %}
+Replay safety comes from the configured policy and the actual tool implementations, not from the word “replay.” Review both before starting the run.
 
-## Create the experiment definition
+## Create the experiment
 
-An [**experiment**](../../concepts/experiments.md) is the reusable definition of the change and its measurements. An **experiment run** supplies one frozen cohort version and one agent version to execute.
+An [**experiment**](../../concepts/experiments.md) fixes the replay configuration and evaluator versions for an agent. An **experiment run** supplies the exact candidate agent version and immutable cohort version.
 
-Create the experiment:
+Create an experiment with the accepted behavior evaluator and operational measurements:
 
 ```bash
 uv run kitaru experiment create \
-  improve-returns-policy \
+  returns-candidate \
   --agent returns-resolver \
-  --description "Replay risky and valid refunds with strict approval rules." \
+  --description "Test one accepted behavior change against the reviewed cohort." \
   --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
-  --evaluator returns-policy@1 \
-  --evaluator kitaru/latency@latest \
-  --evaluator kitaru/tool-call-patterns@latest
+  --evaluator "$BEHAVIOR_EVALUATOR" \
+  --evaluator kitaru/tool-health@latest \
+  --evaluator kitaru/timing-profile@latest
 ```
 
-The experiment fixes three things:
+The experiment fixes the agent parent, tool policy, and evaluator versions. Reusing it does not by itself preserve the candidate code or population; each run supplies those exact versions.
 
-- the agent whose behavior is being studied;
-- the policy for replayed tool calls; and
-- the evaluator versions applied to original and replayed sessions.
-
-The cohort and candidate version are supplied when you start each run. This separation lets you reuse the same experiment against a new cohort version or a later candidate.
-
-## Resolve the frozen cohort versions
-
-The cohort names refer to evolving resources. Experiment runs require the immutable version IDs so their population cannot change underneath them:
+Resolve the cohort-version UUID:
 
 ```bash
-TARGET_COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get unsafe-refund-baseline@1 \
-  | jq -r '.item.id'
-)"
-
-CONTROL_COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get safe-refund-control@1 \
+COHORT_VERSION_ID="$(
+  uv run kitaru --output json cohort version get "$COHORT_REFERENCE" \
   | jq -r '.item.id'
 )"
 ```
 
-## Run the target and control
+Before continuing, inspect `$COHORT_REFERENCE` again and count its members. The run creates one replay per cohort session.
 
-Replay the two known failures through the candidate:
+## Start the bounded run
 
 ```bash
 uv run kitaru experiment run start \
-  improve-returns-policy \
-  --cohort-version "$TARGET_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
+  returns-candidate \
+  --cohort-version "$COHORT_VERSION_ID" \
+  --agent "$CANDIDATE_AGENT" \
   --evaluate-baselines \
   --wait \
   --timeout 1800
 ```
 
-Then replay the three valid refunds:
+Save the experiment-run UUID printed in the receipt:
 
 ```bash
-uv run kitaru experiment run start \
-  improve-returns-policy \
-  --cohort-version "$CONTROL_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
-  --evaluate-baselines \
-  --wait \
-  --timeout 1800
+RUN_ID="YOUR_EXPERIMENT_RUN_UUID"
 ```
 
-Each command creates one **experiment run**. The run creates one replay per cohort session. The worker launches the registered candidate command for each replay, stores each new run as a session with `origin: replay`, and applies the experiment's evaluators.
+The worker launches the candidate command once for each cohort session and stores every new run as a session with `origin: replay`. `--evaluate-baselines` applies the same evaluator versions to both the imported sessions and their replays. Without it, you would have candidate measurements but no like-for-like baseline.
 
-`--evaluate-baselines` also applies the same evaluator versions to the imported sessions. Without it, you would have candidate evaluations but no like-for-like baseline. `--timeout-seconds 180` limits each agent subprocess; `--timeout 1800` limits how long the CLI waits for the entire cohort run.
+`--timeout-seconds 180` limits each agent subprocess. `--timeout 1800` limits how long the CLI waits for the complete experiment run.
 
-If a run fails or times out, do not treat the completed subset as the experiment result. Read the run receipt, inspect its child jobs, and resolve the missing replay before drawing a comparison.
+If a replay fails or times out, keep it in the denominator. A completed subset is not the complete experiment result.
 
 ## Checkpoint
 
 You now have:
 
-- `returns-resolver@2`, the strict-policy candidate;
-- `improve-returns-policy`, the reusable experiment definition;
-- one experiment run over the target cohort; and
-- one experiment run over the control cohort.
+- `CANDIDATE_AGENT`, set to the registered candidate run specification;
+- `returns-candidate`, the experiment definition;
+- `RUN_ID`, identifying one experiment run over `$COHORT_REFERENCE`; and
+- explicit terminal states for every attempted replay, with like-for-like evaluations for completed pairs and preserved failures for incomplete pairs.
 
-The worker has made paid model requests and created five replay sessions. Continue to [5. Compare the evidence](compare.md).
+The worker has made paid model requests. Continue to [5. Compare the paired evidence](compare.md).

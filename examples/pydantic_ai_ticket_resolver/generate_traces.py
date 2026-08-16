@@ -79,8 +79,7 @@ async def generate_traces(export_path: Path) -> Path:
     Agent.instrument_all()
     trace_ids: dict[str, str] = {}
 
-    for case in CASES:
-        ticket = case.ticket
+    for ticket in CASES:
         trace_input = ticket.model_dump(mode="json")
         session_id = f"returns-{ticket.ticket_id}"
         with (
@@ -89,10 +88,9 @@ async def generate_traces(export_path: Path) -> Path:
                 trace_name=f"Returns ticket: {ticket.ticket_id}",
                 environment="canonical-example",
                 version="baseline-v1",
-                tags=["returns-resolution", "kitaru-example", case.scenario],
+                tags=["returns-resolution", "kitaru-example"],
                 metadata={
                     "ticket_id": ticket.ticket_id,
-                    "scenario": case.scenario,
                     "agent_release": "baseline-v1",
                 },
             ),

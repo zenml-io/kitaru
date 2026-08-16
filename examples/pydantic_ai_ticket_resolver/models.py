@@ -94,11 +94,3 @@ class ActionReceipt(BaseModel):
     amount: Decimal | None = None
     receipt_id: str | None = None
     message: str
-
-
-class TicketCase(BaseModel):
-    """One trace-generation case and its withheld expected behavior."""
-
-    scenario: str
-    ticket: TicketInput
-    expected_action: ResolutionAction
