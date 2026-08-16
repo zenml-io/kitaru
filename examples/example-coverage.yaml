@@ -20,7 +20,7 @@ examples:
     path: examples/pydantic_ai_ticket_resolver
     public_docs:
       - examples/README.md
-      - docs/book/getting-started/quickstart.md
+      - docs/book/tutorials/returns-agent/README.md
       - docs/book/adapters/pydantic-ai.md
     owner_area: trace import, evaluation, investigation, cohorts, and experiment replay
     coverage:
@@ -54,7 +54,6 @@ examples:
   - id: mastra-support-triage
     path: v2_examples/mastra_support_triage
     public_docs:
-      - docs/book/getting-started/quickstart.md
       - docs/book/adapters/mastra.md
       - packages/mastra/README.md
     owner_area: TypeScript Mastra recording, worker replay, tool history, and evaluation
@@ -82,7 +81,6 @@ examples:
   - id: vercel-ai-support-triage
     path: v2_examples/vercel_ai_support_triage
     public_docs:
-      - docs/book/getting-started/quickstart.md
       - docs/book/adapters/vercel-ai.md
     owner_area: TypeScript Vercel AI SDK recording, worker replay, tool history, and evaluation
     coverage:
@@ -109,7 +107,6 @@ examples:
   - id: vercel-ai-ticket-resolver
     path: v2_examples/vercel_ai_ticket_resolver
     public_docs:
-      - docs/book/getting-started/quickstart.md
       - docs/book/adapters/vercel-ai.md
       - packages/core/README.md
       - packages/vercel-ai/README.md
