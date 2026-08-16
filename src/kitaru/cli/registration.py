@@ -44,7 +44,12 @@ from kitaru.api_models.v1.importer import (
 )
 from kitaru.api_models.v1.investigation import InvestigationListParams
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
-from kitaru.api_models.v1.replay_config import EvaluatorConfig
+from kitaru.api_models.v1.replay import ReplayListParams
+from kitaru.api_models.v1.replay_config import (
+    EvaluatorConfig,
+    ReplayOverride,
+    ToolPolicy,
+)
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.cli.config import build_api_client, resolve_credential
 from kitaru.cli.output import CLIError, CommandResult
@@ -434,6 +439,16 @@ def parse_json_object(value: str | None, *, option: str) -> dict[str, Any]:
     return parsed
 
 
+def parse_replay_override(value: str, *, option: str) -> ReplayOverride:
+    """Parse an inline replay override using the existing API model."""
+    return ReplayOverride.model_validate(parse_json_object(value, option=option))
+
+
+def parse_tool_policy(value: str, *, option: str) -> ToolPolicy:
+    """Parse an inline tool policy using the existing API model."""
+    return ToolPolicy.model_validate(parse_json_object(value, option=option))
+
+
 async def resolve_evaluator_configs(
     client: Any,
     evaluator_tokens: Sequence[str],
@@ -657,6 +672,7 @@ def list_params(
         "experiment_run",
         "importer",
         "investigation",
+        "replay",
         "session",
     ],
     *,
@@ -676,6 +692,7 @@ def list_params(
         "experiment_run": ExperimentRunListParams,
         "importer": ImporterListParams,
         "investigation": InvestigationListParams,
+        "replay": ReplayListParams,
         "session": SessionListParams,
     }[kind]
     return build_list_params(

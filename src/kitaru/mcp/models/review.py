@@ -14,7 +14,9 @@ from kitaru.api_models.v1.filter import Filter
 from kitaru.api_models.v1.investigation import (
     InvestigationSessionInput,
     InvestigationSessionVerdict,
+    InvestigationStatus,
 )
+from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.mcp.models.common import MCPModel, PageOptions
 
 ReviewKind = Literal["investigation", "annotation"]
@@ -76,7 +78,7 @@ class InvestigationUpdate(MCPModel):
     name: str | None = None
     description: str | None = None
     clear_description: bool = False
-    status: Literal["in_progress", "completed"] | None = None
+    status: InvestigationStatus | None = None
 
     @model_validator(mode="after")
     def _validate_update(self) -> "InvestigationUpdate":
@@ -135,12 +137,39 @@ class AnnotationUpdate(MCPModel):
     value: JsonValue = Field()
 
 
+class TagCreate(MCPModel):
+    """Create a tag."""
+
+    operation: Literal["create_tag"]
+    name: str = Field(min_length=1)
+
+
+class TagUpdate(MCPModel):
+    """Rename one tag by exact UUID."""
+
+    operation: Literal["update_tag"]
+    tag_id: uuid.UUID
+    name: str = Field(min_length=1)
+
+
+class TagLink(MCPModel):
+    """Link one tag to one exact resource."""
+
+    operation: Literal["link_tag"]
+    tag_id: uuid.UUID
+    resource_type: TagResourceType
+    resource_id: uuid.UUID
+
+
 ReviewManageRequest = Annotated[
     InvestigationCreate
     | InvestigationUpdate
     | SetInvestigationSessionVerdict
     | ManualAnnotationCreate
     | InvestigationAnswerCreate
-    | AnnotationUpdate,
+    | AnnotationUpdate
+    | TagCreate
+    | TagUpdate
+    | TagLink,
     Field(discriminator="operation"),
 ]

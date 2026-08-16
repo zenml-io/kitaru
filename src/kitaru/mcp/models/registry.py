@@ -4,9 +4,9 @@
 """Strict registry-read tool inputs."""
 
 import uuid
-from typing import Annotated, Literal
+from typing import Annotated, Literal, Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.filter import Filter
 from kitaru.mcp.models.common import MCPModel, PageOptions
@@ -16,10 +16,10 @@ VersionedKind = Literal["agent", "cohort", "importer", "evaluator"]
 
 
 class RegistryListRequest(PageOptions):
-    """List one page of registry parents."""
+    """List one page of registry parents, tags, or workers."""
 
     operation: Literal["list"]
-    kind: ParentKind
+    kind: ParentKind | Literal["tag", "worker"]
     filter: Filter | None = None
 
 
@@ -37,6 +37,21 @@ class RegistryListVersionsRequest(PageOptions):
     operation: Literal["list_versions"]
     kind: VersionedKind
     parent_reference: str = Field(min_length=1)
+    filter: Filter | None = None
+
+    @model_validator(mode="after")
+    def _validate_filter_support(self) -> Self:
+        """Reject filters for plugin version endpoints that do not support them."""
+        if self.kind in {"importer", "evaluator"} and self.filter is not None:
+            raise ValueError("filter is supported only for agent and cohort versions")
+        return self
+
+
+class RegistryGetWorkerRequest(MCPModel):
+    """Get one worker by its exact UUID."""
+
+    operation: Literal["get_worker"]
+    worker_id: uuid.UUID
 
 
 class RegistryGetVersionRequest(MCPModel):
@@ -53,6 +68,7 @@ RegistryReadRequest = Annotated[
     RegistryListRequest
     | RegistryGetRequest
     | RegistryListVersionsRequest
+    | RegistryGetWorkerRequest
     | RegistryGetVersionRequest,
     Field(discriminator="operation"),
 ]

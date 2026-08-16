@@ -12,6 +12,28 @@ Replay re-executes a recorded [session](../concepts/agents-and-sessions.md) to p
 
 This guide assumes the [Quickstart](../getting-started/quickstart.md) setup: a registered agent with a run command, a registered [evaluator](../concepts/evaluators.md), and a [worker](../concepts/workers.md) running in the agent's environment.
 
+## Create the one-off replay from the CLI
+
+Create an unchanged reproduction with an explicit recorded-history policy:
+
+```bash
+kitaru replay create <baseline-session-id> \
+  --evaluator refund-check@1 \
+  --tool-policy '{"default":{"type":"history","scope":"baseline","on_miss":"fail"}}' \
+  --evaluate-baselines --output json
+```
+
+The JSON result contains the replay ID and job ID. The command queues work and returns; it does not wait for the worker:
+
+```bash
+kitaru job watch <job-id>
+kitaru replay get <replay-id> --output json
+```
+
+Use `kitaru job get <job-id> --tasks` for task errors and `kitaru job cancel <job-id>` to request cancellation. `kitaru replay list --output json` lists both standalone and experiment-created replays.
+
+{% hint style="warning" %} Replay creation is not idempotent. An ambiguous network failure can mean the server created the replay and job even though the CLI did not receive the response. Check `kitaru replay list` before retrying, or the retry may create a duplicate replay and job. Omitting `--tool-policy` uses the server default and may execute live tools. {% endhint %}
+
 ## The three-session discipline
 
 Every trustworthy comparison involves three sessions:
@@ -57,7 +79,7 @@ Field by field:
 - `baseline_session_id` — the recording to re-run.
 - `agent_version_id` — which code runs. Omitted, it's the version the baseline was recorded with (the faithful choice). Point it at a newly registered version to replay old traffic **against your working tree**.
 - `override` — the fork. Omit it for a pure reproduction.
-- `tool_policy` — what tool calls hit. **The default is `passthrough`: live tools.** For a replay that touches nothing real, set a `history` policy as above. Details in [Tool policies](tool-policies.md).
+- `tool_policy` — what tool calls hit. If omitted, the server applies its default, which currently passes calls through to live tools. For a replay that touches nothing real, set a `history` policy as above. Details in [Tool policies](tool-policies.md).
 - `evaluators` — at least one, always. A replay is never just "it ran"; it's evaluated on arrival.
 - `evaluate_baselines` — score the original session with the same evaluators, so the comparison exists as soon as the replay settles.
 
