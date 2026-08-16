@@ -53,7 +53,7 @@ uv run kitaru worker start --name returns-tutorial-worker
 
 Restarting matters because the worker launches the registered agent as a subprocess. A process cannot inherit environment variables that were added to another terminal after it started.
 
-The five replayed agent runs use `BASELINE_MODEL` from `.env`, which defaults to `openai:gpt-5-nano`. Each agent run may make more than one paid model request.
+The five replayed agent runs use `BASELINE_MODEL` from `.env`, which defaults to `openai:gpt-5-mini`. Each agent run may make more than one paid model request.
 
 ## Choose the replay tool policy
 

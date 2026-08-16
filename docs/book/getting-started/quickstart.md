@@ -68,7 +68,7 @@ Kitaru stores each group as a [**cohort**](../concepts/cohorts.md). A cohort ver
 
 The developer changes the agent so it checks the policy before choosing an action, then registers a new [**agent version**](../concepts/agents-and-sessions.md#agents-and-agent-versions). Registration describes how a worker can run the agent; it does not execute the code or snapshot the source tree.
 
-Kitaru then [**replays**](../concepts/replay.md) both recorded situations against the new version. Each replay starts from the original input and produces a new session. An [**experiment**](../concepts/experiments.md) binds together the candidate agent version, frozen cohort version, evaluator versions, and replay policy so the comparison can be repeated.
+Kitaru then [**replays**](../concepts/replay.md) both recorded situations against the new version. Each replay starts from the original input and produces a new session. An [**experiment**](../concepts/experiments.md) fixes the replay configuration and evaluator versions for an agent. Each experiment run supplies the candidate agent version and frozen cohort version, making the comparison repeatable.
 
 ### Replay safety
 
