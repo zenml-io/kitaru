@@ -52,7 +52,7 @@ printf 'OpenAI API key: '
 IFS= read -r -s OPENAI_API_KEY
 printf '\n'
 export OPENAI_API_KEY
-uv run kitaru worker start --name returns-tutorial-worker
+uv run kitaru worker start --name kitaru-template-worker
 ```
 
 Restarting matters because the worker launches the registered agent as a subprocess. A running process cannot inherit environment variables added to another terminal later.

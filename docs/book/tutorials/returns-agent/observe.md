@@ -1,5 +1,5 @@
 ---
-description: Register the returns agent, import its traces, and select evidence for human review.
+description: Verify the prepared returns evidence and select a bounded worklist for human review.
 icon: eye
 ---
 
@@ -7,63 +7,15 @@ icon: eye
 
 **Observe → Judge → Define → Replay → Compare**
 
-The first task is factual: preserve what the agent did and inspect the population before deciding what was right or wrong. By the end of this page, Kitaru will store all ten supplied runs as sessions and you will have a bounded, varied worklist for human review.
+The first task is factual: confirm what the template preserved and inspect the population before deciding what was right or wrong. By the end of this page, you will have descriptive measurements and a bounded, varied worklist for human review.
 
-## Register the recorded agent
+## Confirm the prepared evidence
 
-Every [session](../../concepts/agents-and-sessions.md) belongs to an **agent version**. The agent identifies the logical system, `returns-resolver`. Its immutable version stores the command, working directory, timeout, and declared tools that Kitaru can use for later replay.
+The [`kitaru-template` setup](https://github.com/zenml-io/kitaru-template#prepare-the-template) registered the logical agent `returns-resolver` and assigned its first immutable run specification the reference `returns-resolver@1`. That version stores the command, working directory, timeout, and declared tools Kitaru can use for later replay. Registration did not run the agent.
 
-In Terminal 1, register the baseline:
+The setup also imported `traces/langfuse-traces.jsonl` under that exact version. One complete recorded run became a [session](../../concepts/agents-and-sessions.md); model calls, tool calls, tool results, and other events inside it became session nodes. Importing preserved the evidence and its source identity without calling the historical agent.
 
-```bash
-uv run kitaru agent register \
-  returns-resolver \
-  --command "python -m returns_agent.agent" \
-  --description "Resolve one synthetic returns or delivery request." \
-  --display-version baseline-v1 \
-  --working-dir . \
-  --timeout-seconds 180 \
-  --tool lookup_order \
-  --tool get_return_policy \
-  --tool check_shipping \
-  --tool issue_refund \
-  --tool create_replacement \
-  --tool escalate_to_human
-```
-
-Registration does not run the agent. Kitaru assigns the first version the reference `returns-resolver@1`. The receipt's `Parent ID` identifies the agent across versions; its `Version ID` identifies this exact run specification.
-
-## Import the supplied traces
-
-The repository contains a Langfuse export at `traces/langfuse-traces.jsonl`. Import it under the baseline version:
-
-```bash
-uv run kitaru session import \
-  traces/langfuse-traces.jsonl \
-  --importer kitaru/langfuse@latest \
-  --agent returns-resolver@1 \
-  --tag returns-baseline \
-  --params '{"source_instance":"canonical-returns-example"}' \
-  --media-type application/x-ndjson \
-  --wait
-```
-
-The worker translates each JSONL record into Kitaru's session structure. One complete recorded run becomes a **session**; model calls, tool calls, tool results, and other events inside it become **session nodes**. Importing preserves the evidence and its source identity. It does not call the historical agent.
-
-Confirm that the tag resolves to ten imported sessions:
-
-```bash
-uv run kitaru session list \
-  --tag returns-baseline \
-  --origin imported \
-  --size 20
-```
-
-Stop if the table does not contain ten rows. Use the job ID from the import receipt to inspect failed or skipped tasks:
-
-```bash
-uv run kitaru job get JOB_UUID --tasks
-```
+Do not repeat registration or import here. If either `returns-resolver@1` or the ten `returns-baseline` sessions is missing, return to the template README and resolve that setup failure before continuing.
 
 ## Survey before judging
 
