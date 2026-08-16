@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-11T16:17:46.770048Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -614,6 +614,18 @@ worker = [
 ]
 
 [[package]]
+name = "kitaru-langfuse-importer"
+version = "0.1.0rc0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "kitaru" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a0/99/dfdacbb2637152c9cc98a9419ad2a48bc7a8217c5914e81db450a4cab2d3/kitaru_langfuse_importer-0.1.0rc0.tar.gz", hash = "sha256:677d1061615c50e8dc5088cf56132be4dad70b76744bc486ec9a4d7726b2c7b5", size = 13288, upload-time = "2026-08-13T12:29:29.452Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e0/35/d6537855b08b7e075e1481a250744794edc671d74fd324940e760c8d32a0/kitaru_langfuse_importer-0.1.0rc0-py3-none-any.whl", hash = "sha256:2c8b274ab3c7c6b1bab66623a089a6e078a7c42219c925db9a90873ad79364c2", size = 11433, upload-time = "2026-08-13T12:29:28.402Z" },
+]
+
+[[package]]
 name = "kitaru-pydantic-ai"
 version = "0.1.0rc0"
 source = { registry = "https://pypi.org/simple" }
@@ -638,6 +650,7 @@ version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
     { name = "kitaru", extra = ["cli", "mcp", "worker"] },
+    { name = "kitaru-langfuse-importer" },
     { name = "kitaru-pydantic-ai", extra = ["openai"] },
     { name = "langfuse" },
 ]
@@ -645,6 +658,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "kitaru", extras = ["cli", "mcp", "worker"], specifier = ">=0.22.0rc7,<0.23" },
+    { name = "kitaru-langfuse-importer", specifier = ">=0.1.0rc0,<0.2" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], specifier = ">=0.1.0rc0,<0.2" },
     { name = "langfuse", specifier = ">=4.14,<5" },
 ]

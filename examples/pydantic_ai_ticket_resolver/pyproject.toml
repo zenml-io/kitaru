@@ -4,6 +4,7 @@ version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
     "kitaru[cli,mcp,worker]>=0.22.0rc7,<0.23",
+    "kitaru-langfuse-importer>=0.1.0rc0,<0.2",
     "kitaru-pydantic-ai[openai]>=0.1.0rc0,<0.2",
     "langfuse>=4.14,<5",
 ]

@@ -64,7 +64,7 @@ uv run kitaru evaluator list
 
 ### 3. Register the recorded baseline
 
-The public PydanticAI entrypoint is `agent.py`. One invocation resolves one support email with these tools:
+The public PydanticAI entrypoint is `returns_agent/agent.py`, run as the `returns_agent.agent` module. One invocation resolves one support email with these tools:
 
 - `lookup_order`
 - `get_return_policy`
@@ -78,10 +78,10 @@ Register the baseline:
 ```bash
 uv run kitaru agent register \
   returns-resolver \
-  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
+  --command "python -m returns_agent.agent" \
   --description "Resolve one synthetic returns or delivery request, execute one mock action, and draft the customer reply." \
   --display-version baseline-v1 \
-  --working-dir ../.. \
+  --working-dir . \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \
@@ -517,10 +517,10 @@ Make one bounded change to the agent after the investigation identifies a behavi
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
-  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
+  --command "python -m returns_agent.agent" \
   --description "Test one investigation-derived behavior change." \
   --display-version candidate-v1 \
-  --working-dir ../.. \
+  --working-dir . \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \
