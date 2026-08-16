@@ -100,8 +100,8 @@ class SessionNodeService:
         # the (session, index) key. The lock also stabilizes the pre-image
         # the rollup deltas are computed against.
         session = await self._sessions.get(session_id, exclusive=True)
-        await check_task_session_write(session, actor, self._tasks)
-        await check_task_attempt(actor, self._tasks)
+        task = await check_task_session_write(session, actor, self._tasks)
+        await check_task_attempt(actor, self._tasks, task)
         session.check_node_ingest()
         if not batch:
             return []

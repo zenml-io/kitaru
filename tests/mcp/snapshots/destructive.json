@@ -1125,13 +1125,6 @@
               "title": "Env",
               "type": "object"
             },
-            "import_deadline_seconds": {
-              "default": 86400,
-              "description": "Seconds the resulting session may stay pending import.",
-              "exclusiveMinimum": 0,
-              "title": "Import Deadline Seconds",
-              "type": "integer"
-            },
             "secret_ids": {
               "description": "Secrets merged into the process environment.",
               "items": {

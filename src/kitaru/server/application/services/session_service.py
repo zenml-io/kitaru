@@ -14,7 +14,6 @@
 """Session use cases."""
 
 import uuid
-from datetime import UTC, datetime, timedelta
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.events import EventDispatcher, SessionImportFinalized
@@ -40,7 +39,6 @@ from kitaru.server.application.services.resource_access import (
     check_task_session_write,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
-from kitaru.server.domain.agent_version import FunctionRunSpec
 from kitaru.server.domain.session import (
     TERMINAL_SESSION_STATUSES,
     Session,
@@ -48,6 +46,7 @@ from kitaru.server.domain.session import (
     SessionAgentRequired,
     SessionAgentVersionMismatch,
     SessionBaselineNotFound,
+    SessionContent,
     SessionStatus,
     SessionStatusCannotBeCleared,
 )
@@ -57,10 +56,6 @@ from kitaru.server.domain.task import (
     Task,
     TaskResultSessionAlreadyLinked,
 )
-
-# No session policy exists yet to carry this, so the limit is a plain
-# constant matching TaskPolicy's default sweep_batch_limit.
-IMPORT_EXPIRY_SWEEP_LIMIT = 100
 
 
 class SessionService:
@@ -168,7 +163,6 @@ class SessionService:
             started_at=command.started_at,
             ended_at=command.ended_at,
             external_id=command.external_id,
-            import_expires_at=await self._resolve_import_expiry(task, status),
             metadata=command.metadata,
             imported_from=command.imported_from,
             framework=command.framework,
@@ -213,16 +207,18 @@ class SessionService:
         if placeholder is None:
             return None
         placeholder.adopt_import(
-            name=command.name,
-            inputs=command.inputs,
-            outputs=command.outputs,
-            error=command.error,
-            started_at=command.started_at,
-            ended_at=command.ended_at,
-            metadata=command.metadata,
-            imported_from=command.imported_from,
-            framework=command.framework,
-            adapter_version=command.adapter_version,
+            SessionContent(
+                name=command.name,
+                inputs=command.inputs,
+                outputs=command.outputs,
+                error=command.error,
+                started_at=command.started_at,
+                ended_at=command.ended_at,
+                metadata=command.metadata,
+                imported_from=command.imported_from,
+                framework=command.framework,
+                adapter_version=command.adapter_version,
+            )
         )
         return await self._repository.update(placeholder)
 
@@ -277,35 +273,6 @@ class SessionService:
         if agent_id is None:
             raise SessionAgentRequired()
         return agent_id, agent_version_id
-
-    async def _resolve_import_expiry(
-        self, task: Task | None, status: SessionStatus
-    ) -> datetime | None:
-        """Resolve the import deadline a new pending-import placeholder must beat.
-
-        Args:
-            task: Task the session was produced by, None when the caller
-                has none.
-            status: Effective status of the new session.
-
-        Raises:
-            AgentVersionNotFound: No agent version has the task's agent
-                version id.
-
-        Returns:
-            Deadline the placeholder's import must arrive before, None
-            outside a task-produced pending-import placeholder running a
-            function agent version.
-        """
-        if status is not SessionStatus.PENDING_IMPORT or not isinstance(
-            task, AgentTask
-        ):
-            return None
-        agent_version = await self._agent_versions.get(task.agent_version_id)
-        run_spec = agent_version.run_spec
-        if not isinstance(run_spec, FunctionRunSpec):
-            return None
-        return datetime.now(UTC) + timedelta(seconds=run_spec.import_deadline_seconds)
 
     async def get_session(self, session_id: uuid.UUID, actor: AuthContext) -> Session:
         """Get a session by id.
@@ -406,8 +373,8 @@ class SessionService:
             Updated session.
         """
         session = await self._repository.get(session_id, exclusive=True)
-        await check_task_session_write(session, actor, self._tasks)
-        await check_task_attempt(actor, self._tasks)
+        task = await check_task_session_write(session, actor, self._tasks)
+        await check_task_attempt(actor, self._tasks, task)
         fields = command.model_fields_set
         previous_status = session.status
         if {"status", "outputs", "error", "ended_at"} & fields:
@@ -461,36 +428,3 @@ class SessionService:
         """
         _ = actor
         await self._repository.delete(session_id)
-
-    async def list_expired_import_ids(self, now: datetime) -> list[uuid.UUID]:
-        """Read the ids of pending-import sessions past their import deadline.
-
-        Takes no lock.
-
-        Args:
-            now: Current time.
-
-        Returns:
-            Ids of the expired sessions in ascending order.
-        """
-        return await self._repository.list_expired_import_ids(
-            now, IMPORT_EXPIRY_SWEEP_LIMIT
-        )
-
-    async def expire_import(self, session_id: uuid.UUID, now: datetime) -> None:
-        """Fail one pending-import session whose import deadline passed.
-
-        Locks the session row for the update. A session that finalized
-        before the lock was acquired is left alone.
-
-        Args:
-            session_id: Id of the candidate session.
-            now: Current time.
-        """
-        session = await self._repository.get(session_id, exclusive=True)
-        if session.status is not SessionStatus.PENDING_IMPORT:
-            return
-        session.fail_import("Import deadline expired", now)
-        stored = await self._repository.update(session)
-        if self._dispatcher is not None:
-            await self._dispatcher.dispatch(SessionImportFinalized(session=stored))

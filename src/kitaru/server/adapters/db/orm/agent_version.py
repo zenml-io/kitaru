@@ -72,7 +72,6 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     run_working_dir: Mapped[str | None] = mapped_column(Text)
     run_env: Mapped[dict[str, str] | None] = mapped_column(JSONB(none_as_null=True))
     run_timeout_seconds: Mapped[int | None]
-    run_import_deadline_seconds: Mapped[int | None]
     capabilities: Mapped[dict[str, list[str]]] = mapped_column(JSONB)
 
     def apply_run_spec(self, run_spec: RunSpec | None) -> None:
@@ -86,7 +85,6 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.run_working_dir = None
         self.run_env = None
         self.run_timeout_seconds = None
-        self.run_import_deadline_seconds = None
         if isinstance(run_spec, CommandRunSpec):
             self.run_command = run_spec.command
             self.run_working_dir = run_spec.working_dir
@@ -96,7 +94,6 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             self.run_entrypoint = run_spec.entrypoint
             self.run_env = run_spec.env
             self.run_timeout_seconds = run_spec.timeout_seconds
-            self.run_import_deadline_seconds = run_spec.import_deadline_seconds
 
     @classmethod
     def from_domain(cls, agent_version: AgentVersion) -> "AgentVersionORM":
@@ -145,13 +142,11 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             )
         elif self.run_entrypoint is not None:
             assert self.run_timeout_seconds is not None
-            assert self.run_import_deadline_seconds is not None
             run_spec = FunctionRunSpec(
                 entrypoint=self.run_entrypoint,
                 env=self.run_env if self.run_env is not None else {},
                 secret_ids=secret_ids,
                 timeout_seconds=self.run_timeout_seconds,
-                import_deadline_seconds=self.run_import_deadline_seconds,
             )
         return AgentVersion(
             id=self.id,

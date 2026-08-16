@@ -33,14 +33,8 @@ def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
         batch_op.add_column(sa.Column("run_entrypoint", sa.Text(), nullable=True))
-        batch_op.add_column(
-            sa.Column("run_import_deadline_seconds", sa.Integer(), nullable=True)
-        )
 
     with op.batch_alter_table("session", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("import_expires_at", sa.DateTime(timezone=True), nullable=True)
-        )
         batch_op.create_index(
             "uq_session_owner_id_external_id",
             ["owner_id", "external_id"],
@@ -69,8 +63,6 @@ def downgrade() -> None:
             "uq_session_owner_id_external_id",
             postgresql_where=sa.text("status = 'pending_import'"),
         )
-        batch_op.drop_column("import_expires_at")
 
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
-        batch_op.drop_column("run_import_deadline_seconds")
         batch_op.drop_column("run_entrypoint")

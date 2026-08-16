@@ -116,6 +116,7 @@ def register_subscribers(
             task_repository=task_repository,
             replay_repository=replay_repository,
             experiment_repository=experiment_repository,
+            job_repository=job_repository,
             transitions=TaskTransitions(
                 task_repository=task_repository,
                 job_repository=job_repository,

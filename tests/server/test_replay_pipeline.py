@@ -92,19 +92,13 @@ async def _agent_version_with_run_spec(services: ReplayServices) -> AgentVersion
     )
 
 
-async def _function_agent_version(
-    services: ReplayServices, import_deadline_seconds: int = 3600
-) -> AgentVersion:
+async def _function_agent_version(services: ReplayServices) -> AgentVersion:
     agent = await create_agent(services.agents, ACTOR.account.id)
     return await create_agent_version(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=FunctionRunSpec(
-            entrypoint="pkg.mod:run",
-            timeout_seconds=60,
-            import_deadline_seconds=import_deadline_seconds,
-        ),
+        run_spec=FunctionRunSpec(entrypoint="pkg.mod:run", timeout_seconds=60),
     )
 
 
@@ -289,9 +283,7 @@ async def test_function_mode_replay_creates_a_provisional_job_with_no_wait_task(
     services: ReplayServices,
 ) -> None:
     """A function-mode replay's job is provisional and holds only its agent task."""
-    agent_version = await _function_agent_version(
-        services, import_deadline_seconds=1800
-    )
+    agent_version = await _function_agent_version(services)
     baseline = await _baseline_session(services, agent_version)
 
     bundle = await services.replay_service.create_replay(
@@ -612,10 +604,10 @@ async def test_continue_replay_on_import_after_the_replay_settled_is_a_noop(
         services, bundle.replay.job_id, "ext-2", worker.id
     )
 
-    # The deadline sweep beat the import: fail the replay directly, the way
-    # SessionService.expire_import would through continue_replay_on_import.
+    # Fail the replay before the import finalizes, so the settlement below
+    # runs against an already-settled replay.
     stored_replay = await services.replays.get(bundle.replay.id)
-    stored_replay.fail("import deadline expired")
+    stored_replay.fail("agent task failed")
     await services.replays.update(stored_replay)
 
     adopted = await _adopt_via_import_task(
@@ -629,7 +621,7 @@ async def test_continue_replay_on_import_after_the_replay_settled_is_a_noop(
 
     unchanged = await services.replays.get(bundle.replay.id)
     assert unchanged.status is ReplayStatus.FAILED
-    assert unchanged.error == "import deadline expired"
+    assert unchanged.error == "agent task failed"
     tasks_after, _ = await services.task_service.list_tasks(
         TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
     )
@@ -700,9 +692,7 @@ async def test_continue_replay_on_import_before_agent_task_completes(
 
 async def test_function_mode_replay_end_to_end(services: ReplayServices) -> None:
     """A function-mode replay adopts its placeholder and finishes like a command one."""
-    agent_version = await _function_agent_version(
-        services, import_deadline_seconds=3600
-    )
+    agent_version = await _function_agent_version(services)
     evaluator = await _evaluator_version(services, "accuracy")
     baseline = await _baseline_session(services, agent_version)
 

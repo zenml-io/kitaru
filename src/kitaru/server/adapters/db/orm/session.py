@@ -136,7 +136,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     external_id: Mapped[str | None] = mapped_column(Text)
-    import_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
     imported_from: Mapped[str | None] = mapped_column(Text)
     framework: Mapped[str | None] = mapped_column(Text)
@@ -179,7 +178,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             started_at=session.started_at,
             ended_at=session.ended_at,
             external_id=session.external_id,
-            import_expires_at=session.import_expires_at,
             metadata_=session.metadata,
             imported_from=session.imported_from,
             framework=session.framework,
@@ -239,7 +237,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             started_at=self.started_at,
             ended_at=self.ended_at,
             external_id=self.external_id,
-            import_expires_at=self.import_expires_at,
             metadata=self.metadata_,
             imported_from=self.imported_from,
             framework=self.framework,

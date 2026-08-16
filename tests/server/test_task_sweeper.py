@@ -16,24 +16,17 @@
 import asyncio
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Any, cast
 
 import pytest
 from asyncpg.exceptions import LockNotAvailableError
 from sqlalchemy.exc import DBAPIError
 
-from conftest import (
-    build_job_and_task_services,
-    build_replay_services,
-    create_session,
-    local_settings,
-)
+from conftest import build_job_and_task_services, local_settings
 from kitaru.analytics.client import AnalyticsClient
-from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.api import task_sweeper
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
 
@@ -81,26 +74,17 @@ class _StubDatabase:
         yield session
 
 
-def _stub_sweeper_wiring(
-    monkeypatch: pytest.MonkeyPatch,
-    service: TaskService,
-    session_service: SessionService | None = None,
-) -> None:
-    """Bind the sweeper's per-transaction service builds to fake-backed services.
+def _stub_sweeper_wiring(monkeypatch: pytest.MonkeyPatch, service: TaskService) -> None:
+    """Bind the sweeper's per-transaction service build to one fake-backed service.
 
     Args:
         monkeypatch: Patcher for the sweeper module.
-        service: Task service every sweep unit runs against.
-        session_service: Session service every session sweep unit runs
-            against, ignored when the test never reaches that pass.
+        service: Service every sweep unit runs against.
     """
     monkeypatch.setattr(
         task_sweeper, "get_server_analytics", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(task_sweeper, "get_task_service", lambda *args: service)
-    monkeypatch.setattr(
-        task_sweeper, "get_session_service", lambda *args: session_service
-    )
 
 
 async def test_sweep_once_propagates_before_rescuing(
@@ -124,10 +108,8 @@ async def test_sweep_once_propagates_before_rescuing(
     async def record_propagate(self: TaskService, job_id: uuid.UUID) -> None:
         calls.append("propagate")
 
-    async def candidates(
-        *args: Any,
-    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
-        return [task_id], [job_id], []
+    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        return [task_id], [job_id]
 
     monkeypatch.setattr(TaskService, "sweep_stale_task", record_sweep)
     monkeypatch.setattr(TaskService, "propagate_job_cancel", record_propagate)
@@ -158,10 +140,8 @@ async def test_sweep_once_continues_after_a_failing_item(
         if task_id == first:
             raise RuntimeError("boom")
 
-    async def candidates(
-        *args: Any,
-    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
-        return [first, second], [], []
+    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        return [first, second], []
 
     monkeypatch.setattr(TaskService, "sweep_stale_task", failing_sweep)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
@@ -192,10 +172,8 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
         if job_id == held:
             raise _lock_not_available_error()
 
-    async def candidates(
-        *args: Any,
-    ) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
-        return [], [held, free], []
+    async def candidates(*args: Any) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+        return [], [held, free]
 
     monkeypatch.setattr(TaskService, "propagate_job_cancel", failing_propagate)
     monkeypatch.setattr(task_sweeper, "_read_candidates", candidates)
@@ -211,53 +189,6 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
     assert propagated == [held, free]
     assert [session.rollbacks for session in database.sessions] == [1, 0]
     assert [session.commits for session in database.sessions] == [0, 1]
-
-
-async def test_sweep_once_expires_only_expired_pending_import_sessions(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A sweep tick fails a pending-import session past its deadline alone."""
-    services = build_replay_services()
-    now = datetime.now(UTC)
-    expired = await create_session(
-        services.sessions,
-        uuid.uuid4(),
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.PENDING_IMPORT,
-        import_expires_at=now - timedelta(seconds=1),
-    )
-    unexpired = await create_session(
-        services.sessions,
-        uuid.uuid4(),
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.PENDING_IMPORT,
-        import_expires_at=now + timedelta(seconds=60),
-    )
-    in_progress = await create_session(
-        services.sessions,
-        uuid.uuid4(),
-        uuid.uuid4(),
-        origin=SessionOrigin.RECORDED,
-    )
-    _stub_sweeper_wiring(
-        monkeypatch, services.task_service, session_service=services.session_service
-    )
-
-    await task_sweeper.sweep_once(
-        cast(DatabaseService, _StubDatabase()),
-        local_settings(),
-        AnalyticsClient(enabled=False),
-    )
-
-    assert (await services.sessions.get(expired.id)).status == SessionStatus.FAILED
-    assert (
-        await services.sessions.get(unexpired.id)
-    ).status == SessionStatus.PENDING_IMPORT
-    assert (
-        await services.sessions.get(in_progress.id)
-    ).status == SessionStatus.IN_PROGRESS
 
 
 async def test_start_task_sweeper_returns_none_when_interval_is_zero() -> None:

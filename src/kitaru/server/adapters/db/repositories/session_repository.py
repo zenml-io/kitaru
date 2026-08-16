@@ -137,22 +137,6 @@ def _compile_has_evaluation_condition(
     return evaluation_exists.exists() if expected else ~evaluation_exists.exists()
 
 
-def _expired_import_conditions(now: datetime) -> list[ColumnElement[bool]]:
-    """Build the conditions matching pending-import sessions past their deadline.
-
-    Args:
-        now: Current time.
-
-    Returns:
-        Conditions to AND into a sweep query.
-    """
-    return [
-        SessionORM.status == SessionStatus.PENDING_IMPORT.value,
-        SessionORM.import_expires_at.is_not(None),
-        SessionORM.import_expires_at < now,
-    ]
-
-
 SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": SessionORM.id,
     "agent_id": SessionORM.agent_id,
@@ -294,21 +278,26 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row = (await self._session.scalars(statement)).first()
         return row.to_domain() if row is not None else None
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    async def get(
+        self, session_id: uuid.UUID, exclusive: bool = False, nowait: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds the row.
 
         Raises:
             SessionNotFound: No session has this id.
+            DBAPIError: ``nowait`` is set and the row is held elsewhere.
 
         Returns:
             Stored session.
         """
-        row = await self._get_row(session_id, exclusive=exclusive)
+        row = await self._get_row(session_id, exclusive=exclusive, nowait=nowait)
         return row.to_domain()
 
     async def query(
@@ -349,26 +338,6 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         rows = await self._load_by_ids(list(session_ids))
         return {session_id: row.to_domain() for session_id, row in rows.items()}
 
-    async def list_expired_import_ids(
-        self, now: datetime, limit: int
-    ) -> list[uuid.UUID]:
-        """Read the ids of pending-import sessions past their import deadline.
-
-        Args:
-            now: Current time.
-            limit: Maximum number of ids to read.
-
-        Returns:
-            Ids of the expired sessions in ascending order.
-        """
-        statement = (
-            select(SessionORM.id)
-            .where(*_expired_import_conditions(now))
-            .order_by(SessionORM.id.asc())
-            .limit(limit)
-        )
-        return list((await self._session.scalars(statement)).all())
-
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
@@ -398,7 +367,6 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.started_at = session.started_at
         row.ended_at = session.ended_at
         row.external_id = session.external_id
-        row.import_expires_at = session.import_expires_at
         row.metadata_ = session.metadata
         row.imported_from = session.imported_from
         row.framework = session.framework

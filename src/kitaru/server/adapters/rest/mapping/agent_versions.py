@@ -67,7 +67,6 @@ def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         timeout_seconds=run_spec.timeout_seconds,
-        import_deadline_seconds=run_spec.import_deadline_seconds,
     )
 
 
@@ -93,7 +92,6 @@ def _run_spec_to_response(run_spec: RunSpec) -> WireRunSpec:
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         timeout_seconds=run_spec.timeout_seconds,
-        import_deadline_seconds=run_spec.import_deadline_seconds,
     )
 
 

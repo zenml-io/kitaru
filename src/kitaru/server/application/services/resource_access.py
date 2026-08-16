@@ -29,11 +29,14 @@ from kitaru.server.domain.task import (
     ImportTask,
     ImportTaskDetails,
     ScriptPluginSpec,
+    Task,
     TaskSpec,
 )
 
 
-async def check_task_attempt(actor: AuthContext, tasks: TaskRepository) -> None:
+async def check_task_attempt(
+    actor: AuthContext, tasks: TaskRepository, task: Task | None = None
+) -> Task | None:
     """Require a task principal's token to name the task's current attempt.
 
     A requeue leaves the superseded attempt's token unexpired, and the task
@@ -45,16 +48,22 @@ async def check_task_attempt(actor: AuthContext, tasks: TaskRepository) -> None:
     Args:
         actor: Caller context.
         tasks: Task repository.
+        task: Preloaded task, fetched by the principal's task id when None.
 
     Raises:
         TaskNotFound: The principal names a task that no longer exists.
         TaskAttemptMismatch: The token is fenced by an attempt the task has
             moved past.
+
+    Returns:
+        The principal's task, None for an account principal.
     """
     if not isinstance(actor.principal, TaskPrincipal):
-        return
-    task = await tasks.get(actor.principal.task_id)
+        return None
+    if task is None:
+        task = await tasks.get(actor.principal.task_id)
     task.check_attempt(actor.principal.attempt)
+    return task
 
 
 def build_task_grants(spec: TaskSpec) -> dict[GrantKind, frozenset[uuid.UUID]]:
@@ -90,8 +99,8 @@ async def check_task_session_read(
 ) -> None:
     """Require a task principal to own the session or hold a grant for it.
 
-    An import task principal additionally reads any pending-import session
-    of the account, the adopted placeholder it fills.
+    An import task principal additionally reads any pending-import session,
+    the adopted placeholder it fills.
 
     An account principal always passes.
 
@@ -120,11 +129,11 @@ async def check_task_session_read(
 
 async def check_task_session_write(
     session: Session, actor: AuthContext, tasks: TaskRepository
-) -> None:
+) -> Task | None:
     """Require a task principal to own the session being written.
 
-    An import task principal additionally writes any pending-import session
-    of the account, the adopted placeholder it fills.
+    An import task principal additionally writes any pending-import session,
+    the adopted placeholder it fills.
 
     An account principal always passes.
 
@@ -135,15 +144,19 @@ async def check_task_session_write(
 
     Raises:
         SessionAccessDenied: A task principal does not own the session.
+
+    Returns:
+        The import task fetched to admit a pending-import write, None
+        otherwise.
     """
     if not isinstance(actor.principal, TaskPrincipal):
-        return
+        return None
     if session.task_id == actor.principal.task_id:
-        return
+        return None
     if session.status is SessionStatus.PENDING_IMPORT:
         task = await tasks.get(actor.principal.task_id)
         if isinstance(task, ImportTask):
-            return
+            return task
     raise SessionAccessDenied(session.id)
 
 

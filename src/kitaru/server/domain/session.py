@@ -282,6 +282,21 @@ def rollup_delta(old: SessionRollups, new: SessionRollups) -> SessionRollups:
     )
 
 
+class SessionContent(FrozenModel):
+    """Session content."""
+
+    name: str | None = None
+    inputs: Any = None
+    outputs: Any = None
+    error: str | None = None
+    started_at: datetime | None = None
+    ended_at: datetime | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    imported_from: str | None = None
+    framework: str | None = None
+    adapter_version: str | None = None
+
+
 class Session(DomainModel):
     """Session."""
 
@@ -300,7 +315,6 @@ class Session(DomainModel):
     started_at: datetime | None = None
     ended_at: datetime | None = None
     external_id: str | None = None
-    import_expires_at: datetime | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     imported_from: str | None = None
     framework: str | None = None
@@ -340,43 +354,22 @@ class Session(DomainModel):
         """Clear the task this session was produced by."""
         self.task_id = None
 
-    def adopt_import(
-        self,
-        name: str | None,
-        inputs: Any,
-        outputs: Any,
-        error: str | None,
-        started_at: datetime | None,
-        ended_at: datetime | None,
-        metadata: dict[str, Any],
-        imported_from: str | None,
-        framework: str | None,
-        adapter_version: str | None,
-    ) -> None:
+    def adopt_import(self, content: SessionContent) -> None:
         """Fill the placeholder from an imported trace, keeping identity and status.
 
         Args:
-            name: Session name.
-            inputs: Session inputs.
-            outputs: Session outputs.
-            error: Error from a failed session.
-            started_at: Time the session started.
-            ended_at: Time the session ended.
-            metadata: Arbitrary metadata.
-            imported_from: Source system the session was imported from.
-            framework: Agent framework used.
-            adapter_version: Recording adapter version.
+            content: Session content to adopt.
         """
-        self.name = name
-        self.inputs = inputs
-        self.outputs = outputs
-        self.error = error
-        self.started_at = started_at
-        self.ended_at = ended_at
-        self.metadata = metadata
-        self.imported_from = imported_from
-        self.framework = framework
-        self.adapter_version = adapter_version
+        self.name = content.name
+        self.inputs = content.inputs
+        self.outputs = content.outputs
+        self.error = content.error
+        self.started_at = content.started_at
+        self.ended_at = content.ended_at
+        self.metadata = content.metadata
+        self.imported_from = content.imported_from
+        self.framework = content.framework
+        self.adapter_version = content.adapter_version
 
     def check_node_ingest(self) -> None:
         """Require the session to currently accept node ingestion.
@@ -419,21 +412,3 @@ class Session(DomainModel):
         self.outputs = outputs
         self.error = error
         self.ended_at = ended_at
-
-    def fail_import(self, error: str | None, now: datetime) -> None:
-        """Move a pending-import session to failed.
-
-        Args:
-            error: Failure reason.
-            now: Current time.
-
-        Raises:
-            IllegalSessionStatusTransition: The session is not pending import.
-        """
-        if self.status is not SessionStatus.PENDING_IMPORT:
-            raise IllegalSessionStatusTransition(
-                self.id, self.status, SessionStatus.FAILED
-            )
-        self.status = SessionStatus.FAILED
-        self.error = error
-        self.ended_at = now

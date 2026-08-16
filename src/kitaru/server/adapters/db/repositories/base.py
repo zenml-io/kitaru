@@ -55,22 +55,29 @@ class BaseSQLRepository(Generic[RowT]):
         """
         raise NotImplementedError
 
-    async def _get_row(self, entity_id: uuid.UUID, exclusive: bool = False) -> RowT:
+    async def _get_row(
+        self, entity_id: uuid.UUID, exclusive: bool = False, nowait: bool = False
+    ) -> RowT:
         """Load a row by id.
 
         Args:
             entity_id: Id of the row.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds the row.
 
         Raises:
             NotFoundError: No row has this id.
+            DBAPIError: ``nowait`` is set and the row is held elsewhere.
 
         Returns:
             Stored row.
         """
         row = await self._session.get(
-            self.orm_class, entity_id, with_for_update=exclusive
+            self.orm_class,
+            entity_id,
+            with_for_update={"nowait": nowait} if exclusive else False,
         )
         if row is None:
             raise self._not_found(entity_id)

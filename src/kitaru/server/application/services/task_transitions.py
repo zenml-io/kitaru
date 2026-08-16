@@ -377,9 +377,10 @@ class TaskTransitions:
     async def fail_job(self, job_id: uuid.UUID, error: str | None) -> Job:
         """Fail an unsettled job as if an aborting task failed.
 
-        Locks the job row and no task row unless the job still has live
-        tasks, which routes through the same cancellation as a plain job
-        cancel and settles later through their transitions.
+        Locks the job's live task rows in one id-ordered acquisition, then
+        the job row. A job that still has live tasks takes the same
+        cancellation stamps as a plain job cancel and settles later through
+        their transitions.
 
         Args:
             job_id: Id of the job.
@@ -391,6 +392,8 @@ class TaskTransitions:
         Returns:
             Job, settled FAILED with ``error`` if this call drained it.
         """
+        now = datetime.now(UTC)
+        await self._tasks.lock_by_jobs([job_id])
         job = await self._jobs.get(job_id, exclusive=True)
         if job.settled:
             return job
@@ -398,9 +401,10 @@ class TaskTransitions:
         if tasks and all(task.terminal for task in tasks):
             return await self._settle_job(job, JobStatus.FAILED, error, tasks)
         if job.cancel_requested_at is None:
-            job.request_cancel(datetime.now(UTC))
+            job.request_cancel(now)
             job = await self._jobs.update(job)
-        await self.request_jobs_cancel([job_id])
+        await self._tasks.stamp_cancel_requested([job_id], now)
+        await self._cancel_pending_tasks([job_id], now)
         return job
 
     def _track_task_terminal(self, task: Task, job: Job) -> None:

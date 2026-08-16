@@ -196,21 +196,25 @@ async def continue_replay_on_import(
     task_repository: TaskRepository,
     replay_repository: ReplayRepository,
     experiment_repository: ExperimentRepository,
+    job_repository: JobRepository,
     transitions: TaskTransitions,
 ) -> None:
     """Finalize or fail a replay's provisional job when its placeholder finalizes.
 
     A no-op when the finalized session was not produced by a task, the
     task's job belongs to no replay, or the replay already settled. A
-    completed import appends the replay's result evaluator tasks before
-    finalizing the job, so its drained scan reads every task including
-    these. A failed import fails the job with the session's error.
+    completed import locks the job row before the replay row, re-checking
+    both for settlement under the job lock, then appends the replay's
+    result evaluator tasks before finalizing the job, so its drained scan
+    reads every task including these. A failed import fails the job with
+    the session's error.
 
     Args:
         event: SessionImportFinalized event.
         task_repository: Task repository.
         replay_repository: Replay repository.
         experiment_repository: Experiment repository, for the replay config.
+        job_repository: Job repository.
         transitions: Task transition dispatch.
     """
     session = event.session
@@ -224,6 +228,15 @@ async def continue_replay_on_import(
         return
     if session.status is not SessionStatus.COMPLETED:
         await transitions.fail_job(producer.job_id, session.error)
+        return
+    # Lock the job row before writing the replay row, the order the
+    # settlement path takes them in, and re-check both for settlement so a
+    # cancel that settled first is seen instead of appending to its job.
+    job = await job_repository.get(producer.job_id, exclusive=True)
+    if job.settled:
+        return
+    replay = await replay_repository.get_by_job_id(producer.job_id)
+    if replay is None or replay.settled:
         return
     config = await experiment_repository.get_replay_config(replay.replay_config_id)
     evaluator_tasks: list[Task] = [

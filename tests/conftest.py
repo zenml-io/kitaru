@@ -2180,12 +2180,16 @@ class FakeSessionRepository:
         self._sessions[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    async def get(
+        self, session_id: uuid.UUID, exclusive: bool = False, nowait: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
             exclusive: Ignored, the fake has no concurrent callers to lock
+                against.
+            nowait: Ignored, the fake has no concurrent callers to lock
                 against.
 
         Raises:
@@ -2194,7 +2198,7 @@ class FakeSessionRepository:
         Returns:
             Stored session.
         """
-        _ = exclusive
+        _ = exclusive, nowait
         session = self._sessions.get(session_id)
         if session is None:
             raise SessionNotFound(session_id)
@@ -2355,27 +2359,6 @@ class FakeSessionRepository:
             for session_id in session_ids
             if session_id in self._sessions
         }
-
-    async def list_expired_import_ids(
-        self, now: datetime, limit: int
-    ) -> list[uuid.UUID]:
-        """Read the ids of pending-import sessions past their import deadline.
-
-        Args:
-            now: Current time.
-            limit: Maximum number of ids to read.
-
-        Returns:
-            Ids of the expired sessions in ascending order.
-        """
-        expired = sorted(
-            session.id
-            for session in self._sessions.values()
-            if session.status is SessionStatus.PENDING_IMPORT
-            and session.import_expires_at is not None
-            and session.import_expires_at < now
-        )
-        return expired[:limit]
 
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.

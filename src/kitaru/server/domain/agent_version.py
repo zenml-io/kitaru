@@ -111,7 +111,6 @@ class FunctionRunSpec(FrozenModel):
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: list[uuid.UUID] = Field(default_factory=list)
     timeout_seconds: TimeoutSeconds = 3600
-    import_deadline_seconds: TimeoutSeconds = 86400
 
 
 RunSpec = Annotated[CommandRunSpec | FunctionRunSpec, Field(discriminator="type")]

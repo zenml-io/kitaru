@@ -16,7 +16,7 @@
 import itertools
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -349,87 +349,6 @@ async def test_get_exclusive(setup: Setup) -> None:
     )
     loaded = await repository.get(created.id, exclusive=True)
     assert loaded == created
-
-
-async def test_list_expired_import_ids(setup: Setup) -> None:
-    """List only pending-import sessions past their stamped deadline."""
-    repository, owner_id, agent_id, _, _ = setup
-    now = datetime.now(UTC)
-    expired = await repository.create(
-        Session(
-            owner_id=owner_id,
-            agent_id=agent_id,
-            number=1,
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-            import_expires_at=now - timedelta(seconds=1),
-        )
-    )
-    await repository.create(
-        Session(
-            owner_id=owner_id,
-            agent_id=agent_id,
-            number=2,
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-            import_expires_at=now + timedelta(seconds=60),
-        )
-    )
-    await repository.create(
-        Session(
-            owner_id=owner_id,
-            agent_id=agent_id,
-            number=3,
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.COMPLETED,
-            import_expires_at=now - timedelta(seconds=1),
-        )
-    )
-    await repository.create(
-        Session(
-            owner_id=owner_id,
-            agent_id=agent_id,
-            number=4,
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-        )
-    )
-
-    ids = await repository.list_expired_import_ids(now, limit=100)
-
-    assert ids == [expired.id]
-
-
-async def test_list_expired_import_ids_orders_ascending_and_respects_the_limit(
-    setup: Setup,
-) -> None:
-    """Order expired ids ascending by id and cap the page at the limit."""
-    repository, owner_id, agent_id, _, _ = setup
-    now = datetime.now(UTC)
-    first = await repository.create(
-        Session(
-            owner_id=owner_id,
-            agent_id=agent_id,
-            number=1,
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-            import_expires_at=now - timedelta(seconds=1),
-        )
-    )
-    await repository.create(
-        Session(
-            owner_id=owner_id,
-            agent_id=agent_id,
-            number=2,
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-            import_expires_at=now - timedelta(seconds=1),
-        )
-    )
-
-    ids = await repository.list_expired_import_ids(now, limit=1)
-
-    assert ids == [first.id]
 
 
 async def test_query_filters_by_origin_and_status(setup: Setup) -> None:

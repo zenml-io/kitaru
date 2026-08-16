@@ -53,10 +53,6 @@ class FunctionRunSpec(DiscriminatedRequestModel):
         default_factory=list, description="Secrets merged into the process environment."
     )
     timeout_seconds: PositiveInt = Field(default=3600, description="Process timeout.")
-    import_deadline_seconds: PositiveInt = Field(
-        default=86400,
-        description="Seconds the resulting session may stay pending import.",
-    )
 
 
 RunSpec = Annotated[CommandRunSpec | FunctionRunSpec, Field(discriminator="type")]

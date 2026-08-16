@@ -237,8 +237,9 @@ class TaskService:
             actor.principal.task_id != task_id
         ):
             raise TaskAccessDenied(task_id)
-        await check_task_attempt(actor, self._repository)
-        task = await self._repository.get(task_id)
+        task = await check_task_attempt(actor, self._repository)
+        if task is None:
+            task = await self._repository.get(task_id)
         return await self._spec_builder.build_spec(task)
 
     async def update_task(
@@ -321,6 +322,9 @@ class TaskService:
         Args:
             task_id: Id of the candidate task.
             now: Current time.
+
+        Raises:
+            DBAPIError: Another transaction holds the result session row.
         """
         cutoff = now - timedelta(seconds=self._policy.heartbeat_timeout_seconds)
         task = await self._repository.claim_stale(task_id, cutoff)
@@ -442,9 +446,14 @@ class TaskService:
 
         Args:
             task: Task about to be requeued.
+
+        Raises:
+            DBAPIError: Another transaction holds the session row.
         """
         if task.result_session_id is None:
             return
-        session = await self._sessions.get(task.result_session_id, exclusive=True)
+        session = await self._sessions.get(
+            task.result_session_id, exclusive=True, nowait=True
+        )
         session.unlink_task()
         await self._sessions.update(session)

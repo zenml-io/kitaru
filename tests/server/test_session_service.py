@@ -52,8 +52,6 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionAgentMismatch,
     AgentVersionNotFound,
-    CommandRunSpec,
-    FunctionRunSpec,
     RunSpec,
 )
 from kitaru.server.domain.replay import Replay
@@ -541,24 +539,6 @@ def _session(status: SessionStatus) -> Session:
     )
 
 
-def test_fail_import_moves_pending_import_to_failed_with_the_error() -> None:
-    """A pending-import session fails and records the error."""
-    session = _session(SessionStatus.PENDING_IMPORT)
-    now = datetime.now(UTC)
-    session.fail_import("Import deadline expired", now)
-    assert session.status == SessionStatus.FAILED
-    assert session.error == "Import deadline expired"
-    assert session.ended_at == now
-
-
-def test_fail_import_rejects_a_non_pending_import_session() -> None:
-    """fail_import only applies to a pending-import session."""
-    session = _session(SessionStatus.IN_PROGRESS)
-    with pytest.raises(IllegalSessionStatusTransition):
-        session.fail_import("boom", datetime.now(UTC))
-    assert session.status == SessionStatus.IN_PROGRESS
-
-
 async def test_update_session_rejects_terminal_to_other_terminal(
     service: SessionService,
 ) -> None:
@@ -824,100 +804,6 @@ async def test_update_session_non_terminal_update_dispatches_nothing(
     assert dispatched == []
 
 
-async def test_expire_import_fails_an_expired_placeholder_and_dispatches(
-    repository: FakeSessionRepository,
-    task_repository: FakeTaskRepository,
-    agent_version_repository: FakeAgentVersionRepository,
-    replay_repository: FakeReplayRepository,
-) -> None:
-    """Expiring a pending-import placeholder fails it and dispatches the event."""
-    dispatched: list[Session] = []
-
-    async def record(event: SessionImportFinalized) -> None:
-        dispatched.append(event.session)
-
-    dispatcher = EventDispatcher()
-    dispatcher.register(SessionImportFinalized, record)
-    service = SessionService(
-        repository=repository,
-        task_repository=task_repository,
-        agent_version_repository=agent_version_repository,
-        replay_repository=replay_repository,
-        dispatcher=dispatcher,
-    )
-    placeholder = await create_session(
-        repository,
-        ACTOR.account.id,
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.PENDING_IMPORT,
-        import_expires_at=datetime.now(UTC) - timedelta(seconds=1),
-    )
-
-    now = datetime.now(UTC)
-    await service.expire_import(placeholder.id, now)
-
-    updated = await repository.get(placeholder.id)
-    assert updated.status == SessionStatus.FAILED
-    assert updated.error == "Import deadline expired"
-    assert updated.ended_at == now
-    assert len(dispatched) == 1
-    assert dispatched[0].id == placeholder.id
-
-
-async def test_expire_import_no_ops_on_an_already_finalized_session(
-    service: SessionService, repository: FakeSessionRepository
-) -> None:
-    """Expiring a session already past pending-import leaves it untouched."""
-    finalized = await create_session(
-        repository,
-        ACTOR.account.id,
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.COMPLETED,
-    )
-
-    await service.expire_import(finalized.id, datetime.now(UTC))
-
-    stored = await repository.get(finalized.id)
-    assert stored.status == SessionStatus.COMPLETED
-
-
-async def test_list_expired_import_ids_reads_only_expired_placeholders(
-    service: SessionService, repository: FakeSessionRepository
-) -> None:
-    """List only pending-import sessions past their stamped deadline."""
-    now = datetime.now(UTC)
-    expired = await create_session(
-        repository,
-        ACTOR.account.id,
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.PENDING_IMPORT,
-        import_expires_at=now - timedelta(seconds=1),
-    )
-    await create_session(
-        repository,
-        ACTOR.account.id,
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.PENDING_IMPORT,
-        import_expires_at=now + timedelta(seconds=60),
-    )
-    await create_session(
-        repository,
-        ACTOR.account.id,
-        uuid.uuid4(),
-        origin=SessionOrigin.REPLAY,
-        status=SessionStatus.COMPLETED,
-        import_expires_at=now - timedelta(seconds=1),
-    )
-
-    ids = await service.list_expired_import_ids(now)
-
-    assert ids == [expired.id]
-
-
 async def test_update_session_not_found(service: SessionService) -> None:
     """Raise for an unknown session id."""
     with pytest.raises(SessionNotFound):
@@ -1084,97 +970,6 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     assert second.task_id == task.id
     stored_task = await task_repository.get(task.id)
     assert stored_task.result_session_id is None
-
-
-async def test_create_session_stamps_import_expiry_for_a_function_agent_version(
-    service: SessionService,
-    task_repository: FakeTaskRepository,
-    agent_repository: FakeAgentRepository,
-    agent_version_repository: FakeAgentVersionRepository,
-) -> None:
-    """A task-principal pending-import create stamps the deadline from the run spec."""
-    version = await _stored_agent_version(
-        agent_repository,
-        agent_version_repository,
-        run_spec=FunctionRunSpec(entrypoint="agent:run", import_deadline_seconds=120),
-    )
-    task = await _running_agent_task(task_repository, version.id)
-    before = datetime.now(UTC)
-
-    session = await service.create_session(
-        SessionCreate(
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-            external_id="run-1",
-        ),
-        actor=_task_principal(task.id),
-    )
-
-    assert session.import_expires_at is not None
-    assert session.import_expires_at >= before + timedelta(seconds=120)
-
-
-async def test_create_session_leaves_import_expiry_none_for_a_command_agent_version(
-    service: SessionService,
-    task_repository: FakeTaskRepository,
-    agent_repository: FakeAgentRepository,
-    agent_version_repository: FakeAgentVersionRepository,
-) -> None:
-    """A pending-import create against a command run spec stamps nothing."""
-    version = await _stored_agent_version(
-        agent_repository,
-        agent_version_repository,
-        run_spec=CommandRunSpec(command="run.sh"),
-    )
-    task = await _running_agent_task(task_repository, version.id)
-
-    session = await service.create_session(
-        SessionCreate(
-            origin=SessionOrigin.REPLAY,
-            status=SessionStatus.PENDING_IMPORT,
-            external_id="run-1",
-        ),
-        actor=_task_principal(task.id),
-    )
-
-    assert session.import_expires_at is None
-
-
-async def test_create_session_leaves_import_expiry_none_without_pending_import(
-    service: SessionService,
-    task_repository: FakeTaskRepository,
-    agent_repository: FakeAgentRepository,
-    agent_version_repository: FakeAgentVersionRepository,
-) -> None:
-    """A task-principal create that is not pending-import stamps nothing."""
-    version = await _stored_agent_version(
-        agent_repository,
-        agent_version_repository,
-        run_spec=FunctionRunSpec(entrypoint="agent:run"),
-    )
-    task = await _running_agent_task(task_repository, version.id)
-
-    session = await service.create_session(
-        SessionCreate(origin=SessionOrigin.RECORDED),
-        actor=_task_principal(task.id),
-    )
-
-    assert session.import_expires_at is None
-
-
-async def test_create_session_leaves_import_expiry_none_without_a_task(
-    service: SessionService,
-) -> None:
-    """A non-task-principal create stamps nothing, even when pending-import."""
-    session = await service.create_session(
-        SessionCreate(
-            agent_id=uuid.uuid4(),
-            origin=SessionOrigin.IMPORTED,
-            status=SessionStatus.PENDING_IMPORT,
-        ),
-        actor=ACTOR,
-    )
-    assert session.import_expires_at is None
 
 
 async def test_create_session_adopts_a_matching_pending_import_placeholder(

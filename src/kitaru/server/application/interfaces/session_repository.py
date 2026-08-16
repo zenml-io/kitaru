@@ -15,7 +15,6 @@
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.session import SessionFilter
@@ -57,16 +56,21 @@ class SessionRepository(Protocol):
         """
         ...
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    async def get(
+        self, session_id: uuid.UUID, exclusive: bool = False, nowait: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
+            nowait: Whether to fail instead of waiting when another
+                transaction holds the row.
 
         Raises:
             SessionNotFound: No session has this id.
+            DBAPIError: ``nowait`` is set and the row is held elsewhere.
 
         Returns:
             Stored session.
@@ -115,20 +119,6 @@ class SessionRepository(Protocol):
 
         Returns:
             Stored sessions keyed by id.
-        """
-        ...
-
-    async def list_expired_import_ids(
-        self, now: datetime, limit: int
-    ) -> list[uuid.UUID]:
-        """Read the ids of pending-import sessions past their import deadline.
-
-        Args:
-            now: Current time.
-            limit: Maximum number of ids to read.
-
-        Returns:
-            Ids of the expired sessions in ascending order.
         """
         ...
 

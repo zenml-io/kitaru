@@ -27,18 +27,15 @@ from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.rest.dependencies import (
     get_server_analytics,
-    get_session_service,
     get_task_service,
 )
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.database.service import DatabaseService
 
 logger = logging.getLogger(__name__)
 
 SweepUnit = Callable[[TaskService], Awaitable[None]]
-SessionSweepUnit = Callable[[SessionService], Awaitable[None]]
 
 
 async def _run_unit(
@@ -74,45 +71,13 @@ async def _run_unit(
                 logger.warning("Sweep unit %s failed: %s", label, exc)
 
 
-async def _run_session_unit(
-    database: DatabaseService,
-    analytics: AnalyticsClient,
-    unit: SessionSweepUnit,
-    label: str,
-) -> None:
-    """Run one session sweep unit in its own transaction and commit it.
-
-    Builds the session service the same way a request does, so a
-    settlement the unit applies dispatches through the same event
-    subscribers. A failure rolls the unit back and leaves the remaining
-    units to run.
-
-    Args:
-        database: Database service the unit opens a session against.
-        analytics: Analytics client for this process.
-        unit: Work to run against the service.
-        label: Name of the unit for the failure log.
-    """
-    async for session in database.get_async_session():
-        try:
-            tracker = get_server_analytics(session, analytics)
-            await unit(get_session_service(session, database.engine, tracker))
-            await session.commit()
-        except Exception as exc:
-            await session.rollback()
-            if isinstance(exc, DBAPIError) and is_lock_not_available(exc):
-                logger.debug("Sweep unit %s skipped a contended row.", label)
-            else:
-                logger.warning("Sweep unit %s failed: %s", label, exc)
-
-
 async def _read_candidates(
     database: DatabaseService,
     settings: APISettings,
     analytics: AnalyticsClient,
     now: datetime,
-) -> tuple[list[uuid.UUID], list[uuid.UUID], list[uuid.UUID]]:
-    """Read the stale task, canceling job, and expired import ids without locking.
+) -> tuple[list[uuid.UUID], list[uuid.UUID]]:
+    """Read the stale task ids and the canceling job ids without locking.
 
     Args:
         database: Database service the read opens a session against.
@@ -121,21 +86,18 @@ async def _read_candidates(
         now: Current time.
 
     Returns:
-        Stale task ids, job ids owing a cancel propagation, and expired
-        pending-import session ids.
+        Stale task ids and job ids owing a cancel propagation.
     """
     async for session in database.get_async_session():
         try:
             tracker = get_server_analytics(session, analytics)
-            task_service = get_task_service(session, database.engine, settings, tracker)
-            session_service = get_session_service(session, database.engine, tracker)
-            task_ids = await task_service.list_stale_task_ids(now)
-            job_ids = await task_service.list_unpropagated_cancel_job_ids()
-            import_ids = await session_service.list_expired_import_ids(now)
-            return task_ids, job_ids, import_ids
+            service = get_task_service(session, database.engine, settings, tracker)
+            task_ids = await service.list_stale_task_ids(now)
+            job_ids = await service.list_unpropagated_cancel_job_ids()
+            return task_ids, job_ids
         finally:
             await session.rollback()
-    return [], [], []
+    return [], []
 
 
 async def sweep_once(
@@ -154,9 +116,7 @@ async def sweep_once(
         analytics: Analytics client for this process.
     """
     now = datetime.now(UTC)
-    task_ids, job_ids, import_ids = await _read_candidates(
-        database, settings, analytics, now
-    )
+    task_ids, job_ids = await _read_candidates(database, settings, analytics, now)
     # Propagate first. The rescue chooses between canceling and requeuing by
     # reading the task's own cancel_requested_at, so a stale task of a
     # canceling job whose stamp has not landed yet is requeued instead of
@@ -177,13 +137,6 @@ async def sweep_once(
             analytics,
             partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
             f"stale task {task_id}",
-        )
-    for session_id in import_ids:
-        await _run_session_unit(
-            database,
-            analytics,
-            partial(SessionService.expire_import, session_id=session_id, now=now),
-            f"expired import session {session_id}",
         )
 
 
