@@ -18,10 +18,10 @@ In Terminal 1, register the baseline:
 ```bash
 uv run kitaru agent register \
   returns-resolver \
-  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
+  --command "python -m returns_agent.agent" \
   --description "Resolve one synthetic returns or delivery request." \
   --display-version baseline-v1 \
-  --working-dir ../.. \
+  --working-dir . \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \

@@ -11,7 +11,7 @@ This is the first phase that runs the agent and can make paid model calls. You w
 
 ## Make one investigation-derived change
 
-Change `agent.py` only after the review has identified one behavior worth changing. Keep the candidate narrow enough that you can explain how it is expected to affect the evaluator and counterexamples.
+Change `returns_agent/agent.py` only after the review has identified one behavior worth changing. Keep the candidate narrow enough that you can explain how it is expected to affect the evaluator and counterexamples.
 
 The example does not include a prewritten candidate or environment switch. That is intentional: the candidate should follow from the behavior you accepted, not from a hidden fixture answer key. If you want coding-agent help, ask it for the smallest code change that implements only that behavior, require it to explain the expected effect on every reviewed target and counterexample, and review the patch before registering it.
 
@@ -20,10 +20,10 @@ Record the source revision or working-tree state you intend the worker to execut
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
-  --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
+  --command "python -m returns_agent.agent" \
   --description "Test one investigation-derived behavior change." \
   --display-version candidate-v1 \
-  --working-dir ../.. \
+  --working-dir . \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \
