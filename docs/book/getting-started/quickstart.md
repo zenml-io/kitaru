@@ -1,214 +1,134 @@
 ---
-description: Import PydanticAI traces, review them with human evidence, and test one change through replay.
+description: Understand Kitaru's five-step method for debugging observed agent behavior and testing an improvement.
 icon: rocket
 ---
 
 # Quickstart
 
-This quickstart uses ten synthetic returns-agent sessions recorded by PydanticAI and exported from Langfuse. You will import the sessions, investigate observed behavior, preserve human judgments as evidence, and prepare a replay experiment.
+Kitaru helps you move from **“something went wrong in this agent trace”** to **“I understand the behavior, I can test a change against it, and I know what the evidence supports.”**
 
-The example does not tell you which sessions are good or bad. Review the traces before you define a behavior, assign a verdict, create a cohort, or write an evaluator.
+An observability tool records what happened. Kitaru starts with those traces, helps you inspect and judge the behavior, turns accepted judgments into repeatable measurements, and re-runs changed agent code against the same reviewed situations. You can improve an agent without guessing from a new demo prompt or losing sight of behavior that already worked.
 
-The investigation phase reads stored traces and makes no model calls. A worker processes import and evaluation tasks. Replays run the agent and can make paid model calls.
+You do not need to install or run anything to follow this page. The example below is illustrative rather than an answer key for the [hands-on returns-agent tutorial](../tutorials/returns-agent/README.md). That tutorial asks you to inspect its supplied traces and reach your own judgments.
 
-## Before you start
+## The method in five steps
 
-Install Git, Docker, [`uv`](https://docs.astral.sh/uv/), Node.js, and `jq`. Then check out the example:
+| Step | Question | What Kitaru adds |
+| --- | --- | --- |
+| **1. Observe** | What happened, and where might the behavior have gone wrong? | A trace becomes a session that preserves the agent input, output, model calls, tool calls, and tool results. |
+| **2. Judge** | What should have happened? | A human judgment is stored beside the exact evidence that supports it. |
+| **3. Define** | How will we recognize the behavior again? | The accepted judgment becomes an evaluator, with reviewed cases and counterexamples frozen into a cohort. |
+| **4. Replay** | What would the changed agent do in the same situations? | Kitaru runs the candidate while controlling how tool calls interact with the outside world. |
+| **5. Compare** | Did the change improve the behavior without causing a regression? | The same evaluator checks the original and replayed sessions so improvements, regressions, trade-offs, and missing evidence stay visible. |
 
-```bash
-git clone --branch develop https://github.com/zenml-io/kitaru.git
-cd kitaru/examples/pydantic_ai_ticket_resolver
-uv sync
-```
+The five steps form a loop rather than a one-time pipeline. A replay may expose a new failure, which becomes the next observation to review and preserve.
 
-The example uses synthetic customers, orders, shipments, and actions. Its action tools modify one isolated in-memory store.
+## 1. Observe a recorded behavior
 
-Start a local Kitaru workspace and confirm the connection:
+Imagine a customer-support agent that looks up orders and policies, then decides whether to refund, replace, or escalate a return request. One recorded trace contains this path:
 
-```bash
-uv run kitaru login --local
-uv run kitaru status
-```
+| Trace node | Result |
+| --- | --- |
+| Customer request | The customer asks for a high-value refund. |
+| `lookup_order` | The order exists and its amount and product category are returned. |
+| `get_return_policy` | The policy lookup does not return a usable approval rule. |
+| `issue_refund` | The tool accepts the refund. |
+| Agent response | The agent says that the refund was issued. |
 
-The local workspace opens at [http://localhost:8000](http://localhost:8000). To use an existing deployment, run `uv run kitaru login https://your-kitaru-workspace.example.com`.
+Kitaru stores one complete agent run as a [**session**](../concepts/agents-and-sessions.md). Each model call, tool call, tool result, and other event inside it is a **session node**. The `issue_refund` node matters because it proves that the action occurred; the final message alone only tells you what the agent claimed.
 
-## 1. Register the recorded agent
+At this point, Kitaru has preserved the behavior. It has not decided whether the behavior was acceptable.
 
-Imported sessions belong to an agent version. Register the baseline version:
+## 2. Judge what should have happened
 
-```bash
-uv run kitaru agent register \
-  returns-resolver \
-  --command "python -m returns_agent.agent" \
-  --description "Resolve one synthetic returns or delivery request." \
-  --display-version baseline-v1 \
-  --working-dir . \
-  --timeout-seconds 180 \
-  --tool lookup_order \
-  --tool get_return_policy \
-  --tool check_shipping \
-  --tool issue_refund \
-  --tool create_replacement \
-  --tool escalate_to_human
-```
+A domain expert reviews the trace and might conclude:
 
-Registration stores the command and declared capabilities. It does not run the agent.
+> This outcome is problematic. When the agent cannot establish whether approval is required, it should escalate instead of issuing the refund.
 
-The receipt's `Parent ID` identifies the agent across versions. Its `Version ID` identifies the exact registered version. This quickstart uses `returns-resolver@1`, so you do not need to copy either UUID.
+Kitaru records the verdict in an [**investigation**](../concepts/investigations.md) and stores the answer as an **annotation**. The annotation can point to the exact policy lookup and accepted refund nodes as evidence.
 
-Imports and deterministic evaluations do not need an OpenAI key. Replays use `openai:gpt-5-nano`, make paid OpenAI API calls, and require `OPENAI_API_KEY`.
+This human step is deliberate. Cost, latency, and tool-call statistics can help you find an unusual trace, but they cannot infer your business policy or decide which trade-off you accept. Kitaru keeps the judgment so the later automated check has an auditable reason to exist.
 
-For this local walkthrough, open a second terminal in the same directory. Export the key in that shell, then start a [worker](../concepts/workers.md):
+## 3. Define the behavior to test
 
-```bash
-export OPENAI_API_KEY="your-openai-key"
-uv run kitaru worker start --name returns-quickstart-worker
-```
+After reviewing enough evidence, the team accepts a precise behavior:
 
-You can also use a secret manager that injects `OPENAI_API_KEY` into the worker process. For a deployed worker, configure the environment in your deployment system or attach a [Kitaru secret](../deploy/secrets.md) to the agent version.
+> When required approval cannot be established from the recorded evidence, no refund should be accepted before escalation.
 
-The worker runs in the foreground. The `starting: {...}` message means that it is ready and waiting for tasks. Leave this terminal open and run the remaining commands in your first terminal. Press Ctrl-C to stop the worker.
+That behavior becomes a deterministic [**evaluator**](../concepts/evaluators.md). An evaluator is a reusable check. An **evaluation** is the stored result of applying one evaluator version to one session.
 
-## 2. Import the Langfuse sessions
+One problematic case is not enough. The review also preserves a nearby counterexample:
 
-```bash
-uv run kitaru session import \
-  traces/langfuse-traces.jsonl \
-  --importer kitaru/langfuse@latest \
-  --agent returns-resolver@1 \
-  --tag returns-baseline \
-  --params '{"source_instance":"quickstart"}' \
-  --media-type application/x-ndjson \
-  --wait
-```
+| Reviewed case | Expected behavior | Role in the test |
+| --- | --- | --- |
+| Approval cannot be established | Escalate without an accepted refund | **Target:** behavior that should change. |
+| A valid low-risk refund | Issue the refund | **Counterexample:** behavior that should remain correct. |
 
-The import preserves session inputs and outputs, model calls, tool calls and results, source trace identity, cost, tokens, and the baseline agent version.
+Kitaru stores the reviewed population as a [**cohort**](../concepts/cohorts.md). A cohort version freezes the exact sessions used in the test. The target catches a change that does nothing. The counterexample catches a blunt change such as “never issue refunds.”
 
-Verify the imported population:
+## 4. Replay the changed agent
 
-```bash
-uv run kitaru session list \
-  --tag returns-baseline \
-  --origin imported \
-  --size 20
-```
+The developer makes one bounded change, then registers a new [**agent version**](../concepts/agents-and-sessions.md#agents-and-agent-versions). Registration describes how a worker can run the candidate; it does not execute the code or snapshot a mutable source directory.
 
-The table should contain ten sessions. If it does not, inspect the import job from the receipt before you continue.
+Kitaru then [**replays**](../concepts/replay.md) the frozen cohort against that candidate. Each replay starts from the recorded session input and produces a new session. An [**experiment**](../concepts/experiments.md) fixes the replay configuration and evaluator versions for the agent. Each experiment run supplies the candidate agent version and frozen cohort version.
 
-## 3. Install the Kitaru skills
+### Replay safety
 
-Install the agent skills with the cross-host installer:
+Re-running an agent can re-run its tools. The replay policy must therefore say what happens for each tool call.
 
-```bash
-npx skills add zenml-io/kitaru-skills
-```
+- **Recorded history** returns a stored result instead of calling the live tool. This is the usual choice for payments, messages, database writes, and other side effects.
+- **Static results** return a result supplied for the test.
+- **Passthrough** calls the tool for real. Use it only when the tool is intentionally safe, such as an isolated in-memory example.
+- **Fail on a missing result** stops the replay when Kitaru cannot answer a tool call safely.
 
-The skills guide a coding agent through evidence selection, human review, cohort confirmation, evaluator selection, and safe replay. They use Kitaru MCP for typed operations and the structured CLI when a local upload or wait operation is required.
+“Replay” does not mean “repeat every production side effect.” It means run the agent code again while making its interaction with the outside world explicit and controlled.
 
-Find the MCP executable:
+## 5. Compare the evidence
 
-```bash
-uv run which kitaru-mcp
-```
+Kitaru applies the same evaluator version to the original and replayed sessions:
 
-Configure your coding agent to start it in `standard` mode. Replace the command and server values:
+| Reviewed case | Original | Candidate | Possible conclusion |
+| --- | --- | --- | --- |
+| Approval cannot be established | Refund accepted, fail | Escalation, pass | The reviewed failure improved. |
+| Valid low-risk refund | Refund accepted, pass | Refund accepted, pass | The counterexample was preserved. |
 
-```json
-{
-  "mcpServers": {
-    "kitaru": {
-      "command": "/absolute/path/to/.venv/bin/kitaru-mcp",
-      "args": [
-        "--mode",
-        "standard",
-        "--server",
-        "http://localhost:8000"
-      ]
-    }
-  }
-}
-```
+That would support a narrow claim: the candidate improved the behavior on this frozen reviewed population without breaking its included counterexample. It would not prove that every refund request is safe. More varied reviewed evidence supports a broader claim.
 
-Restart the coding-agent session after you add the MCP server.
+Kitaru keeps four honest outcomes available:
 
-## 4. Start an evidence-led investigation
+| Outcome | Meaning |
+| --- | --- |
+| **Improved** | The target behavior improves and reviewed counterexamples remain correct. |
+| **Regressed** | A target or counterexample gets worse. |
+| **Trade-off** | One important measure improves while another gets worse. |
+| **Inconclusive** | A replay failed, evidence is missing, or the population cannot support the claim. |
 
-Give your coding agent this prompt:
+Inconclusive is useful information. It identifies what execution control or evidence is missing before you trust the change.
 
-```text
-Use the kitaru-investigation skill to investigate the returns-resolver agent.
-The imported population has the tag returns-baseline.
+## The concepts, in context
 
-Begin with read-only inspection. Map the public agent entrypoint and registered
-version. Run relevant built-in deterministic evaluators, then select a bounded,
-diverse review worklist from observed evidence and a random component. Base
-every judgment and cohort proposal on recorded evidence and my decisions. Do
-not use fixture implementation details or a prewritten candidate as an answer
-key.
+| Term | Plain meaning in this example |
+| --- | --- |
+| **Agent / agent version** | The support agent, and one immutable run specification for a particular version. |
+| **Session / session node** | One complete run, and one event inside it such as `issue_refund`. |
+| **Investigation / annotation** | The organized human review, and an answer attached to the session or exact evidence. |
+| **Evaluator / evaluation** | The reusable behavior check, and its result on one session. |
+| **Cohort / cohort version** | A named test population, and one frozen membership list. |
+| **Replay** | A new run of candidate code from a recorded input under an explicit tool policy. |
+| **Experiment / experiment run** | The reusable replay-and-measurement definition, and one execution against a cohort version and agent version. |
 
-Inspect the complete trace for each selected session before writing its
-question. Create one distinct, neutral question per session about a concrete
-decision, tool interaction, inconsistency, operational signal, or missing piece
-of evidence visible in that trace. Make each question concise and
-self-contained for a reviewer using the Kitaru frontend without this chat. Do
-not assume an expected outcome, reveal a verdict, repeat generic wording, or use
-fixture knowledge.
+You do not need to memorize these nouns before using Kitaru. Each preserves one part of the reasoning: what ran, what evidence was reviewed, what behavior was accepted, which population was tested, and what changed.
 
-Attach neutral highlights to the exact nodes, JSON fields, or character spans
-that help answer each question. Give every highlight a specific description
-that explains why the evidence is relevant without stating a conclusion. Before
-creation, show me the ordered sessions, selection reasons, questions, and
-highlights. Ask me to confirm the complete review plan.
+## Use Kitaru on your agent
 
-Create the durable investigation from the confirmed plan. Give me its frontend
-review link and ask me to complete the questions and verdicts there. After I
-return, read the persisted annotations and verdicts before continuing. Do not
-ask the same questions again in chat. If no review link is available, review one
-session at a time in chat. Record a whole-session verdict only after I confirm
-it.
+If you already have an agent, start there. Install the [Kitaru agent skills](../agent-native/skills.md), open your agent repository in Codex, Claude Code, or Cursor, and ask it to use [`kitaru-investigation`](../agent-native/skills.md#the-investigation-skill):
 
-After enough review, synthesize up to three observable behavior candidates from
-persisted human evidence. Show supporting sessions, counterexamples, ambiguity,
-and missing external evidence. Ask me to accept one exact behavior and confirm
-exact cohort membership before any cohort write. Check the installed evaluator
-catalog before creating one narrow custom evaluator.
+> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Explain each concept when it becomes useful, show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
 
-If I approve a candidate change, continue with the kitaru-replay-experiment
-skill. Show the complete run card and ask before writes, code changes, live tool
-effects, or paid replay. Supervise the run and report exact paired evidence as
-improved, regressed, trade-off, or inconclusive. Leave deployment to me.
-```
+The coding agent can inspect your framework, connect or import traces, and guide the review. You still supply the domain judgments and approve consequential actions.
 
-`kitaru-investigation` treats you as the judge. The coding agent can select, summarize, and organize evidence, but it cannot turn its own suggestion into your annotation or verdict.
-
-The skill creates a fixed review worklist with a distinct question for each session. The question and highlights use the recorded trace evidence and stand alone in the frontend review. Each answer becomes an [annotation](../concepts/investigations.md) and can point to an exact node, JSON field, or character range. The complete-session verdict remains separate from question answers and investigation status.
-
-When the evidence supports one behavior, the skill asks you to confirm an exact [cohort version](../concepts/cohorts.md). It checks the installed evaluator catalog before it proposes custom code. A custom evaluator must use observable trace evidence and must not map session identifiers to expected answers.
-
-If you approve a change, `kitaru-replay-experiment` requires an exact candidate agent version, cohort version, evaluator versions and parameters, adapter support, and explicit tool policy. It keeps failed, canceled, and missing cases visible and returns one evidence conclusion: `improved`, `regressed`, `trade-off`, or `inconclusive`.
-
-## 5. Follow the manual route
-
-The example [README on GitHub](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver) shows the same workflow with CLI commands.
-
-The manual route covers:
-
-1. Run six built-in deterministic evaluators to survey session completeness, tool health, trajectory, model-call signals, cost, and timing.
-2. Select a diverse worklist without assigning labels from summary fields.
-3. Create an investigation with fixed neutral questions and optional highlights.
-4. Store human annotations with node, JSON-pointer, and character-span selectors.
-5. Record `acceptable`, `problematic`, or `uncertain` verdicts separately.
-6. Accept one observable behavior and freeze reviewed evidence into an immutable cohort version.
-7. Select an installed evaluator or create and calibrate one narrow evaluator.
-8. Register one candidate and run one bounded experiment with an explicit tool policy.
-9. Compare paired baseline and replay evidence without dropping failed or missing cases.
-
-## Use your own traces
-
-The checked-in Langfuse export is the input for this quickstart. To investigate your own agent, use [Import your traces](import-your-traces.md) to choose the correct importer. You can evaluate and investigate imported sessions even when the historical agent code is unavailable. Replay requires a compatible registered agent version, its runtime credentials, and an active worker.
-
-When you finish, stop the worker with `Ctrl-C`, then run `uv run kitaru logout`. Local logout stops the containers and retains the PostgreSQL volume.
+If you prefer to learn each command in a controlled synthetic environment, follow [Investigate and improve a returns agent](../tutorials/returns-agent/README.md). The walkthrough does not reveal or use the example's test-only expected outcomes: it teaches you how to inspect the traces and reach a bounded conclusion.
 
 ## Where to go next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Investigations and annotations</strong></td><td>Review sessions and attach human evidence to exact trace locations.</td><td><a href="../concepts/investigations.md">../concepts/investigations.md</a></td></tr><tr><td><strong>Agent skills</strong></td><td>Use the investigation and replay procedures from a coding agent.</td><td><a href="../agent-native/skills.md">../agent-native/skills.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, prompts, tools, history, and replay safety.</td><td><a href="../guides/replay-and-overrides.md">../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed evidence into a reusable comparison.</td><td><a href="../guides/regression-suite.md">../guides/regression-suite.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Turn an accepted behavior into a versioned measurement.</td><td><a href="../guides/write-an-evaluator.md">../guides/write-an-evaluator.md</a></td></tr><tr><td><strong>Mastra example</strong></td><td>Try the workflow with a TypeScript support agent.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage</a></td></tr><tr><td><strong>Vercel AI SDK example</strong></td><td>Try the workflow with a TypeScript triage agent.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage</a></td></tr><tr><td><strong>Vercel ticket resolver</strong></td><td>Run the complete TypeScript import, review, cohort, and replay path.</td><td><a href="https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver">https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Complete tutorial</strong></td><td>Run the five-step method with a synthetic returns agent.</td><td><a href="../tutorials/returns-agent/README.md">../tutorials/returns-agent/README.md</a></td></tr><tr><td><strong>Use kitaru-investigation</strong></td><td>Apply the method inside your own agent repository.</td><td><a href="../agent-native/skills.md#the-investigation-skill">../agent-native/skills.md#the-investigation-skill</a></td></tr><tr><td><strong>Import your traces</strong></td><td>Bring in Langfuse, LangSmith, Braintrust, or Kitaru JSONL data.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Core concepts</strong></td><td>Read precise references for each Kitaru resource.</td><td><a href="../concepts/README.md">../concepts/README.md</a></td></tr></tbody></table>
