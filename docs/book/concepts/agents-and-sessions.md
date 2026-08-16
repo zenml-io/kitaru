@@ -105,6 +105,6 @@ The native MCP server can list and filter tags, use existing filtered reads to r
 
 ## Where sessions come from
 
-- **Recorded** — wrap your agent with an adapter and run it as usual. See the [Quickstart](../getting-started/quickstart.md).
+- **Recorded:** wrap your agent with an adapter and run it as usual. See the [adapter overview](../adapters/README.md).
 - **Imported** — bring the traces you already collect. Langfuse stays your system of record; Kitaru gets a runnable copy. See [Import your traces](../getting-started/import-your-traces.md).
 - **Replay** — every replay produces a new session with `origin: replay`, evaluated by the same evaluators as any other session. See [Replay](replay.md).

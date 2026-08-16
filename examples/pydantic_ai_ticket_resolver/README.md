@@ -9,7 +9,7 @@ You can follow either route after setup:
 - **Recommended:** install the Kitaru agent skills and give your coding agent one prompt.
 - **Manual:** use the Kitaru CLI to perform the same operations yourself.
 
-Neither route supplies an answer key. Review the session evidence before you define a problem, assign a verdict, choose cohort members, or write an evaluator.
+Neither walkthrough route reveals or uses the test-only expected outcomes. Review the session evidence before you define a problem, assign a verdict, choose cohort members, or write an evaluator.
 
 Run all commands from `examples/pydantic_ai_ticket_resolver`.
 
@@ -52,6 +52,8 @@ Or select a remote workspace:
 uv run kitaru login https://your-kitaru-workspace.example.com
 uv run kitaru status
 ```
+
+This walkthrough uses stable names and assumes a fresh workspace. Stop if the selected workspace already contains resources from an earlier run. Use another workspace, or, only if every local Kitaru record may be deleted, run `uv run kitaru logout --volumes` before logging in locally again. That command permanently deletes the CLI-managed local PostgreSQL volume.
 
 Confirm the official Langfuse importer and the built-in evaluator catalog:
 
@@ -103,7 +105,10 @@ Imports and deterministic evaluations do not need an OpenAI key. Replays use `op
 For this local walkthrough, open a second terminal in this directory. Export the key in that shell, then start the worker:
 
 ```bash
-export OPENAI_API_KEY="your-openai-key"
+printf 'OpenAI API key: '
+IFS= read -r -s OPENAI_API_KEY
+printf '\n'
+export OPENAI_API_KEY
 uv run kitaru worker start --name returns-example-worker
 ```
 
@@ -381,9 +386,11 @@ Verify the frozen population:
 ```bash
 uv run kitaru cohort version get returns-regression@1
 uv run kitaru session list --cohort returns-regression@1 --size 20
+
+COHORT_REFERENCE="returns-regression@1"
 ```
 
-Create a new cohort version when membership changes. Existing versions remain unchanged.
+Create a new cohort version when membership changes. Existing versions remain unchanged. Set `COHORT_REFERENCE` to the exact accepted version before continuing.
 
 ### 7. Select or create an evaluator
 
@@ -393,7 +400,7 @@ Inspect the installed catalog first:
 uv run kitaru evaluator list
 ```
 
-Use an installed evaluator when it expresses the accepted behavior. Pin its exact version and parameters.
+Use an installed evaluator when it expresses the accepted behavior. Pin its exact version and parameters, then set `BEHAVIOR_EVALUATOR="NAME@VERSION"`.
 
 If no installed evaluator fits, create one narrow evaluator:
 
@@ -486,14 +493,16 @@ uv run kitaru evaluator register \
   --entrypoint evaluate \
   --description "Evaluate the accepted returns behavior from recorded trace evidence." \
   --display-version initial-review
+
+BEHAVIOR_EVALUATOR="returns-behavior@1"
 ```
 
 Run it against the exact cohort and compare its results with the human annotations and verdicts:
 
 ```bash
 uv run kitaru session evaluate \
-  --cohort returns-regression@1 \
-  --evaluator returns-behavior@1 \
+  --cohort "$COHORT_REFERENCE" \
+  --evaluator "$BEHAVIOR_EVALUATOR" \
   --wait
 
 uv run kitaru evaluation list --size 100
@@ -523,6 +532,10 @@ uv run kitaru agent version register \
 
 Record the exact candidate version and source revision. The run spec identifies the command but does not freeze a mutable working tree.
 
+```bash
+CANDIDATE_AGENT="returns-resolver@2"
+```
+
 ### 9. Create one bounded experiment
 
 This example's tools change only an isolated in-memory store. The following explicit passthrough policy is safe for this synthetic agent. Use recorded history with `on_miss=fail` for real side-effecting tools unless live execution is deliberate and approved.
@@ -534,7 +547,7 @@ uv run kitaru experiment create returns-candidate \
   --agent returns-resolver \
   --description "Test one accepted behavior change against the reviewed cohort." \
   --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
-  --evaluator returns-behavior@1 \
+  --evaluator "$BEHAVIOR_EVALUATOR" \
   --evaluator kitaru/tool-health@latest \
   --evaluator kitaru/timing-profile@latest
 ```
@@ -543,7 +556,7 @@ Resolve the immutable cohort-version ID:
 
 ```bash
 COHORT_VERSION_ID="$(
-  uv run kitaru --output json cohort version get returns-regression@1 \
+  uv run kitaru --output json cohort version get "$COHORT_REFERENCE" \
   | jq -r '.item.id'
 )"
 ```
@@ -554,10 +567,16 @@ Start the experiment against the exact candidate version. `--evaluate-baselines`
 uv run kitaru experiment run start \
   returns-candidate \
   --cohort-version "$COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
+  --agent "$CANDIDATE_AGENT" \
   --evaluate-baselines \
   --wait \
   --timeout 1800
+```
+
+Save the experiment-run UUID printed in the receipt:
+
+```bash
+RUN_ID="YOUR_EXPERIMENT_RUN_UUID"
 ```
 
 ### 10. Read the paired evidence
@@ -566,8 +585,8 @@ List runs and inspect the exact run receipt:
 
 ```bash
 uv run kitaru experiment run list --size 20
-uv run kitaru experiment run get YOUR_RUN_UUID
-uv run kitaru experiment run jobs YOUR_RUN_UUID --size 100
+uv run kitaru experiment run get "$RUN_ID"
+uv run kitaru experiment run jobs "$RUN_ID" --size 100
 ```
 
 Inspect replay sessions and their evaluations:

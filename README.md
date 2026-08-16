@@ -123,8 +123,7 @@ run = await client.experiments.start_run(experiment_id, ExperimentRunCreateReque
 ))
 ```
 
-The full walkthrough — same support agent, same ticket — is the
-[Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart).
+The [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) explains the five-step method. The [complete returns-agent tutorial](https://docs.zenml.io/kitaru/tutorials/returns-agent) runs the full import, review, cohort, and replay workflow.
 
 ### Works with your agent SDK
 
@@ -184,7 +183,8 @@ leave your systems. Apache 2.0, no mandatory SaaS control plane.
 | Resource | Description |
 |---|---|
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
-| [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | Record, replay, fork — then cohorts and experiments on real traffic |
+| [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | Understand the Observe, Judge, Define, Replay, Compare method |
+| [Complete tutorial](https://docs.zenml.io/kitaru/tutorials/returns-agent) | Run the full method with a synthetic returns agent |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Start from the history you already have |
 | [No adapter for your framework](https://docs.zenml.io/kitaru/adapters/custom) | Import, build an adapter, or let Kitaru call your agent |
 | [Agent skills](https://docs.zenml.io/kitaru/agent-native/skills) | Teach your coding assistant the loop |
