@@ -84,7 +84,6 @@ The other points at a Python function, as `module:attribute`:
 ```python
 FunctionRunSpec(
     entrypoint="my_service.kitaru_hooks:run_replay",
-    import_deadline_seconds=86400,
 )
 ```
 
@@ -100,9 +99,7 @@ The flow is inverted, and that is the point:
    placeholder**. Evaluations run against the imported content, and the
    replay and experiment settle as normal.
 
-`import_deadline_seconds` bounds step 5. If no import arrives in time the
-replay fails rather than hanging forever — the default is 24 hours, which
-is generous because the import is usually a batch job on your side.
+There is no deadline on step 5. Until the import arrives the replay stays open, visible as a pending replay whose job is still running, and canceling the replay releases it.
 
 The trade-off is honest: you get replay and experiments with no adapter
 and no code change inside the agent, but the fidelity of the replay is

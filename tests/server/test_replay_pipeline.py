@@ -15,7 +15,7 @@
 
 import uuid
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -50,6 +50,7 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
+from kitaru.server.application.models.job import JobFilter
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.session import SessionCreate, SessionUpdate
@@ -64,12 +65,16 @@ from kitaru.server.domain.agent_version import (
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
-from kitaru.server.domain.replay import DuplicateReplayForBaseline
+from kitaru.server.domain.replay import (
+    DuplicateReplayForBaseline,
+    ReplayBaselineNotTerminal,
+)
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import (
     AgentTask,
     CommandAgentTaskDetails,
     EvaluationTask,
+    TaskResultSessionAlreadyLinked,
 )
 from kitaru.server.filtering import FilterCondition
 
@@ -123,6 +128,7 @@ async def _baseline_session(
         agent_id=agent_version.agent_id,
         agent_version_id=agent_version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
         inputs={"q": "hi"},
     )
 
@@ -1564,3 +1570,1062 @@ async def test_finalize_precedence_canceling_beats_failure(
     assert final_run.status is ExperimentRunStatus.CANCELED
     assert counts.failed == 1
     assert counts.canceled == 1
+
+
+async def test_function_mode_run_fan_out_mixed_settlement_and_cancel(
+    services: ReplayServices,
+) -> None:
+    """A function-mode run settles per replay and cancellation drains the rest."""
+    agent_version = await _function_agent_version(services)
+    experiment, _ = await services.experiment_service.create_experiment(
+        ExperimentCreate(name="exp1", agent_id=agent_version.agent_id, evaluators=[]),
+        actor=ACTOR,
+    )
+    sessions = [await _baseline_session(services, agent_version) for _ in range(3)]
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id for session in sessions]
+    )
+    run, _ = await services.experiment_service.start_run(
+        experiment.id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+        ),
+        actor=ACTOR,
+    )
+    bundles, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
+    )
+    completed_replay, failed_replay, open_replay = (bundle.replay for bundle in bundles)
+    for bundle in bundles:
+        job = await services.jobs.get(bundle.replay.job_id)
+        assert job.provisional is True
+
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, completed_placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, completed_replay.job_id, "ext-completed", worker.id
+    )
+    _, failed_placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, failed_replay.job_id, "ext-failed", worker.id
+    )
+    await _run_function_task_to_a_pending_import_placeholder(
+        services, open_replay.job_id, "ext-open", worker.id
+    )
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-completed", worker.id
+    )
+    assert adopted.id == completed_placeholder.id
+    await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    await services.session_service.update_session(
+        failed_placeholder.id,
+        SessionUpdate(status=SessionStatus.FAILED, error="import failed"),
+        actor=ACTOR,
+    )
+
+    mid_run, mid_counts = await services.experiment_run_service.get_run(
+        run.id, actor=ACTOR
+    )
+    assert mid_run.status is ExperimentRunStatus.RUNNING
+    assert mid_counts.completed == 1
+    assert mid_counts.failed == 1
+    assert mid_counts.non_settled == 1
+
+    await _cancel_run(services, run.id)
+
+    final_run, counts = await services.experiment_run_service.get_run(
+        run.id, actor=ACTOR
+    )
+    assert final_run.status is ExperimentRunStatus.CANCELED
+    assert counts.completed == 1
+    assert counts.failed == 1
+    assert counts.canceled == 1
+    open_job = await services.jobs.get(open_replay.job_id)
+    assert open_job.status is JobStatus.CANCELED
+
+
+async def test_function_mode_evaluate_baselines_shares_the_provisional_job(
+    services: ReplayServices,
+) -> None:
+    """Baseline evaluator tasks land in the function replay's provisional job."""
+    agent_version = await _function_agent_version(services)
+    evaluator = await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            evaluate_baselines=True,
+        ),
+        actor=ACTOR,
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.provisional is True
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert len(tasks) == 2
+    baseline_tasks = [task for task in tasks if isinstance(task, EvaluationTask)]
+    assert len(baseline_tasks) == 1
+    assert baseline_tasks[0].input_session_id == baseline.id
+    assert baseline_tasks[0].plugin_version_id == evaluator.id
+    assert baseline_tasks[0].on_failure is TaskOnFailure.ABORT
+
+
+async def test_baseline_evaluator_failure_fails_the_unimported_function_job(
+    services: ReplayServices,
+) -> None:
+    """A baseline evaluator failure fails the job and a later import is a no-op."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            evaluate_baselines=True,
+        ),
+        actor=ACTOR,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_task = next(task for task in tasks if isinstance(task, EvaluationTask))
+    baseline_actor = build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        baseline_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=baseline_actor
+    )
+    await services.task_service.update_task(
+        baseline_task.id,
+        TaskUpdate(status=TaskStatus.FAILED, error="scoring failed"),
+        actor=baseline_actor,
+    )
+
+    job_after = await services.jobs.get(bundle.replay.job_id)
+    assert job_after.status is JobStatus.FAILED
+    assert job_after.error == "scoring failed"
+    replay_after = await services.replays.get(bundle.replay.id)
+    assert replay_after.status is ReplayStatus.FAILED
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    finalized = await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    assert finalized.status is SessionStatus.COMPLETED
+
+    job_unchanged = await services.jobs.get(bundle.replay.job_id)
+    assert job_unchanged.status is JobStatus.FAILED
+    assert job_unchanged.error == "scoring failed"
+    replay_unchanged = await services.replays.get(bundle.replay.id)
+    assert replay_unchanged.status is ReplayStatus.FAILED
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    eval_tasks = [task for task in tasks_after if isinstance(task, EvaluationTask)]
+    assert [task.id for task in eval_tasks] == [baseline_task.id]
+
+
+async def test_import_finalizes_while_a_baseline_evaluator_runs(
+    services: ReplayServices,
+) -> None:
+    """Import finalization appends result evaluators alongside a live baseline one."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            evaluate_baselines=True,
+        ),
+        actor=ACTOR,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_task = next(task for task in tasks if isinstance(task, EvaluationTask))
+    baseline_actor = build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        baseline_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=baseline_actor
+    )
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    job_after_finalize = await services.jobs.get(bundle.replay.job_id)
+    assert job_after_finalize.provisional is False
+    assert not job_after_finalize.settled
+    replay_after_finalize = await services.replays.get(bundle.replay.id)
+    assert replay_after_finalize.status is ReplayStatus.EVALUATING
+    tasks_after_finalize, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    result_task = next(
+        task
+        for task in tasks_after_finalize
+        if isinstance(task, EvaluationTask) and task.id != baseline_task.id
+    )
+    assert result_task.input_session_id == placeholder.id
+    assert result_task.status is TaskStatus.PENDING
+
+    await services.task_service.update_task(
+        baseline_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 0.5}],
+        ),
+        actor=baseline_actor,
+    )
+    job_mid = await services.jobs.get(bundle.replay.job_id)
+    assert not job_mid.settled
+
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    result_actor = build_task_actor(ACTOR.account, result_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        result_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=result_actor
+    )
+    await services.task_service.update_task(
+        result_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=result_actor,
+    )
+
+    job_final = await services.jobs.get(bundle.replay.job_id)
+    assert job_final.status is JobStatus.COMPLETED
+    replay_final = await services.replays.get(bundle.replay.id)
+    assert replay_final.status is ReplayStatus.COMPLETED
+
+
+async def test_function_mode_cancel_while_the_agent_task_is_pending(
+    services: ReplayServices,
+) -> None:
+    """Canceling before the claim settles the provisional job canceled."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+
+    await services.job_service.cancel_job(bundle.replay.job_id, actor=ACTOR)
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.CANCELED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.CANCELED
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert tasks[0].status is TaskStatus.CANCELED
+
+
+async def test_function_mode_cancel_while_the_agent_task_is_running(
+    services: ReplayServices,
+) -> None:
+    """A cancel during the run settles the job once the worker reports canceled."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    function_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=function_actor
+    )
+
+    await services.job_service.cancel_job(bundle.replay.job_id, actor=ACTOR)
+
+    job_mid = await services.jobs.get(bundle.replay.job_id)
+    assert not job_mid.settled
+    stored_task = await services.tasks.get(function_task.id)
+    assert stored_task.status is TaskStatus.RUNNING
+    assert stored_task.cancel_requested_at is not None
+
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.CANCELED), actor=function_actor
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.CANCELED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.CANCELED
+
+
+async def test_function_mode_cancel_between_placeholder_creation_and_completion(
+    services: ReplayServices,
+) -> None:
+    """A cancel racing the completion settles canceled and keeps the placeholder."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    function_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=function_actor
+    )
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=function_actor,
+    )
+
+    await services.job_service.cancel_job(bundle.replay.job_id, actor=ACTOR)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.COMPLETED), actor=function_actor
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.CANCELED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.CANCELED
+    stored_placeholder = await services.sessions.get(placeholder.id)
+    assert stored_placeholder.status is SessionStatus.PENDING_IMPORT
+
+
+async def test_function_mode_cancel_while_awaiting_import_then_import_finalizes(
+    services: ReplayServices,
+) -> None:
+    """Canceling a drained job settles it and a later import finalizes plainly."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    job_open = await services.jobs.get(bundle.replay.job_id)
+    assert not job_open.settled
+
+    await services.job_service.cancel_job(bundle.replay.job_id, actor=ACTOR)
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.CANCELED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.CANCELED
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    finalized = await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    assert finalized.status is SessionStatus.COMPLETED
+
+    job_unchanged = await services.jobs.get(bundle.replay.job_id)
+    assert job_unchanged.status is JobStatus.CANCELED
+    replay_unchanged = await services.replays.get(bundle.replay.id)
+    assert replay_unchanged.status is ReplayStatus.CANCELED
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert not any(isinstance(task, EvaluationTask) for task in tasks_after)
+
+
+async def test_function_mode_cancel_while_evaluating(
+    services: ReplayServices,
+) -> None:
+    """A cancel during evaluation settles the finalized job canceled."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    _, placeholder = await _run_function_task_to_a_pending_import_placeholder(
+        services, bundle.replay.job_id, "ext-1", worker.id
+    )
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    replay_evaluating = await services.replays.get(bundle.replay.id)
+    assert replay_evaluating.status is ReplayStatus.EVALUATING
+
+    await services.job_service.cancel_job(bundle.replay.job_id, actor=ACTOR)
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.CANCELED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.CANCELED
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    eval_task = next(task for task in tasks_after if isinstance(task, EvaluationTask))
+    assert eval_task.status is TaskStatus.CANCELED
+
+
+async def test_function_task_timeout_after_placeholder_creation_fails_the_job(
+    services: ReplayServices,
+) -> None:
+    """A timed-out function task fails the job and a later import is a no-op."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    function_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=function_actor
+    )
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=function_actor,
+    )
+
+    await services.task_service.update_task(
+        function_task.id,
+        TaskUpdate(status=TaskStatus.TIMED_OUT, error="deadline exceeded"),
+        actor=function_actor,
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.FAILED
+    assert job.error == "deadline exceeded"
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.FAILED
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    finalized = await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    assert finalized.status is SessionStatus.COMPLETED
+
+    job_unchanged = await services.jobs.get(bundle.replay.job_id)
+    assert job_unchanged.status is JobStatus.FAILED
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert not any(isinstance(task, EvaluationTask) for task in tasks_after)
+
+
+async def test_requeued_function_task_reclaims_its_placeholder(
+    services: ReplayServices,
+) -> None:
+    """A requeued attempt keeps its placeholder and reclaims it by external id."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    first_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=first_actor
+    )
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=first_actor,
+    )
+
+    stored = await services.tasks.get(function_task.id)
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+    now = datetime.now(UTC)
+    assert await services.task_service.list_stale_task_ids(now) == [function_task.id]
+    await services.task_service.sweep_stale_task(function_task.id, now)
+
+    requeued = await services.tasks.get(function_task.id)
+    assert requeued.status is TaskStatus.PENDING
+    assert requeued.result_session_id == placeholder.id
+    kept = await services.sessions.get(placeholder.id)
+    assert kept.task_id == function_task.id
+    assert kept.status is SessionStatus.PENDING_IMPORT
+
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    second_actor = build_task_actor(ACTOR.account, function_task.id, 2, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=second_actor
+    )
+
+    reclaimed = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=second_actor,
+    )
+    assert reclaimed.id == placeholder.id
+
+    with pytest.raises(TaskResultSessionAlreadyLinked):
+        await services.session_service.create_session(
+            SessionCreate(
+                origin=SessionOrigin.REPLAY,
+                status=SessionStatus.PENDING_IMPORT,
+                external_id="ext-2",
+            ),
+            actor=second_actor,
+        )
+
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.COMPLETED), actor=second_actor
+    )
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.COMPLETED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.COMPLETED
+
+
+async def test_retry_reclaims_a_placeholder_finalized_meanwhile(
+    services: ReplayServices,
+) -> None:
+    """A retry whose placeholder finalized mid-flight completes against it."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    first_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=first_actor
+    )
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=first_actor,
+    )
+
+    stored = await services.tasks.get(function_task.id)
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+    now = datetime.now(UTC)
+    await services.task_service.sweep_stale_task(function_task.id, now)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    second_actor = build_task_actor(ACTOR.account, function_task.id, 2, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=second_actor
+    )
+
+    adopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert adopted.id == placeholder.id
+    await services.session_service.update_session(
+        adopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    reclaimed = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=second_actor,
+    )
+    assert reclaimed.id == placeholder.id
+    assert reclaimed.status is SessionStatus.COMPLETED
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.COMPLETED), actor=second_actor
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.COMPLETED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.COMPLETED
+
+
+async def test_requeued_command_task_discards_its_recording_and_links_fresh(
+    services: ReplayServices,
+) -> None:
+    """A command-mode requeue severs both link directions and attempt 2 links fresh."""
+    agent_version = await _agent_version_with_run_spec(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    command_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    first_actor = build_task_actor(ACTOR.account, command_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        command_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=first_actor
+    )
+    recording = await services.session_service.create_session(
+        SessionCreate(origin=SessionOrigin.REPLAY),
+        actor=first_actor,
+    )
+    assert recording.status is SessionStatus.IN_PROGRESS
+
+    stored = await services.tasks.get(command_task.id)
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+    now = datetime.now(UTC)
+    assert await services.task_service.list_stale_task_ids(now) == [command_task.id]
+    await services.task_service.sweep_stale_task(command_task.id, now)
+
+    requeued = await services.tasks.get(command_task.id)
+    assert requeued.status is TaskStatus.PENDING
+    assert requeued.result_session_id is None
+    discarded = await services.sessions.get(recording.id)
+    assert discarded.task_id is None
+
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    second_actor = build_task_actor(ACTOR.account, command_task.id, 2, worker.id)
+    await services.task_service.update_task(
+        command_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=second_actor
+    )
+    fresh = await services.session_service.create_session(
+        SessionCreate(origin=SessionOrigin.REPLAY),
+        actor=second_actor,
+    )
+    assert fresh.id != recording.id
+    relinked = await services.tasks.get(command_task.id)
+    assert relinked.result_session_id == fresh.id
+
+
+async def test_canceled_replay_retry_still_reclaims_its_placeholder(
+    services: ReplayServices,
+) -> None:
+    """A cancel during a running retry leaves the placeholder reclaim intact."""
+    agent_version = await _function_agent_version(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    first_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=first_actor
+    )
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=first_actor,
+    )
+
+    stored = await services.tasks.get(function_task.id)
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+    await services.task_service.sweep_stale_task(function_task.id, datetime.now(UTC))
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    second_actor = build_task_actor(ACTOR.account, function_task.id, 2, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=second_actor
+    )
+
+    await services.job_service.cancel_job(bundle.replay.job_id, actor=ACTOR)
+
+    reclaimed = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=second_actor,
+    )
+    assert reclaimed.id == placeholder.id
+
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.CANCELED), actor=second_actor
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.CANCELED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.CANCELED
+    kept = await services.sessions.get(placeholder.id)
+    assert kept.status is SessionStatus.PENDING_IMPORT
+    assert kept.task_id == function_task.id
+    tasks_after, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert not any(isinstance(task, EvaluationTask) for task in tasks_after)
+
+
+async def test_import_arriving_before_the_placeholder_reimports_to_complete(
+    services: ReplayServices,
+) -> None:
+    """An import landing before the placeholder exists resolves on a re-import."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    function_task = tasks[0]
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    function_actor = build_task_actor(ACTOR.account, function_task.id, 1, worker.id)
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.RUNNING), actor=function_actor
+    )
+
+    early = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    await services.session_service.update_session(
+        early.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    placeholder = await services.session_service.create_session(
+        SessionCreate(
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="ext-1",
+        ),
+        actor=function_actor,
+    )
+    assert placeholder.id != early.id
+    await services.task_service.update_task(
+        function_task.id, TaskUpdate(status=TaskStatus.COMPLETED), actor=function_actor
+    )
+
+    job_waiting = await services.jobs.get(bundle.replay.job_id)
+    assert job_waiting.provisional is True
+    assert not job_waiting.settled
+
+    readopted = await _adopt_via_import_task(
+        services, agent_version.agent_id, "ext-1", worker.id
+    )
+    assert readopted.id == placeholder.id
+    await services.session_service.update_session(
+        readopted.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.status is JobStatus.COMPLETED
+    replay = await services.replays.get(bundle.replay.id)
+    assert replay.status is ReplayStatus.COMPLETED
+
+
+async def test_two_standalone_function_replays_of_one_baseline_coexist(
+    services: ReplayServices,
+) -> None:
+    """A second standalone replay of one baseline is not a duplicate."""
+    agent_version = await _function_agent_version(services)
+    baseline = await _baseline_session(services, agent_version)
+
+    first = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    second = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+
+    assert first.replay.id != second.replay.id
+    assert first.replay.job_id != second.replay.job_id
+    for bundle in (first, second):
+        job = await services.jobs.get(bundle.replay.job_id)
+        assert job.provisional is True
+
+
+async def test_function_mode_replay_of_an_imported_baseline(
+    services: ReplayServices,
+) -> None:
+    """An imported session replays through a function-mode agent version."""
+    agent_version = await _function_agent_version(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        origin=SessionOrigin.IMPORTED,
+        status=SessionStatus.COMPLETED,
+        inputs={"q": "hi"},
+        imported_from="langfuse",
+        external_id="trace-1",
+    )
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            agent_version_id=agent_version.id,
+            evaluators=[],
+        ),
+        actor=ACTOR,
+    )
+
+    job = await services.jobs.get(bundle.replay.job_id)
+    assert job.provisional is True
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    assert len(tasks) == 1
+    agent_task = tasks[0]
+    assert isinstance(agent_task, AgentTask)
+    assert agent_task.inputs == baseline.inputs
+
+
+async def test_create_replay_rejects_a_pending_import_baseline(
+    services: ReplayServices,
+) -> None:
+    """A baseline still pending import rejects the replay."""
+    agent_version = await _function_agent_version(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        external_id="ext-base",
+    )
+    with pytest.raises(ReplayBaselineNotTerminal):
+        await services.replay_service.create_replay(
+            ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+            actor=ACTOR,
+        )
+
+
+async def test_create_replay_rejects_an_in_progress_baseline(
+    services: ReplayServices,
+) -> None:
+    """A baseline still in progress rejects the replay."""
+    agent_version = await _function_agent_version(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.IN_PROGRESS,
+    )
+    with pytest.raises(ReplayBaselineNotTerminal):
+        await services.replay_service.create_replay(
+            ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+            actor=ACTOR,
+        )
+
+
+async def test_create_replay_accepts_a_failed_baseline(
+    services: ReplayServices,
+) -> None:
+    """A failed baseline is terminal and replays normally."""
+    agent_version = await _function_agent_version(services)
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.FAILED,
+        error="boom",
+    )
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(baseline_session_id=baseline.id, evaluators=[]),
+        actor=ACTOR,
+    )
+    assert bundle.replay.baseline_session_id == baseline.id
+
+
+async def test_start_run_rejects_a_cohort_containing_a_non_terminal_session(
+    services: ReplayServices,
+) -> None:
+    """A non-terminal cohort session aborts the run before anything is created."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
+    terminal_session = await _baseline_session(services, agent_version)
+    non_terminal_session = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.IN_PROGRESS,
+        inputs={"q": "hi"},
+    )
+    cohort_version = await _cohort_version(
+        services,
+        agent_version.agent_id,
+        [terminal_session.id, non_terminal_session.id],
+    )
+
+    with pytest.raises(ReplayBaselineNotTerminal):
+        await services.experiment_service.start_run(
+            experiment_id,
+            ExperimentRunCreate(
+                cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            ),
+            actor=ACTOR,
+        )
+
+    replays, _ = await services.replay_service.list_replays(ReplayFilter(), actor=ACTOR)
+    assert replays == []
+    jobs, _ = await services.job_service.list_jobs(JobFilter(), actor=ACTOR)
+    assert jobs == []
+    tasks, _ = await services.task_service.list_tasks(TaskFilter(), actor=ACTOR)
+    assert tasks == []

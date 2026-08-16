@@ -104,6 +104,18 @@ class DuplicateReplayForBaseline(ConflictError):
         )
 
 
+class ReplayBaselineNotTerminal(ConflictError):
+    """Raised when a replay baseline session is not in a terminal status."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the non-terminal baseline session.
+        """
+        super().__init__(f"Session {session_id} is not in a terminal status")
+
+
 class Replay(DomainModel):
     """Replay."""
 

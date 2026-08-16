@@ -72,6 +72,7 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
                     "agent_id": agent["id"],
                     "agent_version_id": version["id"],
                     "origin": "recorded",
+                    "status": "completed",
                     "inputs": {"q": "hi"},
                     "outputs": None,
                 },
@@ -103,6 +104,8 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
         "experiment_id": experiment["id"],
         "cohort_version_id": cohort_version["id"],
         "agent_version_id": version["id"],
+        "agent_id": agent["id"],
+        "cohort_id": cohort["id"],
     }
 
 
@@ -139,6 +142,45 @@ async def test_start_run_fans_out_one_replay_per_session(
     jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
     assert len(jobs) == 2
     assert all(job["status"] == "pending" for job in jobs)
+
+
+async def test_start_run_with_a_non_terminal_cohort_session_leaves_no_state(
+    client: httpx.AsyncClient,
+) -> None:
+    """A 409 for a non-terminal cohort session persists no run, replays, or tasks."""
+    setup = await _setup_run(client)
+    in_progress = (
+        await client.post(
+            "/v1/sessions",
+            json={
+                "agent_id": setup["agent_id"],
+                "agent_version_id": setup["agent_version_id"],
+                "origin": "recorded",
+                "inputs": {"q": "hi"},
+                "outputs": None,
+            },
+        )
+    ).json()
+    mixed_cohort_version = (
+        await client.post(
+            f"/v1/cohorts/{setup['cohort_id']}/versions",
+            json={"add_session_ids": [in_progress["id"]]},
+        )
+    ).json()
+
+    response = await client.post(
+        f"/v1/experiments/{setup['experiment_id']}/runs",
+        json={
+            "cohort_version_id": mixed_cohort_version["id"],
+            "agent_version_id": setup["agent_version_id"],
+        },
+    )
+    assert response.status_code == 409
+
+    assert (await client.get("/v1/experiment-runs")).json()["items"] == []
+    assert (await client.get("/v1/replays")).json()["items"] == []
+    assert (await client.get("/v1/jobs")).json()["items"] == []
+    assert (await client.get("/v1/tasks")).json()["items"] == []
 
 
 async def test_list_run_jobs_scoped_to_the_run(

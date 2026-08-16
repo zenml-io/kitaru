@@ -29,7 +29,7 @@ from conftest import (
     create_plugin,
     create_session,
 )
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -39,7 +39,7 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent_version import CommandRunSpec
+from kitaru.server.domain.agent_version import CommandRunSpec, FunctionRunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -94,6 +94,7 @@ async def baseline_session_id(services: ReplayServices) -> uuid.UUID:
         agent_id=agent.id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
         inputs={"q": "hi"},
     )
     return session.id
@@ -119,6 +120,69 @@ async def test_create_replay(
     assert body["evaluators"][0]["evaluator"] == "accuracy"
 
 
+async def test_create_replay_with_no_evaluators(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """Create a replay with an empty evaluators list and observe HTTP 201."""
+    response = await client.post(
+        "/v1/replays",
+        json={
+            "baseline_session_id": str(baseline_session_id),
+            "evaluators": [],
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["evaluators"] == []
+
+
+async def test_create_function_mode_replay_reports_pending_status(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """A function-mode replay reads back pending while its provisional job is open."""
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    version = await create_agent_version(
+        services.agent_versions,
+        agent_id=agent.id,
+        owner_id=ACCOUNT.id,
+        run_spec=FunctionRunSpec(entrypoint="pkg.mod:run", timeout_seconds=60),
+    )
+    plugin = await create_plugin(
+        services.plugins, ACCOUNT.id, kind=PluginKind.EVALUATOR, name="accuracy"
+    )
+    blob = await create_blob(services.blobs, ACCOUNT.id, content=b"score")
+    await services.plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=blob.id, entrypoint="score"),
+        display_version=None,
+    )
+    session = await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=agent.id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
+        inputs={"q": "hi"},
+    )
+
+    created = await client.post(
+        "/v1/replays",
+        json={
+            "baseline_session_id": str(session.id),
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert created.status_code == 201
+    body = created.json()
+    assert body["status"] == "pending"
+    assert body["result_session_id"] is None
+
+    response = await client.get(f"/v1/replays/{body['id']}")
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+
 async def test_create_replay_unknown_baseline_session(
     client: httpx.AsyncClient,
 ) -> None:
@@ -131,6 +195,34 @@ async def test_create_replay_unknown_baseline_session(
         },
     )
     assert response.status_code == 404
+
+
+async def test_create_replay_rejects_a_non_terminal_baseline(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Observe HTTP 409 for a non-terminal baseline session."""
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    version = await create_agent_version(
+        services.agent_versions,
+        agent_id=agent.id,
+        owner_id=ACCOUNT.id,
+        run_spec=CommandRunSpec(command="run.sh"),
+    )
+    session = await create_session(
+        services.sessions,
+        ACCOUNT.id,
+        agent_id=agent.id,
+        agent_version_id=version.id,
+        origin=SessionOrigin.RECORDED,
+    )
+    response = await client.post(
+        "/v1/replays",
+        json={
+            "baseline_session_id": str(session.id),
+            "evaluators": [],
+        },
+    )
+    assert response.status_code == 409
 
 
 async def test_get_replay(

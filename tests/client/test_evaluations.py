@@ -96,9 +96,7 @@ async def api_client(
         replay_repository=FakeReplayRepository(),
     )
     evaluation_service = EvaluationService(
-        repository=evaluation_repository,
-        session_repository=session_repository,
-        task_repository=FakeTaskRepository(sessions=session_repository),
+        repository=evaluation_repository, session_repository=session_repository
     )
     tasks = FakeTaskRepository(sessions=session_repository)
     jobs = FakeJobRepository(tasks=tasks)

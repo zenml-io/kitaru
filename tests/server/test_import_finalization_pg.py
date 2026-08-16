@@ -536,6 +536,126 @@ async def test_job_cancel_races_import_finalization() -> None:
                 assert replay.status is ReplayStatus.CANCELED
 
 
+async def test_import_after_a_settled_cancel_finalizes_as_a_noop() -> None:
+    """An adoption and finalization after a settled cancel change nothing."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    async with pg_session_with_engine() as (seed_session, engine):
+        seed = await _seed_static(seed_session)
+        config_id = await _create_config(seed_session, seed, evaluator_count=1)
+        plugins = SQLPluginRepository(seed_session)
+        importer = await plugins.create(
+            Plugin(owner_id=seed.owner.id, kind=PluginKind.IMPORTER, name="langfuse")
+        )
+        importer_version = await plugins.create_version(
+            importer.id, EVALUATOR_SOURCE, display_version=None
+        )
+        payload, _ = await SQLBlobRepository(seed_session).create(
+            Blob(
+                owner_id=seed.owner.id,
+                sha256="0" * 64,
+                size=2,
+                media_type="application/json",
+                data=b"{}",
+            )
+        )
+        numbers = count(1)
+        case = await _seed_replay_case(
+            seed_session,
+            engine,
+            seed,
+            config_id,
+            numbers,
+            task_status=TaskStatus.COMPLETED,
+        )
+        await seed_session.commit()
+        session_factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+
+        result = await _cancel_job(
+            session_factory, engine, case.job_id, asyncio.Barrier(1)
+        )
+        assert result == "ok"
+
+        async with session_factory() as verify:
+            job = await SQLJobRepository(verify).get(case.job_id)
+            assert job.status is JobStatus.CANCELED
+            replay = await SQLReplayRepository(verify).get(case.replay_id)
+            assert replay.status is ReplayStatus.CANCELED
+            placeholder = await SQLSessionRepository(verify, engine).get(
+                case.placeholder_id
+            )
+            external_id = placeholder.external_id
+            assert external_id is not None
+
+        async with session_factory() as session:
+            import_job = await SQLJobRepository(session).create(
+                Job(
+                    owner_id=seed.owner.id,
+                    kind=JobKind.IMPORT,
+                    status=JobStatus.RUNNING,
+                )
+            )
+            now = datetime.now(UTC)
+            import_task = await SQLTaskRepository(session).create(
+                ImportTask(
+                    job_id=import_job.id,
+                    plugin_version_id=importer_version.id,
+                    payload_blob_id=payload.id,
+                    agent_id=seed.agent.id,
+                    status=TaskStatus.RUNNING,
+                    attempt=1,
+                    worker_id=seed.worker.id,
+                    claimed_at=now,
+                    heartbeat_at=now,
+                    started_at=now,
+                )
+            )
+            service = _build_session_service(
+                session, engine, build_event_dispatcher(session, engine)
+            )
+            actor = TaskAuthContext(
+                account=seed.owner,
+                principal=TaskPrincipal(
+                    task_id=import_task.id,
+                    attempt=1,
+                    worker_id=seed.worker.id,
+                    job_id=import_job.id,
+                ),
+            )
+            adopted = await service.create_session(
+                SessionCreate(
+                    origin=SessionOrigin.IMPORTED,
+                    external_id=external_id,
+                    imported_from="langfuse",
+                    inputs={"q": "hi"},
+                    outputs={"answer": "hi"},
+                ),
+                actor,
+            )
+            await session.commit()
+        assert adopted.id == case.placeholder_id
+
+        result = await _finalize_import(
+            session_factory, engine, seed, case.placeholder_id, asyncio.Barrier(1)
+        )
+        assert result == "ok"
+
+        async with session_factory() as verify:
+            job = await SQLJobRepository(verify).get(case.job_id)
+            assert job.status is JobStatus.CANCELED
+            replay = await SQLReplayRepository(verify).get(case.replay_id)
+            assert replay.status is ReplayStatus.CANCELED
+            placeholder = await SQLSessionRepository(verify, engine).get(
+                case.placeholder_id
+            )
+            assert placeholder.status is SessionStatus.COMPLETED
+            tasks = await SQLTaskRepository(verify).list_by_job(case.job_id)
+            assert not any(isinstance(task, EvaluationTask) for task in tasks)
+
+
 async def test_sibling_task_completions_race_settles_job_once() -> None:
     """Two sibling completions settle the job and map the replay exactly once."""
     if not await postgres_available():

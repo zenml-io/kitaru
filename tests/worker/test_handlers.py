@@ -24,6 +24,7 @@ from fakes import (
     as_client,
     make_agent_spec,
     make_evaluator_spec,
+    make_function_agent_spec,
     make_importer_spec,
 )
 
@@ -136,6 +137,23 @@ async def test_agent_handler_omits_the_replay_id_without_one(
     process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
 
     assert "KITARU_REPLAY_ID" not in process.env
+
+
+async def test_agent_handler_function_mode_runs_the_run_agent_module(
+    tmp_path: Path,
+) -> None:
+    """A function agent task runs kitaru.task run-agent with no run-spec env."""
+    task_id = uuid.uuid4()
+    spec = make_function_agent_spec(task_id, extra_env={"KITARU_SESSION_NAME": "run-1"})
+    ctx = _ctx(tmp_path, FakeKitaruAPIClient())
+
+    process = await AgentHandler().prepare(ctx, task_id, spec, "task-token")
+
+    assert process.command == [sys.executable, "-m", "kitaru.task", "run-agent"]
+    assert process.working_dir is None
+    assert process.timeout_seconds == spec.timeout_seconds
+    assert process.env["KITARU_SESSION_NAME"] == "run-1"
+    assert process.env["KITARU_API_TOKEN"] == "task-token"
 
 
 async def test_evaluation_handler_script_plugin_materializes_and_sets_path(

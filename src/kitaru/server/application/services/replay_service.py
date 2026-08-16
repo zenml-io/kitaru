@@ -49,12 +49,17 @@ from kitaru.server.application.services.evaluator_resolution import validate_eva
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.replay import Replay, ReplayAccessDenied
+from kitaru.server.domain.replay import (
+    Replay,
+    ReplayAccessDenied,
+    ReplayBaselineNotTerminal,
+)
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     ReplayConfig,
     default_tool_policy,
 )
+from kitaru.server.domain.session import TERMINAL_SESSION_STATUSES
 from kitaru.server.domain.session_node import SessionNode
 
 
@@ -146,6 +151,8 @@ class ReplayService:
 
         Raises:
             SessionNotFound: No session has the baseline session id.
+            ReplayBaselineNotTerminal: The baseline session is not in a
+                terminal status.
             ValidationError: The baseline session carries no agent version
                 and none was given, the resolved agent version has no run
                 spec, or the config uses cohort-version-scoped history.
@@ -158,6 +165,8 @@ class ReplayService:
             Created replay, paired with its config and result session id.
         """
         baseline = await self._sessions.get(command.baseline_session_id)
+        if baseline.status not in TERMINAL_SESSION_STATUSES:
+            raise ReplayBaselineNotTerminal(baseline.id)
         agent_version_id = command.agent_version_id
         if agent_version_id is None:
             if baseline.agent_version_id is None:

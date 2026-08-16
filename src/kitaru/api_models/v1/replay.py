@@ -58,7 +58,7 @@ class ReplayCreateRequest(RequestModel):
         default=None, description="Tool policy to apply."
     )
     evaluators: list[EvaluatorConfig] = Field(
-        min_length=1, description="Evaluators run against the result session."
+        description="Evaluators run against the result session."
     )
     evaluate_baselines: bool = Field(
         default=False, description="Whether to also score the baseline session."

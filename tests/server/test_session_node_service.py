@@ -47,7 +47,7 @@ from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.session_node import SessionNodeParentNotFound
-from kitaru.server.domain.task import AgentTask
+from kitaru.server.domain.task import AgentTask, ImportTask
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
 
@@ -367,6 +367,22 @@ async def test_ingest_into_pending_import_session_allowed(
     assert len(stored) == 1
 
 
+async def test_ingest_into_a_finalized_replay_placeholder_rejected(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+) -> None:
+    """Reject node ingest into an adopted replay placeholder after it finalizes."""
+    session = await create_session(
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.COMPLETED,
+    )
+    with pytest.raises(Exception, match="does not accept node ingestion"):
+        await service.ingest_nodes(session.id, [_llm_node(0)], actor=ACTOR)
+
+
 async def test_ingest_into_terminal_recorded_session_rejected(
     service: SessionNodeService,
     session_service: SessionService,
@@ -518,6 +534,56 @@ async def test_ingest_nodes_allows_a_task_principal_for_its_own_session(
     assert len(stored) == 1
 
 
+async def test_ingest_nodes_allows_an_import_task_for_a_foreign_placeholder(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Allow an import task principal to ingest into a foreign placeholder."""
+    import_task = await task_repository.create(
+        ImportTask(
+            job_id=uuid.uuid4(),
+            plugin_version_id=uuid.uuid4(),
+            payload_blob_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            attempt=1,
+        )
+    )
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    actor = _task_principal(import_task.id)
+    stored = await service.ingest_nodes(session.id, [_llm_node(0)], actor=actor)
+    assert len(stored) == 1
+
+
+async def test_ingest_nodes_denies_a_non_import_task_for_a_foreign_placeholder(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Reject a non-import task principal ingesting into a foreign placeholder."""
+    agent_task = await task_repository.create(
+        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4(), attempt=1)
+    )
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    actor = _task_principal(agent_task.id)
+    with pytest.raises(SessionAccessDenied):
+        await service.ingest_nodes(session.id, [_llm_node(0)], actor=actor)
+
+
 async def test_get_indexes_by_ids_denies_a_task_principal_for_another_tasks_session(
     service: SessionNodeService, session_repository: FakeSessionRepository
 ) -> None:
@@ -548,6 +614,84 @@ async def test_get_indexes_by_ids_skips_the_ownership_check_for_an_account_princ
     """Preserve the existing empty-dict result for an unknown session id."""
     index_by_id = await service.get_indexes_by_ids(uuid.uuid4(), [], actor=ACTOR)
     assert index_by_id == {}
+
+
+async def test_get_indexes_by_ids_denies_an_import_task_for_a_foreign_placeholder(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Reject an import task principal reading the index of a foreign placeholder."""
+    import_task = await task_repository.create(
+        ImportTask(
+            job_id=uuid.uuid4(),
+            plugin_version_id=uuid.uuid4(),
+            payload_blob_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            attempt=1,
+        )
+    )
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    actor = _task_principal(import_task.id)
+    with pytest.raises(SessionAccessDenied):
+        await service.get_indexes_by_ids(session.id, [], actor=actor)
+
+
+async def test_get_indexes_for_ingest_allows_an_import_task_for_a_foreign_placeholder(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Allow an import task principal to resolve indexes on a foreign placeholder."""
+    import_task = await task_repository.create(
+        ImportTask(
+            job_id=uuid.uuid4(),
+            plugin_version_id=uuid.uuid4(),
+            payload_blob_id=uuid.uuid4(),
+            agent_id=uuid.uuid4(),
+            attempt=1,
+        )
+    )
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    actor = _task_principal(import_task.id)
+    index_by_id = await service.get_indexes_for_ingest(session.id, [], actor=actor)
+    assert index_by_id == {}
+
+
+async def test_get_indexes_for_ingest_denies_a_non_import_task_on_a_placeholder(
+    service: SessionNodeService,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+) -> None:
+    """Reject a non-import task principal resolving indexes on a foreign placeholder."""
+    agent_task = await task_repository.create(
+        AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4(), attempt=1)
+    )
+    session = await create_session(
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        task_id=uuid.uuid4(),
+    )
+    actor = _task_principal(agent_task.id)
+    with pytest.raises(SessionAccessDenied):
+        await service.get_indexes_for_ingest(session.id, [], actor=actor)
 
 
 async def test_list_nodes_denies_a_task_principal_for_another_tasks_session(

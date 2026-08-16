@@ -144,6 +144,7 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
                 "agent_id": agent["id"],
                 "agent_version_id": version["id"],
                 "origin": "recorded",
+                "status": "completed",
                 "inputs": {"q": "hi"},
                 "outputs": None,
             },

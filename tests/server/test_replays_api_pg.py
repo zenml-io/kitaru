@@ -33,7 +33,9 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         yield client
 
 
-async def _setup_replayable_session(client: httpx.AsyncClient) -> tuple[str, str, str]:
+async def _setup_replayable_session(
+    client: httpx.AsyncClient, status: str = "completed"
+) -> tuple[str, str, str]:
     """Create an agent, a runnable version, and a recorded baseline session.
 
     Returns:
@@ -59,6 +61,7 @@ async def _setup_replayable_session(client: httpx.AsyncClient) -> tuple[str, str
                 "agent_id": agent["id"],
                 "agent_version_id": version["id"],
                 "origin": "recorded",
+                "status": status,
                 "inputs": {"q": "hi"},
                 "outputs": None,
             },
@@ -194,6 +197,7 @@ async def test_replay_pipeline_completes_through_the_api(
                 "agent_id": agent_id,
                 "agent_version_id": version_id,
                 "origin": "recorded",
+                "status": "completed",
                 "inputs": {"q": "hi again"},
                 "outputs": None,
             },
@@ -265,28 +269,8 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
     client: httpx.AsyncClient,
 ) -> None:
     """A tool_lookup hit persists once the recorded node is ingested."""
-    _, _, baseline_id = await _setup_replayable_session(client)
+    _, _, baseline_id = await _setup_replayable_session(client, status="in_progress")
     await _register_evaluator(client)
-
-    replay = (
-        await client.post(
-            "/api/v1/replays",
-            json={
-                "baseline_session_id": baseline_id,
-                "evaluators": [{"evaluator": "accuracy"}],
-                "tool_policy": {
-                    "default": {"type": "passthrough"},
-                    "tools": {
-                        "search": {
-                            "type": "history",
-                            "scope": "baseline",
-                            "on_miss": "fail",
-                        }
-                    },
-                },
-            },
-        )
-    ).json()
 
     tool_inputs = {"query": "hi"}
     await client.post(
@@ -307,6 +291,27 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
             ]
         },
     )
+    await client.patch(f"/api/v1/sessions/{baseline_id}", json={"status": "completed"})
+
+    replay = (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": baseline_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+                "tool_policy": {
+                    "default": {"type": "passthrough"},
+                    "tools": {
+                        "search": {
+                            "type": "history",
+                            "scope": "baseline",
+                            "on_miss": "fail",
+                        }
+                    },
+                },
+            },
+        )
+    ).json()
 
     cache_key = compute_tool_cache_key("search", tool_inputs)
     response = await client.post(

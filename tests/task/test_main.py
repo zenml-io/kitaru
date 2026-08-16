@@ -71,7 +71,7 @@ def test_main_missing_task_token_exits_one(
     assert "KITARU_API_TOKEN" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("kind", ["evaluate", "import"])
+@pytest.mark.parametrize("kind", ["evaluate", "import", "run-agent"])
 def test_main_runs_selected_kind(monkeypatch: pytest.MonkeyPatch, kind: str) -> None:
     """Dispatch the requested kind with the client and task id."""
     monkeypatch.setattr("sys.argv", ["kitaru.task", kind])

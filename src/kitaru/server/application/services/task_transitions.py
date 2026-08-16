@@ -51,6 +51,28 @@ def _settlement_outcome(tasks: list[Task]) -> tuple[JobStatus, str | None]:
     return JobStatus.COMPLETED, None
 
 
+def _drained_outcome(
+    job: Job, tasks: list[Task]
+) -> tuple[JobStatus, str | None] | None:
+    """Decide the terminal status of a drained job, or None to leave it unsettled.
+
+    Args:
+        job: Job loaded under its row lock.
+        tasks: Every task of the job, all terminal.
+
+    Returns:
+        Terminal status and error, or None when the job must stay unsettled.
+    """
+    status, error = _settlement_outcome(tasks)
+    if status is JobStatus.COMPLETED and job.provisional:
+        # A provisional job's task set is not final, so a completed
+        # drain does not settle it until it is finalized.
+        if job.cancel_requested_at is None:
+            return None
+        status, error = JobStatus.CANCELED, None
+    return status, error
+
+
 class TaskTransitions:
     """Single write point for task statuses and the job settlement it drives."""
 
@@ -200,13 +222,10 @@ class TaskTransitions:
             return job
         if not tasks or not all(task.terminal for task in tasks):
             return job
-        status, error = _settlement_outcome(tasks)
-        if status is JobStatus.COMPLETED and job.provisional:
-            # A provisional job's task set is not final, so a completed
-            # drain does not settle it until it is finalized.
-            if job.cancel_requested_at is None:
-                return job
-            status, error = JobStatus.CANCELED, None
+        outcome = _drained_outcome(job, tasks)
+        if outcome is None:
+            return job
+        status, error = outcome
         return await self._settle_job(job, status, error, tasks)
 
     async def _settle_job(
@@ -321,11 +340,10 @@ class TaskTransitions:
             tasks = tasks_by_job.get(job_id, [])
             if not tasks or not all(task.terminal for task in tasks):
                 continue
-            status, error = _settlement_outcome(tasks)
-            if status is JobStatus.COMPLETED and job.provisional:
-                if job.cancel_requested_at is None:
-                    continue
-                status, error = JobStatus.CANCELED, None
+            outcome = _drained_outcome(job, tasks)
+            if outcome is None:
+                continue
+            status, error = outcome
             job.settle(status, error, datetime.now(UTC))
             if self._analytics is not None:
                 self._analytics.track(
@@ -379,20 +397,19 @@ class TaskTransitions:
 
         Locks the job's live task rows in one id-ordered acquisition, then
         the job row. A job that still has live tasks takes the same
-        cancellation stamps as a plain job cancel and settles later through
-        their transitions.
+        cancellation stamps as a plain job cancel and settles through
+        their transitions, dropping the error for a cancellation outcome.
 
         Args:
             job_id: Id of the job.
-            error: Error to settle the job with once it is drained.
+            error: Error to settle the job with when already drained.
 
         Raises:
             JobNotFound: No job has this id.
 
         Returns:
-            Job, settled FAILED with ``error`` if this call drained it.
+            Job, settled if this call drained it.
         """
-        now = datetime.now(UTC)
         await self._tasks.lock_by_jobs([job_id])
         job = await self._jobs.get(job_id, exclusive=True)
         if job.settled:
@@ -400,12 +417,8 @@ class TaskTransitions:
         tasks = await self._tasks.list_by_job(job_id)
         if tasks and all(task.terminal for task in tasks):
             return await self._settle_job(job, JobStatus.FAILED, error, tasks)
-        if job.cancel_requested_at is None:
-            job.request_cancel(now)
-            job = await self._jobs.update(job)
-        await self._tasks.stamp_cancel_requested([job_id], now)
-        await self._cancel_pending_tasks([job_id], now)
-        return job
+        await self.request_jobs_cancel([job_id])
+        return await self.settle_job_if_drained(job_id)
 
     def _track_task_terminal(self, task: Task, job: Job) -> None:
         """Track a task's transition to a terminal status by kind.

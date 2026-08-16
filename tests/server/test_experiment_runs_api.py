@@ -32,7 +32,7 @@ from conftest import (
     create_plugin,
     create_session,
 )
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_run_service,
@@ -120,6 +120,7 @@ async def run_setup(services: ReplayServices) -> dict[str, str]:
         agent_id=agent.id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
     )
     cohort = await create_cohort(services.cohorts, ACCOUNT.id, agent.id)
     cohort_version = await create_cohort_version(

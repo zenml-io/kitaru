@@ -35,7 +35,7 @@ from kitaru.api_models.v1.replay import (
     ToolLookupRequest,
 )
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -101,6 +101,7 @@ async def baseline_session_id(services: ReplayServices) -> uuid.UUID:
         agent_id=agent.id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
         inputs={"q": "hi"},
     )
     return session.id

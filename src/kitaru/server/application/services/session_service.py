@@ -96,10 +96,11 @@ class SessionService:
         A task principal's session is linked to the principal's task, which
         must be running. An agent task links exactly one session and gets its
         result session written in the same transaction, an import task links
-        every session it creates. The task is the source of truth for the
-        agent and the agent version. The session takes the next number of
-        its agent, allocated outside the request transaction, so a failed
-        create leaves a gap.
+        every session it creates. A running agent task asking again for its
+        linked session by external id gets it back unchanged. The task is
+        the source of truth for the agent and the agent version. The
+        session takes the next number of its agent, allocated outside the
+        request transaction, so a failed create leaves a gap.
 
         Args:
             command: Fields for the new session.
@@ -138,6 +139,15 @@ class SessionService:
             # the result link.
             task.check_attempt(actor.principal.attempt)
             if isinstance(task, AgentTask) and task.result_session_id is not None:
+                linked = await self._repository.get(task.result_session_id)
+                # A retry keeps its dead attempt's placeholder, so asking
+                # for the same external run returns it unchanged, in
+                # whatever import state it reached in the meantime.
+                if (
+                    command.external_id is not None
+                    and linked.external_id == command.external_id
+                ):
+                    return linked
                 raise TaskResultSessionAlreadyLinked(task.id)
         if isinstance(task, ImportTask) and command.external_id is not None:
             adopted = await self._adopt_placeholder(command, actor)
@@ -293,7 +303,7 @@ class SessionService:
             Stored session.
         """
         session = await self._repository.get(session_id)
-        await check_task_session_read(session, actor, self._tasks)
+        check_task_session_read(session_id, session.task_id, actor)
         return session
 
     async def get_baseline_session(
@@ -320,7 +330,7 @@ class SessionService:
             Baseline session the replay ran against.
         """
         session = await self._repository.get(session_id)
-        await check_task_session_read(session, actor, self._tasks)
+        check_task_session_read(session_id, session.task_id, actor)
         if session.task_id is None:
             raise SessionBaselineNotFound(session_id)
         task = await self._tasks.get(session.task_id)

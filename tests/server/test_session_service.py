@@ -715,6 +715,67 @@ async def test_create_session_in_progress_tracks_nothing(
     assert analytics.tracked == []
 
 
+async def test_create_session_pending_import_tracks_nothing(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Skip tracking when a placeholder is created pending import."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
+        analytics=analytics,
+    )
+    await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.REPLAY,
+            status=SessionStatus.PENDING_IMPORT,
+            external_id="run-1",
+        ),
+        actor=ACTOR,
+    )
+
+    assert analytics.tracked == []
+
+
+async def test_update_session_finalizing_a_placeholder_tracks_session_completed(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Track a session_completed event once when a placeholder finalizes."""
+    analytics = _RecordingAnalytics()
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
+        analytics=analytics,
+    )
+    placeholder = await create_session(
+        repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.PENDING_IMPORT,
+        external_id="run-1",
+    )
+    await service.update_session(
+        placeholder.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+
+    assert len(analytics.tracked) == 1
+    tracked_user_id, tracked_event, tracked_properties = analytics.tracked[0]
+    assert tracked_user_id == ACTOR.account.id
+    assert tracked_event == AnalyticsEvent.SESSION_COMPLETED
+    assert tracked_properties["origin"] == "replay"
+    assert tracked_properties["status"] == "completed"
+
+
 async def test_update_session_transition_with_analytics_none_is_safe(
     service: SessionService,
 ) -> None:
@@ -946,6 +1007,27 @@ async def test_create_session_rejects_a_second_link_to_an_agent_task(
     with pytest.raises(TaskResultSessionAlreadyLinked):
         await service.create_session(
             SessionCreate(origin=SessionOrigin.RECORDED),
+            actor=actor,
+        )
+
+
+async def test_create_session_rejects_an_external_id_the_linked_session_lacks(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """An external id not matching the linked session's does not reclaim it."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    actor = _task_principal(task.id)
+    await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=actor,
+    )
+    with pytest.raises(TaskResultSessionAlreadyLinked):
+        await service.create_session(
+            SessionCreate(origin=SessionOrigin.RECORDED, external_id="ext-1"),
             actor=actor,
         )
 

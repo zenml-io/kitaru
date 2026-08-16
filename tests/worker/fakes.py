@@ -23,6 +23,7 @@ from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, Session
 from kitaru.api_models.v1.task import (
     CommandAgentTaskDetails,
     EvaluationTaskDetails,
+    FunctionAgentTaskDetails,
     ImportTaskDetails,
     PackagePluginSpec,
     PayloadSpec,
@@ -126,6 +127,41 @@ def make_agent_spec(
         env=extra_env or {},
         secret_env=secret_env or {},
         details=CommandAgentTaskDetails(inputs=inputs, replay_id=replay_id),
+    )
+
+
+def make_function_agent_spec(
+    task_id: uuid.UUID,
+    entrypoint: str = "plugin:run",
+    timeout_seconds: int = 30,
+    inputs: Any = None,
+    extra_env: dict[str, str] | None = None,
+    secret_env: dict[str, str] | None = None,
+    replay_id: uuid.UUID | None = None,
+) -> TaskSpecResponse:
+    """Build a function agent task spec.
+
+    Args:
+        task_id: Task the spec belongs to.
+        entrypoint: Run function to load, as module:attribute.
+        timeout_seconds: Process timeout.
+        inputs: Inputs passed to the run function.
+        extra_env: Creator-set environment extras.
+        secret_env: Secrets merged into the process environment.
+        replay_id: Replay the task runs for.
+
+    Returns:
+        Function agent task spec.
+    """
+    return TaskSpecResponse(
+        task_id=task_id,
+        kind=TaskKind.AGENT,
+        timeout_seconds=timeout_seconds,
+        env=extra_env or {},
+        secret_env=secret_env or {},
+        details=FunctionAgentTaskDetails(
+            entrypoint=entrypoint, inputs=inputs, replay_id=replay_id
+        ),
     )
 
 

@@ -85,9 +85,7 @@ async def client(
         )
     )
     evaluation_service = EvaluationService(
-        repository=evaluation_repository,
-        session_repository=session_repository,
-        task_repository=FakeTaskRepository(sessions=session_repository),
+        repository=evaluation_repository, session_repository=session_repository
     )
     agents = FakeAgentRepository()
     tasks = FakeTaskRepository(sessions=session_repository)

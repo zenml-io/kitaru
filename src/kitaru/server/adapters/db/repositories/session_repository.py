@@ -385,9 +385,6 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
                 ),
-                SESSION_PENDING_IMPORT_EXTERNAL_ID_UNIQUE_INDEX: lambda: (
-                    DuplicatePendingImportSession(session.external_id)
-                ),
             }
         )
         return row.to_domain()

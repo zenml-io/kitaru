@@ -5266,7 +5266,6 @@
             "items": {
               "$ref": "#/components/schemas/EvaluatorConfig"
             },
-            "minItems": 1,
             "title": "Evaluators",
             "type": "array"
           },

@@ -397,6 +397,9 @@ class Task(DomainModel):
         self.claimed_at = None
         self.heartbeat_at = None
         self.started_at = None
+
+    def unlink_result_session(self) -> None:
+        """Clear the result session this task produced."""
         self.result_session_id = None
 
     def check_result(self, result: Any) -> None:

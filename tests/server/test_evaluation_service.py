@@ -17,12 +17,7 @@ import uuid
 
 import pytest
 
-from conftest import (
-    FakeEvaluationRepository,
-    FakeSessionRepository,
-    FakeTaskRepository,
-    create_session,
-)
+from conftest import FakeEvaluationRepository, FakeSessionRepository, create_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import (
@@ -62,9 +57,7 @@ def service(
 ) -> EvaluationService:
     """Provide an evaluation service backed by the fake repositories."""
     return EvaluationService(
-        repository=evaluation_repository,
-        session_repository=session_repository,
-        task_repository=FakeTaskRepository(sessions=session_repository),
+        repository=evaluation_repository, session_repository=session_repository
     )
 
 

@@ -444,6 +444,9 @@ class TaskService:
     async def _unlink_result_session(self, task: Task) -> None:
         """Free the result session slot a requeued attempt left behind.
 
+        A pending-import placeholder stays linked. It carries no content
+        from the dead attempt, and the retry gets it back on creation.
+
         Args:
             task: Task about to be requeued.
 
@@ -455,5 +458,8 @@ class TaskService:
         session = await self._sessions.get(
             task.result_session_id, exclusive=True, nowait=True
         )
+        if session.status is SessionStatus.PENDING_IMPORT:
+            return
         session.unlink_task()
         await self._sessions.update(session)
+        task.unlink_result_session()

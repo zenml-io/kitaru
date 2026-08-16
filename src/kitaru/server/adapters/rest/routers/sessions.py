@@ -216,7 +216,7 @@ async def ingest_session_nodes(
     """
     batch = session_node_batch_to_upserts(body)
     nodes = await service.ingest_nodes(session_id, batch, actor=actor)
-    index_by_id = await service.get_indexes_by_ids(
+    index_by_id = await service.get_indexes_for_ingest(
         session_id, referenced_parent_ids(nodes), actor=actor
     )
     return [

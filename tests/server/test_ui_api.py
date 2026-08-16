@@ -151,9 +151,7 @@ async def client(
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
-        repository=evaluation_repository,
-        session_repository=session_repository,
-        task_repository=task_repository,
+        repository=evaluation_repository, session_repository=session_repository
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service

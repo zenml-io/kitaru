@@ -58,6 +58,7 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.replay import ReplayBaselineNotTerminal
 from kitaru.server.domain.replay_config import (
     EvaluatorConfig,
     ReplayConfig,
@@ -66,7 +67,7 @@ from kitaru.server.domain.replay_config import (
     ToolPolicy,
     default_tool_policy,
 )
-from kitaru.server.domain.session import Session
+from kitaru.server.domain.session import TERMINAL_SESSION_STATUSES, Session
 from kitaru.server.filtering import FilterCondition
 from kitaru.server.utils import paginate_all
 
@@ -392,6 +393,8 @@ class ExperimentService:
             AgentVersionNotFound: No agent version has the given id.
             AgentVersionAgentMismatch: The agent version belongs to another
                 agent.
+            ReplayBaselineNotTerminal: A cohort version session is not in a
+                terminal status.
 
         Returns:
             Created run and its replay counts by status.
@@ -415,6 +418,9 @@ class ExperimentService:
         )
         config = await self._repository.get_replay_config(experiment.replay_config_id)
         sessions = await self._resolve_cohort_version_sessions(cohort_version.id)
+        for session in sessions:
+            if session.status not in TERMINAL_SESSION_STATUSES:
+                raise ReplayBaselineNotTerminal(session.id)
 
         number = await self._experiment_runs.get_max_number(experiment_id) + 1
         run = ExperimentRun(

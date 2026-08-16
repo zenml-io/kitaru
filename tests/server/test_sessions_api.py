@@ -162,9 +162,7 @@ async def client(
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
-        repository=evaluation_repository,
-        session_repository=session_repository,
-        task_repository=FakeTaskRepository(sessions=session_repository),
+        repository=evaluation_repository, session_repository=session_repository
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
@@ -259,6 +257,42 @@ async def test_list_sessions_filters_by_origin_and_status(
     items = response.json()["items"]
     assert len(items) == 1
     assert items[0]["status"] == "completed"
+
+
+async def test_create_pending_import_session(client: httpx.AsyncClient) -> None:
+    """A placeholder response carries its pending-import status and external id."""
+    response = await client.post(
+        "/v1/sessions",
+        json=_session_body(
+            origin="replay", status="pending_import", external_id="run-1"
+        ),
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["status"] == "pending_import"
+    assert body["external_id"] == "run-1"
+
+
+async def test_list_sessions_filters_by_pending_import_status(
+    client: httpx.AsyncClient,
+) -> None:
+    """Filter sessions by the pending-import status."""
+    await client.post(
+        "/v1/sessions",
+        json=_session_body(
+            origin="replay", status="pending_import", external_id="run-1"
+        ),
+    )
+    await client.post("/v1/sessions", json=_session_body())
+
+    filter_expression = {"field": "status", "op": "eq", "value": "pending_import"}
+    response = await client.get(
+        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert len(items) == 1
+    assert items[0]["status"] == "pending_import"
 
 
 async def test_list_sessions_filters_by_imported_from_and_external_id(
@@ -924,9 +958,7 @@ def _build_task_scoped_app(
         task_repository=task_repository,
     )
     app.dependency_overrides[get_evaluation_service] = lambda: EvaluationService(
-        repository=evaluation_repository,
-        session_repository=session_repository,
-        task_repository=FakeTaskRepository(sessions=session_repository),
+        repository=evaluation_repository, session_repository=session_repository
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     transport = httpx.ASGITransport(app=app)

@@ -210,7 +210,7 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_node_filter.session_id)
-            await check_task_session_read(session, actor, self._tasks)
+            check_task_session_read(session.id, session.task_id, actor)
         return await self._repository.query(session_node_filter)
 
     async def list_all_nodes(
@@ -238,7 +238,7 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
-            await check_task_session_read(session, actor, self._tasks)
+            check_task_session_read(session_id, session.task_id, actor)
         return await self._repository.list_all(session_id, include_payloads)
 
     async def get_indexes_by_ids(
@@ -268,5 +268,34 @@ class SessionNodeService:
         """
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
-            await check_task_session_read(session, actor, self._tasks)
+            check_task_session_read(session_id, session.task_id, actor)
+        return await self._repository.get_indexes_by_ids(session_id, node_ids)
+
+    async def get_indexes_for_ingest(
+        self,
+        session_id: uuid.UUID,
+        node_ids: Collection[uuid.UUID],
+        actor: AuthContext,
+    ) -> dict[uuid.UUID, int]:
+        """Look up node indexes for an ingest response, keyed by node id.
+
+        Authorized like the ingest itself, so an import task resolves
+        against the pending-import session it fills.
+
+        Args:
+            session_id: Id of the session whose nodes to look up.
+            node_ids: Ids to look up.
+            actor: Caller context.
+
+        Raises:
+            SessionNotFound: A task principal names a session that does not
+                exist.
+            SessionAccessDenied: A task principal does not own the session.
+
+        Returns:
+            Each requested node id mapped to its index, missing ids omitted.
+        """
+        if isinstance(actor.principal, TaskPrincipal):
+            session = await self._sessions.get(session_id)
+            await check_task_session_write(session, actor, self._tasks)
         return await self._repository.get_indexes_by_ids(session_id, node_ids)

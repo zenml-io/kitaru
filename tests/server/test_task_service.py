@@ -1205,6 +1205,25 @@ async def test_fail_job_settles_a_drained_provisional_job_failed() -> None:
     assert failed.error == "external failure"
 
 
+async def test_fail_job_with_pending_tasks_settles_through_their_cancellation() -> None:
+    """Failing a job whose pending tasks cancel in place settles it canceled."""
+    transitions, tasks, jobs = _build_transitions(None)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+    evaluator = await create_evaluation_task(tasks, job.id)
+
+    failed = await transitions.fail_job(job.id, "external failure")
+
+    canceled = await tasks.get(evaluator.id)
+    assert canceled.status is TaskStatus.CANCELED
+    assert failed.status is JobStatus.CANCELED
+    assert failed.settled
+
+
 async def test_fail_job_on_a_settled_job_is_a_no_op() -> None:
     """Failing an already settled job leaves it unchanged."""
     transitions, _tasks, jobs = _build_transitions(None)
@@ -1214,3 +1233,49 @@ async def test_fail_job_on_a_settled_job_is_a_no_op() -> None:
 
     assert result.status is JobStatus.COMPLETED
     assert result.error is None
+
+
+async def test_finalize_job_settlement_tracks_job_completed() -> None:
+    """Track one job_completed event when finalizing settles a provisional job."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+
+    finalized = await transitions.finalize_job(job.id)
+
+    assert finalized.status is JobStatus.COMPLETED
+    job_events = [
+        entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.JOB_COMPLETED
+    ]
+    assert len(job_events) == 1
+    assert job_events[0][2]["status"] == "completed"
+
+
+async def test_settle_jobs_if_drained_canceled_provisional_tracks_job_completed() -> (
+    None
+):
+    """Track one job_completed event when the bulk settle cancels a provisional job."""
+    analytics = _RecordingAnalytics()
+    transitions, tasks, jobs = _build_transitions(analytics)
+    job = await create_job(jobs, ACTOR.account.id, provisional=True)
+    job.request_cancel(datetime.now(UTC))
+    await jobs.update(job)
+    await tasks.create(
+        AgentTask(
+            job_id=job.id, agent_version_id=uuid.uuid4(), status=TaskStatus.COMPLETED
+        )
+    )
+
+    await transitions.settle_jobs_if_drained([job.id])
+
+    assert (await jobs.get(job.id)).status is JobStatus.CANCELED
+    job_events = [
+        entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.JOB_COMPLETED
+    ]
+    assert len(job_events) == 1
+    assert job_events[0][2]["status"] == "canceled"

@@ -81,6 +81,20 @@ async def test_get_job(client: httpx.AsyncClient, services: JobAndTaskServices) 
     assert body["status"] == "pending"
 
 
+async def test_get_job_reports_the_provisional_flag(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """A job response carries the provisional flag."""
+    provisional_job = await create_job(services.jobs, ACCOUNT.id, provisional=True)
+    response = await client.get(f"/v1/jobs/{provisional_job.id}")
+    assert response.status_code == 200
+    assert response.json()["provisional"] is True
+
+    plain_job = await create_job(services.jobs, ACCOUNT.id)
+    response = await client.get(f"/v1/jobs/{plain_job.id}")
+    assert response.json()["provisional"] is False
+
+
 async def test_get_job_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown job id."""
     missing_id = uuid.uuid4()

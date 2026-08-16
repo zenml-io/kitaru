@@ -62,9 +62,7 @@ async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, 
         )
     )
     evaluation_service = EvaluationService(
-        repository=services.evaluations,
-        session_repository=services.sessions,
-        task_repository=services.tasks,
+        repository=services.evaluations, session_repository=services.sessions
     )
     app.dependency_overrides[get_experiment_run_service] = lambda: (
         services.experiment_run_service
@@ -214,6 +212,54 @@ async def test_aggregates_float_evaluations(
             ],
         }
     ]
+
+
+async def test_aggregates_ignore_a_replay_without_a_result_session(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """A replay whose job is still open contributes no result evaluations."""
+    run_id = await _create_run(services)
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    evaluated_replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    await _store_evaluation(
+        services, result, "accuracy", EvaluationDataType.FLOAT, score=1.0
+    )
+    open_job = await create_job(services.jobs, ACCOUNT.id, provisional=True)
+    open_config = await services.experiments.create_replay_config(
+        ReplayConfig(
+            owner_id=ACCOUNT.id, tool_policy=default_tool_policy(), evaluators=[]
+        )
+    )
+    open_replay = await create_replay(
+        services.replays,
+        ACCOUNT.id,
+        job_id=open_job.id,
+        replay_config_id=open_config.id,
+        baseline_session_id=uuid.uuid4(),
+        experiment_run_id=run_id,
+    )
+    await services.tasks.create(
+        AgentTask(job_id=open_replay.job_id, agent_version_id=uuid.uuid4())
+    )
+
+    response = await client.get(
+        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["result"]["count"] == 1
+    values_by_replay = {entry["replay_id"]: entry for entry in aggregate["replays"]}
+    assert values_by_replay[str(evaluated_replay_id)]["result"] == {
+        "score": 1.0,
+        "value": None,
+        "passed": None,
+    }
+    assert values_by_replay[str(open_replay.id)]["result"] is None
 
 
 async def test_aggregates_bool_and_pass_rate(

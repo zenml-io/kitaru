@@ -155,19 +155,28 @@ def test_claim_increments_the_attempt() -> None:
 
 
 def test_requeue_drops_the_attempt_state() -> None:
-    """A requeue clears everything the stale attempt wrote."""
+    """A requeue clears everything the stale attempt wrote except the result link."""
     task = _task(TaskStatus.RUNNING, attempt=1)
     task.worker_id = WORKER_ID
     task.claimed_at = NOW
     task.heartbeat_at = NOW
     task.started_at = NOW
-    task.result_session_id = uuid.uuid4()
+    result_session_id = uuid.uuid4()
+    task.result_session_id = result_session_id
     task.requeue()
     assert task.attempt == 1
     assert task.worker_id is None
     assert task.claimed_at is None
     assert task.heartbeat_at is None
     assert task.started_at is None
+    assert task.result_session_id == result_session_id
+
+
+def test_unlink_result_session_clears_the_link() -> None:
+    """An unlink clears the result session link."""
+    task = _task(TaskStatus.PENDING)
+    task.result_session_id = uuid.uuid4()
+    task.unlink_result_session()
     assert task.result_session_id is None
 
 
