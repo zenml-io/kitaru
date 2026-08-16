@@ -8,7 +8,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-11T09:58:55.985823Z"
+exclude-newer = "2026-08-11T16:17:46.770048Z"
 exclude-newer-span = "P3D"
 
 [options.exclude-newer-package]
@@ -587,15 +587,15 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc4"
+version = "0.22.0rc7"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/2d/d7/12a04b3272a7f865411f416a5389d9ef6f8d3c07b2c75f8f1f12bfb18718/kitaru-0.22.0rc4.tar.gz", hash = "sha256:52ca0ef975d6f6d6a045ecc1face530beef6ce7a87c44899b154457b7bbe84d7", size = 4054947, upload-time = "2026-08-14T08:25:06.602Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/57/cb/4145f43678ce6ff8207f337472c783011335a5e2df0b00215a41ea6b80e4/kitaru-0.22.0rc7.tar.gz", hash = "sha256:98f0b0087cc595dd6aee71a9352ce95c2f30a2bb297a2c4da6064ab17e2b5b9e", size = 4070673, upload-time = "2026-08-14T14:20:45.962Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/fc/0bb2ca03aafa1aacd934707612bbb861971f1fa03b6b60f48685559e8626/kitaru-0.22.0rc4-py3-none-any.whl", hash = "sha256:28837f9623902a3f375f0c9b78fb6e85176f57bf56646c627dba73f210c3568c", size = 2646313, upload-time = "2026-08-14T08:25:04.943Z" },
+    { url = "https://files.pythonhosted.org/packages/24/eb/8b530743a8cb3220ee42d9c779a3261c1c6af28acffe4758c6bd3150d91d/kitaru-0.22.0rc7-py3-none-any.whl", hash = "sha256:ab850bb9725ef072345417b5b8c046fab97c1e3a9b61195cddb4dc08bd26b078", size = 2652883, upload-time = "2026-08-14T14:20:44.398Z" },
 ]
 
 [package.optional-dependencies]
@@ -644,7 +644,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
-    { name = "kitaru", extras = ["cli", "mcp", "worker"], specifier = ">=0.22.0rc4,<0.23" },
+    { name = "kitaru", extras = ["cli", "mcp", "worker"], specifier = ">=0.22.0rc7,<0.23" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], specifier = ">=0.1.0rc0,<0.2" },
     { name = "langfuse", specifier = ">=4.14,<5" },
 ]

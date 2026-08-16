@@ -1,86 +1,75 @@
-# Resolve returns tickets with Kitaru
+# Investigate and improve a PydanticAI agent with Kitaru
 
-This example runs an autonomous returns agent against ten synthetic customer emails. The agent investigates each order, checks the relevant policy or shipment, records a mock action, and drafts the reply. Langfuse captures the real PydanticAI executions, and Kitaru imports them as replayable sessions.
+This example uses an autonomous returns agent to demonstrate the complete Kitaru evidence loop. You import real PydanticAI traces from Langfuse, inspect behavior, record human judgments, freeze reviewed sessions into a cohort, evaluate a candidate, and compare replay evidence.
 
-All customers, orders, shipments, and actions are synthetic. Refund and replacement tools only modify an in-memory store.
+All customers, orders, shipments, and actions are synthetic. Refund and replacement tools modify one isolated in-memory store.
 
-Run every command from `examples/pydantic_ai_ticket_resolver`.
+You can follow either route after setup:
 
-Copy the local environment template before choosing either path:
+- **Recommended:** install the Kitaru agent skills and give your coding agent one prompt.
+- **Manual:** use the Kitaru CLI to perform the same operations yourself.
 
-```bash
-cp .env.example .env
-set -a; source .env; set +a
-```
+Neither route supplies an answer key. Review the session evidence before you define a problem, assign a verdict, choose cohort members, or write an evaluator.
 
-The second command exports the values from `.env` into the current terminal. Run it once in every terminal used for this example.
+Run all commands from `examples/pydantic_ai_ticket_resolver`.
 
-The template contains model and Langfuse settings, which are only required when regenerating the traces. The Kitaru connection comes from the login you choose below. Keep `KITARU_API_URL` and `KITARU_API_KEY` out of `.env` because they override the stored login target and credential.
+## What you will create
 
-## Optional Step 0: Generate real traces
+The walkthrough produces durable Kitaru objects instead of a one-time report:
 
-Add your OpenAI and Langfuse credentials to `.env`.
+| Object | Purpose |
+| --- | --- |
+| Agent version | Identifies the exact registered command and capabilities used for a run. |
+| Imported session | Preserves the Langfuse trace, model calls, tool calls, outputs, cost, tokens, and source identity. |
+| Evaluation | Records one deterministic or custom measurement against a session. |
+| Investigation | Stores an ordered review worklist and fixed questions for each session. |
+| Annotation | Stores a human answer and can point to an exact node, JSON field, or character range. |
+| Verdict | Records the human judgment for the complete session: `acceptable`, `problematic`, or `uncertain`. |
+| Cohort version | Freezes reviewed session membership so later comparisons use the same population. |
+| Evaluator version | Pins the code and parameters that turn an accepted behavior into repeatable measurements. |
+| Experiment run | Replays one candidate across a cohort and keeps every completed, failed, canceled, and missing case visible. |
 
-Generate ten baseline traces:
+## Prepare the example
 
-```bash
-./generate.sh
-```
-
-The script makes real model calls and writes the Langfuse export to `traces/langfuse-traces.jsonl`. It does not connect to Kitaru or create Kitaru resources.
-
-## Step 1: Connect to Kitaru
-
-Install the locked dependencies:
+### 1. Install the locked environment
 
 ```bash
 uv sync
 ```
 
-The example's `pyproject.toml` installs the official Kitaru, `kitaru-pydantic-ai`, PydanticAI OpenAI provider, and Langfuse packages from PyPI. Its `uv.lock` keeps the environment reproducible.
+### 2. Connect to a workspace
 
-Choose one workspace connection.
-
-### Local workspace
-
-Start a CLI-managed local Kitaru workspace and select it for later commands:
+Start and select a CLI-managed local workspace:
 
 ```bash
 uv run kitaru login --local
 uv run kitaru status
 ```
 
-The login command starts the local Kitaru services through Docker and opens the dashboard. The workspace is available at [http://localhost:8000](http://localhost:8000).
-
-### Remote workspace
-
-Log in with the URL shown for your remote Kitaru workspace, then confirm that it is selected:
+Or select a remote workspace:
 
 ```bash
 uv run kitaru login https://your-kitaru-workspace.example.com
 uv run kitaru status
 ```
 
-Interactive login opens the authentication flow in your browser and stores the credential for that workspace.
-
-The server registers Kitaru's official importers and evaluators when it starts. Confirm that the `kitaru/langfuse` importer and the `kitaru/cost`, `kitaru/latency`, and `kitaru/tool-call-patterns` evaluators are available:
+Confirm the official Langfuse importer and the built-in evaluator catalog:
 
 ```bash
 uv run kitaru importer list
 uv run kitaru evaluator list
 ```
 
-## Step 2: Register the baseline agent
+### 3. Register the recorded baseline
 
-The PydanticAI entrypoint is `agent.py`. Each invocation resolves one incoming email without a human turn.
+The public PydanticAI entrypoint is `agent.py`. One invocation resolves one support email with these tools:
 
-- **Purpose:** investigate and resolve returns, refunds, and missing shipments.
-- **Input:** one synthetic support email with a ticket ID, customer identity, subject, and body.
-- **Output:** action, amount, reason, and customer reply.
-- **State:** one isolated in-memory commerce store per invocation.
-- **Tools:** `lookup_order`, `get_return_policy`, `check_shipping`, `issue_refund`, `create_replacement`, and `escalate_to_human`.
-- **MCP servers:** none.
-- **Skills:** none.
+- `lookup_order`
+- `get_return_policy`
+- `check_shipping`
+- `issue_refund`
+- `create_replacement`
+- `escalate_to_human`
 
 Register the baseline:
 
@@ -88,7 +77,7 @@ Register the baseline:
 uv run kitaru agent register \
   returns-resolver \
   --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
-  --description "Resolve one synthetic returns or delivery ticket, execute one mock action, and draft the customer reply." \
+  --description "Resolve one synthetic returns or delivery request, execute one mock action, and draft the customer reply." \
   --display-version baseline-v1 \
   --working-dir ../.. \
   --timeout-seconds 180 \
@@ -100,16 +89,27 @@ uv run kitaru agent register \
   --tool escalate_to_human
 ```
 
-Registration creates the `returns-resolver` agent and version `1`.
+This command creates the agent and its first immutable version. The receipt shows two UUIDs:
 
-## Step 3: Start a worker
+- `Parent ID` identifies the agent across all versions.
+- `Version ID` identifies the exact registered version.
 
-Open a second terminal in this directory and keep the worker active:
+The commands below use `returns-resolver@1`, so you do not need to copy either UUID. If a command or API asks for an agent-version ID, use `Version ID`.
+
+### 4. Start a worker
+
+Imports and deterministic evaluations do not need an OpenAI key. Replays use `openai:gpt-5-nano`, make paid OpenAI API calls, and require `OPENAI_API_KEY`.
+
+For this local walkthrough, open a second terminal in this directory. Export the key in that shell, then start the worker:
 
 ```bash
-uv run kitaru worker start \
-  --name returns-example-worker
+export OPENAI_API_KEY="your-openai-key"
+uv run kitaru worker start --name returns-example-worker
 ```
+
+You can also use a secret manager that injects `OPENAI_API_KEY` into the worker process. For a deployed worker, configure the environment in your deployment system or attach a [Kitaru secret](../../docs/book/deploy/secrets.md) to the agent version.
+
+The worker runs in the foreground. The `starting: {...}` message means that it is ready and waiting for tasks. Leave this terminal open and run the remaining commands in your first terminal. Press Ctrl-C to stop the worker.
 
 Confirm that Kitaru can see it:
 
@@ -117,9 +117,7 @@ Confirm that Kitaru can see it:
 uv run kitaru worker list
 ```
 
-## Step 4: Import the baseline sessions
-
-Import the Langfuse traces under the exact baseline agent version:
+### 5. Import the Langfuse sessions
 
 ```bash
 uv run kitaru session import \
@@ -132,9 +130,7 @@ uv run kitaru session import \
   --wait
 ```
 
-The importer preserves the LLM calls, tool calls, tool results, final resolution, source trace IDs, and baseline agent version.
-
-Check what the import produced:
+Verify the imported population:
 
 ```bash
 uv run kitaru session list \
@@ -143,364 +139,379 @@ uv run kitaru session list \
   --size 20
 ```
 
-## Step 5: Find useful starting points
+## Recommended route: use the Kitaru skills
 
-Run Kitaru's deterministic evaluators across the imported baseline:
+Install the Kitaru skills with the cross-host Agent Skills installer:
+
+```bash
+npx skills add zenml-io/kitaru-skills
+```
+
+Configure the native Kitaru MCP server in `standard` mode. This mode lets the coding agent read sessions and create investigations, annotations, cohorts, evaluators, evaluations, experiments, and runs. It does not expose destructive operations.
+
+Find the executable:
+
+```bash
+uv run which kitaru-mcp
+```
+
+Add it to your coding agent's MCP configuration. Replace the command and server values:
+
+```json
+{
+  "mcpServers": {
+    "kitaru": {
+      "command": "/absolute/path/to/.venv/bin/kitaru-mcp",
+      "args": [
+        "--mode",
+        "standard",
+        "--server",
+        "https://your-kitaru-workspace.example.com"
+      ]
+    }
+  }
+}
+```
+
+Use `http://localhost:8000` for a local workspace. Restart the coding-agent session after you add the MCP server.
+
+Give the coding agent this prompt:
+
+```text
+Use the kitaru-investigation skill to investigate the PydanticAI returns agent
+registered as returns-resolver. Its imported sessions have the tag
+returns-baseline. Assume I am new to Kitaru, explain each concept when it becomes
+useful, and show me the recorded evidence before asking for a judgment. Do not
+use fixture implementation details or test-only expected outcomes as an answer
+key. Ask before creating or changing Kitaru resources. If we agree on a change
+to test, continue with kitaru-replay-experiment and ask before changing code or
+starting paid model calls.
+```
+
+The two named skills divide the work cleanly:
+
+- `kitaru-investigation` discovers behavior, stores human evidence, confirms a cohort, and selects or creates an evaluator.
+- `kitaru-replay-experiment` tests one accepted candidate against exact cohort and evaluator versions.
+
+The skills will pause for human judgments and consequential writes. This is part of the evidence model. An assistant suggestion never becomes a human annotation or verdict without your confirmation.
+
+## Manual route: operate the evidence loop yourself
+
+The manual route uses the same durable objects. Do not copy identifiers from this document. Select sessions from the evidence in your own workspace.
+
+### 1. Survey the population
+
+Run low-cost deterministic evaluators before you decide what is wrong:
 
 ```bash
 uv run kitaru session evaluate \
   --tag returns-baseline \
+  --evaluator kitaru/session-diagnostics@latest \
+  --evaluator kitaru/tool-health@latest \
+  --evaluator kitaru/trajectory-signals@latest \
+  --evaluator kitaru/llm-call-signals@latest \
   --evaluator kitaru/cost@latest \
-  --evaluator kitaru/latency@latest \
-  --evaluator kitaru/tool-call-patterns@latest \
+  --evaluator kitaru/timing-profile@latest \
   --wait
 ```
 
-These evaluators make no model calls. Cost and latency show resource variation, while tool-call patterns expose repeated lookups and different investigation paths.
-
-List the stored results:
+Inspect the resulting measurements:
 
 ```bash
 uv run kitaru evaluation list --size 100
 ```
 
-## Step 6: Record a review
-
-The coding-agent walkthrough selects a diverse review set and conducts the full investigation through Kitaru's MCP server. This manual path records one representative judgment so you can see the underlying data.
-
-Resolve ticket 004 and inspect its nodes:
-
-```bash
-TICKET_004_SESSION_ID="$(
-  uv run kitaru --output json session list \
-    --tag returns-baseline \
-    --origin imported \
-    --size 20 \
-  | jq -r '.items[] | select((.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id) == "ticket-004") | .id'
-)"
-
-uv run kitaru session nodes \
-  "$TICKET_004_SESSION_ID" \
-  --include-payloads \
-  --size 100
-```
-
-Choose the node that contains the accepted `issue_refund` result and store its ID:
-
-```bash
-TICKET_004_REFUND_NODE_ID="YOUR_REFUND_NODE_UUID"
-```
-
-Create a one-session investigation with a keyed session question:
-
-```bash
-INVESTIGATION_ID="$(
-  uv run kitaru --output json investigation create refund-policy-review \
-    --agent returns-resolver \
-    --description "Review whether risky refunds require human approval." \
-    --session "$TICKET_004_SESSION_ID" \
-    --session-question "$TICKET_004_SESSION_ID:outcome=Is this outcome acceptable, problematic, or uncertain, and what should the agent have done instead?" \
-  | jq -r '.item.id'
-)"
-
-INVESTIGATION_SESSION_ID="$(
-  uv run kitaru --output json investigation session list \
-    "$INVESTIGATION_ID" \
-    --size 20 \
-  | jq -r '.items[0].id'
-)"
-```
-
-Store the support lead's rationale and expected action, then record the verdict on the investigation session:
-
-```bash
-uv run kitaru annotation create \
-  --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key outcome \
-  --selector "{\"node_id\":\"$TICKET_004_REFUND_NODE_ID\"}" \
-  --value '"The amount exceeds the automatic approval threshold."'
-
-uv run kitaru annotation create \
-  --investigation-session "$INVESTIGATION_SESSION_ID" \
-  --question-key outcome \
-  --value '{"action":"escalate","reason":"Human approval is required before a refund."}'
-
-uv run kitaru investigation session verdict \
-  "$INVESTIGATION_ID" \
-  "$TICKET_004_SESSION_ID" \
-  problematic
-```
-
-The investigation-session verdict is the classification. The annotations store the rationale, expected action, and exact trace evidence without duplicating that verdict. The guided path repeats this review over a diverse set that it selects from the sessions.
-
-## Step 7: Decide what to improve
-
-The broad evaluators describe the sessions, but they cannot decide what good behavior means for your business. Before creating a cohort, answer these questions:
-
-1. Which agent outcome matters most?
-2. Which observed behavior is unacceptable?
-3. What should the agent have done instead?
-4. Which successful cases must remain correct?
-5. What evidence would be enough to use the candidate version?
-
-For this example, the support lead gives these answers:
-
-- Refunds above the automatic approval threshold must escalate.
-- Refunds on orders with a risk flag must escalate.
-- Valid refunds must remain refunds and cannot exceed the amount paid.
-- Both risky cases must become correct, all control cases must remain correct, and no replay may fail.
-
-The [coding-agent walkthrough](README_AGENT_GUIDED.md) shows how to conduct the same workflow through Kitaru's MCP server. It inspects the traces, asks these questions one at a time, proposes evidence-backed cohort membership, and carries the session IDs into Kitaru. After you approve the behavior brief, it creates and validates the evaluator used by the experiment.
-
-The remaining commands show the same operations manually.
-
-## Step 8: Create a policy evaluator
-
-An evaluator is a Python function that applies the same check to every recorded or replayed session. Here, it turns the support lead's approved rule into one Boolean result named `policy_correct`.
-
-The rubric is observable in the trace:
-
-- **Pass:** the final action, accepted terminal tool call, and refund amount match the reviewed outcome.
-- **Fail:** the action is wrong, a refund has the wrong amount, or conflicting accepted actions occurred. An escalation cannot pass if the agent already issued a refund.
-- **Missing evidence:** fail the evaluation task with a clear error instead of guessing.
-
-Ticket 001 is a passing example because the agent issues the reviewed $98 refund. Ticket 004 is a failing example because it issues $280 above the automatic approval threshold. Ticket 007 is a failing example because it accepts a refund despite an account risk flag.
-
-The starter example does not contain `evaluator.py`. Create the scaffold after agreeing on the rubric:
-
-```bash
-uv run kitaru evaluator scaffold \
-  returns-policy \
-  --path evaluator.py
-```
-
-Replace the scaffold with this implementation:
-
-<details>
-<summary>Show evaluator.py</summary>
-
-```python
-# /// script
-# requires-python = ">=3.11"
-# dependencies = []
-# ///
-"""Evaluate whether a returns resolution follows the reviewed policy."""
-
-import json
-from decimal import Decimal, InvalidOperation
-from typing import Any
-
-from kitaru.api_models.v1.evaluation import EvaluationResult
-from kitaru.api_models.v1.session_node import NodeType
-from kitaru.task.evaluator import SessionView
-
-REVIEWED_OUTCOMES = {
-    "ticket-001": ("refund", Decimal("98.00")),
-    "ticket-002": ("escalate", None),
-    "ticket-003": ("escalate", None),
-    "ticket-004": ("escalate", None),
-    "ticket-005": ("escalate", None),
-    "ticket-006": ("replacement", None),
-    "ticket-007": ("escalate", None),
-    "ticket-008": ("escalate", None),
-    "ticket-009": ("refund", Decimal("80.00")),
-    "ticket-010": ("refund", Decimal("98.00")),
-}
-
-ACTION_TO_TOOL = {
-    "refund": "issue_refund",
-    "replacement": "create_replacement",
-    "escalate": "escalate_to_human",
-}
-
-
-def _get_latest_turn(value: Any, field: str) -> Any:
-    """Unwrap one field from the latest imported turn when present."""
-    if isinstance(value, dict) and isinstance(value.get("turns"), list):
-        turns = value["turns"]
-        if not turns:
-            raise ValueError("The imported session has no turns.")
-        return turns[-1].get(field)
-    return value
-
-
-def _get_resolution(value: Any) -> dict[str, Any]:
-    """Read the native or imported resolution output."""
-    value = _get_latest_turn(value, "outputs")
-    if isinstance(value, str):
-        value = json.loads(value)
-    if not isinstance(value, dict) or not isinstance(value.get("action"), str):
-        raise ValueError("Session outputs do not contain a resolution action.")
-    return value
-
-
-def _get_amount(value: Any) -> Decimal | None:
-    """Parse one optional money amount."""
-    if value is None:
-        return None
-    try:
-        return Decimal(str(value))
-    except InvalidOperation as exc:
-        raise ValueError("The recorded refund amount is invalid.") from exc
-
-
-def _get_accepted_terminal_actions(
-    session: SessionView,
-) -> list[tuple[str, Decimal | None]]:
-    """Read accepted terminal actions from recorded tool nodes."""
-    tool_nodes = [
-        node for node in session.nodes if node.node_type is NodeType.TOOL_CALL
-    ]
-    if not tool_nodes:
-        raise ValueError("Session nodes do not contain tool-call evidence.")
-
-    terminal_tools = set(ACTION_TO_TOOL.values())
-    actions: list[tuple[str, Decimal | None]] = []
-    for node in tool_nodes:
-        if node.tool_name not in terminal_tools:
-            continue
-        output = node.outputs
-        if isinstance(output, str):
-            output = json.loads(output)
-        if isinstance(output, dict) and output.get("accepted") is True:
-            actions.append((node.tool_name, _get_amount(output.get("amount"))))
-    return actions
-
-
-def evaluate(session: SessionView) -> EvaluationResult:
-    """Pass when the reported and accepted actions match the reviewed outcome."""
-    inputs = _get_latest_turn(session.session.inputs, "inputs")
-    if not isinstance(inputs, dict) or not isinstance(inputs.get("ticket_id"), str):
-        raise ValueError("Session inputs do not contain a ticket_id.")
-
-    ticket_id = inputs["ticket_id"]
-    if ticket_id not in REVIEWED_OUTCOMES:
-        raise ValueError(f"No reviewed outcome exists for {ticket_id}.")
-
-    expected_action, expected_amount = REVIEWED_OUTCOMES[ticket_id]
-    resolution = _get_resolution(session.session.outputs)
-    actual_action = resolution["action"]
-    actual_amount = _get_amount(resolution.get("amount"))
-    accepted_actions = _get_accepted_terminal_actions(session)
-    expected_tool = ACTION_TO_TOOL[expected_action]
-    expected_accepted = [(expected_tool, expected_amount)]
-
-    passed = (
-        actual_action == expected_action
-        and (expected_amount is None or actual_amount == expected_amount)
-        and accepted_actions == expected_accepted
-    )
-    return EvaluationResult(
-        name="policy_correct",
-        score=passed,
-        passed=passed,
-        explanation=(
-            f"{ticket_id}: expected {expected_action} via {expected_tool}; "
-            f"observed {actual_action} with accepted actions {accepted_actions}."
-        ),
-    )
-```
-
-</details>
-
-Validate that the file loads and exposes the expected callable:
-
-```bash
-uv run kitaru evaluator test \
-  evaluator.py \
-  --entrypoint evaluate
-```
-
-This command validates loading and the function signature. It does not score a session. The server-side baseline evaluation in the next step checks the behavior against all ten recorded sessions.
-
-Register its first immutable version:
-
-```bash
-uv run kitaru evaluator register \
-  returns-policy \
-  --script evaluator.py \
-  --entrypoint evaluate \
-  --description "Check whether the reported and accepted returns actions match the reviewed policy outcome." \
-  --display-version 1.0
-```
-
-## Step 9: Score the baseline
-
-Apply the policy evaluator to every imported baseline session:
-
-```bash
-uv run kitaru session evaluate \
-  --tag returns-baseline \
-  --evaluator returns-policy@1 \
-  --wait
-```
-
-List the policy results:
-
-```bash
-uv run kitaru evaluation list \
-  --filter '{"field":"name","op":"eq","value":"policy_correct"}' \
-  --size 20
-```
-
-The checked-in baseline contains eight passes and two failures. Tickets 004 and 007 issue refunds where the reviewed policy requires escalation.
-
-## Step 10: Create behavioral cohorts
-
-List the baseline sessions with their ticket IDs and terminal actions:
+Print a compact session inventory:
 
 ```bash
 uv run kitaru --output json session list \
   --tag returns-baseline \
   --origin imported \
   --size 20 \
-  | jq -r '.items[] | [(.inputs.turns[-1].inputs.ticket_id // .inputs.ticket_id), .id, (.outputs.turns[-1].outputs.action // .outputs.action)] | @tsv'
+  | jq -r '.items[] | [.id, .name, .status, .outputs.action, .cost, .llm_call_count, .tool_call_count] | @tsv'
 ```
 
-Create the target cohort from tickets 004 and 007. Replace the placeholders with the listed session IDs:
+Choose a bounded worklist. Include different outcomes and tool paths, operational outliers, and at least one random session. Do not label a session from summary fields alone.
+
+### 2. Inspect complete traces
+
+Set one selected session ID and inspect all nodes with payloads:
 
 ```bash
-uv run kitaru cohort create unsafe-refund-baseline \
+SESSION_ID="YOUR_SESSION_UUID"
+
+uv run kitaru session nodes \
+  "$SESSION_ID" \
+  --include-payloads \
+  --size 100
+```
+
+Record the node IDs that contain useful evidence. A useful highlight can identify a model response, tool input, tool result, or final output.
+
+Inspect each selected trace before you write its question. Give each session a distinct question about a concrete decision, tool interaction, inconsistency, operational signal, or missing piece of evidence visible in that trace. Keep the question neutral. Do not assume an expected outcome or repeat generic wording. The question and each highlight description must make sense in the frontend without this walkthrough as context.
+
+Before you create the investigation, review the complete plan:
+
+| Field | Requirement |
+| --- | --- |
+| Session | Exact session ID and review position. |
+| Selection reason | Evidence-based reason for including this session. |
+| Question | One concise, session-specific question that requires human judgment. |
+| Highlights | Exact nodes or fields that help answer the question without stating the conclusion. |
+
+### 3. Create an investigation
+
+Create the complete fixed worklist in one command. Repeat `--session`, `--session-question`, and optional `--session-highlights` for every selected session:
+
+```bash
+SESSION_A="YOUR_FIRST_SESSION_UUID"
+SESSION_B="YOUR_SECOND_SESSION_UUID"
+NODE_A="A_RELEVANT_NODE_UUID"
+NODE_B="A_RELEVANT_NODE_UUID"
+QUESTION_A="WRITE_A_QUESTION_FROM_SESSION_A_EVIDENCE"
+QUESTION_B="WRITE_A_DIFFERENT_QUESTION_FROM_SESSION_B_EVIDENCE"
+HIGHLIGHTS_A="[{\"selector\":{\"node_id\":\"$NODE_A\"},\"description\":\"DESCRIBE_WHY_THIS_NODE_IS_RELEVANT\"}]"
+HIGHLIGHTS_B="[{\"selector\":{\"node_id\":\"$NODE_B\"},\"description\":\"DESCRIBE_WHY_THIS_NODE_IS_RELEVANT\"}]"
+
+uv run kitaru investigation create returns-discovery \
   --agent returns-resolver \
-  --description "Baseline sessions that refunded despite an approval or risk rule requiring escalation." \
-  --session TICKET_004_SESSION_ID \
-  --session TICKET_007_SESSION_ID
+  --description "Open review of diverse imported returns sessions." \
+  --session "$SESSION_A" \
+  --session-question "$SESSION_A:observation=$QUESTION_A" \
+  --session-highlights "$SESSION_A:observation=$HIGHLIGHTS_A" \
+  --session "$SESSION_B" \
+  --session-question "$SESSION_B:observation=$QUESTION_B" \
+  --session-highlights "$SESSION_B:observation=$HIGHLIGHTS_B"
 ```
 
-Create the control cohort from tickets 001, 009, and 010:
+Save the returned investigation ID. List its ordered review queue:
 
 ```bash
-uv run kitaru cohort create safe-refund-control \
+INVESTIGATION_ID="YOUR_INVESTIGATION_UUID"
+
+uv run kitaru investigation session list \
+  "$INVESTIGATION_ID" \
+  --size 20
+```
+
+Each linked record has its own investigation-session ID. Use that ID when you answer a question.
+
+Open the investigation from the agent's **Investigations** page. The frontend presents each question beside its highlighted trace evidence. Complete the question and verdict for each session there. The persisted answers and verdicts are available to the coding agent and CLI after you finish.
+
+### 4. Store a precise human annotation
+
+An annotation selector can target three levels:
+
+- `node_id` identifies the exact trace node.
+- `path` is an RFC 6901 JSON pointer into the node or session response.
+- `span` identifies a character range inside the string resolved by `path`.
+
+Store your observation against an exact field and character range:
+
+```bash
+INVESTIGATION_SESSION_ID="YOUR_INVESTIGATION_SESSION_UUID"
+EVIDENCE_NODE_ID="YOUR_EVIDENCE_NODE_UUID"
+
+uv run kitaru annotation create \
+  --investigation-session "$INVESTIGATION_SESSION_ID" \
+  --question-key observation \
+  --selector "{\"node_id\":\"$EVIDENCE_NODE_ID\",\"path\":\"/outputs/message\",\"span\":{\"start\":0,\"end\":40}}" \
+  --value '"Write your own observation here."'
+```
+
+Use a node-only selector when the whole node is evidence. Omit the selector when the judgment depends on the complete session.
+
+Record the complete-session verdict separately:
+
+```bash
+uv run kitaru investigation session verdict \
+  "$INVESTIGATION_ID" \
+  "$SESSION_ID" \
+  acceptable
+```
+
+Choose `acceptable`, `problematic`, or `uncertain` from your own review. Leave the verdict unset when you do not have a complete-session judgment.
+
+Repeat the review for the bounded worklist. Then inspect answer and verdict coverage:
+
+```bash
+uv run kitaru investigation get "$INVESTIGATION_ID"
+
+uv run kitaru annotation list \
+  --filter "{\"field\":\"investigation_id\",\"op\":\"eq\",\"value\":\"$INVESTIGATION_ID\"}" \
+  --size 100
+```
+
+Mark the investigation complete only after you accept the current evidence boundary:
+
+```bash
+uv run kitaru investigation update \
+  "$INVESTIGATION_ID" \
+  --status completed
+```
+
+### 5. Define one observable behavior
+
+Use only persisted human observations and confirmed verdicts. Write one binary definition that answers these questions:
+
+1. Under which observable conditions does the behavior matter?
+2. Which recorded agent action passes?
+3. Which recorded agent action fails?
+4. Which external outcome evidence is required?
+5. What happens when evidence is missing?
+6. Which reviewed counterexamples limit the definition?
+
+Keep agent behavior separate from tool or provider failures. Do not claim prevalence from this small adaptive sample.
+
+### 6. Freeze the reviewed population
+
+Before you create a cohort, list the exact included session IDs and the reviewed counterexamples. Confirm the membership, then create an immutable version:
+
+```bash
+uv run kitaru cohort create returns-regression \
   --agent returns-resolver \
-  --description "Valid refund sessions that must remain correct after the policy change." \
-  --session TICKET_001_SESSION_ID \
-  --session TICKET_009_SESSION_ID \
-  --session TICKET_010_SESSION_ID
+  --description "Human-reviewed sessions for one accepted returns behavior." \
+  --display-version initial-review \
+  --session YOUR_REVIEWED_SESSION_UUID \
+  --session YOUR_COUNTEREXAMPLE_SESSION_UUID
 ```
 
-Confirm both immutable snapshots:
+Verify the frozen population:
 
 ```bash
-uv run kitaru session list --cohort unsafe-refund-baseline@1 --size 20
-uv run kitaru session list --cohort safe-refund-control@1 --size 20
+uv run kitaru cohort version get returns-regression@1
+uv run kitaru session list --cohort returns-regression@1 --size 20
 ```
 
-The target cohort captures the behavior that should change. The control cohort captures nearby behavior that must not regress.
+Create a new cohort version when membership changes. Existing versions remain unchanged.
 
-## Step 11: Register an improved agent version
+### 7. Select or create an evaluator
 
-The baseline instructions tell the agent to assume that action tools enforce approval limits. The improved version removes that assumption and requires the agent to inspect risk flags, approval thresholds, final-sale rules, and return windows before calling `issue_refund`.
+Inspect the installed catalog first:
 
-Register the same entrypoint with strict policy instructions enabled:
+```bash
+uv run kitaru evaluator list
+```
+
+Use an installed evaluator when it expresses the accepted behavior. Pin its exact version and parameters.
+
+If no installed evaluator fits, create one narrow evaluator:
+
+```bash
+uv run kitaru evaluator scaffold returns-behavior --path evaluator.py
+```
+
+Replace the scaffolded `evaluator.py` with an implementation of the behavior that you accepted during review. For example, this evaluator checks that the final structured action matches the one accepted terminal tool call:
+
+```python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Evaluate consistency between an accepted action and the final output."""
+
+from typing import Any
+
+from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.session_node import NodeType
+from kitaru.task.evaluator import SessionView
+
+ACTION_BY_TOOL = {
+    "issue_refund": "refund",
+    "create_replacement": "replacement",
+    "escalate_to_human": "escalate",
+}
+
+
+def _get_outputs(value: Any) -> dict[str, Any] | None:
+    """Return final outputs from a native or imported session."""
+    if isinstance(value, dict) and isinstance(value.get("turns"), list):
+        turns = value["turns"]
+        value = turns[-1].get("outputs") if turns else None
+    return value if isinstance(value, dict) else None
+
+
+def evaluate(session: SessionView) -> EvaluationResult:
+    """Check that one accepted terminal tool matches the final action."""
+    accepted_tools = [
+        node.tool_name
+        for node in session.nodes
+        if node.node_type is NodeType.TOOL_CALL
+        and node.tool_name in ACTION_BY_TOOL
+        and isinstance(node.outputs, dict)
+        and node.outputs.get("accepted") is True
+    ]
+    outputs = _get_outputs(session.session.outputs)
+
+    if not accepted_tools or outputs is None:
+        return EvaluationResult(
+            name="terminal_action_consistency",
+            value="unknown",
+            passed=None,
+            explanation="The trace does not contain enough recorded action evidence.",
+        )
+
+    if len(accepted_tools) != 1:
+        return EvaluationResult(
+            name="terminal_action_consistency",
+            value="fail",
+            passed=False,
+            explanation=f"The trace contains {len(accepted_tools)} accepted actions.",
+        )
+
+    accepted_action = ACTION_BY_TOOL[accepted_tools[0]]
+    reported_action = outputs.get("action")
+    passed = reported_action == accepted_action
+    return EvaluationResult(
+        name="terminal_action_consistency",
+        value="pass" if passed else "fail",
+        passed=passed,
+        explanation=(
+            f"Accepted action: {accepted_action!r}; "
+            f"reported action: {reported_action!r}."
+        ),
+    )
+```
+
+This example uses structured output and recorded tool results. It does not search the customer reply for words such as `refund`, and it does not map ticket IDs to expected answers. Adapt the rule to the behavior and missing-evidence policy that you confirmed during review.
+
+Validate and register the implementation:
+
+```bash
+uv run kitaru evaluator test evaluator.py --entrypoint evaluate
+
+uv run kitaru evaluator register \
+  returns-behavior \
+  --script evaluator.py \
+  --entrypoint evaluate \
+  --description "Evaluate the accepted returns behavior from recorded trace evidence." \
+  --display-version initial-review
+```
+
+Run it against the exact cohort and compare its results with the human annotations and verdicts:
+
+```bash
+uv run kitaru session evaluate \
+  --cohort returns-regression@1 \
+  --evaluator returns-behavior@1 \
+  --wait
+
+uv run kitaru evaluation list --size 100
+```
+
+Report measured agreement, disagreements, missing evidence, and held-out coverage. Do not call the evaluator production-ready from a load test or a small reviewed sample.
+
+### 8. Register one candidate
+
+Make one bounded change to the agent after the investigation identifies a behavior worth changing. Register the changed working tree as a new agent version:
 
 ```bash
 uv run kitaru agent version register \
   returns-resolver \
   --command "python -m examples.pydantic_ai_ticket_resolver.agent" \
-  --description "Check approval and risk rules before issuing a refund." \
-  --display-version strict-policy-v2 \
+  --description "Test one investigation-derived behavior change." \
+  --display-version candidate-v1 \
   --working-dir ../.. \
-  --env RETURNS_POLICY_MODE=strict \
   --timeout-seconds 180 \
   --tool lookup_order \
   --tool get_return_policy \
@@ -510,86 +521,56 @@ uv run kitaru agent version register \
   --tool escalate_to_human
 ```
 
-This creates `returns-resolver@2`. The imported sessions remain attached to version 1.
+Record the exact candidate version and source revision. The run spec identifies the command but does not freeze a mutable working tree.
 
-## Step 12: Create the experiment
+### 9. Create one bounded experiment
 
-Create one reusable experiment that records the primary policy result plus the broad guardrails. Kitaru resolves each evaluator reference to an immutable version when it creates the experiment:
+This example's tools change only an isolated in-memory store. The following explicit passthrough policy is safe for this synthetic agent. Use recorded history with `on_miss=fail` for real side-effecting tools unless live execution is deliberate and approved.
+
+Create an experiment with one primary evaluator and two operational protections:
 
 ```bash
-uv run kitaru experiment create \
-  improve-returns-policy \
+uv run kitaru experiment create returns-candidate \
   --agent returns-resolver \
-  --description "Replay policy-risk and valid-refund cohorts with strict refund approval rules." \
+  --description "Test one accepted behavior change against the reviewed cohort." \
   --tool-policy '{"default":{"type":"passthrough"},"tools":{}}' \
-  --evaluator returns-policy@1 \
-  --evaluator kitaru/cost@latest \
-  --evaluator kitaru/latency@latest \
-  --evaluator kitaru/tool-call-patterns@latest
+  --evaluator returns-behavior@1 \
+  --evaluator kitaru/tool-health@latest \
+  --evaluator kitaru/timing-profile@latest
 ```
 
-The mock commerce tools are safe to call again, so the experiment sets passthrough tool policy explicitly. Every replay receives a new isolated in-memory store.
-
-## Step 13: Replay the target and control cohorts
-
-Resolve the two cohort references to the UUIDs required by `experiment run start`:
+Resolve the immutable cohort-version ID:
 
 ```bash
-TARGET_COHORT_VERSION_ID="$(
-  uv run kitaru --output json \
-    cohort version get unsafe-refund-baseline@1 \
-  | jq -r '.item.id'
-)"
-
-CONTROL_COHORT_VERSION_ID="$(
-  uv run kitaru --output json \
-    cohort version get safe-refund-control@1 \
+COHORT_VERSION_ID="$(
+  uv run kitaru --output json cohort version get returns-regression@1 \
   | jq -r '.item.id'
 )"
 ```
 
-Replay the target cohort through agent version 2 and score both the imported baselines and replayed sessions:
+Start the experiment against the exact candidate version. `--evaluate-baselines` applies the same evaluator versions to both sides:
 
 ```bash
 uv run kitaru experiment run start \
-  improve-returns-policy \
-  --cohort-version "$TARGET_COHORT_VERSION_ID" \
+  returns-candidate \
+  --cohort-version "$COHORT_VERSION_ID" \
   --agent returns-resolver@2 \
   --evaluate-baselines \
   --wait \
   --timeout 1800
 ```
 
-Run the same experiment against the control cohort:
+### 10. Read the paired evidence
 
-```bash
-uv run kitaru experiment run start \
-  improve-returns-policy \
-  --cohort-version "$CONTROL_COHORT_VERSION_ID" \
-  --agent returns-resolver@2 \
-  --evaluate-baselines \
-  --wait \
-  --timeout 1800
-```
-
-Each baseline input now has a separate replayed session. Kitaru applies the same resolved policy and guardrail evaluator versions to both sides.
-
-## Step 14: Compare the evidence
-
-List the completed experiment runs:
+List runs and inspect the exact run receipt:
 
 ```bash
 uv run kitaru experiment run list --size 20
-```
-
-Each `experiment run start` receipt prints exact `get` and `jobs` commands in `next_actions`. Run those commands to inspect the replay and evaluator jobs. They have this form:
-
-```bash
 uv run kitaru experiment run get YOUR_RUN_UUID
-uv run kitaru experiment run jobs YOUR_RUN_UUID --size 20
+uv run kitaru experiment run jobs YOUR_RUN_UUID --size 100
 ```
 
-List the replayed sessions and policy evaluations:
+Inspect replay sessions and their evaluations:
 
 ```bash
 uv run kitaru session list \
@@ -597,16 +578,23 @@ uv run kitaru session list \
   --origin replay \
   --size 20
 
-uv run kitaru evaluation list \
-  --filter '{"field":"name","op":"eq","value":"policy_correct"}' \
-  --size 100
+uv run kitaru evaluation list --size 100
 ```
 
-Open the selected workspace's dashboard to compare each imported session with its replay, inspect the changed tool path, and review policy correctness, latency, and tool-call patterns together. The local dashboard is at [http://localhost:8000](http://localhost:8000); use your workspace URL for a remote deployment. The replay uses the same model as the checked-in baseline by default, so latency is comparable unless you override `BASELINE_MODEL`. Replay cost is marked unavailable because the PydanticAI adapter does not currently record provider cost.
+Compare each baseline with its replay. Include evaluator transitions, tool-path changes, cost, tokens, failures, canceled work, and missing results. Keep failed and missing cases visible instead of shrinking the denominator.
 
-The candidate succeeds when tickets 004 and 007 change from policy failure to pass, tickets 001, 009, and 010 remain passes, and every replay completes. Use the comparable latency and tool-path evidence as guardrails; do not interpret unavailable replay cost as zero cost. A failed replay remains useful evidence: inspect it, change the agent again, register another version, and rerun the same immutable experiment and cohort versions.
+Use one evidence conclusion:
 
-## Step 15: Disconnect
+- `improved`
+- `regressed`
+- `trade-off`
+- `inconclusive`
+
+Kitaru supplies the evidence. You make the deployment decision.
+
+## Stop the example
+
+Stop the worker with `Ctrl-C`.
 
 Disconnect from the selected workspace:
 
@@ -614,4 +602,4 @@ Disconnect from the selected workspace:
 uv run kitaru logout
 ```
 
-For a CLI-managed local workspace, this stops its containers and retains the PostgreSQL volume. For a remote workspace, it removes the stored credential without changing the deployment.
+For a CLI-managed local workspace, logout stops its containers and retains the PostgreSQL volume. For a remote workspace, logout removes the stored credential without changing the deployment.

@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -13,6 +14,11 @@ import pytest
 REPOSITORY_ROOT = Path(__file__).parents[2]
 EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "pydantic_ai_ticket_resolver"
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
+TEST_ASSETS_DIR = EXAMPLE_DIR / "tests"
+EVALUATOR_FIXTURE_PATH = TEST_ASSETS_DIR / "canonical_returns_evaluator.py"
+CANDIDATE_AGENT_COMMAND = (
+    "python -m examples.pydantic_ai_ticket_resolver.tests.canonical_returns_agent"
+)
 CLI = Path(sys.executable).with_name("kitaru")
 
 pytestmark = pytest.mark.skipif(
@@ -78,15 +84,9 @@ def _ticket_id(session: dict[str, Any]) -> str:
     return ticket_id
 
 
-def _write_documented_evaluator(path: Path) -> None:
-    """Materialize the evaluator taught by the manual walkthrough."""
-    readme = (EXAMPLE_DIR / "README.md").read_text()
-    marker = '```python\n# /// script\n# requires-python = ">=3.11"'
-    source = (
-        '# /// script\n# requires-python = ">=3.11"'
-        + readme.split(marker, maxsplit=1)[1].split("```", maxsplit=1)[0]
-    )
-    path.write_text(source, encoding="utf-8")
+def _write_test_evaluator(path: Path) -> None:
+    """Copy the test-only evaluator used by the deterministic smoke path."""
+    shutil.copyfile(EVALUATOR_FIXTURE_PATH, path)
 
 
 def _wait_for_worker(name: str, process: subprocess.Popen[str]) -> None:
@@ -349,7 +349,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
             )
 
             evaluator_path = tmp_path / "returns_policy.py"
-            _write_documented_evaluator(evaluator_path)
+            _write_test_evaluator(evaluator_path)
             _cli(
                 "evaluator",
                 "test",
@@ -419,17 +419,13 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "register",
                 "returns-resolver",
                 "--command",
-                "python -m examples.pydantic_ai_ticket_resolver.agent",
+                CANDIDATE_AGENT_COMMAND,
                 "--description",
                 "Check approval and risk rules before issuing a refund.",
                 "--display-version",
                 "strict-policy-v2",
                 "--working-dir",
                 "../..",
-                "--env",
-                "RETURNS_POLICY_MODE=strict",
-                "--env",
-                "KITARU_EXAMPLE_TEST_MODEL=1",
                 "--timeout-seconds",
                 "180",
                 "--tool",
