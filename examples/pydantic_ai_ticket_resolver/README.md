@@ -178,60 +178,14 @@ Use `http://localhost:8000` for a local workspace. Restart the coding-agent sess
 Give the coding agent this prompt:
 
 ```text
-Use the kitaru-investigation skill to investigate and improve the PydanticAI
-returns agent in this repository. The registered agent is returns-resolver and
-the imported population has the tag returns-baseline.
-
-Begin with read-only inspection. Map the public agent entrypoint and the exact
-registered version. Survey the complete imported population with relevant
-built-in deterministic evaluators. Select a bounded, diverse review worklist
-from observed behavior, operational signals, and a random component. Base every
-judgment and cohort proposal on recorded evidence and my decisions. Do not use
-fixture implementation details or a prewritten candidate as an answer key.
-
-Inspect the complete trace for each selected session before you write its
-question. Create one distinct, neutral question per session about a concrete
-decision, tool interaction, inconsistency, operational signal, or missing piece
-of evidence visible in that trace. Make every question concise and
-self-contained so a reviewer can answer it in the Kitaru frontend without this
-chat. Do not assume an expected outcome, reveal a verdict, repeat generic
-wording across sessions, or use fixture knowledge.
-
-Attach neutral highlights to the exact nodes, JSON fields, or character spans
-that help the reviewer answer each question. Give every highlight a specific,
-self-contained description of why that evidence is relevant without stating a
-conclusion. Before you create the investigation, show me the ordered worklist,
-the reason each session was selected, every proposed question, and its
-highlights. Ask me to confirm the complete review plan.
-
-Create one durable Kitaru investigation from the confirmed plan. Give me its
-frontend review link and use the frontend as the primary review path when it is
-available. Ask me to complete the questions and verdicts there. After I return,
-read the persisted annotations and verdicts before you summarize or continue.
-Do not ask the same questions again in chat. If no review link is available,
-review one session at a time in chat. Ask for my observation before proposing a
-hypothesis. Record a whole-session verdict only after I confirm it. Keep answer
-coverage, verdict coverage, and investigation status separate.
-
-After enough open review, synthesize at most three observable behavior
-candidates from persisted human evidence. Include supporting sessions,
-counterexamples, ambiguity, and missing external evidence. Ask me to accept,
-edit, or reject one exact behavior. Before any cohort write, show and ask me to
-confirm its exact membership.
-
-Check the installed evaluator catalog before writing code. If no installed
-evaluator expresses the accepted behavior, create one narrow evaluator that
-uses observable trace evidence and does not map session or ticket identifiers
-to expected answers. Test it, register an immutable version, and report its
-agreement and limitations against the reviewed evidence.
-
-If I want to test a change, continue with the kitaru-replay-experiment skill.
-Show one complete run card with the exact cohort version, candidate agent
-version, evaluator versions and parameters, adapter support, explicit tool
-policy, expected model work, cost uncertainty, and claim limits. Ask before
-remote writes, candidate code changes, or paid replay. Supervise the accepted
-run to a terminal state and report exact paired case evidence as improved,
-regressed, trade-off, or inconclusive. Leave the deployment decision to me.
+Use the kitaru-investigation skill to investigate the PydanticAI returns agent
+registered as returns-resolver. Its imported sessions have the tag
+returns-baseline. Assume I am new to Kitaru, explain each concept when it becomes
+useful, and show me the recorded evidence before asking for a judgment. Do not
+use fixture implementation details or test-only expected outcomes as an answer
+key. Ask before creating or changing Kitaru resources. If we agree on a change
+to test, continue with kitaru-replay-experiment and ask before changing code or
+starting paid model calls.
 ```
 
 The two named skills divide the work cleanly:

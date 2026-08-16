@@ -93,6 +93,8 @@ they belong in `docs/book/`. Do not hand-edit generated reference output.
 
 Only document shipped features.
 
+The canonical returns example in `examples/pydantic_ai_ticket_resolver/` and the Kitaru quickstart describe the same user workflow. When changing the example's commands, fixtures, behavior, terminology, or expected outcomes, inspect and update `docs/book/getting-started/quickstart.md` and `examples/example-coverage.yaml` in the same change when needed. Apply the same check in the other direction when changing the quickstart.
+
 ## Git, Commits, and PRs
 
 - Default branch is `develop`; PRs normally target `develop`. During the v2 migration, v2 feature work may target its explicitly named integration branch.
