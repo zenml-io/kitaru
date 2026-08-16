@@ -16,6 +16,11 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionUpdateRequest,
     InvestigationUpdateRequest,
 )
+from kitaru.api_models.v1.tag import (
+    TagCreateRequest,
+    TagLinkCreateRequest,
+    TagUpdateRequest,
+)
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.common import PageData, ReviewItem
 from kitaru.mcp.models.review import (
@@ -29,6 +34,9 @@ from kitaru.mcp.models.review import (
     ReviewManageRequest,
     ReviewReadRequest,
     SetInvestigationSessionVerdict,
+    TagCreate,
+    TagLink,
+    TagUpdate,
 )
 from kitaru.mcp.tools.registry import build_page_data
 
@@ -109,7 +117,20 @@ async def handle_review_manage(
                 value=request.value,
             )
         )
-    assert isinstance(request, AnnotationUpdate)
-    return await state.client.annotations.update(
-        request.annotation_id, AnnotationUpdateRequest(value=request.value)
+    if isinstance(request, AnnotationUpdate):
+        return await state.client.annotations.update(
+            request.annotation_id, AnnotationUpdateRequest(value=request.value)
+        )
+    if isinstance(request, TagCreate):
+        return await state.client.tags.create(TagCreateRequest(name=request.name))
+    if isinstance(request, TagUpdate):
+        return await state.client.tags.update(
+            request.tag_id, TagUpdateRequest(name=request.name)
+        )
+    assert isinstance(request, TagLink)
+    return await state.client.tags.create_link(
+        request.tag_id,
+        TagLinkCreateRequest(
+            resource_type=request.resource_type, resource_id=request.resource_id
+        ),
     )

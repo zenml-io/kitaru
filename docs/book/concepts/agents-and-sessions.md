@@ -99,7 +99,9 @@ kitaru session list --agent support-agent --origin recorded
 kitaru session nodes <session-id> --include-payloads
 ```
 
-Sessions attach to the rest of the system by reference: a [cohort version](cohorts.md) pins a set of session ids, an [evaluation](evaluators.md) row scores one session, and a [replay](replay.md) points at its baseline session and produces a result session. **Tags** group sessions ad hoc before they graduate into a cohort — apply one to a whole import with `kitaru session import --tag ...`, then select on it anywhere (`kitaru session evaluate --tag ...`, or a `tag` filter on any list).
+Sessions attach to the rest of the system by reference: a [cohort version](cohorts.md) pins a set of session ids, an [evaluation](evaluators.md) row scores one session, and a [replay](replay.md) points at its baseline session and produces a result session. **Tags** group resources ad hoc before they graduate into a cohort or another durable structure. A tag can link to a session, cohort, cohort version, agent version, experiment, or experiment run. Apply one to a whole import with `kitaru session import --tag ...`, then select on it anywhere that resource supports a `tag` filter, such as `kitaru session evaluate --tag ...`.
+
+The native MCP server can list and filter tags, use existing filtered reads to rediscover tagged resources, and create, rename, link, unlink, or delete tags according to its capability mode. It cannot enumerate every link belonging to a tag. Deleting a tag removes all of its resource links; it does not delete the linked resources.
 
 ## Where sessions come from
 

@@ -67,6 +67,7 @@ class CohortVersionCreate(MCPModel):
 
     operation: Literal["create_version"]
     cohort_id: uuid.UUID
+    baseline_id: uuid.UUID | None = None
     add_session_ids: list[uuid.UUID] = Field(default_factory=list)
     remove_session_ids: list[uuid.UUID] = Field(default_factory=list)
     display_version: str | None = None

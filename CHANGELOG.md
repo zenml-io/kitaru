@@ -72,6 +72,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - TypeScript cloud examples now reuse CLI logins without exporting a token, verify dedicated-worker access before creating remote resources, isolate exact-job recovery state, and stop when a mutation or cancellation cannot be journaled safely.
 
 ### Added
+- Standalone replay CLI create, list, and get commands; cohort baseline selection in the CLI and MCP; and native MCP reads for tags and workers plus capability-gated tag lifecycle operations.
 - Vercel AI SDK 7 `ToolLoopAgent` support for typed, non-streaming agent generation with Kitaru recording and safe replay boundaries.
 - The server now serves the bundled Kitaru UI at its root URL with SPA fallback. Setting `KITARU_SERVER_EXTERNAL_UI=true` makes it redirect to the configured dashboard URL instead of serving files, and `GET /v1/info` reports the served UI version.
 - Every filterable entity list filters by `id`, including `in` over a list of ids.
