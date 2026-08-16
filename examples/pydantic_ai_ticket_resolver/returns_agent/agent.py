@@ -7,10 +7,10 @@ from typing import Any
 from pydantic_ai import Agent
 from pydantic_ai.models import KnownModelName, Model
 
-from examples.pydantic_ai_ticket_resolver.models import Resolution, TicketInput
-from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
 from kitaru.task import get_task_inputs
 from kitaru_pydantic_ai import KitaruAgent
+from returns_agent.models import Resolution, TicketInput
+from returns_agent.store import MockCommerceStore
 
 MODEL: KnownModelName = "openai:gpt-5-nano"
 

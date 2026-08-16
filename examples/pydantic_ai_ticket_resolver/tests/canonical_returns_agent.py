@@ -5,13 +5,6 @@ from decimal import Decimal
 from importlib import import_module
 from typing import Any
 
-from examples.pydantic_ai_ticket_resolver.agent import (
-    build_agent,
-    build_prompt,
-    get_ticket_input,
-)
-from examples.pydantic_ai_ticket_resolver.models import TicketInput
-from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
 from pydantic_ai.messages import (
     ModelRequest,
     ModelResponse,
@@ -20,6 +13,13 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models import Model
 from pydantic_ai.models.function import FunctionModel
+from returns_agent.agent import (
+    build_agent,
+    build_prompt,
+    get_ticket_input,
+)
+from returns_agent.models import TicketInput
+from returns_agent.store import MockCommerceStore
 
 from kitaru.task import get_task_inputs
 

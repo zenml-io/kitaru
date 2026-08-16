@@ -1,29 +1,23 @@
 """Contract tests for the canonical returns-resolution example."""
 
-import runpy
 import tomllib
 from decimal import Decimal
 from pathlib import Path
 
-from examples.pydantic_ai_ticket_resolver.agent import (
+from kitaru_langfuse_importer.importer import parse
+from returns_agent.agent import (
     build_agent,
     build_prompt,
     get_ticket_input,
 )
-from examples.pydantic_ai_ticket_resolver.fixtures import CASES
-from examples.pydantic_ai_ticket_resolver.store import MockCommerceStore
+from returns_agent.fixtures import CASES
+from returns_agent.store import MockCommerceStore
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.task.importer import ImportedSession, flatten_nodes
 
-REPOSITORY_ROOT = Path(__file__).parents[1]
-EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "pydantic_ai_ticket_resolver"
+EXAMPLE_DIR = Path(__file__).parents[1]
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
-IMPORTER_PATH = (
-    REPOSITORY_ROOT
-    / "plugins/packages/langfuse-importer/src/kitaru_langfuse_importer/importer.py"
-)
-parse = runpy.run_path(str(IMPORTER_PATH))["parse"]
 
 
 def test_fixture_corpus_contains_ten_distinct_synthetic_inputs() -> None:
@@ -152,6 +146,10 @@ def test_example_declares_its_pypi_dependencies() -> None:
     )
     assert any(
         requirement.startswith("kitaru-pydantic-ai[openai]")
+        for requirement in dependencies
+    )
+    assert any(
+        requirement.startswith("kitaru-langfuse-importer")
         for requirement in dependencies
     )
     assert (EXAMPLE_DIR / "uv.lock").is_file()

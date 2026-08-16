@@ -11,14 +11,11 @@ from typing import Any
 
 import pytest
 
-REPOSITORY_ROOT = Path(__file__).parents[2]
-EXAMPLE_DIR = REPOSITORY_ROOT / "examples" / "pydantic_ai_ticket_resolver"
+EXAMPLE_DIR = Path(__file__).parents[1]
 TRACE_PATH = EXAMPLE_DIR / "traces" / "langfuse-traces.jsonl"
 TEST_ASSETS_DIR = EXAMPLE_DIR / "tests"
 EVALUATOR_FIXTURE_PATH = TEST_ASSETS_DIR / "canonical_returns_evaluator.py"
-CANDIDATE_AGENT_COMMAND = (
-    "python -m examples.pydantic_ai_ticket_resolver.tests.canonical_returns_agent"
-)
+CANDIDATE_AGENT_COMMAND = "python -m tests.canonical_returns_agent"
 CLI = Path(sys.executable).with_name("kitaru")
 
 pytestmark = pytest.mark.skipif(
@@ -116,13 +113,13 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
         "register",
         "returns-resolver",
         "--command",
-        "python -m examples.pydantic_ai_ticket_resolver.agent",
+        "python -m returns_agent.agent",
         "--description",
         "Resolve one synthetic returns or delivery ticket.",
         "--display-version",
         "baseline-v1",
         "--working-dir",
-        "../..",
+        ".",
         "--timeout-seconds",
         "180",
         "--tool",
@@ -425,7 +422,7 @@ def test_canonical_example_completes_import_to_replay(tmp_path: Path) -> None:
                 "--display-version",
                 "strict-policy-v2",
                 "--working-dir",
-                "../..",
+                ".",
                 "--timeout-seconds",
                 "180",
                 "--tool",
