@@ -235,7 +235,7 @@ Three things to get right, because they are where custom importers usually go wr
 - **Decide session boundaries deliberately.** One `ImportedSession` should be one end-to-end run; see [what a session is](../concepts/agents-and-sessions.md). If your source splits a run across records, join them in the parser.
 - **Yield failures, don't raise them.** An exception ends the import; an `ImportFailure` costs you one record and keeps the rest.
 
-The shipped importers are the reference: `plugins/packages/jsonl-importer` is the smallest at under 80 lines, and the Langfuse one shows real normalization. The `kitaru-importer-builder` [agent skill](../agent-native/README.md) exists for this job: it turns a representative export into a locally validated importer, keeps the mapping from source evidence to normalized sessions explicit so you can see what is preserved, approximated, or unavailable, and finishes locally until you approve registration:
+The shipped importers are the reference: `plugins/packages/jsonl-importer` is the smallest at under 80 lines, and the Langfuse one shows real normalization. The `kitaru-importer-builder` [agent skill](../agent-native/setup.md) exists for this job: it turns a representative export into a locally validated importer, keeps the mapping from source evidence to normalized sessions explicit so you can see what is preserved, approximated, or unavailable, and finishes locally until you approve registration:
 
 ```bash
 npx skills add zenml-io/kitaru-skills

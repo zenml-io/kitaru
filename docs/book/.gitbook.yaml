@@ -22,7 +22,7 @@ redirects:
   concepts/how-it-works: concepts/under-the-hood.md
   concepts/harness-runtime-platform: concepts/under-the-hood.md
   getting-started/deploy: deploy/README.md
-  agent-native/claude-code-skill: agent-native/README.md
+  agent-native/claude-code-skill: agent-native/setup.md
   getting-started/end-to-end: getting-started/quickstart.md
   getting-started/examples: getting-started/quickstart.md
   guides/secrets-and-model-registration: deploy/secrets.md
@@ -61,12 +61,12 @@ redirects:
   typescript-sdk: deploy/sdks.md
   getting-started/typescript-sdk: deploy/sdks.md
   adapters/typescript-sdk: deploy/sdks.md
-  getting-started/mcp-server: agent-native/README.md
-  getting-started/skills: agent-native/README.md
-  guides/mcp-server: agent-native/README.md
-  guides/skills: agent-native/README.md
-  agent-native/mcp-server: agent-native/README.md
-  agent-native/skills: agent-native/README.md
+  getting-started/mcp-server: agent-native/setup.md
+  getting-started/skills: agent-native/setup.md
+  guides/mcp-server: agent-native/setup.md
+  guides/skills: agent-native/setup.md
+  agent-native/mcp-server: agent-native/setup.md
+  agent-native/skills: agent-native/setup.md
   getting-started/import-your-traces: getting-started/import-your-traces.md
   getting-started/troubleshooting: getting-started/troubleshooting.md
   getting-started/returns-agent: tutorials/returns-agent/README.md

@@ -17,7 +17,7 @@ Your agent has already been tested thousands of times, in production. Each of th
 Kitaru has both a Python and a TypeScript SDK, and both talk to the same server. The CLI ships with the Python package.
 {% endhint %}
 
-**Kitaru is built to be driven by agents.** The whole product is written for coding assistants as much as for you: the MCP server gives Claude Code, Codex, or Cursor bounded Kitaru operations, the agent skills teach it the procedures, and the CLI speaks JSON. You supply the judgment; your assistant does the legwork. [Set up your coding agent](agent-native/README.md) takes a few minutes.
+**Kitaru is built to be driven by agents.** The whole product is written for coding assistants as much as for you: the MCP server gives Claude Code, Codex, or Cursor bounded Kitaru operations, the agent skills teach it the procedures, and the CLI speaks JSON. You supply the judgment; your assistant does the legwork. [Set up your coding agent](agent-native/setup.md) takes a few minutes.
 
 Kitaru is open source (Apache 2.0) and self-hosted, from the team behind [ZenML](https://zenml.io): ZenML is for ML pipelines, Kitaru is for agents.
 
@@ -69,7 +69,7 @@ Replays, imports, and evaluations all execute offline, on [workers](concepts/wor
 
 - **Self-hosted.** One FastAPI + Postgres server on your infrastructure. Your traces and credentials don't leave your systems.
 - **Beside your observability, not instead of it.** Langfuse, LangSmith, and Braintrust remain where you watch production. Kitaru is where you re-run it.
-- **Choose how you drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/README.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
+- **Choose how you drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/setup.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
 
 ## Next steps
 

@@ -34,7 +34,7 @@ and cannot see. A wrapper that silently misses nested tool calls is worse
 than one that declares the gap.
 
 The fastest path is the `kitaru-adapter-builder`
-[agent skill](../agent-native/README.md), which is built for exactly this:
+[agent skill](../agent-native/setup.md), which is built for exactly this:
 
 ```bash
 npx skills add zenml-io/kitaru-skills

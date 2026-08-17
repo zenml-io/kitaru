@@ -7,7 +7,7 @@
 - [Deploy Kitaru](deploy/README.md)
   - [Docker](deploy/docker.md)
   - [Helm](deploy/helm.md)
-- [Set up your coding agent](agent-native/README.md)
+- [Set up your coding agent](agent-native/setup.md)
 - [Quickstart](getting-started/quickstart.md)
 
 ## Core Concepts

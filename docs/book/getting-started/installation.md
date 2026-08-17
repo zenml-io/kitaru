@@ -38,7 +38,7 @@ pip install "kitaru[cli,worker]" kitaru-pydantic-ai
 | `cli` | The `kitaru` command, the full loop: import, evaluate, cohorts, experiments, workers, jobs |
 | `worker` | Run a worker in this environment (`kitaru worker start`) |
 | `server` | Run the Kitaru server itself from this package |
-| `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/README.md) |
+| `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/setup.md) |
 | `otel` | OpenTelemetry export from the server |
 
 The plain `kitaru` package is the SDK alone (the async client and the API models), which is all a production service needs to record sessions.
@@ -93,7 +93,7 @@ No adapter for your framework? You are not blocked: [import your traces instead,
 
 ## Install the agent skills
 
-Do this now rather than later. Kitaru is a loop with real judgment calls in it: which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result actually supports shipping. The [agent skills](../agent-native/README.md) teach your coding assistant how to make them with you:
+Do this now rather than later. Kitaru is a loop with real judgment calls in it: which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result actually supports shipping. The [agent skills](../agent-native/setup.md) teach your coding assistant how to make them with you:
 
 {% tabs %}
 {% tab title="Any skill-aware host" %}
@@ -112,7 +112,7 @@ npx skills add zenml-io/kitaru-skills
 
 `kitaru-investigation` is the front door: point your assistant at it and it will walk you from the traces you have to a reviewed cohort, choosing the review batch and stopping at checkpoints you can resume from. The others cover [replay experiments](../adapters/README.md), [building an adapter](../adapters/custom.md), and building an importer.
 
-Pair them with the [MCP server](../agent-native/README.md) (`kitaru[mcp]`) so the assistant has bounded operations to go with the method. `kitaru` with no arguments tells you whether the skills are installed.
+Pair them with the [MCP server](../agent-native/setup.md) (`kitaru[mcp]`) so the assistant has bounded operations to go with the method. `kitaru` with no arguments tells you whether the skills are installed.
 
 ## Start a local server
 
