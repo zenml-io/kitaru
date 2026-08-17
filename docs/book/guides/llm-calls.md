@@ -1,5 +1,5 @@
 ---
-description: Every model call recorded: tokens, cost, and call counts on every session, and how to total them across cohorts and experiments.
+description: "Every model call recorded: tokens, cost, and call counts on every session, and how to total them across cohorts and experiments."
 icon: coins
 ---
 

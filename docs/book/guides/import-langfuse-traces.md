@@ -1,5 +1,5 @@
 ---
-description: The importer contract in full: Langfuse JSONL imports, custom importers, dedup semantics, and how imports execute on your worker.
+description: "The importer contract in full: Langfuse JSONL imports, custom importers, dedup semantics, and how imports execute on your worker."
 icon: file-import
 ---
 

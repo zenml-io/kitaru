@@ -1,5 +1,5 @@
 ---
-description: Client-side configuration: servers, environment variables, and the precedence between them.
+description: "Client-side configuration: servers, environment variables, and the precedence between them."
 icon: gear
 ---
 

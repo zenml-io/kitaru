@@ -1,5 +1,5 @@
 ---
-description: Self-host Kitaru for your team: one server, your Postgres, workers in the environments where your agents live.
+description: "Self-host Kitaru for your team: one server, your Postgres, workers in the environments where your agents live."
 icon: server
 ---
 

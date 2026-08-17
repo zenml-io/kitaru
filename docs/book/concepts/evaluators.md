@@ -1,5 +1,5 @@
 ---
-description: Evaluators turn sessions into evaluations: the rows they write. Numbers average, words count, free text gets read.
+description: "Evaluators turn sessions into evaluations: the rows they write. Numbers average, words count, free text gets read."
 icon: chart-line
 ---
 

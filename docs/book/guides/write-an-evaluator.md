@@ -1,5 +1,5 @@
 ---
-description: Turn your domain expert's criteria into a versioned evaluator: code checks, LLM judges, human calibration, and backfilling your history.
+description: "Turn your domain expert's criteria into a versioned evaluator: code checks, LLM judges, human calibration, and backfilling your history."
 icon: chart-line
 ---
 
