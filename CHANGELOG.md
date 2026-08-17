@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Restored the SDK reference docs generator (`scripts/generate_sdk_docs.py`) for the v2 SDK: a reviewed `PUBLIC_API` allowlist over `kitaru.client` and `kitaru.task`, re-enabling `just generate-docs` and the `sdkdocs.kitaru.ai` build and deploy pipeline.
+
 ## [0.22.0rc8]
 
 ### Changed
