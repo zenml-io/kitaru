@@ -22,7 +22,7 @@ redirects:
   concepts/how-it-works: concepts/under-the-hood.md
   concepts/harness-runtime-platform: concepts/under-the-hood.md
   getting-started/deploy: deploy/README.md
-  agent-native/claude-code-skill: agent-native/mcp-server.md
+  agent-native/claude-code-skill: agent-native/README.md
   getting-started/end-to-end: getting-started/quickstart.md
   getting-started/examples: getting-started/quickstart.md
   guides/secrets-and-model-registration: deploy/secrets.md
@@ -60,8 +60,12 @@ redirects:
   # is part of the published URL, so each move needs a redirect).
   typescript-sdk: adapters/typescript-sdk.md
   getting-started/typescript-sdk: adapters/typescript-sdk.md
-  getting-started/mcp-server: agent-native/mcp-server.md
-  getting-started/skills: agent-native/skills.md
+  getting-started/mcp-server: agent-native/README.md
+  getting-started/skills: agent-native/README.md
+  guides/mcp-server: agent-native/README.md
+  guides/skills: agent-native/README.md
+  agent-native/mcp-server: agent-native/README.md
+  agent-native/skills: agent-native/README.md
   getting-started/import-your-traces: getting-started/import-your-traces.md
   getting-started/troubleshooting: getting-started/troubleshooting.md
   getting-started/returns-agent: tutorials/returns-agent/README.md

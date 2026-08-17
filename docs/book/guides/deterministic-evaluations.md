@@ -140,7 +140,7 @@ Start `kitaru-mcp` in `standard` mode. Discover each evaluator parent and exact 
 }
 ```
 
-The tool returns the submitted Job immediately. Read the Job with `kitaru_activity_read`, then use `list_children` with `kind: "job_tasks"` to inspect evaluator task results. See [MCP Server](../agent-native/mcp-server.md) for capability modes and request envelopes.
+The tool returns the submitted Job immediately. Read the Job with `kitaru_activity_read`, then use `list_children` with `kind: "job_tasks"` to inspect evaluator task results. See [MCP Server](../agent-native/README.md) for capability modes and request envelopes.
 
 ## Respect the batch limit
 

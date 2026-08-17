@@ -35,7 +35,7 @@ Both build on [`@zenml-io/kitaru`](typescript-sdk.md), the framework-neutral Typ
 If your framework isn't covered, see [No adapter for your framework](custom.md) for three options available today:
 
 - **Import.** Your framework already emits traces to Langfuse, LangSmith, or Braintrust? [Import them](../getting-started/import-your-traces.md); sessions from imports can be replayed and evaluated like any other. Convert any other format to [Kitaru JSONL](../guides/importing-sessions.md).
-- **Record directly.** Create a session and ingest its nodes with the Python or TypeScript client. The `kitaru-adapter-builder` [agent skill](../agent-native/skills.md) will write that integration with you.
+- **Record directly.** Create a session and ingest its nodes with the Python or TypeScript client. The `kitaru-adapter-builder` [agent skill](../agent-native/README.md) will write that integration with you.
 - **Hand the run back to your own system.** Register the agent version as a function instead of a command, and Kitaru calls you to run it. See [Let Kitaru call your agent](custom.md#let-kitaru-call-your-agent).
 
 ## Why the wrapper is enough

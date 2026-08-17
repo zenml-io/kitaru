@@ -76,6 +76,6 @@ Investigation answers can serve as human labels for [evaluator calibration](../g
 
 Sessions confirmed as failures can also be collected in a [cohort](cohorts.md) and included in later regression experiments.
 
-Over [MCP](../agent-native/mcp-server.md), `kitaru_review_read` and `kitaru_review_manage` let a coding assistant read the review queue, answer questions, and create annotations. A human still decides which sessions to review and what verdict to assign.
+Over [MCP](../agent-native/README.md), `kitaru_review_read` and `kitaru_review_manage` let a coding assistant read the review queue, answer questions, and create annotations. A human still decides which sessions to review and what verdict to assign.
 
 The client mirrors the surface: `client.investigations.*` and `client.annotations.*`.

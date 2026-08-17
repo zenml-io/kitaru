@@ -36,8 +36,6 @@
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
-- [Drive it from your coding agent](agent-native/mcp-server.md)
-- [Agent skills](agent-native/skills.md)
 
 ## Import your traces
 

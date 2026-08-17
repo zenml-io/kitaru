@@ -42,7 +42,7 @@ Some tutorial commands create jobs. The [worker](../../concepts/workers.md) clai
 
 ## Prefer a coding agent?
 
-The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/skills.md) and use the template-specific prompt in the [`kitaru-template` README](https://github.com/zenml-io/kitaru-template#continue-with-a-coding-agent).
+The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/README.md) and use the template-specific prompt in the [`kitaru-template` README](https://github.com/zenml-io/kitaru-template#continue-with-a-coding-agent).
 
 ## Start the investigation
 
