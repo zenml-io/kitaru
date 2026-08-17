@@ -34,7 +34,7 @@ from kitaru.analytics.source import (
 )
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
-from kitaru.server.adapters.db.errors import is_deadlock
+from kitaru.server.adapters.db.errors import is_connection_unavailable, is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -152,22 +152,29 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-def _register_deadlock_exception_handler(app: FastAPI) -> None:
-    """Register the JSON error response for a deadlock-canceled transaction.
+def _register_database_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for a retryable database error.
 
-    Clients receive HTTP 503 with the usual ``detail`` message. Any other
-    database error propagates unchanged.
+    A deadlock-canceled transaction and a lost or unavailable connection both
+    yield HTTP 503 with a ``detail`` message. Any other database error
+    propagates unchanged.
 
     Args:
         app: FastAPI application that will serve the v1 API.
     """
 
     @app.exception_handler(DBAPIError)
-    async def deadlock(request: Request, exc: DBAPIError) -> JSONResponse:
+    async def database_error(request: Request, exc: DBAPIError) -> JSONResponse:
         _ = request
-        if not is_deadlock(exc):
-            raise exc
-        return JSONResponse(status_code=503, content={"detail": "Deadlock detected"})
+        if is_deadlock(exc):
+            return JSONResponse(
+                status_code=503, content={"detail": "Deadlock detected"}
+            )
+        if is_connection_unavailable(exc):
+            return JSONResponse(
+                status_code=503, content={"detail": "Database connection unavailable"}
+            )
+        raise exc
 
 
 def _register_pool_timeout_exception_handler(app: FastAPI) -> None:
@@ -318,7 +325,7 @@ def create_app(settings: APISettings) -> FastAPI:
     # Replaced with the persisted server id at startup.
     app.state.server_id = None
     _register_domain_exception_handlers(app)
-    _register_deadlock_exception_handler(app)
+    _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)
     _register_token_grant_exception_handler(app)
     app.middleware("http")(_set_analytics_attribution)
