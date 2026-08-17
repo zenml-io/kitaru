@@ -572,6 +572,18 @@ def _join_value(
     return next(iter(values)), selector, False
 
 
+def _get_unwrap_root_names(params: dict[str, Any]) -> set[str]:
+    """Return validated observation names whose trace roots should be omitted."""
+    value = params.get("unwrap_root_names")
+    if value is None:
+        return set()
+    if not isinstance(value, list):
+        raise InvalidImport("unwrap_root_names must be an array of strings")
+    if any(not isinstance(item, str) or not item.strip() for item in value):
+        raise InvalidImport("unwrap_root_names must contain only non-empty strings")
+    return {item.strip() for item in value}
+
+
 def _metadata_value(record: dict[str, Any], *keys: str) -> Any:
     """Return the first non-empty value from Langfuse metadata layers."""
     metadata = _dict(record.get("metadata"))
@@ -994,6 +1006,8 @@ class LangfuseJSONLImporter:
         warnings: list[str] = []
         if trace_fallback:
             warnings.append("No Langfuse session id found; grouped by trace id")
+        unwrap_root_names = _get_unwrap_root_names(params)
+        unwrapped_root_names: set[str] = set()
         raw_nodes: list[tuple[str, str | None, dict[str, Any]]] = []
         turns: list[_Turn] = []
         trace_names: list[str] = []
@@ -1025,6 +1039,23 @@ class LangfuseJSONLImporter:
                 )
             root = roots[0] if roots else (ordered[0] if ordered else {})
             root_by_trace[trace_id] = root
+            child_counts: dict[str, int] = defaultdict(int)
+            for record in ordered:
+                parent = _first(record, "parentObservationId", "parent_observation_id")
+                if parent is not None:
+                    child_counts[str(parent)] += 1
+            unwrapped_root_ids = {
+                str(candidate["id"])
+                for candidate in roots
+                if candidate.get("id") is not None
+                and str(candidate.get("name") or "") in unwrap_root_names
+                and child_counts[str(candidate["id"])] > 0
+            }
+            unwrapped_root_names.update(
+                str(candidate.get("name"))
+                for candidate in roots
+                if str(candidate.get("id") or "") in unwrapped_root_ids
+            )
             turn_input = _decode_json(_first(root, "traceInput", "input"))
             turn_output = _decode_json(_first(root, "traceOutput", "output"))
             trace_start = min(
@@ -1061,12 +1092,20 @@ class LangfuseJSONLImporter:
                     raise InvalidImport(
                         f"Trace '{trace_id}' contains an observation without an id"
                     )
+                if observation_id in unwrapped_root_ids:
+                    continue
                 parent = _first(record, "parentObservationId", "parent_observation_id")
                 parent_id = str(parent) if parent is not None else None
                 parent_source_id = (
-                    f"{trace_id}:{parent_id}" if parent_id in ids else None
+                    f"{trace_id}:{parent_id}"
+                    if parent_id in ids and parent_id not in unwrapped_root_ids
+                    else None
                 )
-                if parent and parent_source_id is None:
+                if (
+                    parent
+                    and parent_source_id is None
+                    and parent_id not in unwrapped_root_ids
+                ):
                     warnings.append(
                         f"Observation '{observation_id}' references a missing parent"
                     )
@@ -1190,6 +1229,7 @@ class LangfuseJSONLImporter:
             "langfuse.session_id": source_id,
             "langfuse.trace_ids": [turn.trace_id for turn in turns],
             "langfuse.join_paths": sorted(join_paths),
+            "langfuse.unwrapped_root_names": sorted(unwrapped_root_names),
             "langfuse.environments": sorted(
                 {
                     str(value)

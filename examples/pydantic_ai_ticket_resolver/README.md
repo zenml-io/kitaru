@@ -130,7 +130,7 @@ uv run kitaru session import \
   --importer kitaru/langfuse@latest \
   --agent returns-resolver@1 \
   --tag returns-baseline \
-  --params '{"source_instance":"canonical-returns-example"}' \
+  --params '{"source_instance":"canonical-returns-example","unwrap_root_names":["resolve-ticket"]}' \
   --media-type application/x-ndjson \
   --wait
 ```

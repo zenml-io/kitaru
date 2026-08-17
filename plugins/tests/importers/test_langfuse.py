@@ -254,6 +254,67 @@ def test_imports_multiturn_observations() -> None:
     assert nodes["trace-2:tool-1"].tool_name == "weather"
 
 
+def test_unwraps_named_root_observations() -> None:
+    """Promote children while retaining session data from an omitted root."""
+    parsed = sessions(
+        jsonl(
+            observation(
+                "wrapper",
+                "trace-1",
+                input_={"message": "hello"},
+                output={"answer": "done"},
+                name="resolve-ticket",
+                level="ERROR",
+                statusMessage="wrapper failed",
+            ),
+            observation(
+                "agent",
+                "trace-1",
+                parent_id="wrapper",
+                name="agent run",
+            ),
+            observation(
+                "generation",
+                "trace-1",
+                parent_id="agent",
+                observation_type="GENERATION",
+            ),
+        ),
+        {"unwrap_root_names": ["resolve-ticket"]},
+    )
+
+    assert len(parsed) == 1
+    session = parsed[0]
+    assert session.inputs["turns"][0]["inputs"] == {"message": "hello"}
+    assert session.outputs == {"answer": "done"}
+    assert session.status is SessionStatus.FAILED
+    assert session.error == "wrapper failed"
+    assert [node.name for node in session.nodes] == ["agent run"]
+    assert [node.name for node in session.nodes[0].children] == ["generation"]
+    assert session.metadata["langfuse.unwrapped_root_names"] == ["resolve-ticket"]
+
+
+def test_rejects_invalid_unwrap_root_names() -> None:
+    """Require unwrap_root_names to contain non-empty strings."""
+    content = jsonl(observation("root", "trace-1"))
+
+    parsed_failures = failures(content, {"unwrap_root_names": "root"})
+
+    assert len(parsed_failures) == 1
+    assert "unwrap_root_names must be an array" in parsed_failures[0].error
+
+
+def test_retains_named_root_without_children() -> None:
+    """Keep a matched root when it has no children to promote."""
+    parsed = sessions(
+        jsonl(observation("root", "trace-1", name="resolve-ticket")),
+        {"unwrap_root_names": ["resolve-ticket"]},
+    )
+
+    assert [node.name for node in parsed[0].nodes] == ["resolve-ticket"]
+    assert parsed[0].metadata["langfuse.unwrapped_root_names"] == []
+
+
 def test_trace_without_session_id_becomes_one_turn_session() -> None:
     """Use a trace id when Langfuse has no session id."""
     parsed = sessions(

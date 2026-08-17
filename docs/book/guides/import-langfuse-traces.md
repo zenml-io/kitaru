@@ -50,6 +50,18 @@ The Langfuse importer parses **Langfuse JSONL exports** — up to 50 MiB per pay
 | --- | --- |
 | `source_instance` | The Langfuse project the export came from. Optional when the export itself carries project ids; required when it doesn't — it anchors the sessions' external identity. |
 | `filename` | Optional label used as a fallback source name. |
+| `unwrap_root_names` | Optional array of root observation names to omit from the node tree. Their children become roots, while their input, output, status, and timing continue to define the session turn. Roots without children remain in the tree. |
+
+Use `unwrap_root_names` when instrumentation adds a wrapper around a complete agent run and that wrapper duplicates the run node in Kitaru:
+
+```bash
+kitaru session import langfuse-export.jsonl \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@latest \
+  --params '{"source_instance":"my-langfuse-project","unwrap_root_names":["resolve-ticket"]}' \
+  --media-type application/x-ndjson \
+  --wait
+```
 
 Import in slices as often as you like — dedup makes it safe.
 
