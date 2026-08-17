@@ -119,6 +119,8 @@ dev = [
     "pytest>=8.0",
     "import-linter>=2.0",
     "pytest-asyncio>=1.4.0",
+    "griffe>=1.13.0,<2.0.0",
+    "griffe-typingdoc>=0.2.8,<1.0.0",
 ]
 
 [tool.ruff]
@@ -165,6 +167,14 @@ exclude = ["examples/**"]
 [tool.ty.environment]
 python-version = "3.11"
 root = [".", "src", "scripts", "tests"]
+
+# fumapy is installed from the npm package (docs/node_modules/fumadocs-python),
+# not PyPI, so it is absent from most environments that run ty.
+[[tool.ty.overrides]]
+include = ["scripts/generate_sdk_docs.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

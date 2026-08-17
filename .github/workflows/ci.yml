@@ -430,22 +430,22 @@ jobs:
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli
               --extra worker
-            pytest-command: uv run pytest tests/cli
+            pytest-command: uv run pytest tests/cli tests/scripts
           - name: py312-cli
             python-version: '3.12'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli
               --extra worker
-            pytest-command: uv run pytest tests/cli
+            pytest-command: uv run pytest tests/cli tests/scripts
           - name: py313-cli
             python-version: '3.13'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli
               --extra worker
-            pytest-command: uv run pytest tests/cli
+            pytest-command: uv run pytest tests/cli tests/scripts
           - name: py314-cli
             python-version: '3.14'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli
               --extra worker
-            pytest-command: uv run pytest tests/cli
+            pytest-command: uv run pytest tests/cli tests/scripts
           - name: py311-mcp
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra mcp
