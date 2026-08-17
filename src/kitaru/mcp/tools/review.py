@@ -3,6 +3,8 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Bounded investigation and annotation handlers."""
 
+import httpx
+
 from kitaru.api_models.v1.annotation import (
     AnnotationListParams,
     AnnotationUpdateRequest,
@@ -21,8 +23,10 @@ from kitaru.api_models.v1.tag import (
     TagLinkCreateRequest,
     TagUpdateRequest,
 )
+from kitaru.client.dashboard_urls import get_investigation_review_url
+from kitaru.client.exceptions import APIError
 from kitaru.mcp.lifecycle import MCPServerState
-from kitaru.mcp.models.common import PageData, ReviewItem
+from kitaru.mcp.models.common import PageData, ReviewItem, ToolSuccessPayload
 from kitaru.mcp.models.review import (
     AnnotationUpdate,
     InvestigationAnswerCreate,
@@ -77,13 +81,38 @@ async def handle_review_manage(
 ) -> object:
     """Perform one investigation or annotation mutation."""
     if isinstance(request, InvestigationCreate):
+        info = None
+        warnings: list[str] = []
+        try:
+            info = await state.client.info.get()
+        # ValueError covers malformed info payloads: JSON decoding and Pydantic
+        # validation errors both derive from it. Resolve info before the mutation
+        # so a handler timeout cannot report a successful create as retryable.
+        except (APIError, httpx.HTTPError, ValueError):
+            warnings.append(
+                "Could not resolve a dashboard review link because the server "
+                "info request failed. The investigation was created."
+            )
         dto = InvestigationCreateRequest(
             agent_id=request.agent_id,
             name=request.name,
             description=request.description,
             sessions=request.sessions,
         )
-        return await state.client.investigations.create(dto)
+        investigation = await state.client.investigations.create(dto)
+        review_url: str | None = None
+        if info is not None:
+            review_url = get_investigation_review_url(
+                info,
+                state.client.base_url,
+                agent_id=investigation.agent_id,
+                investigation_id=investigation.id,
+            )
+        return ToolSuccessPayload(
+            data=investigation,
+            links={"review": review_url} if review_url else {},
+            warnings=warnings,
+        )
     if isinstance(request, InvestigationUpdate):
         values = request.model_dump(
             include={"name", "description", "status"}, exclude_unset=True

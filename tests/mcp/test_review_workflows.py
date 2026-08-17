@@ -4,10 +4,12 @@
 import asyncio
 import json
 import uuid
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any, cast
 
+import httpx
 import pytest
 from mcp.server import MCPServer, ServerRequestContext
 from mcp.server.mcpserver import Context
@@ -19,7 +21,11 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorResponse,
     EvaluatorVersionResponse,
 )
-from kitaru.api_models.v1.investigation import InvestigationSessionVerdict
+from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
+from kitaru.api_models.v1.investigation import (
+    InvestigationResponse,
+    InvestigationSessionVerdict,
+)
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource
 from kitaru.api_models.v1.tag import (
@@ -339,13 +345,19 @@ async def test_investigation_pending_preserves_downstream_transition_error() -> 
 
 
 async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
+    calls: list[str] = []
     investigation_requests: list[object] = []
     annotation_creates: list[object] = []
     annotation_updates: list[object] = []
 
     async def create_investigation(request: object) -> object:
+        calls.append("create")
         investigation_requests.append(request)
-        return SimpleNamespace()
+        return _investigation()
+
+    async def get_info() -> ServerInfoResponse:
+        calls.append("info")
+        return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
 
     async def create_annotation(request: object) -> object:
         annotation_creates.append(request)
@@ -356,8 +368,10 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
         return SimpleNamespace()
 
     client = SimpleNamespace(
+        base_url="https://api.example.com/",
         investigations=SimpleNamespace(create=create_investigation),
         annotations=SimpleNamespace(create=create_annotation, update=update_annotation),
+        info=SimpleNamespace(get=get_info),
     )
     state = _get_state(client)
     session_id = uuid.uuid4()
@@ -418,6 +432,147 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
         == "root-cause"
     )
     assert cast(Any, annotation_updates[0]).model_dump(mode="json") == {"value": True}
+    assert calls == ["info", "create"]
+
+
+def _investigation() -> InvestigationResponse:
+    now = datetime.now(UTC)
+    return InvestigationResponse(
+        id=uuid.uuid4(),
+        owner_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        name="failure review",
+        description=None,
+        status="pending",
+        metadata={},
+        total_sessions=1,
+        completed_sessions=0,
+        created=now,
+        updated=now,
+    )
+
+
+async def _create_investigation(
+    investigation: InvestigationResponse,
+    get_info: Callable[[], Awaitable[ServerInfoResponse]],
+) -> CallToolResult:
+    async def create(_request: object) -> InvestigationResponse:
+        return investigation
+
+    client = SimpleNamespace(
+        base_url="https://api.example.com/",
+        investigations=SimpleNamespace(create=create),
+        info=SimpleNamespace(get=get_info),
+    )
+    server, context = _get_context(client, CapabilityMode.STANDARD)
+    result = await server.call_tool(
+        "kitaru_review_manage",
+        {
+            "request": {
+                "operation": "create_investigation",
+                "agent_id": str(investigation.agent_id),
+                "name": investigation.name,
+                "sessions": [
+                    {
+                        "session_id": str(uuid.uuid4()),
+                        "questions": [{"key": "root-cause", "question": "Why?"}],
+                    }
+                ],
+            }
+        },
+        context,
+    )
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["id"] == str(investigation.id)
+    assert json.loads(cast(TextContent, result.content[0]).text) == (
+        result.structured_content
+    )
+    return result
+
+
+async def test_investigation_create_returns_dashboard_review_link() -> None:
+    investigation = _investigation()
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0",
+            auth_scheme=AuthScheme.CONTROL_PLANE,
+            dashboard_url="https://cloud.example.com/kitaru-workspaces/ws-1/",
+        )
+
+    result = await _create_investigation(investigation, get_info)
+
+    assert result.structured_content is not None
+    assert result.structured_content["links"] == {
+        "review": (
+            "https://cloud.example.com/kitaru-workspaces/ws-1"
+            f"/agents/{investigation.agent_id}"
+            f"/investigations/{investigation.id}/review"
+        )
+    }
+    assert result.structured_content["warnings"] == []
+
+
+@pytest.mark.parametrize(
+    "info_error",
+    [
+        APIError(503, "unavailable"),
+        ValueError("malformed payload"),
+        httpx.ConnectError("unavailable"),
+    ],
+    ids=["api_error", "malformed_payload", "transport_error"],
+)
+async def test_investigation_create_preserves_result_when_info_fails(
+    info_error: Exception,
+) -> None:
+    investigation = _investigation()
+
+    async def get_info() -> ServerInfoResponse:
+        raise info_error
+
+    result = await _create_investigation(investigation, get_info)
+
+    assert result.structured_content is not None
+    assert result.structured_content["links"] == {}
+    assert len(result.structured_content["warnings"]) == 1
+    assert "review link" in result.structured_content["warnings"][0]
+
+
+async def test_investigation_create_omits_link_for_api_only_server() -> None:
+    investigation = _investigation()
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
+
+    result = await _create_investigation(investigation, get_info)
+
+    assert result.structured_content is not None
+    assert result.structured_content["links"] == {}
+    assert result.structured_content["warnings"] == []
+
+
+async def test_investigation_create_links_bundled_ui_review_page() -> None:
+    investigation = _investigation()
+
+    async def get_info() -> ServerInfoResponse:
+        return ServerInfoResponse(
+            version="0.0.0",
+            auth_scheme=AuthScheme.LOCAL,
+            ui_version="1.2.3",
+        )
+
+    result = await _create_investigation(investigation, get_info)
+
+    assert result.structured_content is not None
+    assert result.structured_content["links"] == {
+        "review": (
+            "https://api.example.com"
+            f"/agents/{investigation.agent_id}"
+            f"/investigations/{investigation.id}/review"
+        )
+    }
 
 
 async def test_review_tag_mutations_forward_typed_sdk_dtos() -> None:

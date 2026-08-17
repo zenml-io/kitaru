@@ -84,6 +84,14 @@ class ToolResult(MCPModel):
     error: ToolError | None = None
 
 
+class ToolSuccessPayload(MCPModel):
+    """Handler data plus success metadata for the public result envelope."""
+
+    data: object
+    warnings: list[str] = Field(default_factory=list)
+    links: dict[str, str] = Field(default_factory=dict)
+
+
 RegistryItem = (
     CohortResponse
     | ExperimentResponse
@@ -143,6 +151,7 @@ class ReviewManageResult(ToolResult):
     """Typed investigation and annotation management result."""
 
     data: ReviewItem | TagResponse | TagLinkResponse | None = None
+    links: dict[Literal["review"], str] = Field(default_factory=dict)
 
 
 class CohortsManageResult(ToolResult):
