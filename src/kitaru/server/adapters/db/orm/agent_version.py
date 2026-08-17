@@ -67,8 +67,11 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     version: Mapped[int]
     display_version: Mapped[str | None] = mapped_column(String(255))
     description: Mapped[str | None] = mapped_column(Text)
-    run_command: Mapped[str | None] = mapped_column(Text)
-    run_entrypoint: Mapped[str | None] = mapped_column(Text)
+    # Discriminates the flattened run spec union: "command" stores a shell
+    # command in run_target, "function" a module:attribute entrypoint, null
+    # when there is no run spec.
+    run_type: Mapped[str | None] = mapped_column(String(16))
+    run_target: Mapped[str | None] = mapped_column(Text)
     run_working_dir: Mapped[str | None] = mapped_column(Text)
     run_env: Mapped[dict[str, str] | None] = mapped_column(JSONB(none_as_null=True))
     run_timeout_seconds: Mapped[int | None]
@@ -80,18 +83,20 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Args:
             run_spec: Run spec to store.
         """
-        self.run_command = None
-        self.run_entrypoint = None
+        self.run_type = None
+        self.run_target = None
         self.run_working_dir = None
         self.run_env = None
         self.run_timeout_seconds = None
         if isinstance(run_spec, CommandRunSpec):
-            self.run_command = run_spec.command
+            self.run_type = "command"
+            self.run_target = run_spec.command
             self.run_working_dir = run_spec.working_dir
             self.run_env = run_spec.env
             self.run_timeout_seconds = run_spec.timeout_seconds
         elif isinstance(run_spec, FunctionRunSpec):
-            self.run_entrypoint = run_spec.entrypoint
+            self.run_type = "function"
+            self.run_target = run_spec.entrypoint
             self.run_env = run_spec.env
             self.run_timeout_seconds = run_spec.timeout_seconds
 
@@ -131,19 +136,21 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             Agent version with timestamps set.
         """
         run_spec: RunSpec | None = None
-        if self.run_command is not None:
+        if self.run_type == "command":
+            assert self.run_target is not None
             assert self.run_timeout_seconds is not None
             run_spec = CommandRunSpec(
-                command=self.run_command,
+                command=self.run_target,
                 working_dir=self.run_working_dir,
                 env=self.run_env if self.run_env is not None else {},
                 secret_ids=secret_ids,
                 timeout_seconds=self.run_timeout_seconds,
             )
-        elif self.run_entrypoint is not None:
+        elif self.run_type == "function":
+            assert self.run_target is not None
             assert self.run_timeout_seconds is not None
             run_spec = FunctionRunSpec(
-                entrypoint=self.run_entrypoint,
+                entrypoint=self.run_target,
                 env=self.run_env if self.run_env is not None else {},
                 secret_ids=secret_ids,
                 timeout_seconds=self.run_timeout_seconds,

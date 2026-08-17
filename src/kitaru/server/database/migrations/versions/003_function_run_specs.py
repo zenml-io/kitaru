@@ -32,7 +32,11 @@ depends_on = None
 def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
-        batch_op.add_column(sa.Column("run_entrypoint", sa.Text(), nullable=True))
+        batch_op.add_column(sa.Column("run_type", sa.String(length=16), nullable=True))
+        batch_op.alter_column("run_command", new_column_name="run_target")
+    op.execute(
+        "UPDATE agent_version SET run_type = 'command' WHERE run_target IS NOT NULL"
+    )
 
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.create_index(
@@ -64,5 +68,7 @@ def downgrade() -> None:
             postgresql_where=sa.text("status = 'pending_import'"),
         )
 
+    op.execute("UPDATE agent_version SET run_target = NULL WHERE run_type = 'function'")
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
-        batch_op.drop_column("run_entrypoint")
+        batch_op.alter_column("run_target", new_column_name="run_command")
+        batch_op.drop_column("run_type")
