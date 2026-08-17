@@ -74,7 +74,79 @@ uv run kitaru evaluator scaffold \
   --path evaluator.py
 ```
 
-Replace the scaffold with code that implements the behavior you accepted during review. The canonical example README includes a [generic terminal-action consistency evaluator](https://github.com/zenml-io/kitaru/tree/develop/examples/pydantic_ai_ticket_resolver#7-select-or-create-an-evaluator) to demonstrate the `SessionView` and `EvaluationResult` contracts. Adapt the rule, required evidence, and missing-evidence result to your accepted behavior.
+Replace the scaffold with code that implements the behavior you accepted during review. The following generic example demonstrates the `SessionView` and `EvaluationResult` contracts by checking whether one accepted terminal tool call agrees with the final structured action:
+
+```python
+# /// script
+# requires-python = ">=3.11"
+# dependencies = []
+# ///
+"""Evaluate consistency between an accepted action and the final output."""
+
+from typing import Any
+
+from kitaru.api_models.v1.evaluation import EvaluationResult
+from kitaru.api_models.v1.session_node import NodeType
+from kitaru.task.evaluator import SessionView
+
+ACTION_BY_TOOL = {
+    "issue_refund": "refund",
+    "create_replacement": "replacement",
+    "escalate_to_human": "escalate",
+}
+
+
+def _get_outputs(value: Any) -> dict[str, Any] | None:
+    """Return final outputs from a native or imported session."""
+    if isinstance(value, dict) and isinstance(value.get("turns"), list):
+        turns = value["turns"]
+        value = turns[-1].get("outputs") if turns else None
+    return value if isinstance(value, dict) else None
+
+
+def evaluate(session: SessionView) -> EvaluationResult:
+    """Check that one accepted terminal tool matches the final action."""
+    accepted_tools = [
+        node.tool_name
+        for node in session.nodes
+        if node.node_type is NodeType.TOOL_CALL
+        and node.tool_name in ACTION_BY_TOOL
+        and isinstance(node.outputs, dict)
+        and node.outputs.get("accepted") is True
+    ]
+    outputs = _get_outputs(session.session.outputs)
+
+    if not accepted_tools or outputs is None:
+        return EvaluationResult(
+            name="terminal_action_consistency",
+            value="unknown",
+            passed=None,
+            explanation="The trace does not contain enough recorded action evidence.",
+        )
+
+    if len(accepted_tools) != 1:
+        return EvaluationResult(
+            name="terminal_action_consistency",
+            value="fail",
+            passed=False,
+            explanation=f"The trace contains {len(accepted_tools)} accepted actions.",
+        )
+
+    accepted_action = ACTION_BY_TOOL[accepted_tools[0]]
+    reported_action = outputs.get("action")
+    passed = reported_action == accepted_action
+    return EvaluationResult(
+        name="terminal_action_consistency",
+        value="pass" if passed else "fail",
+        passed=passed,
+        explanation=(
+            f"Accepted action: {accepted_action!r}; "
+            f"reported action: {reported_action!r}."
+        ),
+    )
+```
+
+This example uses structured output and recorded tool results. It does not search the customer reply for words such as `refund`, and it does not map ticket IDs to expected answers. Adapt the rule, required evidence, and missing-evidence result to the behavior you confirmed during review.
 
 If you want coding-agent help, ask it to implement only the accepted behavior from the persisted investigation and show you how each branch follows from recorded evidence. Tell it not to read or use the example's test-only expected outcomes. Review the resulting code before registering it.
 

@@ -19,9 +19,7 @@ examples:
   - id: canonical-returns
     path: examples/pydantic_ai_ticket_resolver
     public_docs:
-      - examples/README.md
-      - docs/book/tutorials/returns-agent/README.md
-      - docs/book/adapters/pydantic-ai.md
+      - examples/pydantic_ai_ticket_resolver/README.md
     owner_area: trace import, evaluation, investigation, cohorts, and experiment replay
     coverage:
       deterministic_pytest:

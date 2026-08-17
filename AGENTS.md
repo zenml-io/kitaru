@@ -93,7 +93,7 @@ they belong in `docs/book/`. Do not hand-edit generated reference output.
 
 Only document shipped features.
 
-The canonical returns example in `examples/pydantic_ai_ticket_resolver/`, the conceptual quickstart in `docs/book/getting-started/quickstart.md`, and the detailed tutorial in `docs/book/tutorials/returns-agent/` describe the same method at different levels. When changing the example's commands, fixtures, behavior, or terminology, inspect both documentation paths and `examples/example-coverage.yaml` in the same change. Apply the same check in the other direction when changing either documentation path.
+The canonical returns implementation lives in the public [`zenml-io/kitaru-template`](https://github.com/zenml-io/kitaru-template) repository. Its root README owns clone, frozen installation, local workspace setup, agent registration, worker startup, and the checked-in trace import. The conceptual quickstart in `docs/book/getting-started/quickstart.md` and the detailed tutorial in `docs/book/tutorials/returns-agent/` explain the same method without copying that setup contract. When changing template commands, fixtures, behavior, or terminology, inspect both documentation paths and validate the affected template contract. Apply the same check in the other direction when changing either documentation path.
 
 ## Git, Commits, and PRs
 
