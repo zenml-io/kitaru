@@ -168,7 +168,10 @@ describe("execution lifecycle resources", () => {
         `https://api.example/api/v1/experiment-runs/${RELATED_ID}/jobs?size=10`,
         "GET",
       ],
-      [`https://api.example/api/v1/experiment-runs/${RELATED_ID}/cancel`, "POST"],
+      [
+        `https://api.example/api/v1/experiment-runs/${RELATED_ID}/cancel`,
+        "POST",
+      ],
       [`https://api.example/api/v1/experiment-runs/${RELATED_ID}`, "DELETE"],
       [`https://api.example/api/v1/experiments/${ID}`, "DELETE"],
     ]);

@@ -217,6 +217,16 @@ jobs:
         run: uv sync --frozen
         env:
           UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
+      - name: Install candidate artifacts in standalone example
+        working-directory: examples/pydantic_ai_ticket_resolver
+        run: >-
+          uv pip install
+          --python .venv/bin/python
+          --reinstall
+          --no-deps
+          ../../plugins/candidate-wheels/kitaru-*.whl
+          ../../plugins/candidate-wheels/kitaru_pydantic_ai-*.whl
+          ../../plugins/candidate-wheels/kitaru_langfuse_importer-*.whl
       - name: Start local Kitaru server
         run: |
           uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
@@ -243,10 +253,10 @@ jobs:
         run: uv run --with pyyaml python scripts/audit-example-coverage.py
       - name: Test canonical example contracts
         working-directory: examples/pydantic_ai_ticket_resolver
-        run: uv run --frozen --with pytest python -m pytest -q tests/test_contract.py
+        run: uv run --no-sync --with pytest python -m pytest -q tests/test_contract.py
       - name: Run canonical example end to end
         working-directory: examples/pydantic_ai_ticket_resolver
-        run: uv run --frozen --with pytest python -m pytest -q tests/test_e2e.py
+        run: uv run --no-sync --with pytest python -m pytest -q tests/test_e2e.py
         env:
           KITARU_CANONICAL_E2E: '1'
           KITARU_CANONICAL_SERVER_URL: http://127.0.0.1:8000
