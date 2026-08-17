@@ -56,6 +56,18 @@ def test_versioned_agent_claim_alongside_unversioned_rejected() -> None:
         )
 
 
+def test_too_many_claims_rejected() -> None:
+    """Reject a claims list exceeding the maximum size."""
+    claims = [
+        WorkerClaim(kind=TaskKind.AGENT, agent_version_id=uuid.uuid4())
+        for _ in range(15)
+    ]
+    claims.append(WorkerClaim(kind=TaskKind.EVALUATOR))
+    claims.append(WorkerClaim(kind=TaskKind.IMPORTER))
+    with pytest.raises(ValidationError):
+        WorkerScope(claims=claims)
+
+
 def test_valid_mixed_scope_accepted() -> None:
     """Accept a scope mixing a versioned agent claim with other kinds."""
     agent_version_id = uuid.uuid4()

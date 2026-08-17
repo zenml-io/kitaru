@@ -8545,6 +8545,7 @@
             "items": {
               "$ref": "#/components/schemas/WorkerClaim"
             },
+            "maxItems": 16,
             "minItems": 1,
             "title": "Claims",
             "type": "array"

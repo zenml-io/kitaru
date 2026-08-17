@@ -2123,6 +2123,7 @@
               "items": {
                 "$ref": "#/$defs/WorkerClaim"
               },
+              "maxItems": 16,
               "minItems": 1,
               "title": "Claims",
               "type": "array"

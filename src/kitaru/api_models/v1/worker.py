@@ -71,6 +71,7 @@ class WorkerScope(FrozenModel):
 
     claims: list[WorkerClaim] = Field(
         min_length=1,
+        max_length=16,
         description="Claims the worker serves, combined by disjunction.",
     )
     selectors: list[LabelSelector] | None = Field(

@@ -214,16 +214,12 @@ from kitaru.server.domain.tag import (
     TagNotFound,
 )
 from kitaru.server.domain.task import (
-    AGENT_QUEUE_KEY_PREFIX,
-    EVALUATOR_QUEUE_KEY,
-    IMPORTER_QUEUE_KEY,
     AgentTask,
     DuplicateEvaluationTask,
     EvaluationTask,
     ImportTask,
     Task,
     TaskNotFound,
-    agent_queue_key,
 )
 from kitaru.server.domain.worker import Worker, WorkerNotFound
 from kitaru.server.filtering import (
@@ -5059,22 +5055,21 @@ class FakeTaskRepository:
         }
 
     def _matches_claim(self, task: Task, claim: WorkerClaim) -> bool:
-        """Report whether a task's queue key matches a claim.
+        """Report whether a task's kind and agent version match a claim.
 
         Args:
             task: Candidate task.
             claim: Claim from the worker's scope.
 
         Returns:
-            Whether the claim covers the task's queue key.
+            Whether the claim covers the task.
         """
-        if claim.kind is TaskKind.EVALUATOR:
-            return task.queue_key == EVALUATOR_QUEUE_KEY
-        if claim.kind is TaskKind.IMPORTER:
-            return task.queue_key == IMPORTER_QUEUE_KEY
         if claim.agent_version_id is not None:
-            return task.queue_key == agent_queue_key(claim.agent_version_id)
-        return task.queue_key.startswith(AGENT_QUEUE_KEY_PREFIX)
+            return (
+                isinstance(task, AgentTask)
+                and task.agent_version_id == claim.agent_version_id
+            )
+        return task.kind is claim.kind
 
     def _matches_residual(self, task: Task, scope: WorkerScope) -> bool:
         """Report whether a task matches a scope's conditions beyond its claims.
@@ -5181,12 +5176,9 @@ class FakeTaskRepository:
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
-        Ordering mirrors the SQL repository: a scope claiming everything
-        hands out the oldest pending tasks, any other scope merges up to
-        ``limit`` candidates per claim by id, and an unversioned agent claim
-        reads its candidates in queue key order before id. Row locking has
-        no in-memory counterpart, a single process never contends with
-        itself.
+        Ordering mirrors the SQL repository: the oldest pending tasks
+        matching the scope are handed out. Row locking has no in-memory
+        counterpart, a single process never contends with itself.
 
         Args:
             scope: Claim scope narrowing the queue.
@@ -5206,16 +5198,11 @@ class FakeTaskRepository:
             ),
             key=lambda task: task.id,
         )
-        if scope.claims_everything:
-            selected = pending[:limit]
-        else:
-            candidates: list[Task] = []
-            for claim in scope.claims:
-                bucket = [task for task in pending if self._matches_claim(task, claim)]
-                if claim.kind is TaskKind.AGENT and claim.agent_version_id is None:
-                    bucket.sort(key=lambda task: (task.queue_key, task.id))
-                candidates.extend(bucket[:limit])
-            selected = sorted(candidates, key=lambda task: task.id)[:limit]
+        selected = [
+            task
+            for task in pending
+            if any(self._matches_claim(task, claim) for claim in scope.claims)
+        ][:limit]
         claimed: list[Task] = []
         for task in selected:
             claimed_task = task.model_copy()

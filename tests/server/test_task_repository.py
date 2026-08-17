@@ -537,7 +537,7 @@ async def test_claim_pending_agent_version_scoped_workers_claim_only_their_own(
 async def test_claim_pending_unversioned_agent_claim_spans_every_version(
     setup: Setup,
 ) -> None:
-    """An unversioned agent claim claims tasks across every agent version."""
+    """An unversioned agent claim claims tasks across every version, oldest first."""
     first_version_task = await setup.tasks.create(_agent_task(setup))
     second_version_task = await setup.tasks.create(
         _agent_task(setup, agent_version_id=setup.agent_version_id_2)
@@ -548,10 +548,45 @@ async def test_claim_pending_unversioned_agent_claim_spans_every_version(
         10,
         datetime.now(UTC),
     )
-    assert {task.id for task in claimed} == {
+    assert [task.id for task in claimed] == [
         first_version_task.id,
         second_version_task.id,
-    }
+    ]
+
+
+async def test_claim_pending_unversioned_agent_claim_does_not_starve_other_versions(
+    setup: Setup,
+) -> None:
+    """A young backlog in one agent version does not starve an older task in another."""
+    if setup.agent_version_id < setup.agent_version_id_2:
+        lower_version_id, higher_version_id = (
+            setup.agent_version_id,
+            setup.agent_version_id_2,
+        )
+    else:
+        lower_version_id, higher_version_id = (
+            setup.agent_version_id_2,
+            setup.agent_version_id,
+        )
+    limit = 4
+    older_task = await setup.tasks.create(
+        _agent_task(setup, agent_version_id=higher_version_id)
+    )
+    for _ in range(limit):
+        await setup.tasks.create(_agent_task(setup, agent_version_id=lower_version_id))
+
+    claimed = await setup.tasks.claim_pending(
+        WorkerScope(
+            claims=[
+                WorkerClaim(kind=TaskKind.AGENT),
+                WorkerClaim(kind=TaskKind.EVALUATOR),
+            ]
+        ),
+        setup.worker_id,
+        limit,
+        datetime.now(UTC),
+    )
+    assert older_task.id in {task.id for task in claimed}
 
 
 async def test_claim_pending_kind_isolation_across_claims(setup: Setup) -> None:
@@ -597,7 +632,7 @@ async def test_claim_pending_kind_isolation_across_claims(setup: Setup) -> None:
 
 
 async def test_claim_pending_merges_claims_oldest_first(setup: Setup) -> None:
-    """Mixed claims hand out the oldest eligible tasks regardless of kind."""
+    """Mixed claims hand out the oldest tasks in exact id order, regardless of kind."""
     evaluation_task = await setup.tasks.create(
         EvaluationTask(
             job_id=setup.job_id,

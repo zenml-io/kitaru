@@ -11,9 +11,9 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Add the task queue key.
+"""Add the task claim indexes.
 
-Revision ID: 002_task_queue_key
+Revision ID: 002_task_claim_indexes
 Revises: 001_initial
 Create Date: 2026-08-17
 
@@ -23,35 +23,24 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "002_task_queue_key"
+revision = "002_task_claim_indexes"
 down_revision = "001_initial"
 branch_labels = None
 depends_on = None
-
-_BACKFILL_QUEUE_KEY = """
-UPDATE task
-SET queue_key = CASE kind
-    WHEN 'agent' THEN 'agent:' || agent_version_id::text
-    WHEN 'evaluator' THEN 'evaluator'
-    WHEN 'importer' THEN 'importer'
-END
-"""
 
 
 def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
     with op.batch_alter_table("task", schema=None) as batch_op:
-        batch_op.add_column(
-            sa.Column("queue_key", sa.String(length=64, collation="C"), nullable=True)
-        )
-
-    op.execute(sa.text(_BACKFILL_QUEUE_KEY))
-
-    with op.batch_alter_table("task", schema=None) as batch_op:
-        batch_op.alter_column("queue_key", nullable=False)
         batch_op.create_index(
-            "ix_task_queue_key_id",
-            ["queue_key", "id"],
+            "ix_task_kind_id",
+            ["kind", "id"],
+            unique=False,
+            postgresql_where=sa.text("status = 'pending'"),
+        )
+        batch_op.create_index(
+            "ix_task_agent_version_id_id",
+            ["agent_version_id", "id"],
             unique=False,
             postgresql_where=sa.text("status = 'pending'"),
         )
@@ -73,6 +62,9 @@ def downgrade() -> None:
             postgresql_where=sa.text("status = 'pending'"),
         )
         batch_op.drop_index(
-            "ix_task_queue_key_id", postgresql_where=sa.text("status = 'pending'")
+            "ix_task_agent_version_id_id",
+            postgresql_where=sa.text("status = 'pending'"),
         )
-        batch_op.drop_column("queue_key")
+        batch_op.drop_index(
+            "ix_task_kind_id", postgresql_where=sa.text("status = 'pending'")
+        )
