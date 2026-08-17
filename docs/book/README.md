@@ -7,13 +7,15 @@ icon: hand-wave
 
 Your agent has already been tested thousands of times, in production. Each of those runs is sitting in a trace store as a transcript you can read but not run. Kitaru makes them runnable: it records (or imports) each run as a **session**, then **replays** it against your real code, with the recording answering for the world the original run saw. Change the prompt, swap the model, or point replay at the fix in your working tree, and see what improved and what broke before it ships.
 
-**Who it's for:** teams with an agent in front of real users, where regression testing today means re-running a few samples and eyeballing the output. Kitaru replaces that with [evaluators](concepts/evaluators.md), [cohorts](concepts/cohorts.md), and [experiments](concepts/experiments.md) over your actual traffic. If you're prototyping and haven't shipped, it will feel like more machinery than you need.
+{% hint style="success" %}
+**Who it's for:** Teams with an agent in front of real users, where regression testing today means re-running a few samples and eyeballing the output. Kitaru replaces that with [evaluators](concepts/evaluators.md), [cohorts](concepts/cohorts.md), and [experiments](concepts/experiments.md) over your actual traffic. If you're prototyping and haven't shipped, it will feel like more machinery than you need.
+{% endhint %}
+
+**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, and plain JSONL importers are built in) or [build a small adapter](adapters/custom.md) (the recording API is two client calls).
 
 {% hint style="info" %}
 Kitaru has both a Python and a TypeScript SDK, and both talk to the same server. The CLI ships with the Python package.
 {% endhint %}
-
-**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, and plain JSONL importers are built in) or [build a small adapter](adapters/custom.md) (the recording API is two client calls).
 
 Kitaru is open source (Apache 2.0) and self-hosted, from the team behind [ZenML](https://zenml.io): ZenML is for ML pipelines, Kitaru is for agents.
 
