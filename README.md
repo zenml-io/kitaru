@@ -40,8 +40,8 @@ Kitaru makes those traces runnable:
 **1. Install and log in.** The local server (FastAPI + Postgres) provisions itself in Docker:
 
 ```bash
-pip install "kitaru[cli,worker,mcp]" kitaru-pydantic-ai
-kitaru login --local        # or: kitaru login <your-team-url>
+uv add "kitaru[cli,worker,mcp]" kitaru-pydantic-ai    # or: pip install
+kitaru login --local                                  # or: kitaru login <your-team-url>
 ```
 
 **2. Make your coding assistant Kitaru-capable.** This is the intended way to drive it: skills teach it the method, the MCP server gives it bounded operations.
