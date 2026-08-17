@@ -4,20 +4,11 @@
 
 - [Welcome to Kitaru](README.md)
 - [Installation](getting-started/installation.md)
-- [Quickstart](getting-started/quickstart.md)
-- [Complete returns-agent tutorial](tutorials/returns-agent/README.md)
-  - [1. Observe the recorded behavior](tutorials/returns-agent/observe.md)
-  - [2. Judge the selected behavior](tutorials/returns-agent/judge.md)
-  - [3. Define one behavior to test](tutorials/returns-agent/define.md)
-  - [4. Replay one bounded change](tutorials/returns-agent/replay.md)
-  - [5. Compare the paired evidence](tutorials/returns-agent/compare.md)
-- [Import your traces](getting-started/import-your-traces.md)
-- [Drive it from your coding agent](agent-native/mcp-server.md)
-- [Agent skills](agent-native/skills.md)
 - [Deploy Kitaru](deploy/README.md)
   - [Docker](deploy/docker.md)
   - [Helm](deploy/helm.md)
-- [Troubleshooting](getting-started/troubleshooting.md)
+- [Quickstart](getting-started/quickstart.md)
+- [Agent skills](agent-native/skills.md)
 
 ## Core Concepts
 
@@ -33,14 +24,23 @@
 
 ## Guides
 
+- [Complete returns-agent tutorial](tutorials/returns-agent/README.md)
+  - [1. Observe the recorded behavior](tutorials/returns-agent/observe.md)
+  - [2. Judge the selected behavior](tutorials/returns-agent/judge.md)
+  - [3. Define one behavior to test](tutorials/returns-agent/define.md)
+  - [4. Replay one bounded change](tutorials/returns-agent/replay.md)
+  - [5. Compare the paired evidence](tutorials/returns-agent/compare.md)
 - [Replay a failure and fork it](guides/replay-and-overrides.md)
 - [Build a regression suite from production](guides/regression-suite.md)
 - [Write an evaluator](guides/write-an-evaluator.md)
+- [Import your traces](getting-started/import-your-traces.md)
 - [Import Langfuse traces](guides/import-langfuse-traces.md)
 - [Import any trace format](guides/importing-sessions.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
+- [Drive it from your coding agent](agent-native/mcp-server.md)
+- [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Adapters
 
