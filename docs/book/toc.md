@@ -14,11 +14,11 @@
 
 - [Overview](concepts/README.md)
 - [Agents & Sessions](concepts/agents-and-sessions.md)
+- [Investigations & Annotations](concepts/investigations.md)
 - [Replay](concepts/replay.md)
 - [Evaluators & Evaluations](concepts/evaluators.md)
 - [Cohorts](concepts/cohorts.md)
 - [Experiments](concepts/experiments.md)
-- [Investigations & Annotations](concepts/investigations.md)
 - [Workers](concepts/workers.md)
 - [Under the Hood](concepts/under-the-hood.md)
 

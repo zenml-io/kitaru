@@ -90,11 +90,13 @@ Each model call, tool call, and result is a **session node**. The `issue_refund`
 
 > Open an investigation on this session. I will give the verdicts; record each one as an annotation pinned to the exact nodes that support it.
 
-A domain expert reviews the session and concludes:
+This is the interview, and it is the crucial step of the whole game. Your assistant has already mapped your sessions and built a worklist (related failures plus at least one counterexample); now it creates an [**investigation**](../concepts/investigations.md) and asks you, against the evidence on screen, the questions Kitaru needs clarity on. Not "write down your eval criteria," but "given this policy lookup that returned nothing and this refund that was accepted anyway, was escalation required?"
+
+The expert answers:
 
 > When the agent cannot establish whether approval is required, it should escalate instead of issuing the refund.
 
-Kitaru records the review as an [**investigation**](../concepts/investigations.md) and the verdict as an **annotation**. This step is deliberately human: statistics can surface an unusual trace, but they cannot infer your business policy. The assistant organizes the evidence; the judgment is yours.
+Each answer is stored as an **annotation** pinned to the exact nodes that support it, and the conclusion becomes the session's verdict. Statistics can surface an unusual trace, but they cannot infer your business policy; every judgment recorded here is the ground truth the next three steps are calibrated against.
 {% endstep %}
 
 {% step %}
