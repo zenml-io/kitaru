@@ -7,8 +7,8 @@
 - [Deploy Kitaru](deploy/README.md)
   - [Docker](deploy/docker.md)
   - [Helm](deploy/helm.md)
-- [Quickstart](getting-started/quickstart.md)
 - [Agent skills](agent-native/skills.md)
+- [Quickstart](getting-started/quickstart.md)
 
 ## Core Concepts
 
