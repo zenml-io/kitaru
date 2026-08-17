@@ -5,7 +5,13 @@ icon: download
 
 # Installation
 
-Kitaru is three installable pieces: the **SDK + CLI** in your project, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. For a first session on one machine, all three run locally.
+Kitaru is three installable pieces:
+
+- the **SDK + CLI** in your project
+- a **server** your team shares (self-hosted, one per team)
+- **workers** that execute replays and evaluations in your environment
+
+For a first session on one machine, all three run locally.
 
 The Kitaru CLI, server, and workers require **Python 3.11 or newer**. TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server.
 
