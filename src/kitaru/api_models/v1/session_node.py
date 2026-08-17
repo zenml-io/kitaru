@@ -123,7 +123,8 @@ class SessionNodeBatchRequest(RequestModel):
     """Session node batch request."""
 
     nodes: list[SessionNodeCreateRequest] = Field(
-        description="Nodes to upsert, parent before child."
+        max_length=500,
+        description="Nodes to upsert, parent before child.",
     )
 
     @model_validator(mode="after")

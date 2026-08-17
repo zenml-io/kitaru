@@ -89,3 +89,15 @@ def test_negative_secondary_parent_index_rejected() -> None:
             outputs=None,
             attributes=None,
         )
+
+
+def test_batch_at_cap_accepted() -> None:
+    """Accept a batch of exactly the maximum node count."""
+    batch = SessionNodeBatchRequest(nodes=[_node(i, None) for i in range(500)])
+    assert len(batch.nodes) == 500
+
+
+def test_batch_over_cap_rejected() -> None:
+    """Reject a batch larger than the maximum node count."""
+    with pytest.raises(ValidationError):
+        SessionNodeBatchRequest(nodes=[_node(i, None) for i in range(501)])

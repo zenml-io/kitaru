@@ -5985,6 +5985,7 @@
             "items": {
               "$ref": "#/components/schemas/SessionNodeCreateRequest"
             },
+            "maxItems": 500,
             "title": "Nodes",
             "type": "array"
           }
