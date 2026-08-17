@@ -1,22 +1,37 @@
 ---
-description: Replay-based evals for AI agents. Traces you can run, not just read.
+description: Replay-based evals for AI agents, in Python and TypeScript. Test your next change against what your agent already did in production.
 icon: hand-wave
 ---
 
 # Welcome to Kitaru
 
-Most traces are transcripts: you read them. Kitaru records an agent run as a **session** — every model call, tool call, and decision — and a session **re-executes**: your real code runs again, with the recording answering for the world the original run saw. Reproduce a run, fork it with one thing changed, and trust that the difference you see is your change.
+Your agent has already been tested — thousands of times, in production. Each of those runs is sitting in a trace store as a transcript you can read but not run. Kitaru makes them runnable: it records (or imports) each run as a **session**, then **replays** it against your real code, with the recording answering for the world the original run saw. Change the prompt, swap the model, or point replay at the fix in your working tree, and see what improved and what broke — before it ships.
 
-That single verb — **replay** — is what turns production's past into your test bench. You can't unit-test an agent that writes to real systems, and your agent left the test suite behind the day it shipped. But it has been generating test cases all along: every production run. Kitaru is the machinery that makes them runnable — a debugger with a memory, sitting beside your observability stack. Traces tell you what happened; Kitaru re-runs it.
+**Who it's for:** teams with an agent in front of real users, where regression testing today means re-running a few samples and eyeballing the output. Kitaru replaces that with [evaluators](concepts/evaluators.md), [cohorts](concepts/cohorts.md), and [experiments](concepts/experiments.md) over your actual traffic. If you're prototyping and haven't shipped, it will feel like more machinery than you need.
 
-Kitaru comes from the team behind [ZenML](https://zenml.io): ZenML is for ML pipelines, Kitaru is for agents.
+**Languages:** Python and TypeScript SDKs, against the same server. The CLI is Python.
 
-## The loop
+**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, and plain JSONL importers are built in) or [build a small adapter](adapters/custom.md) — the recording API is two client calls.
 
-- **Record** — wrap the agent you already have with an [adapter](adapters/README.md) (one wrapper, no rewrite), or [import the traces you already collect](getting-started/import-your-traces.md). Your existing trace store — Langfuse, for example — stays your system of record; Kitaru gets a runnable copy. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
-- **Replay** — [re-execute a session](concepts/replay.md) against your real code. Tool calls are answered from the recording, so nothing touches real systems. Unchanged, the replay reproduces the original — the faithful baseline that makes a diff trustworthy. Then fork it: a different model, a new prompt, your working tree's code.
-- **Improve** — [evaluators](concepts/evaluators.md) score both sides; [cohorts](concepts/cohorts.md) freeze the population; [experiments](concepts/experiments.md) replay a cohort against a change and show what improved and what regressed. The cohort that caught a failure becomes the regression gate that keeps it caught.
+Kitaru is open source (Apache 2.0) and self-hosted, from the team behind [ZenML](https://zenml.io): ZenML is for ML pipelines, Kitaru is for agents.
 
+## Do I have to run it in production?
+
+No. There are two ways to get sessions, and they end in the same place:
+
+- **Import the history you already have.** If your agent logs to Langfuse or anything else you can export from, import it. Nothing in your production path changes: your trace store stays your system of record, and Kitaru gets a runnable copy.
+- **Record with an adapter.** Wrap the agent once, no rewrite, and every run becomes a session — wherever the agent runs: production, staging, or your laptop.
+
+{% tabs %}
+{% tab title="Import traces" %}
+```bash
+kitaru session import langfuse-export.jsonl \
+  --importer kitaru/langfuse@latest \
+  --agent support-agent@latest --wait
+```
+{% endtab %}
+
+{% tab title="Record with an adapter" %}
 ```python
 from pydantic_ai import Agent
 from kitaru_pydantic_ai import KitaruAgent
@@ -31,14 +46,23 @@ def refund_payment(order_id: str) -> str:
 support = KitaruAgent(agent, agent_id=AGENT_ID)
 support.run_sync("Refund order #4821 — the card reader was double-charged.")
 ```
+{% endtab %}
+{% endtabs %}
 
-Every run is now a session you can replay. Read the [Quickstart](getting-started/quickstart.md) for Kitaru's five-step method. To try it in a controlled environment, prepare the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template), then follow the [complete returns-agent tutorial](tutorials/returns-agent/README.md).
+Replays, imports, and evaluations all execute offline, on [workers](concepts/workers.md) in your environment — none of it touches your production traffic. An adapter does run inside your agent's process to record; if you don't want anything of Kitaru's near production, the import path never gets close to it.
+
+## The loop
+
+- **Record** — wrap or import, as above. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
+- **Replay** — [re-execute a session](concepts/replay.md) against your real code. Tool calls are answered from the recording, so nothing touches real systems. Unchanged, the replay reproduces the original — the faithful baseline that makes a diff trustworthy. Then fork it: a different model, a new prompt, your working tree's code.
+- **Improve** — [evaluators](concepts/evaluators.md) score both sides; [cohorts](concepts/cohorts.md) freeze the population; [experiments](concepts/experiments.md) replay a cohort against a change and show what improved and what regressed. The cohort that caught a failure becomes the regression gate that keeps it caught.
+
+Read the [Quickstart](getting-started/quickstart.md) for Kitaru's five-step method. To try it in a controlled environment, prepare the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template), then follow the [complete returns-agent tutorial](tutorials/returns-agent/README.md).
 
 ## Built to sit in your stack
 
-- **Self-hosted, open source (Apache 2.0).** One FastAPI + Postgres server on your infrastructure. Replays, imports, and evaluations execute on [workers](concepts/workers.md) in _your_ environment — your traces and credentials don't leave your systems.
+- **Self-hosted.** One FastAPI + Postgres server on your infrastructure. Your traces and credentials don't leave your systems.
 - **Beside your observability, not instead of it.** Langfuse, LangSmith, and Braintrust remain where you watch production. Kitaru is where you re-run it.
-- **Framework-agnostic by design.** Adapters ship for Python and TypeScript frameworks alike — PydanticAI, LangGraph, and the OpenAI Agents SDK in Python; Mastra and the Vercel AI SDK in TypeScript; the [adapter overview](adapters/README.md) states each integration's boundary. The [import path](getting-started/import-your-traces.md) works regardless of framework.
 - **Four ways to drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/mcp-server.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
 
 ## Next steps
