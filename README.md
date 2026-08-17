@@ -92,7 +92,7 @@ One server on your infrastructure (Docker image and Helm chart included), and no
 |---|---|
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
 | [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | From an agent in production to your first replay-backed decision |
-| [Set up your coding agent](https://docs.zenml.io/kitaru/getting-started/setup) | The MCP server and skills, in one page |
+| [Set up your coding agent](https://docs.zenml.io/kitaru/getting-started/setup) | Install the MCP server and the agent skills |
 | [Kitaru template](https://github.com/zenml-io/kitaru-template) | A ready agent and traces to try the method on |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Langfuse, LangSmith, Braintrust, or any format |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Production traffic as your test suite, gated in CI |

@@ -148,7 +148,7 @@ The five steps form a loop, not a one-time pipeline: a replay can expose a new f
 **Every step also has a manual form.** The CLI covers the whole loop with `--output json`, and the [Python and TypeScript SDKs](../deploy/sdks.md) reach everything. The [guides](../guides/replay-and-overrides.md) and the [returns-agent tutorial](../tutorials/returns-agent/README.md) teach the manual path so you can see each object and boundary for yourself.
 {% endhint %}
 
-## The concepts, in one table
+## Glossary
 
 | Term | Plain meaning in this example |
 | --- | --- |
