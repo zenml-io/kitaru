@@ -98,8 +98,247 @@ PUBLIC_API: dict[str, ModuleSpec] = {
             }
         ),
     ),
+    # kitaru/client/resources/__init__.py re-exports nothing, so every class
+    # below is found in its defining submodule (sessions.py, replays.py, ...)
+    # and published under the package path users import from.
+    "kitaru.client.resources": ModuleSpec(
+        symbols=frozenset(
+            {
+                "SessionsResource",
+                "ReplaysResource",
+                "AgentsResource",
+                "AgentVersionsResource",
+                "JobsResource",
+                "EvaluatorsResource",
+                "EvaluationsResource",
+                "CohortsResource",
+                "CohortVersionsResource",
+                "ExperimentsResource",
+                "ExperimentRunsResource",
+                "InvestigationsResource",
+                "iterate_pages",
+            }
+        ),
+    ),
     "kitaru.task": ModuleSpec(
         symbols=frozenset({"get_task_id", "get_task_inputs"}),
+    ),
+    # Container entries: kitaru.api_models and kitaru.api_models.v1 define no
+    # developer-facing symbols themselves, but the attach step in
+    # build_public_api requires every published module's parent to be
+    # published too. An empty ModuleSpec flows through the normal pipeline and
+    # yields a module with no classes/functions, which the converter renders
+    # as an index page linking the children — no special-casing needed.
+    "kitaru.api_models": ModuleSpec(),
+    "kitaru.api_models.v1": ModuleSpec(),
+    "kitaru.api_models.v1.base": ModuleSpec(
+        symbols=frozenset({"Page", "ListParams", "CursorParams"}),
+    ),
+    "kitaru.api_models.v1.session": ModuleSpec(
+        symbols=frozenset(
+            {
+                "SessionCreateRequest",
+                "SessionUpdateRequest",
+                "SessionEvaluationsRequest",
+                "SessionListParams",
+                "SessionResponse",
+                "SessionOrigin",
+                "SessionStatus",
+                "TokenUsage",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.session_node": ModuleSpec(
+        symbols=frozenset(
+            {
+                "SessionNodeCreateRequest",
+                "SessionNodeBatchRequest",
+                "SessionNodeListParams",
+                "SessionNodeResponse",
+                "SessionWithNodesResponse",
+                "NodeType",
+                "NodeStatus",
+            }
+        ),
+    ),
+    # EvaluationResult stays published under kitaru.task.evaluator (see its
+    # reexports entry); publishing it here too would create two pages for one
+    # symbol.
+    "kitaru.api_models.v1.evaluation": ModuleSpec(
+        symbols=frozenset(
+            {
+                "EvaluationBatchCreateRequest",
+                "EvaluationListParams",
+                "EvaluationResponse",
+                "EvaluationDataType",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.replay": ModuleSpec(
+        symbols=frozenset(
+            {
+                "ReplayCreateRequest",
+                "ReplayListParams",
+                "ReplayResponse",
+                "ReplayStatus",
+                "ToolLookupRequest",
+                "ToolLookupResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.replay_config": ModuleSpec(
+        symbols=frozenset(
+            {
+                "EvaluatorConfig",
+                "HistoryConfig",
+                "PassthroughConfig",
+                "StaticConfig",
+                "StaticCase",
+                "LLMConfig",
+                "ToolPolicy",
+                "ReplayOverride",
+                "HistoryScope",
+                "ToolPolicyOnMiss",
+                "StaticMatchMode",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.job": ModuleSpec(
+        symbols=frozenset(
+            {
+                "JobResponse",
+                "JobListParams",
+                "JobTasksListParams",
+                "JobStatus",
+                "JobKind",
+            }
+        ),
+    ),
+    # ImportFailure / ImportStats / MAX_IMPORT_FAILURES stay published under
+    # kitaru.task.importer (see its reexports entry).
+    "kitaru.api_models.v1.imports": ModuleSpec(
+        symbols=frozenset({"ImportCreateRequest"}),
+    ),
+    "kitaru.api_models.v1.agent": ModuleSpec(
+        symbols=frozenset(
+            {
+                "AgentCreateRequest",
+                "AgentUpdateRequest",
+                "AgentListParams",
+                "AgentResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.agent_version": ModuleSpec(
+        symbols=frozenset(
+            {
+                "AgentVersionCreateRequest",
+                "AgentVersionUpdateRequest",
+                "AgentVersionListParams",
+                "AgentVersionResponse",
+                "RunSpec",
+                "AgentCapabilities",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.cohort": ModuleSpec(
+        symbols=frozenset(
+            {
+                "CohortCreateRequest",
+                "CohortUpdateRequest",
+                "CohortListParams",
+                "CohortResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.cohort_version": ModuleSpec(
+        symbols=frozenset(
+            {
+                "CohortVersionCreateRequest",
+                "CohortVersionUpdateRequest",
+                "CohortVersionListParams",
+                "CohortVersionResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.evaluator": ModuleSpec(
+        symbols=frozenset(
+            {
+                "EvaluatorCreateRequest",
+                "EvaluatorUpdateRequest",
+                "EvaluatorListParams",
+                "EvaluatorResponse",
+                "EvaluatorVersionCreateRequest",
+                "EvaluatorVersionUpdateRequest",
+                "EvaluatorVersionResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.experiment": ModuleSpec(
+        symbols=frozenset(
+            {
+                "ExperimentCreateRequest",
+                "ExperimentUpdateRequest",
+                "ExperimentListParams",
+                "ExperimentResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.experiment_run": ModuleSpec(
+        symbols=frozenset(
+            {
+                "ExperimentRunCreateRequest",
+                "ExperimentRunListParams",
+                "ExperimentRunJobsListParams",
+                "ExperimentRunResponse",
+                "ExperimentRunProgress",
+                "ExperimentRunStatus",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.investigation": ModuleSpec(
+        symbols=frozenset(
+            {
+                "InvestigationCreateRequest",
+                "InvestigationUpdateRequest",
+                "InvestigationListParams",
+                "InvestigationResponse",
+                "InvestigationStatus",
+                "InvestigationSessionVerdict",
+                "InvestigationSessionInput",
+                "InvestigationSessionHighlight",
+                "InvestigationSessionQuestion",
+                "InvestigationSessionsListParams",
+                "InvestigationSessionUpdateRequest",
+                "InvestigationSessionResponse",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.annotation": ModuleSpec(
+        symbols=frozenset(
+            {
+                "AnnotationCreateRequest",
+                "ManualAnnotationCreateRequest",
+                "InvestigationAnswerCreateRequest",
+                "AnnotationUpdateRequest",
+                "AnnotationListParams",
+                "AnnotationResponse",
+                "AnnotationSpan",
+                "AnnotationSelector",
+            }
+        ),
+    ),
+    "kitaru.api_models.v1.filter": ModuleSpec(
+        symbols=frozenset(
+            {
+                "FilterOp",
+                "FilterCondition",
+                "AndFilter",
+                "OrFilter",
+                "NotFilter",
+                "FilterableListParams",
+            }
+        ),
     ),
     "kitaru.task.evaluator": ModuleSpec(
         symbols=frozenset(
@@ -135,9 +374,17 @@ PUBLIC_API: dict[str, ModuleSpec] = {
 }
 
 
-# Pydantic machinery that appears as inherited class members but is not part
-# of the documented API surface.
-EXCLUDED_CLASS_MEMBERS = {"model_config", "model_fields", "model_computed_fields"}
+# Pydantic machinery that appears as class members but is not part of the
+# documented API surface. Members inherited from pydantic.BaseModel itself
+# (model_dump, model_validate, ...) never reach the serialized output because
+# griffe only records inherited members from bases inside the loaded package;
+# this set covers the pydantic hooks kitaru models define or override.
+EXCLUDED_CLASS_MEMBERS = {
+    "model_config",
+    "model_fields",
+    "model_computed_fields",
+    "model_post_init",
+}
 
 
 class PublicApiError(Exception):

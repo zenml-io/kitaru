@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
-- Restored the SDK reference docs generator (`scripts/generate_sdk_docs.py`) for the v2 SDK: a reviewed `PUBLIC_API` allowlist over `kitaru.client` and `kitaru.task`, re-enabling `just generate-docs` and the `sdkdocs.kitaru.ai` build and deploy pipeline.
+- Restored the SDK reference docs generator (`scripts/generate_sdk_docs.py`) for the v2 SDK: a reviewed `PUBLIC_API` allowlist over `kitaru.client` (including the resource method groups such as `client.sessions`), `kitaru.task`, and the developer-facing `kitaru.api_models.v1` types, re-enabling `just generate-docs` and the `sdkdocs.kitaru.ai` build and deploy pipeline.
 - Added a v2 CLI reference generator (`scripts/generate_cli_docs.py`) that renders `sdkdocs.kitaru.ai` CLI pages from the `kitaru schema` contract, replacing the stale v1 CLI reference.
 
 ## [0.22.0rc8]

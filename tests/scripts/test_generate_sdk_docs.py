@@ -1,6 +1,10 @@
 """Tests for the SDK documentation generator."""
 
+import ast
+import importlib
+import inspect
 import json
+from pathlib import Path
 from typing import ClassVar
 
 import pytest
@@ -183,14 +187,163 @@ class TestBuildPublicModule:
             _build_public_module("kitaru.nope", ModuleSpec(), {})
 
 
-class TestAllowlistConfiguration:
-    def test_only_client_and_task_modules_are_published(self) -> None:
-        assert set(PUBLIC_API) == {
-            "kitaru.client",
-            "kitaru.task",
-            "kitaru.task.evaluator",
-            "kitaru.task.importer",
+# Public names in published api_models modules that are deliberately not in
+# the allowlist. The structural drift test fails when a module gains a public
+# name that is neither allowlisted nor listed here, so new symbols surface
+# loudly instead of silently staying undocumented.
+API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
+    # Shared base machinery and validation aliases; developers receive these
+    # via the concrete request/response models, never construct them directly.
+    "kitaru.api_models.v1.base": frozenset(
+        {
+            "RequestModel",
+            "ResponseModel",
+            "DiscriminatedRequestModel",
+            "TimestampedResponseModel",
+            "OwnedResponseModel",
+            "ErrorBody",
+            "PlainSerializedSecretStr",
+            "FiniteFloat",
+            "JsonValue",
+            "ItemT",
         }
+    ),
+    # EvaluationResult is published under kitaru.task.evaluator (reexport);
+    # the rest are validation internals.
+    "kitaru.api_models.v1.evaluation": frozenset(
+        {"EvaluationResult", "EvaluationName", "MAX_NAME_LENGTH"}
+    ),
+    # Published under kitaru.task.importer (reexports).
+    "kitaru.api_models.v1.imports": frozenset(
+        {"ImportFailure", "ImportStats", "MAX_IMPORT_FAILURES"}
+    ),
+    # Annotated discriminated-union alias; the four concrete configs are the
+    # developer-facing entry points.
+    "kitaru.api_models.v1.replay_config": frozenset({"ToolConfig"}),
+    # Annotated union aliases; the concrete filter models are published.
+    "kitaru.api_models.v1.filter": frozenset({"Filter", "FilterParam"}),
+    "kitaru.api_models.v1.replay": frozenset(),
+    "kitaru.api_models.v1.session": frozenset(),
+    "kitaru.api_models.v1.session_node": frozenset(),
+    "kitaru.api_models.v1.job": frozenset(),
+    "kitaru.api_models.v1.agent": frozenset(),
+    "kitaru.api_models.v1.agent_version": frozenset(),
+    "kitaru.api_models.v1.cohort": frozenset(),
+    "kitaru.api_models.v1.cohort_version": frozenset(),
+    "kitaru.api_models.v1.evaluator": frozenset(),
+    "kitaru.api_models.v1.experiment": frozenset(),
+    "kitaru.api_models.v1.experiment_run": frozenset(),
+    "kitaru.api_models.v1.investigation": frozenset(),
+    "kitaru.api_models.v1.annotation": frozenset(),
+}
+
+# The published resource classes mapped to the submodule that defines each.
+PUBLISHED_RESOURCE_CLASSES: dict[str, str] = {
+    "SessionsResource": "sessions",
+    "ReplaysResource": "replays",
+    "AgentsResource": "agents",
+    "AgentVersionsResource": "agent_versions",
+    "JobsResource": "jobs",
+    "EvaluatorsResource": "evaluators",
+    "EvaluationsResource": "evaluations",
+    "CohortsResource": "cohorts",
+    "CohortVersionsResource": "cohort_versions",
+    "ExperimentsResource": "experiments",
+    "ExperimentRunsResource": "experiment_runs",
+    "InvestigationsResource": "investigations",
+}
+
+
+def get_public_source_names(module_path: str) -> set[str]:
+    """Collect public top-level names defined in a module's source file.
+
+    Uses the AST rather than runtime ``vars()`` so imported names (pydantic
+    helpers, sibling models) do not count as definitions, mirroring what
+    griffe extracts.
+    """
+    module = importlib.import_module(module_path)
+    assert module.__file__ is not None
+    tree = ast.parse(Path(module.__file__).read_text())
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            names.update(
+                target.id for target in node.targets if isinstance(target, ast.Name)
+            )
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            names.add(node.target.id)
+    return {name for name in names if not name.startswith("_")}
+
+
+class TestAllowlistConfiguration:
+    def test_published_module_set_is_exact(self) -> None:
+        api_models_leaves = {
+            f"kitaru.api_models.v1.{name}"
+            for name in (
+                "base",
+                "session",
+                "session_node",
+                "evaluation",
+                "replay",
+                "replay_config",
+                "job",
+                "imports",
+                "agent",
+                "agent_version",
+                "cohort",
+                "cohort_version",
+                "evaluator",
+                "experiment",
+                "experiment_run",
+                "investigation",
+                "annotation",
+                "filter",
+            )
+        }
+        assert (
+            set(PUBLIC_API)
+            == {
+                "kitaru.client",
+                "kitaru.client.resources",
+                "kitaru.task",
+                "kitaru.task.evaluator",
+                "kitaru.task.importer",
+                "kitaru.api_models",
+                "kitaru.api_models.v1",
+            }
+            | api_models_leaves
+        )
+
+    def test_api_models_allowlists_track_module_sources(self) -> None:
+        # Structural drift check for modules without __all__: every
+        # allowlisted symbol must exist in the module source, and every public
+        # name in the source must be either allowlisted or in the documented
+        # exclusions above.
+        assert set(API_MODELS_DOC_EXCLUSIONS) == {
+            path for path in PUBLIC_API if path.startswith("kitaru.api_models.v1.")
+        }
+        for module_path, excluded in API_MODELS_DOC_EXCLUSIONS.items():
+            spec = PUBLIC_API[module_path]
+            documented = set(spec.symbols) | set(spec.reexports)
+            public_names = get_public_source_names(module_path)
+            missing = documented - public_names
+            assert not missing, f"{module_path}: allowlisted but not defined: {missing}"
+            unaccounted = public_names - documented - excluded
+            assert not unaccounted, (
+                f"{module_path}: public names neither allowlisted nor in "
+                f"API_MODELS_DOC_EXCLUSIONS: {sorted(unaccounted)}"
+            )
+            stale = excluded - public_names
+            assert not stale, f"{module_path}: stale exclusions: {sorted(stale)}"
+
+    def test_resource_allowlist_matches_defined_classes(self) -> None:
+        spec = PUBLIC_API["kitaru.client.resources"]
+        assert set(PUBLISHED_RESOURCE_CLASSES) | {"iterate_pages"} == set(spec.symbols)
+        for class_name, submodule in PUBLISHED_RESOURCE_CLASSES.items():
+            module = importlib.import_module(f"kitaru.client.resources.{submodule}")
+            assert isinstance(getattr(module, class_name), type), class_name
 
     def test_no_excluded_segment_in_allowlist(self) -> None:
         for path in PUBLIC_API:
@@ -230,7 +383,45 @@ class TestExtractedPublicApi:
 
     def test_root_module_is_kitaru(self, public_api: dict) -> None:
         assert public_api["name"] == "kitaru"
-        assert set(public_api["modules"]) == {"client", "task"}
+        assert set(public_api["modules"]) == {"api_models", "client", "task"}
+
+    def test_api_models_containers_publish_no_symbols(self, public_api: dict) -> None:
+        api_models = public_api["modules"]["api_models"]
+        v1 = api_models["modules"]["v1"]
+        for container in (api_models, v1):
+            assert container["classes"] == {}
+            assert container["functions"] == {}
+        assert set(api_models["modules"]) == {"v1"}
+        assert len(v1["modules"]) == 18
+
+    def test_page_is_published_under_api_models_base(self, public_api: dict) -> None:
+        base = public_api["modules"]["api_models"]["modules"]["v1"]["modules"]["base"]
+        assert set(base["classes"]) == {"Page", "ListParams", "CursorParams"}
+
+    def test_resource_classes_expose_all_public_methods(self, public_api: dict) -> None:
+        # Structural drift check: a public method added to a published
+        # resource class must show up on its generated page.
+        resources = public_api["modules"]["client"]["modules"]["resources"]
+        assert "iterate_pages" in resources["functions"]
+        for class_name, submodule in PUBLISHED_RESOURCE_CLASSES.items():
+            module = importlib.import_module(f"kitaru.client.resources.{submodule}")
+            cls = getattr(module, class_name)
+            real_methods = {
+                name
+                for name, member in vars(cls).items()
+                if inspect.isfunction(member) and not name.startswith("_")
+            }
+            documented = set(resources["classes"][class_name]["functions"])
+            missing = real_methods - documented
+            assert not missing, f"{class_name}: undocumented methods {sorted(missing)}"
+
+    def test_sessions_resource_page_has_expected_methods(
+        self, public_api: dict
+    ) -> None:
+        resources = public_api["modules"]["client"]["modules"]["resources"]
+        sessions = resources["classes"]["SessionsResource"]
+        for method in ("create", "get", "get_with_nodes", "list", "iter", "delete"):
+            assert method in sessions["functions"], method
 
     def test_output_is_json_serializable(self, public_api: dict) -> None:
         assert json.loads(json.dumps(public_api)) == public_api
