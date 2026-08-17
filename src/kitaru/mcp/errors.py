@@ -4,6 +4,7 @@
 """Canonical MCP results and stable redacted exception mapping."""
 
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import cast
 
@@ -43,9 +44,22 @@ class MCPOutputValidationError(Exception):
         Exception.__init__(self, "MCP handler output validation failed")
 
 
-def success_result(result_type: type[ToolResult], data: JsonValue) -> ToolResult:
+def success_result(
+    result_type: type[ToolResult],
+    data: JsonValue,
+    *,
+    warnings: list[str] | None = None,
+    links: Mapping[str, str] | None = None,
+) -> ToolResult:
     """Build a versioned success envelope."""
-    return result_type(ok=True, data=data)
+    if warnings is None and links is None:
+        return result_type(ok=True, data=data)
+    values: dict[str, object] = {"ok": True, "data": data}
+    if warnings:
+        values["warnings"] = warnings
+    if links:
+        values["links"] = dict(links)
+    return result_type.model_validate(values)
 
 
 def error_result(result_type: type[ToolResult], error: BaseException) -> ToolResult:

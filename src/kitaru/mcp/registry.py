@@ -31,6 +31,7 @@ from kitaru.mcp.models.common import (
     ReviewReadResult,
     SessionImportResult,
     ToolResult,
+    ToolSuccessPayload,
     WorkflowCancelResult,
     WorkflowStartResult,
 )
@@ -201,8 +202,17 @@ async def _invoke(
     state = cast(MCPServerState, context.request_context.lifespan_context)
     try:
         data = await state.execute(lambda: handler(state, request))
-        json_data = redact_data(data)
-        envelope = success_result(result_type, json_data)
+        if isinstance(data, ToolSuccessPayload):
+            json_data = redact_data(data.data)
+            envelope = success_result(
+                result_type,
+                json_data,
+                warnings=data.warnings,
+                links=data.links,
+            )
+        else:
+            json_data = redact_data(data)
+            envelope = success_result(result_type, json_data)
     except ValidationError as error:
         envelope = error_result(result_type, MCPOutputValidationError(error))
     except Exception as error:
