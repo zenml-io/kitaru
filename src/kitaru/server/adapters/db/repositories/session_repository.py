@@ -14,7 +14,7 @@
 """SQL session repository."""
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
@@ -36,6 +36,8 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.session import (
+    SESSION_AGENT_ID_FOREIGN_KEY,
+    SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
     SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
@@ -48,7 +50,8 @@ from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.agent_version import AgentVersionNotFound
+from kitaru.server.domain.base import DomainError, NotFoundError
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
@@ -233,19 +236,26 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Raises:
             DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
+            AgentNotFound: No agent has the session's agent id.
+            AgentVersionNotFound: No agent version has the session's agent
+                version id.
 
         Returns:
             Stored session with timestamps set.
         """
         row = SessionORM.from_domain(session)
-        await self._add(
-            row,
-            {
-                SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
-                    self._duplicate_external_id(session)
-                )
-            },
-        )
+        constraints: dict[str, Callable[[], DomainError]] = {
+            SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
+                self._duplicate_external_id(session)
+            ),
+            SESSION_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(session.agent_id),
+        }
+        if session.agent_version_id is not None:
+            agent_version_id = session.agent_version_id
+            constraints[SESSION_AGENT_VERSION_ID_FOREIGN_KEY] = lambda: (
+                AgentVersionNotFound(agent_version_id)
+            )
+        await self._add(row, constraints)
         return row.to_domain()
 
     async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:

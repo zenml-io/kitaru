@@ -14,7 +14,7 @@
 """SQL task repository."""
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime
 
 from sqlalchemy import (
@@ -33,14 +33,20 @@ from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.task import (
+    TASK_AGENT_ID_FOREIGN_KEY,
+    TASK_AGENT_VERSION_ID_FOREIGN_KEY,
     TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT,
+    TASK_INPUT_SESSION_ID_FOREIGN_KEY,
     TERMINAL_STATUS_VALUES,
     TaskORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.task import TaskFilter
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.agent import AgentNotFound
+from kitaru.server.domain.agent_version import AgentVersionNotFound
+from kitaru.server.domain.base import DomainError, NotFoundError
+from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.task import DuplicateEvaluationTask, Task, TaskNotFound
 
 IN_FLIGHT_STATUS_VALUES = [TaskStatus.CLAIMED.value, TaskStatus.RUNNING.value]
@@ -127,19 +133,32 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         Raises:
             DuplicateEvaluationTask: The job already holds an evaluator task
                 for this input session and plugin version.
+            NotFoundError: No agent, agent version, or session has an id the
+                task references.
 
         Returns:
             Stored task with timestamps set.
         """
         row = TaskORM.from_domain(task)
-        await self._add(
-            row,
-            {
-                TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT: lambda: DuplicateEvaluationTask(
-                    row.job_id, row.input_session_id, row.plugin_version_id
-                )
-            },
-        )
+        constraints: dict[str, Callable[[], DomainError]] = {
+            TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT: lambda: DuplicateEvaluationTask(
+                row.job_id, row.input_session_id, row.plugin_version_id
+            ),
+        }
+        if row.agent_id is not None:
+            agent_id = row.agent_id
+            constraints[TASK_AGENT_ID_FOREIGN_KEY] = lambda: AgentNotFound(agent_id)
+        if row.agent_version_id is not None:
+            agent_version_id = row.agent_version_id
+            constraints[TASK_AGENT_VERSION_ID_FOREIGN_KEY] = lambda: (
+                AgentVersionNotFound(agent_version_id)
+            )
+        if row.input_session_id is not None:
+            input_session_id = row.input_session_id
+            constraints[TASK_INPUT_SESSION_ID_FOREIGN_KEY] = lambda: SessionNotFound(
+                input_session_id
+            )
+        await self._add(row, constraints)
         return row.to_domain()
 
     async def create_many(self, tasks: list[Task]) -> list[Task]:
@@ -148,14 +167,28 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         Args:
             tasks: Tasks to store.
 
+        Raises:
+            NotFoundError: No agent, agent version, or session has an id a
+                task references.
+
         Returns:
             Stored tasks with timestamps set, in the same order.
         """
         if not tasks:
             return []
         rows = [TaskORM.from_domain(task) for task in tasks]
-        self._session.add_all(rows)
-        await self._flush()
+        await self._add_all(
+            rows,
+            {
+                TASK_AGENT_ID_FOREIGN_KEY: lambda: NotFoundError("Agent was not found"),
+                TASK_AGENT_VERSION_ID_FOREIGN_KEY: lambda: NotFoundError(
+                    "Agent version was not found"
+                ),
+                TASK_INPUT_SESSION_ID_FOREIGN_KEY: lambda: NotFoundError(
+                    "Input session was not found"
+                ),
+            },
+        )
         return [row.to_domain() for row in rows]
 
     async def get(self, task_id: uuid.UUID, exclusive: bool = False) -> Task:

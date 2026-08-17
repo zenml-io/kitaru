@@ -27,6 +27,7 @@ from kitaru.server.adapters.db.filtering import (
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.replay import (
+    REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
     REPLAY_JOB_ID_UNIQUE_CONSTRAINT,
     REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT,
     ReplayORM,
@@ -42,6 +43,7 @@ from kitaru.server.domain.replay import (
     ReplayAlreadyExistsForJob,
     ReplayNotFound,
 )
+from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.filtering import FilterCondition
 
 
@@ -116,6 +118,7 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             DuplicateReplayForBaseline: The run already holds a replay for
                 this baseline session.
             ReplayAlreadyExistsForJob: The job already has a replay.
+            SessionNotFound: No session has the replay's baseline session id.
 
         Returns:
             Stored replay with timestamps set.
@@ -132,6 +135,9 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
                 REPLAY_JOB_ID_UNIQUE_CONSTRAINT: lambda: ReplayAlreadyExistsForJob(
                     replay.job_id
                 ),
+                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
+                    replay.baseline_session_id
+                ),
             },
         )
         return row.to_domain()
@@ -145,6 +151,7 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         Raises:
             IntegrityError: The batch collides on (job_id) or
                 (experiment_run_id, baseline_session_id).
+            NotFoundError: No session has a replay's baseline session id.
 
         Returns:
             Stored replays with timestamps set, in the same order.
@@ -152,8 +159,14 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         if not replays:
             return []
         rows = [ReplayORM.from_domain(replay) for replay in replays]
-        self._session.add_all(rows)
-        await self._flush()
+        await self._add_all(
+            rows,
+            {
+                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: NotFoundError(
+                    "Baseline session was not found"
+                )
+            },
+        )
         return [row.to_domain() for row in rows]
 
     async def get(self, replay_id: uuid.UUID) -> Replay:

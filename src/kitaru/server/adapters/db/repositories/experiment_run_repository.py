@@ -28,12 +28,14 @@ from kitaru.server.adapters.db.filtering import (
 from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.experiment_run import (
+    EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY,
     EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT,
     ExperimentRunORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
+from kitaru.server.domain.agent_version import AgentVersionNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.experiment_run import (
     DuplicateExperimentRunNumber,
@@ -90,6 +92,8 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
         Raises:
             DuplicateExperimentRunNumber: The experiment already has a run
                 with this number.
+            AgentVersionNotFound: No agent version has the run's agent
+                version id.
 
         Returns:
             Stored experiment run with timestamps set.
@@ -100,7 +104,10 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
             {
                 EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT: lambda: (
                     DuplicateExperimentRunNumber(run.experiment_id, run.number)
-                )
+                ),
+                EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY: lambda: (
+                    AgentVersionNotFound(run.agent_version_id)
+                ),
             },
         )
         return row.to_domain()
