@@ -3,7 +3,7 @@ description: "Import Braintrust project logs into Kitaru: accepted export shapes
 icon: file-import
 ---
 
-# Import Braintrust traces
+# Braintrust
 
 If your agent already logs to Braintrust, you don't need to instrument anything to start using Kitaru. Export the logs, run one import, and each trace lands as a [session](../concepts/agents-and-sessions.md): the same object a live-recorded run produces, ready to evaluate and replay.
 

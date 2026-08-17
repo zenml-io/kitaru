@@ -3,7 +3,7 @@ description: "Turn LangSmith runs into replayable Kitaru sessions: the accepted 
 icon: file-import
 ---
 
-# Import LangSmith traces
+# LangSmith
 
 If your agent already reports to LangSmith, you don't need to re-instrument anything to start using Kitaru. Export the runs, import them, and each one lands as a [session](../concepts/agents-and-sessions.md) with `origin: imported`, the same object a live-recorded run produces. LangSmith stays your system of record; Kitaru takes a runnable copy of the runs you want to evaluate and replay.
 

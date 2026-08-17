@@ -3,7 +3,7 @@ description: "The importer contract in full: Langfuse JSONL imports, custom impo
 icon: file-import
 ---
 
-# Import Langfuse traces
+# Langfuse
 
 [Import your traces](../getting-started/import-your-traces.md) covers the happy path: one `kitaru session import` against the built-in Langfuse importer. This guide is the full contract: what the importer understands, how re-runs dedup, and how to write an importer for any other format.
 

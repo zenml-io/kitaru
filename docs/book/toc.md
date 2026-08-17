@@ -40,9 +40,9 @@
 ## Import your traces
 
 - [Overview](getting-started/import-your-traces.md)
-- [Import Langfuse traces](guides/import-langfuse-traces.md)
-- [Import LangSmith traces](guides/import-langsmith-traces.md)
-- [Import Braintrust traces](guides/import-braintrust-traces.md)
+- [Langfuse](guides/import-langfuse-traces.md)
+- [LangSmith](guides/import-langsmith-traces.md)
+- [Braintrust](guides/import-braintrust-traces.md)
 - [Import any trace format](guides/importing-sessions.md)
 
 ## Adapters
