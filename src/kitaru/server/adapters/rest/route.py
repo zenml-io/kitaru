@@ -33,6 +33,10 @@ from kitaru.server.adapters.rest.request_state import (
 _IDEMPOTENT_ENDPOINT_ATTR = "_kitaru_idempotent"
 _READ_ONLY_ENDPOINT_ATTR = "_kitaru_read_only"
 
+_PREFER_HEADER = "Prefer"
+_PREFERENCE_APPLIED_HEADER = "Preference-Applied"
+_STRONG_CONSISTENCY_PREFERENCE = "consistency=strong"
+
 F = TypeVar("F", bound=Callable[..., Any])
 
 
@@ -97,6 +101,9 @@ def is_idempotent(endpoint: Callable[..., Any]) -> bool:
 def read_only(endpoint: F) -> F:
     """Mark an endpoint's database session for routing to the read engine.
 
+    A request carrying ``Prefer: consistency=strong`` is served from the
+    primary engine instead.
+
     Args:
         endpoint: Route handler function.
 
@@ -117,6 +124,26 @@ def is_read_only(endpoint: Callable[..., Any]) -> bool:
         Whether ``endpoint`` was decorated with ``read_only``.
     """
     return getattr(endpoint, _READ_ONLY_ENDPOINT_ATTR, False)
+
+
+def _wants_strong_consistency(request: Request) -> bool:
+    """Return whether the request prefers strongly consistent reads.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Whether a ``Prefer`` header carries ``consistency=strong``.
+    """
+    for header in request.headers.getlist(_PREFER_HEADER):
+        for member in header.split(","):
+            name, _, value = member.split(";", 1)[0].partition("=")
+            if (
+                name.strip().lower() == "consistency"
+                and value.strip().strip('"').lower() == "strong"
+            ):
+                return True
+    return False
 
 
 class KitaruAPIRoute(APIRoute):
@@ -154,7 +181,8 @@ class KitaruAPIRoute(APIRoute):
         read_only_endpoint = is_read_only(self.endpoint)
 
         async def route_handler(request: Request) -> Response:
-            if read_only_endpoint:
+            strong_consistency = _wants_strong_consistency(request)
+            if read_only_endpoint and not strong_consistency:
                 # Set before calling the original handler because dependency
                 # resolution, including get_session, runs inside that call.
                 mark_request_read_only(request)
@@ -166,6 +194,10 @@ class KitaruAPIRoute(APIRoute):
                     status_code=reused.status_code,
                     media_type=reused.content_type,
                     headers={"Idempotent-Replayed": "true"},
+                )
+            if strong_consistency:
+                response.headers[_PREFERENCE_APPLIED_HEADER] = (
+                    _STRONG_CONSISTENCY_PREFERENCE
                 )
             handle = get_idempotency_key_handle(request)
             if (

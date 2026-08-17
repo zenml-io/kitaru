@@ -221,3 +221,125 @@ async def test_route_commits_pending_writes_on_an_unmarked_route() -> None:
     await app(scope, receive, send)
 
     assert events == ["committed", "response_sent"]
+
+
+def _drive_with_headers(
+    scope: dict[str, Any], events: list[str], response_headers: dict[str, str]
+) -> Any:
+    """Build receive/send callables that also capture response headers.
+
+    Args:
+        scope: ASGI scope for the request.
+        events: Shared list commit and send events are appended to.
+        response_headers: Dict response headers are recorded into.
+
+    Returns:
+        Receive and send ASGI callables.
+    """
+    receive, send = _drive(scope, events)
+
+    async def send_capturing(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            for name, value in message.get("headers", []):
+                response_headers[name.decode().lower()] = value.decode()
+        await send(message)
+
+    return receive, send_capturing
+
+
+@pytest.mark.parametrize(
+    "prefer",
+    [
+        "consistency=strong",
+        'respond-async, Consistency="Strong"',
+        "consistency = strong; wait=10",
+    ],
+)
+async def test_route_serves_strong_consistency_from_the_primary(
+    prefer: str,
+) -> None:
+    """A strong consistency preference keeps a read-only route on the primary."""
+    seen: list[bool] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def probe_dependency(request: Request) -> None:
+        seen.append(request_uses_read_engine(request))
+
+    @router.get("/read-only", dependencies=[Depends(probe_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    response_headers: dict[str, str] = {}
+    scope = base_asgi_scope(
+        method="GET",
+        path="/read-only",
+        raw_path=b"/read-only",
+        headers=[(b"prefer", prefer.encode())],
+    )
+    receive, send = _drive_with_headers(scope, events, response_headers)
+    await app(scope, receive, send)
+
+    assert seen == [False]
+    assert response_headers["preference-applied"] == "consistency=strong"
+
+
+@pytest.mark.parametrize("prefer", ["consistency=eventual", "respond-async"])
+async def test_route_ignores_other_preferences(prefer: str) -> None:
+    """A read-only route stays on the read engine for other preferences."""
+    seen: list[bool] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def probe_dependency(request: Request) -> None:
+        seen.append(request_uses_read_engine(request))
+
+    @router.get("/read-only", dependencies=[Depends(probe_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    response_headers: dict[str, str] = {}
+    scope = base_asgi_scope(
+        method="GET",
+        path="/read-only",
+        raw_path=b"/read-only",
+        headers=[(b"prefer", prefer.encode())],
+    )
+    receive, send = _drive_with_headers(scope, events, response_headers)
+    await app(scope, receive, send)
+
+    assert seen == [True]
+    assert "preference-applied" not in response_headers
+
+
+async def test_route_confirms_strong_consistency_on_an_unmarked_route() -> None:
+    """An unmarked route confirms the strong consistency preference."""
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    @router.get("/normal")
+    async def normal_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    response_headers: dict[str, str] = {}
+    scope = base_asgi_scope(
+        method="GET",
+        path="/normal",
+        raw_path=b"/normal",
+        headers=[(b"prefer", b"consistency=strong")],
+    )
+    receive, send = _drive_with_headers(scope, events, response_headers)
+    await app(scope, receive, send)
+
+    assert response_headers["preference-applied"] == "consistency=strong"

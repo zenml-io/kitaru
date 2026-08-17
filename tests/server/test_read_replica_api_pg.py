@@ -146,7 +146,9 @@ async def _login(client: httpx.AsyncClient) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-@pytest.mark.parametrize("path", ["/api/v1/__test__/read-only", "/api/v1/__test__/normal"])
+@pytest.mark.parametrize(
+    "path", ["/api/v1/__test__/read-only", "/api/v1/__test__/normal"]
+)
 async def test_probe_route_persists_the_throttled_api_key_last_used(
     client: httpx.AsyncClient, path: str
 ) -> None:
@@ -158,12 +160,16 @@ async def test_probe_route_persists_the_throttled_api_key_last_used(
     """
     user_headers = await _login(client)
     created = (
-        await client.post("/api/v1/api-keys", json={"name": "probe"}, headers=user_headers)
+        await client.post(
+            "/api/v1/api-keys", json={"name": "probe"}, headers=user_headers
+        )
     ).json()
     key_headers = {"Authorization": f"Bearer {created['key']}"}
 
     response = await client.get(path, headers=key_headers)
     assert response.status_code == 200
 
-    response = await client.get(f"/api/v1/api-keys/{created['id']}", headers=user_headers)
+    response = await client.get(
+        f"/api/v1/api-keys/{created['id']}", headers=user_headers
+    )
     assert response.json()["last_used"] is not None

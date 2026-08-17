@@ -139,6 +139,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - CLI and MCP investigation creation return the dashboard review page as a `review` link, resolved from the server-stated dashboard URL or, for servers hosting the bundled UI, from the URL the client logged into. If link resolution fails after creation, both preserve the created investigation and return a warning.
 - Standalone replay CLI create, list, and get commands; cohort baseline selection in the CLI and MCP; and native MCP reads for tags and workers plus capability-gated tag lifecycle operations.
 - Endpoints can serve reads from a read replica configured via `KITARU_SERVER_READ_DATABASE_URL` or `KITARU_SERVER_DB_READ_HOST`.
+- Requests to read-replica endpoints are served from the primary database when they carry the `Prefer: consistency=strong` header.
 - Vercel AI SDK 7 `ToolLoopAgent` support for typed, non-streaming agent generation with Kitaru recording and safe replay boundaries.
 - The server now serves the bundled Kitaru UI at its root URL with SPA fallback. Setting `KITARU_SERVER_EXTERNAL_UI=true` makes it redirect to the configured dashboard URL instead of serving files, and `GET /api/v1/info` reports the served UI version.
 - Every filterable entity list filters by `id`, including `in` over a list of ids.
