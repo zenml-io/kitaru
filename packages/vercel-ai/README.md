@@ -2,10 +2,10 @@
 
 `@zenml-io/kitaru-vercel-ai` adds Kitaru recording and replay to AI SDK 7 `ToolLoopAgent.generate()` and the non-streaming `generateText` function.
 
-This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. Release candidates use npm's `rc` tag and remain pre-1.0 compatibility previews.
+This adapter depends on the framework-neutral `@zenml-io/kitaru` package, whose repository directory is `packages/core/`. The packages are versioned and released together.
 
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.65
+pnpm add @zenml-io/kitaru-vercel-ai ai@7.0.65
 ```
 
 ## Links
