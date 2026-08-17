@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "LangSmith trace importer for Kitaru."
 license = "Apache-2.0"
 requires-python = ">=3.11"
-dependencies = ["kitaru>=0.22.0,<0.23"]
+dependencies = ["kitaru>=0.22.0"]
 
 [build-system]
 requires = ["hatchling==1.32.0"]
