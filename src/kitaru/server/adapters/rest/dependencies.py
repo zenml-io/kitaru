@@ -487,6 +487,7 @@ def _build_task_transitions(
         job_repository=SQLJobRepository(session),
         dispatcher=build_event_dispatcher(session, analytics),
         analytics=analytics,
+        plugin_repository=SQLPluginRepository(session),
     )
 
 
@@ -813,16 +814,18 @@ def get_tag_service(
 
 def get_worker_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> WorkerService:
     """Return a worker service for the current request.
 
     Args:
         session: Request-scoped database session.
+        analytics: Analytics tracker for the current request.
 
     Returns:
         Worker service bound to the SQL repository.
     """
-    return WorkerService(repository=SQLWorkerRepository(session))
+    return WorkerService(repository=SQLWorkerRepository(session), analytics=analytics)
 
 
 def get_auth_service(

@@ -22,7 +22,7 @@ import httpx
 from pydantic import BaseModel
 
 from kitaru.analytics.events import AnalyticsEvent
-from kitaru.analytics.source import AnalyticsSource, current_source
+from kitaru.analytics.source import AnalyticsSource, current_attribution
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ class AnalyticsClient:
                 self._deliver_messages()
             )
         try:
-            self._queue.put_nowait((current_source.get(), message))
+            self._queue.put_nowait((current_attribution.get().source, message))
         except asyncio.QueueFull:
             logger.debug("Analytics queue is full, dropping message")
 

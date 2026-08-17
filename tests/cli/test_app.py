@@ -28,7 +28,7 @@ import kitaru.cli
 from kitaru.cli import app as app_module
 from kitaru.cli.output import CommandResult, OutputMode, emit_event, get_output_context
 from kitaru.cli.skill_discovery import INSTALL_COMMAND, SKILLS_URL
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 
 
 def test_bare_command_group_prints_help_without_bootstrap(monkeypatch, capsys) -> None:
@@ -506,6 +506,20 @@ def test_http_413_maps_to_invalid_arguments_with_server_detail() -> None:
     assert error.kind == "invalid_arguments"
     assert error.message == "payload exceeds configured cap"
     assert error.details == {"status_code": 413}
+
+
+def test_html_response_maps_to_invalid_configuration() -> None:
+    """The shared boundary names the endpoint that answered with an HTML page."""
+    error = app_module._convert_error(
+        InvalidServerResponseError(
+            "The server answered GET /api/v1/info with an HTML page "
+            "instead of an API response"
+        )
+    )
+
+    assert error.kind == "invalid_configuration"
+    assert "GET /api/v1/info" in error.message
+    assert error.hint is not None
 
 
 def test_transport_error_falls_back_to_secret_safe_request_origin() -> None:

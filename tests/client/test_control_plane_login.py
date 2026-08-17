@@ -41,6 +41,7 @@ from kitaru.client.credentials import ApiToken, ApiType
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneAuthenticator,
+    ControlPlaneError,
     ControlPlaneUser,
 )
 from kitaru.server.adapters.rest.dependencies import get_auth_service
@@ -55,6 +56,7 @@ class FakeControlPlaneSession:
     """Control plane session issuing a fixed token without any HTTP."""
 
     calls: ClassVar[list[str]] = []
+    stored_token: ClassVar[str | None] = None
 
     def __init__(self, api_url: str, store: CredentialStore) -> None:
         """Initialize the session.
@@ -98,13 +100,13 @@ class FakeControlPlaneSession:
         return ApiToken.issued(CONTROL_PLANE_TOKEN, 3600)
 
     async def get_token(self) -> str | None:
-        """Record the call and return the fixed token.
+        """Record the call and return the configured stored token.
 
         Returns:
-            Fixed token.
+            Configured stored token.
         """
         self.calls.append("get_token")
-        return CONTROL_PLANE_TOKEN
+        return self.stored_token
 
     async def close(self) -> None:
         """Close the session, which holds no connections."""
@@ -119,6 +121,7 @@ def session_calls(monkeypatch: pytest.MonkeyPatch) -> list[str]:
     """
     calls: list[str] = []
     monkeypatch.setattr(FakeControlPlaneSession, "calls", calls)
+    monkeypatch.setattr(FakeControlPlaneSession, "stored_token", None)
     for module in ("control_plane_auth", "auth"):
         monkeypatch.setattr(
             f"kitaru.client.{module}.ControlPlaneSession", FakeControlPlaneSession
@@ -166,11 +169,12 @@ async def test_api_key_login_stores_both_credentials(
     authorizer: FakeControlPlaneClient,
 ) -> None:
     """Cache the control plane entry and the Kitaru session it produced."""
-    token = await control_plane_login(
+    token, method = await control_plane_login(
         api_client, SERVER_URL, credential_store, api_key="ZENPROKEY_abc"
     )
 
     assert token.access_token
+    assert method == "api_key"
     assert authorizer.received_credentials == [CONTROL_PLANE_TOKEN]
 
     server = credential_store.get(SERVER_URL)
@@ -185,21 +189,93 @@ async def test_login_without_an_api_key_runs_the_device_flow(
     credential_store: CredentialStore,
     session_calls: list[str],
 ) -> None:
-    """Fall back to the device authorization flow when no API key is given."""
-    await control_plane_login(
+    """Fall back to the device authorization flow when nothing is stored."""
+    _, method = await control_plane_login(
         api_client, SERVER_URL, credential_store, open_browser=False
     )
 
     info = await api_client.info.get()
+    assert method == "device"
+    assert session_calls == ["get_token", f"device:{info.id}"]
+
+
+async def test_login_reuses_a_stored_control_plane_credential(
+    api_client: KitaruAPIClient,
+    credential_store: CredentialStore,
+    authorizer: FakeControlPlaneClient,
+    session_calls: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Skip the device flow when a stored credential still produces a token."""
+    monkeypatch.setattr(FakeControlPlaneSession, "stored_token", CONTROL_PLANE_TOKEN)
+
+    token, method = await control_plane_login(
+        api_client, SERVER_URL, credential_store, open_browser=False
+    )
+
+    assert token.access_token
+    assert method == "stored"
+    assert session_calls == ["get_token"]
+    assert authorizer.received_credentials == [CONTROL_PLANE_TOKEN]
+    server = credential_store.get(SERVER_URL)
+    assert server is not None
+    assert server.api_token is not None
+
+
+async def test_refresh_skips_the_stored_credential(
+    api_client: KitaruAPIClient,
+    credential_store: CredentialStore,
+    session_calls: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Force the device flow even when a stored credential is available."""
+    monkeypatch.setattr(FakeControlPlaneSession, "stored_token", CONTROL_PLANE_TOKEN)
+
+    _, method = await control_plane_login(
+        api_client, SERVER_URL, credential_store, open_browser=False, refresh=True
+    )
+
+    info = await api_client.info.get()
+    assert method == "device"
     assert session_calls == [f"device:{info.id}"]
+
+
+async def test_rejected_stored_credential_falls_back_to_the_device_flow(
+    api_client: KitaruAPIClient,
+    credential_store: CredentialStore,
+    authorizer: FakeControlPlaneClient,
+    session_calls: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run the device flow when the server rejects the stored credential."""
+    monkeypatch.setattr(FakeControlPlaneSession, "stored_token", "stale-token")
+    authorize_user = authorizer.authorize_user
+
+    async def reject_stale(credential: str, server_id: uuid.UUID) -> ControlPlaneUser:
+        if credential == "stale-token":
+            raise ControlPlaneError("Invalid credential.")
+        return await authorize_user(credential, server_id)
+
+    monkeypatch.setattr(authorizer, "authorize_user", reject_stale)
+
+    token, method = await control_plane_login(
+        api_client, SERVER_URL, credential_store, open_browser=False
+    )
+
+    assert token.access_token
+    assert method == "device"
+    info = await api_client.info.get()
+    assert session_calls == ["get_token", f"device:{info.id}"]
 
 
 async def test_stored_control_plane_entry_renews_the_session_token(
     api_client: KitaruAPIClient,
     credential_store: CredentialStore,
     authorizer: FakeControlPlaneClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Exchange a control plane token for a new session once the cached one is gone."""
+    monkeypatch.setattr(FakeControlPlaneSession, "stored_token", CONTROL_PLANE_TOKEN)
     await control_plane_login(
         api_client, SERVER_URL, credential_store, api_key="ZENPROKEY_abc"
     )

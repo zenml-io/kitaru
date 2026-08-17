@@ -12,6 +12,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Restored the SDK reference docs generator (`scripts/generate_sdk_docs.py`) for the v2 SDK: a reviewed `PUBLIC_API` allowlist over `kitaru.client` (including the resource method groups such as `client.sessions`), `kitaru.task`, and the developer-facing `kitaru.api_models.v1` types, re-enabling `just generate-docs` and the `sdkdocs.kitaru.ai` build and deploy pipeline.
 - Added a v2 CLI reference generator (`scripts/generate_cli_docs.py`) that renders `sdkdocs.kitaru.ai` CLI pages from the `kitaru schema` contract, replacing the stale v1 CLI reference.
 
+## [0.22.0rc9]
+
+### Added
+
+- Added the Logfire records-query importer as a default plugin at `0.1.0rc0`.
+
+### Changed
+
+- Prepared the ninth Kitaru 0.22 release candidate with `kitaru-ui-v0.2.0-rc.5` and the Langfuse importer at `0.1.0rc2`.
+
 ## [0.22.0rc8]
 
 ### Changed

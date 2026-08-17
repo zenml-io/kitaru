@@ -35,6 +35,8 @@ class AnalyticsEvent(StrEnum):
     ANNOTATION_CREATED = "Annotation Created"
     JOB_COMPLETED = "Job Completed"
     PLUGIN_VERSION_REGISTERED = "Plugin Version Registered"
+    WORKER_REGISTERED = "Worker Registered"
+    ACCOUNT_CREATED = "Account Created"
     USER_ENRICHED = "User Enriched"
 
 

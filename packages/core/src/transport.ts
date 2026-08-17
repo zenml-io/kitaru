@@ -71,6 +71,7 @@ export interface KitaruTransportOptions {
 
 const KITARU_CLIENT_HEADER = "X-Kitaru-Client";
 const KITARU_CLIENT_IDENTIFICATION = "kitaru-typescript";
+const KITARU_SKILL_HEADER = "X-Kitaru-Skill";
 
 function cloneBytes(value: ArrayBuffer | Uint8Array): Uint8Array<ArrayBuffer> {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
@@ -291,6 +292,7 @@ export class KitaruTransport {
   readonly #credentialProvider?: ReturnType<typeof bindCredentialProvider>;
   readonly #fetch: typeof globalThis.fetch;
   readonly #timeoutMs: number;
+  readonly #skill: string | undefined;
 
   constructor(options: KitaruTransportOptions) {
     this.#apiUrl = normalizeApiUrl(options.apiUrl);
@@ -300,6 +302,10 @@ export class KitaruTransport {
         : bindCredentialProvider(options.credentialProvider);
     this.#fetch = options.fetch ?? globalThis.fetch;
     this.#timeoutMs = options.timeoutMs;
+    this.#skill =
+      typeof process === "undefined"
+        ? undefined
+        : process.env.KITARU_ACTIVE_SKILL || undefined;
   }
 
   async request<T>(request: TransportRequest<T>): Promise<T> {
@@ -386,6 +392,9 @@ export class KitaruTransport {
               headers: {
                 Accept: "application/json",
                 [KITARU_CLIENT_HEADER]: KITARU_CLIENT_IDENTIFICATION,
+                ...(this.#skill === undefined
+                  ? {}
+                  : { [KITARU_SKILL_HEADER]: this.#skill }),
                 ...(createdBody?.contentType === undefined
                   ? {}
                   : { "Content-Type": createdBody.contentType }),

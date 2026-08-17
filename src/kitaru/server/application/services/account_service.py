@@ -31,6 +31,7 @@ from kitaru.server.application.models.account import AccountFilter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.permissions import Action, ResourceType
 from kitaru.server.application.services.analytics_events import (
+    build_account_created_properties,
     build_account_traits,
     build_user_enriched_properties,
 )
@@ -79,6 +80,21 @@ class AccountService:
             return
         self._analytics.identify(account.id, build_account_traits(account, origin))
 
+    def _track_account_created(self, account: Account, origin: AccountOrigin) -> None:
+        """Track the creation of an account.
+
+        Args:
+            account: Created account.
+            origin: Where the account was created.
+        """
+        if self._analytics is None:
+            return
+        self._analytics.track(
+            account.id,
+            AnalyticsEvent.ACCOUNT_CREATED,
+            build_account_created_properties(account, origin),
+        )
+
     async def create_user(
         self,
         name: str,
@@ -123,6 +139,7 @@ class AccountService:
             )
         account = await self._repository.create(account)
         self._identify(account, AccountOrigin.API)
+        self._track_account_created(account, AccountOrigin.API)
         return account, activation_token
 
     async def create_service_account(
@@ -147,6 +164,7 @@ class AccountService:
             Account(name=name, email=email, is_service_account=True)
         )
         self._identify(account, AccountOrigin.API)
+        self._track_account_created(account, AccountOrigin.API)
         return account
 
     async def ensure_account(self, name: str, password: str | None) -> Account:
@@ -177,6 +195,7 @@ class AccountService:
                 account = await self._repository.create(
                     Account(name=name, password_hash=password_hash, is_admin=True)
                 )
+                self._track_account_created(account, AccountOrigin.BOOTSTRAP)
             except DuplicateAccountName:
                 account = await self._repository.get_by_name(name)
         self._identify(account, AccountOrigin.BOOTSTRAP)

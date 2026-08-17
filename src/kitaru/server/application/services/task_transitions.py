@@ -26,10 +26,12 @@ from kitaru.server.application.events import (
     TaskTerminal,
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
+from kitaru.server.application.interfaces.plugin_repository import PluginRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.job import Job
+from kitaru.server.domain.plugin import Plugin
 from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
 
 
@@ -60,6 +62,7 @@ class TaskTransitions:
         job_repository: JobRepository,
         dispatcher: EventDispatcher,
         analytics: ServerAnalytics | None = None,
+        plugin_repository: PluginRepository | None = None,
     ) -> None:
         """Initialize the dispatch.
 
@@ -68,11 +71,14 @@ class TaskTransitions:
             job_repository: Job repository.
             dispatcher: Event dispatcher the transitions publish on.
             analytics: Analytics tracker, None skips tracking.
+            plugin_repository: Plugin repository, None skips the plugin
+                properties on tracked events.
         """
         self._tasks = task_repository
         self._jobs = job_repository
         self._dispatcher = dispatcher
         self._analytics = analytics
+        self._plugins = plugin_repository
 
     async def apply_status(
         self, task: Task, transition: Callable[[Task], None]
@@ -102,7 +108,7 @@ class TaskTransitions:
         if not stored.terminal:
             return stored
         job = await self.advance_job(stored.job_id)
-        self._track_task_terminal(stored, job)
+        await self._track_task_terminal(stored, job)
         return stored
 
     async def _write_transition(
@@ -328,7 +334,7 @@ class TaskTransitions:
         await self.request_jobs_cancel([job_id])
         return await self.settle_job_if_drained(job_id)
 
-    def _track_task_terminal(self, task: Task, job: Job) -> None:
+    async def _track_task_terminal(self, task: Task, job: Job) -> None:
         """Track a task's transition to a terminal status by kind.
 
         Args:
@@ -341,11 +347,29 @@ class TaskTransitions:
             self._analytics.track(
                 job.owner_id,
                 AnalyticsEvent.IMPORT_COMPLETED,
-                analytics_events.build_import_completed_properties(task),
+                analytics_events.build_import_completed_properties(
+                    task, await self._get_task_plugin(task.plugin_version_id)
+                ),
             )
         elif isinstance(task, EvaluationTask):
             self._analytics.track(
                 job.owner_id,
                 AnalyticsEvent.EVALUATION_COMPLETED,
-                analytics_events.build_evaluation_completed_properties(task),
+                analytics_events.build_evaluation_completed_properties(
+                    task, await self._get_task_plugin(task.plugin_version_id)
+                ),
             )
+
+    async def _get_task_plugin(self, plugin_version_id: uuid.UUID) -> Plugin | None:
+        """Load the plugin behind a task's plugin version.
+
+        Args:
+            plugin_version_id: Id of the plugin version the task ran.
+
+        Returns:
+            Stored plugin, or None without a plugin repository.
+        """
+        if self._plugins is None:
+            return None
+        version = await self._plugins.get_version_by_id(plugin_version_id)
+        return await self._plugins.get(version.plugin_id)

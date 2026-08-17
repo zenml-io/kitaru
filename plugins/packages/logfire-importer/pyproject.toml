@@ -1,7 +1,7 @@
 [project]
-name = "kitaru-langfuse-importer"
-version = "0.1.0rc2"
-description = "Langfuse trace importer for Kitaru."
+name = "kitaru-logfire-importer"
+version = "0.1.0rc0"
+description = "Logfire records-query importer for Kitaru."
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = ["kitaru>=0.22.0rc0,<0.23"]
@@ -11,4 +11,4 @@ requires = ["hatchling==1.32.0"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/kitaru_langfuse_importer"]
+packages = ["src/kitaru_logfire_importer"]
