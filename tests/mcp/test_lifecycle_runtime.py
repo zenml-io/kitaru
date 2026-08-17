@@ -6,7 +6,7 @@ from typing import Any, cast
 
 import pytest
 
-from kitaru.analytics.source import AnalyticsSource, current_source
+from kitaru.analytics.source import AnalyticsSource, current_attribution
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.settings import MCPSettings
 
@@ -44,7 +44,7 @@ async def test_concurrency_is_bounded_and_source_resets() -> None:
 
     async def operation() -> str:
         nonlocal active, maximum
-        assert current_source.get() is AnalyticsSource.MCP
+        assert current_attribution.get().source is AnalyticsSource.MCP
         active += 1
         maximum = max(maximum, active)
         await asyncio.sleep(0.02)
@@ -56,7 +56,7 @@ async def test_concurrency_is_bounded_and_source_resets() -> None:
         "ok",
     ]
     assert maximum == 1
-    assert current_source.get() is AnalyticsSource.PYTHON
+    assert current_attribution.get().source is AnalyticsSource.PYTHON
 
 
 async def test_timeout_and_cancellation_propagate_and_reset_source() -> None:
@@ -67,7 +67,7 @@ async def test_timeout_and_cancellation_propagate_and_reset_source() -> None:
 
     with pytest.raises(TimeoutError):
         await state.execute(blocked)
-    assert current_source.get() is AnalyticsSource.PYTHON
+    assert current_attribution.get().source is AnalyticsSource.PYTHON
 
     state = _get_state(FakeClient(), handler_timeout=10)
     task = asyncio.create_task(state.execute(blocked))
@@ -75,7 +75,7 @@ async def test_timeout_and_cancellation_propagate_and_reset_source() -> None:
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
-    assert current_source.get() is AnalyticsSource.PYTHON
+    assert current_attribution.get().source is AnalyticsSource.PYTHON
 
 
 async def test_handler_timeout_includes_concurrency_queue_time() -> None:
@@ -90,4 +90,4 @@ async def test_handler_timeout_includes_concurrency_queue_time() -> None:
             await state.execute(must_not_run)
     finally:
         state.semaphore.release()
-    assert current_source.get() is AnalyticsSource.PYTHON
+    assert current_attribution.get().source is AnalyticsSource.PYTHON

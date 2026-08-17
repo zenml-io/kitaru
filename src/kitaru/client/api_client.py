@@ -23,6 +23,7 @@ import httpx
 
 from kitaru.analytics.source import (
     CLIENT_HEADER,
+    SKILL_HEADER,
     AnalyticsSource,
     format_client_header,
 )
@@ -110,6 +111,8 @@ class KitaruAPIClient:
         self._owns_transport = True
         identification = format_client_header(AnalyticsSource.PYTHON)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
+        if skill := os.environ.get("KITARU_ACTIVE_SKILL"):
+            headers[SKILL_HEADER] = skill
         self._http = build_async_client(
             base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )
