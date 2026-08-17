@@ -4,6 +4,7 @@ import hashlib
 import json
 import uuid
 from datetime import UTC, datetime
+from importlib.metadata import version
 from pathlib import Path
 
 import pytest
@@ -108,7 +109,7 @@ def test_render_writes_installable_v1_environment(tmp_path: Path) -> None:
     assert manifest.target_version == "0.3.0"
     pyproject = (root / "pyproject.toml").read_text()
     assert '"verifiers==0.3.0"' in pyproject
-    assert '"kitaru==0.21.0"' in pyproject
+    assert f'"kitaru=={version("kitaru")}"' in pyproject
     assert (root / "agent_source" / "agent.py").read_text() == "print('agent')\n"
     readme = (root / "README.md").read_text()
     assert "`eval` is the Verifiers CLI" in readme
