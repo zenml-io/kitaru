@@ -310,7 +310,7 @@ def _validation_error() -> Exception:
 async def test_create_warns_when_server_info_is_unavailable(
     info_error: Exception,
 ) -> None:
-    """A failed or unparseable info request keeps the investigation and warns."""
+    """A failed or unparsable info request keeps the investigation and warns."""
     client = StubInvestigationClient()
     client.info_error = info_error
 
