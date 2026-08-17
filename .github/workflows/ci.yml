@@ -218,16 +218,17 @@ jobs:
         run: uv sync --frozen
         env:
           UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
-      - name: Install current Kitaru artifacts into standalone example
+      - name: Install candidate artifacts in standalone example
+        working-directory: examples/pydantic_ai_ticket_resolver
         run: |
           uv pip install \
-            --python examples/pydantic_ai_ticket_resolver/.venv/bin/python \
+            --python .venv/bin/python \
             --reinstall \
             --no-deps \
-            plugins/candidate-wheels/kitaru-*.whl \
-            plugins/candidate-wheels/kitaru_pydantic_ai-*.whl \
-            plugins/candidate-wheels/kitaru_langfuse_importer-*.whl
-          uv pip check --python examples/pydantic_ai_ticket_resolver/.venv/bin/python
+            ../../plugins/candidate-wheels/kitaru-*.whl \
+            ../../plugins/candidate-wheels/kitaru_pydantic_ai-*.whl \
+            ../../plugins/candidate-wheels/kitaru_langfuse_importer-*.whl
+          uv pip check --python .venv/bin/python
       - name: Start local Kitaru server
         run: |
           uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
