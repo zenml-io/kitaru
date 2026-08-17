@@ -95,7 +95,7 @@ If your host supports neither, copy the skill directory you want into wherever i
 
 ## The investigation skill
 
-`kitaru-investigation` is the front door. It helps you review sessions and collect evidence about a suspected behavior; use it when you have one surprising session, or a larger population you want to sample before defining a failure category.
+`kitaru-investigation` is the front door, and it embodies the design: **you don't author investigations, your assistant does**. It maps your sessions, generates a baseline [investigation](../concepts/investigations.md) (the worklist, the questions, the evidence highlights), and interviews you against the trace; your job is answering. Use it when you have one surprising session, or a larger population you want to sample before defining a failure category.
 
 It picks one of two entry paths from what you already have:
 

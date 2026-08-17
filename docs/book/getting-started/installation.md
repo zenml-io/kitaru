@@ -15,6 +15,8 @@ For a first session on one machine, all three run locally.
 
 The Kitaru CLI, server, and workers require **Python 3.11 or newer**. TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server.
 
+The server stores everything in **PostgreSQL**, its only stateful dependency. You do not install it by hand for local use: `kitaru login --local` provisions the server and Postgres together in Docker. A [self-hosted deployment](../deploy/README.md) brings its own Postgres. Workers are plain processes (`kitaru worker start`) that run wherever your agent's environment lives; for containerized fleets, the published `zenmldocker/kitaru-worker` image works out of the box (see [Workers in production](../deploy/workers.md)).
+
 ## Install the Python SDK and CLI
 
 {% tabs %} {% tab title="uv (recommended)" %}
