@@ -1,5 +1,5 @@
 ---
-description: From an agent in production to your first replay-backed decision, with the five-step method that gets you there.
+description: "From an agent in production to your first replay-backed decision, driven by your coding assistant: every step is a prompt first, a command second."
 icon: rocket
 ---
 
@@ -7,32 +7,38 @@ icon: rocket
 
 **You probably already have an agent in production.** It serves real users, it occasionally does something wrong, and when it does, you read the trace, tweak a prompt, and hope. This page is the way out of that loop: get the agent's runs into Kitaru, judge one bad behavior, and test a fix against recorded evidence instead of a fresh demo prompt.
 
+And you don't work Kitaru by memorizing commands. The product is built to be driven by your coding assistant: you ask, it operates Kitaru through the MCP server and the agent skills, and you keep the judgment calls. Every step below is a prompt first; the equivalent command exists when you want your hands on it.
+
 {% hint style="info" %}
 **No agent in production yet?** Prepare the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template), a ready PydanticAI agent with checked-in Langfuse traces, and follow the [returns-agent tutorial](../tutorials/returns-agent/README.md). Everything on this page applies to it unchanged.
 {% endhint %}
 
-This page assumes you have [installed Kitaru and logged in](installation.md).
+Before starting, [install Kitaru and log in](installation.md), then [set up your coding agent](../agent-native/setup.md): the MCP server gives it bounded Kitaru operations, and the skills teach it the procedures.
 
 ## First: get your runs into Kitaru
 
-Nothing else works until your agent's runs land in Kitaru as [sessions](../concepts/agents-and-sessions.md). There are two ways in:
+Nothing else works until your agent's runs land in Kitaru as [sessions](../concepts/agents-and-sessions.md). Both ways in are one ask away:
 
 {% tabs %}
 {% tab title="Import the traces you already have" %}
-If your agent logs to Langfuse, LangSmith, or Braintrust, export and import; anything else converts to Kitaru JSONL. Your production path does not change.
+> Here is an export of our agent's traces from Langfuse: `langfuse-export.jsonl`. Register the agent in Kitaru as `support-agent`, import the export, tag the sessions `imported-baseline`, and tell me what landed and what was skipped.
+
+Prefer to do it by hand? It is two commands:
 
 ```bash
 kitaru agent register support-agent --command "python support.py"
 kitaru session import langfuse-export.jsonl \
   --importer kitaru/langfuse@latest \
-  --agent support-agent@latest --wait
+  --agent support-agent@latest --tag imported-baseline --wait
 ```
 
-See [Import your traces](import-your-traces.md) for the full walkthrough.
+See [Import your traces](import-your-traces.md) for the full walkthrough, and the [Langfuse](../guides/import-langfuse-traces.md), [LangSmith](../guides/import-langsmith-traces.md), and [Braintrust](../guides/import-braintrust-traces.md) guides for each provider's contract.
 {% endtab %}
 
 {% tab title="Record with an adapter" %}
-Wrap the agent once and every run is recorded, wherever it executes:
+> Add the Kitaru adapter to our PydanticAI agent so every run is recorded as a session. Register the agent as `support-agent` first and wire its agent id into the wrapper. Don't change any agent behavior.
+
+The wrapper it adds is one line around the agent you already have:
 
 ```python
 from pydantic_ai import Agent
@@ -52,13 +58,19 @@ Which one? Both, eventually:
 - **Import is the fastest start.** Your history becomes reviewable today, with no code change and nothing new in production.
 - **You will want the adapter anyway.** Replays and experiments re-run *your agent's code*; the adapter is what answers its tool calls from the recording. Import your backlog now, add the adapter with your next deploy.
 
-## Then: work the five-step method
+## Then: let your assistant drive the loop
 
-Kitaru's loop moves you from **"something went wrong in this trace"** to **"I tested a fix against the recorded evidence, and here is what it supports."** The example below follows a support agent that refunds, replaces, or escalates return requests. You do not need to run anything to follow it.
+The whole method fits in one ask. `kitaru-investigation` is the skill that runs it with you:
+
+> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
+
+The assistant selects sessions, walks the review, drafts the evaluator, and runs the experiment. You supply the domain judgments and approve consequential actions. What follows is what it is doing at each step, with a worked example from a support agent that refunds, replaces, or escalates return requests, and the prompt you would use to drive that step alone.
 
 {% stepper %}
 {% step %}
 ### Observe a recorded behavior
+
+> Show me the most recent failed `support-agent` session, node by node, and point at where the behavior went wrong.
 
 One recorded session contains this path:
 
@@ -76,17 +88,21 @@ Each model call, tool call, and result is a **session node**. The `issue_refund`
 {% step %}
 ### Judge what should have happened
 
+> Open an investigation on this session. I will give the verdicts; record each one as an annotation pinned to the exact nodes that support it.
+
 A domain expert reviews the session and concludes:
 
 > When the agent cannot establish whether approval is required, it should escalate instead of issuing the refund.
 
-Kitaru records the review as an [**investigation**](../concepts/investigations.md) and the verdict as an **annotation**, pinned to the exact nodes that support it. This step is deliberately human: statistics can surface an unusual trace, but they cannot infer your business policy.
+Kitaru records the review as an [**investigation**](../concepts/investigations.md) and the verdict as an **annotation**. This step is deliberately human: statistics can surface an unusual trace, but they cannot infer your business policy. The assistant organizes the evidence; the judgment is yours.
 {% endstep %}
 
 {% step %}
 ### Define the behavior to test
 
-The accepted judgment becomes a deterministic [**evaluator**](../concepts/evaluators.md), a reusable check. One bad case is not enough, so the review also keeps a counterexample:
+> Turn my accepted judgment into a deterministic evaluator, and freeze the reviewed cases, including at least one counterexample, into a cohort.
+
+The accepted judgment becomes a reusable [**evaluator**](../concepts/evaluators.md). One bad case is not enough, so the review also keeps a counterexample:
 
 | Reviewed case | Expected behavior | Role |
 | --- | --- | --- |
@@ -99,15 +115,19 @@ Both are frozen into a [**cohort**](../concepts/cohorts.md) version. The target 
 {% step %}
 ### Replay the changed agent
 
-The developer makes one bounded change and registers a new **agent version**. Kitaru [**replays**](../concepts/replay.md) the frozen cohort against it inside an [**experiment**](../concepts/experiments.md): each replay starts from the recorded input and produces a new session.
+> Register my working tree as a new version of `support-agent` and replay the cohort against it. Answer every tool call from the recorded history and fail on any missing result.
+
+Kitaru [**replays**](../concepts/replay.md) the frozen cohort against the candidate inside an [**experiment**](../concepts/experiments.md): each replay starts from the recorded input and produces a new session.
 
 {% hint style="warning" %}
-Re-running an agent can re-run its tools, so every tool call needs a policy: **recorded history** (answer from the recording; the default for side effects), **static results**, **passthrough** (live call, only for intentionally safe tools), or **fail on a missing result**. Replay never means repeating production side effects.
+Re-running an agent can re-run its tools, so every tool call needs a policy: **recorded history** (answer from the recording; the default for side effects), **static results**, **passthrough** (live call, only for intentionally safe tools), or **fail on a missing result**. Replay never means repeating production side effects. Insist on the recorded-history default in assistant-written replays.
 {% endhint %}
 {% endstep %}
 
 {% step %}
 ### Compare the evidence
+
+> Compare evaluations between the baseline and the candidate across the cohort, and tell me what improved, what regressed, and what is inconclusive.
 
 The same evaluator version checks the original and replayed sessions:
 
@@ -116,19 +136,15 @@ The same evaluator version checks the original and replayed sessions:
 | Approval cannot be established | Refund accepted, fail | Escalation, pass | The reviewed failure improved. |
 | Valid low-risk refund | Refund accepted, pass | Refund accepted, pass | The counterexample held. |
 
-Four honest outcomes stay available: **improved**, **regressed**, **trade-off**, and **inconclusive**. Inconclusive is information too; it names the missing evidence or execution control before you trust the change.
+Four honest outcomes stay available: **improved**, **regressed**, **trade-off**, and **inconclusive**. Inconclusive is information too; it names the missing evidence or execution control before you trust the change. The deployment decision stays with you.
 {% endstep %}
 {% endstepper %}
 
 The five steps form a loop, not a one-time pipeline: a replay can expose a new failure, which becomes the next observation to review.
 
-## Do it on your agent, assisted
-
-The fastest way to run this loop for real is to let your coding assistant drive it. Install the [Kitaru agent skills](../agent-native/setup.md), open your agent repository in Claude Code, Codex, or Cursor, and ask:
-
-> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
-
-The assistant connects or imports traces, walks the review with you, and drafts the evaluator. You supply the domain judgments and approve consequential actions.
+{% hint style="info" %}
+**Every step also has a manual form.** The CLI covers the whole loop with `--output json`, and the [Python and TypeScript SDKs](../deploy/sdks.md) reach everything. The [guides](../guides/replay-and-overrides.md) and the [returns-agent tutorial](../tutorials/returns-agent/README.md) teach the manual path so you can see each object and boundary for yourself.
+{% endhint %}
 
 ## The concepts, in one table
 
@@ -142,8 +158,8 @@ The assistant connects or imports traces, walks the review with you, and drafts 
 | **Replay** | A new run of candidate code from a recorded input under an explicit tool policy. |
 | **Experiment / experiment run** | The reusable replay-and-measurement definition, and one execution of it. |
 
-You do not need to memorize these before starting; each one preserves a step of the reasoning.
+You do not need to memorize these before starting; each one preserves a step of the reasoning, and your assistant knows them already.
 
 ## Where to go next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Import your traces</strong></td><td>Bring in Langfuse, LangSmith, Braintrust, or Kitaru JSONL data.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Kitaru template</strong></td><td>Prepare the synthetic PydanticAI agent and checked-in Langfuse traces.</td><td><a href="https://github.com/zenml-io/kitaru-template">https://github.com/zenml-io/kitaru-template</a></td></tr><tr><td><strong>Complete tutorial</strong></td><td>Run the five-step method from the prepared template.</td><td><a href="../tutorials/returns-agent/README.md">../tutorials/returns-agent/README.md</a></td></tr><tr><td><strong>Use kitaru-investigation</strong></td><td>Apply the method inside your own agent repository.</td><td><a href="../agent-native/setup.md#the-investigation-skill">../agent-native/setup.md#the-investigation-skill</a></td></tr><tr><td><strong>Core concepts</strong></td><td>Read precise references for each Kitaru resource.</td><td><a href="../concepts/README.md">../concepts/README.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Set up your coding agent</strong></td><td>The MCP server and skills that make all of this one ask away.</td><td><a href="../agent-native/setup.md">../agent-native/setup.md</a></td></tr><tr><td><strong>Import your traces</strong></td><td>Bring in Langfuse, LangSmith, Braintrust, or Kitaru JSONL data.</td><td><a href="import-your-traces.md">import-your-traces.md</a></td></tr><tr><td><strong>Kitaru template</strong></td><td>Prepare the synthetic PydanticAI agent and checked-in Langfuse traces.</td><td><a href="https://github.com/zenml-io/kitaru-template">https://github.com/zenml-io/kitaru-template</a></td></tr><tr><td><strong>Complete tutorial</strong></td><td>Run the five-step method manually from the prepared template.</td><td><a href="../tutorials/returns-agent/README.md">../tutorials/returns-agent/README.md</a></td></tr><tr><td><strong>Core concepts</strong></td><td>Read precise references for each Kitaru resource.</td><td><a href="../concepts/README.md">../concepts/README.md</a></td></tr></tbody></table>
