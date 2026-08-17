@@ -26,7 +26,10 @@ from kitaru.server.adapters.db.filtering import (
 )
 from kitaru.server.adapters.db.orm.agent import AgentORM
 from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
-from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecretORM
+from kitaru.server.adapters.db.orm.agent_version_secret import (
+    AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY,
+    AgentVersionSecretORM,
+)
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent_version import AgentVersionFilter
@@ -36,7 +39,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
     RunSpec,
 )
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.base import NotFoundError, ValidationError
 
 AGENT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": AgentVersionORM.id,
@@ -94,6 +97,9 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         Args:
             agent_version_id: Id of the owning agent version.
             run_spec: Run spec carrying the secret ids, or ``None``.
+
+        Raises:
+            ValidationError: A secret id does not resolve to a stored secret.
         """
         if run_spec is not None:
             for index, secret_id in enumerate(run_spec.secret_ids):
@@ -104,7 +110,13 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
                         index=index,
                     )
                 )
-        await self._flush()
+        await self._flush(
+            {
+                AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY: lambda: ValidationError(
+                    "Run spec references a secret that does not exist"
+                )
+            }
+        )
 
     async def _sync_secret_links(
         self, agent_version_id: uuid.UUID, run_spec: RunSpec | None
@@ -114,6 +126,9 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         Args:
             agent_version_id: Id of the owning agent version.
             run_spec: Run spec carrying the desired secret ids, or ``None``.
+
+        Raises:
+            ValidationError: A secret id does not resolve to a stored secret.
         """
         await self._session.execute(
             delete(AgentVersionSecretORM).where(
@@ -179,6 +194,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
 
         Raises:
             AgentNotFound: No agent has the given agent id.
+            ValidationError: The run spec references an unknown secret id.
 
         Returns:
             Stored agent version with its assigned version number and
@@ -272,6 +288,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            ValidationError: The run spec references an unknown secret id.
 
         Returns:
             Stored agent version with the updated timestamp renewed.
