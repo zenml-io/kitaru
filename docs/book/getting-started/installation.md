@@ -146,4 +146,4 @@ kitaru doctor
 
 ## Next steps
 
-Head to the [Quickstart](quickstart.md) to record and replay your first run — or, if you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).
+Read the [Quickstart](quickstart.md) to understand Kitaru's five-step method. Then [follow the complete returns-agent tutorial](../tutorials/returns-agent/README.md), or start with [Import your traces](import-your-traces.md) if you already collect traces elsewhere.

@@ -201,14 +201,22 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --candidate-dir plugins/candidate-wheels
-      - name: Install canonical example adapter
+      - name: Install canonical example plugins
         run: |
-          PLUGIN_VERSION=$(uv run --no-sync python -c \
+          PYDANTIC_AI_VERSION=$(uv run --no-sync python -c \
             'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("plugins/packages/pydantic-ai/pyproject.toml").read_text())["project"]["version"])')
+          LANGFUSE_IMPORTER_VERSION=$(uv run --no-sync python -c \
+            'import pathlib, tomllib; print(tomllib.loads(pathlib.Path("plugins/packages/langfuse-importer/pyproject.toml").read_text())["project"]["version"])')
           uv pip install \
             --no-index \
             --find-links plugins/candidate-wheels \
-            "kitaru-pydantic-ai[openai]==${PLUGIN_VERSION}"
+            "kitaru-pydantic-ai[openai]==${PYDANTIC_AI_VERSION}" \
+            "kitaru-langfuse-importer==${LANGFUSE_IMPORTER_VERSION}"
+      - name: Sync standalone example
+        working-directory: examples/pydantic_ai_ticket_resolver
+        run: uv sync --frozen
+        env:
+          UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
       - name: Start local Kitaru server
         run: |
           uv run uvicorn kitaru.server.api.main:app --factory --host 127.0.0.1 --port 8000 >"$RUNNER_TEMP/kitaru-server.log" 2>&1 &
@@ -234,9 +242,11 @@ jobs:
       - name: Audit public example coverage manifest
         run: uv run --with pyyaml python scripts/audit-example-coverage.py
       - name: Test canonical example contracts
-        run: PYTHONPATH=. uv run pytest -q tests/test_canonical_example.py
+        working-directory: examples/pydantic_ai_ticket_resolver
+        run: uv run --frozen --with pytest python -m pytest -q tests/test_contract.py
       - name: Run canonical example end to end
-        run: uv run pytest -q tests/integration/test_canonical_example_e2e.py
+        working-directory: examples/pydantic_ai_ticket_resolver
+        run: uv run --frozen --with pytest python -m pytest -q tests/test_e2e.py
         env:
           KITARU_CANONICAL_E2E: '1'
           KITARU_CANONICAL_SERVER_URL: http://127.0.0.1:8000
@@ -436,23 +446,19 @@ jobs:
           - name: py311-base
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py312-base
             python-version: '3.12'
             sync-command: uv sync --frozen --extra server --extra otel
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py313-base
             python-version: '3.13'
             sync-command: uv sync --frozen --extra server --extra otel
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py314-base
             python-version: '3.14'
             sync-command: uv sync --frozen --extra server --extra otel
-            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/test_canonical_example.py
-              --ignore=tests/integration/test_canonical_example_e2e.py --ignore=tests/typescript
+            pytest-command: uv run pytest --ignore=tests/cli --ignore=tests/mcp --ignore=tests/typescript
           - name: py311-cli
             python-version: '3.11'
             sync-command: uv sync --frozen --extra server --extra otel --extra cli

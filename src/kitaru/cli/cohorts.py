@@ -216,6 +216,7 @@ async def create_cohort_version(
     add_session_ids: list[uuid.UUID] | None,
     remove_session_ids: list[uuid.UUID] | None,
     display_version: str | None,
+    baseline_id: uuid.UUID | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
     additions = list(add_session_ids or [])
@@ -236,6 +237,7 @@ async def create_cohort_version(
     version = await client.cohorts.create_version(
         cohort.id,
         CohortVersionCreateRequest(
+            baseline_id=baseline_id,
             add_session_ids=additions,
             remove_session_ids=removals,
             display_version=display_version,
@@ -243,9 +245,15 @@ async def create_cohort_version(
     )
     warnings = []
     if not additions and not removals:
-        warnings.append(
-            "No sessions were added or removed; cohort membership is unchanged."
-        )
+        if baseline_id is None:
+            warnings.append(
+                "No sessions were added or removed; cohort membership is unchanged."
+            )
+        else:
+            warnings.append(
+                "No sessions were added or removed; the new version copies "
+                f"the membership of baseline {baseline_id}."
+            )
     return CommandResult(item=version.model_dump(mode="json"), warnings=warnings)
 
 

@@ -81,6 +81,7 @@ GROUP_DESCRIPTIONS = {
     "experiment": "Configure experiments and manage asynchronous runs.",
     "importer": "Develop, register, and inspect importers.",
     "investigation": "Create investigations and review their linked sessions.",
+    "replay": "Create and inspect standalone replays.",
     "session": "Import and inspect sessions and their nodes.",
     "worker": "Run and inspect generic local workers.",
     "job": "Inspect, watch, and cancel jobs.",

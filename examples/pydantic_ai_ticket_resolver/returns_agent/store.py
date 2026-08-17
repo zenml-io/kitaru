@@ -2,8 +2,8 @@
 
 from decimal import Decimal
 
-from examples.pydantic_ai_ticket_resolver.fixtures import ORDERS, POLICIES, SHIPMENTS
-from examples.pydantic_ai_ticket_resolver.models import (
+from returns_agent.fixtures import ORDERS, POLICIES, SHIPMENTS
+from returns_agent.models import (
     ActionReceipt,
     Order,
     OrderLookup,
