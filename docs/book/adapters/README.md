@@ -30,7 +30,7 @@ LangChain agents and Deep Agents use the LangGraph adapter — their public fact
 | [Vercel AI SDK](vercel-ai.md) | `@zenml-io/kitaru-vercel-ai` | `createKitaruToolLoopAgent`, `createKitaruGenerateText` |
 | [Mastra](mastra.md) | `@zenml-io/kitaru-mastra` | `KitaruAgent` |
 
-Both build on [`@zenml-io/kitaru`](../typescript-sdk.md), the framework-neutral TypeScript client and adapter foundation. Its resource namespaces cover the record-review-evaluate-experiment workflow; it deliberately does not provide a framework-neutral agent, CLI, or streaming abstraction.
+Both build on [`@zenml-io/kitaru`](../getting-started/installation.md#use-the-typescript-sdk), the framework-neutral TypeScript client and adapter foundation. Its resource namespaces cover the record-review-evaluate-experiment workflow; it deliberately does not provide a framework-neutral agent, CLI, or streaming abstraction.
 
 If your framework isn't covered, see [No adapter for your framework](custom.md) for three options available today:
 

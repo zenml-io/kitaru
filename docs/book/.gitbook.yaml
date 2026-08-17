@@ -58,3 +58,5 @@ redirects:
   stacks/sagemaker-stacks: deploy/README.md
   stacks/azureml-stacks: deploy/README.md
   stacks/log-store: deploy/README.md
+  # v2 launch polish: TypeScript SDK page merged into Installation.
+  typescript-sdk: getting-started/installation.md

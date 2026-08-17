@@ -13,7 +13,7 @@ Kitaru comes from the team behind [ZenML](https://zenml.io): ZenML is for ML pip
 
 ## The loop
 
-- **Record** — wrap the agent you already have with an [adapter](adapters/README.md) (one wrapper, no rewrite), or [import the traces you already collect](getting-started/import-your-traces.md). Langfuse stays your system of record; Kitaru gets a runnable copy. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
+- **Record** — wrap the agent you already have with an [adapter](adapters/README.md) (one wrapper, no rewrite), or [import the traces you already collect](getting-started/import-your-traces.md). Your existing trace store — Langfuse, for example — stays your system of record; Kitaru gets a runnable copy. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
 - **Replay** — [re-execute a session](concepts/replay.md) against your real code. Tool calls are answered from the recording, so nothing touches real systems. Unchanged, the replay reproduces the original — the faithful baseline that makes a diff trustworthy. Then fork it: a different model, a new prompt, your working tree's code.
 - **Improve** — [evaluators](concepts/evaluators.md) score both sides; [cohorts](concepts/cohorts.md) freeze the population; [experiments](concepts/experiments.md) replay a cohort against a change and show what improved and what regressed. The cohort that caught a failure becomes the regression gate that keeps it caught.
 
@@ -38,7 +38,7 @@ Every run is now a session you can replay. Read the [Quickstart](getting-started
 
 - **Self-hosted, open source (Apache 2.0).** One FastAPI + Postgres server on your infrastructure. Replays, imports, and evaluations execute on [workers](concepts/workers.md) in _your_ environment — your traces and credentials don't leave your systems.
 - **Beside your observability, not instead of it.** Langfuse, LangSmith, and Braintrust remain where you watch production. Kitaru is where you re-run it.
-- **Framework-agnostic by design.** Shipped adapters cover PydanticAI, LangGraph, OpenAI Agents SDK, Mastra, and the Vercel AI SDK; the [adapter overview](adapters/README.md) states each integration's boundary. The [import path](getting-started/import-your-traces.md) works regardless of framework.
+- **Framework-agnostic by design.** Adapters ship for Python and TypeScript frameworks alike — PydanticAI, LangGraph, and the OpenAI Agents SDK in Python; Mastra and the Vercel AI SDK in TypeScript; the [adapter overview](adapters/README.md) states each integration's boundary. The [import path](getting-started/import-your-traces.md) works regardless of framework.
 - **Four ways to drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/mcp-server.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
 
 ## Next steps

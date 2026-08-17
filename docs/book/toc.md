@@ -4,7 +4,6 @@
 
 - [Welcome to Kitaru](README.md)
 - [Installation](getting-started/installation.md)
-- [TypeScript SDK](typescript-sdk.md)
 - [Quickstart](getting-started/quickstart.md)
 - [Complete returns-agent tutorial](tutorials/returns-agent/README.md)
   - [1. Observe the recorded behavior](tutorials/returns-agent/observe.md)

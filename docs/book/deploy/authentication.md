@@ -60,7 +60,7 @@ import { createKitaruClient } from "@zenml-io/kitaru/node";
 const client = await createKitaruClient();
 ```
 
-This is intended for local developer workflows. It reads the CLI store without modifying it and renews credentials only in process memory. The Node reader accepts HTTPS servers and cleartext HTTP only on loopback addresses, even if the CLI has stored another HTTP URL. After running `kitaru login` again, create a new Node client; a client that was already active rejects a changed stored identity instead of silently switching accounts. The runtime-neutral package entries never access the filesystem. CI and production services should use explicit `KITARU_API_URL` plus `KITARU_API_KEY`, or the `KITARU_API_TOKEN` supplied to a worker task. See the [TypeScript SDK](../typescript-sdk.md) for precedence and recovery behavior.
+This is intended for local developer workflows. It reads the CLI store without modifying it and renews credentials only in process memory. The Node reader accepts HTTPS servers and cleartext HTTP only on loopback addresses, even if the CLI has stored another HTTP URL. After running `kitaru login` again, create a new Node client; a client that was already active rejects a changed stored identity instead of silently switching accounts. The runtime-neutral package entries never access the filesystem. CI and production services should use explicit `KITARU_API_URL` plus `KITARU_API_KEY`, or the `KITARU_API_TOKEN` supplied to a worker task. See [Use the TypeScript SDK](../getting-started/installation.md#use-the-typescript-sdk) for precedence and recovery behavior.
 
 ## Workers and tasks get scoped tokens
 
