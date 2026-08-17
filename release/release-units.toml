@@ -89,6 +89,16 @@ tag-prefix = "python/kitaru-langgraph/v"
 checks = ["plugin package (langgraph)"]
 
 [[units]]
+slug = "logfire-importer"
+path = "plugins/packages/logfire-importer"
+distribution = "kitaru-logfire-importer"
+registry = "pypi"
+version-source = "plugins/packages/logfire-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-logfire-importer/v"
+checks = ["plugin package (logfire-importer)"]
+
+[[units]]
 slug = "langsmith-importer"
 path = "plugins/packages/langsmith-importer"
 distribution = "kitaru-langsmith-importer"
