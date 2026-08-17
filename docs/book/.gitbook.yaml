@@ -58,8 +58,9 @@ redirects:
   stacks/log-store: deploy/README.md
   # v2 launch restructure: pages moved between toc sections (section slug
   # is part of the published URL, so each move needs a redirect).
-  typescript-sdk: adapters/typescript-sdk.md
-  getting-started/typescript-sdk: adapters/typescript-sdk.md
+  typescript-sdk: deploy/sdks.md
+  getting-started/typescript-sdk: deploy/sdks.md
+  adapters/typescript-sdk: deploy/sdks.md
   getting-started/mcp-server: agent-native/README.md
   getting-started/skills: agent-native/README.md
   guides/mcp-server: agent-native/README.md
