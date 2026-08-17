@@ -5,7 +5,7 @@ icon: code-compare
 
 # 5. Compare the paired evidence
 
-**Observe → Judge → Define → Replay → Compare**
+Observe → Judge → Define → Replay → **Compare**
 
 A conclusive improvement or regression claim requires every expected original-and-replay comparison under the same evaluator versions. An incomplete run is still useful evidence for diagnosing an inconclusive result. In this final phase, you will inspect run health, read the available pairs, preserve failures and missing results, and state the narrow conclusion supported by your reviewed cohort.
 

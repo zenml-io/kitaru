@@ -5,7 +5,7 @@ icon: list-check
 
 # 3. Define one behavior to test
 
-**Observe → Judge → Define → Replay → Compare**
+Observe → Judge → **Define** → Replay → Compare
 
 A verdict says what a reviewer concluded about one complete session. A repeatable test needs a more precise behavior definition, a frozen population, and a measurement that reads observable trace evidence.
 

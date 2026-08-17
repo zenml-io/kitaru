@@ -5,7 +5,7 @@ icon: eye
 
 # 1. Observe the recorded behavior
 
-**Observe → Judge → Define → Replay → Compare**
+**Observe** → Judge → Define → Replay → Compare
 
 The first task is factual: confirm what the template preserved and inspect the population before deciding what was right or wrong. By the end of this page, you will have descriptive measurements and a bounded, varied worklist for human review.
 

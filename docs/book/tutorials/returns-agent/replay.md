@@ -5,7 +5,7 @@ icon: rotate-left
 
 # 4. Replay one bounded change
 
-**Observe → Judge → Define → Replay → Compare**
+Observe → Judge → Define → **Replay** → Compare
 
 This is the first phase that runs the agent and can make paid model calls. You will make one change justified by the investigation, register its run specification, review tool safety, and replay the frozen cohort.
 
