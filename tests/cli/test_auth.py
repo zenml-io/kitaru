@@ -199,12 +199,18 @@ async def test_no_auth_login_stores_only_the_selected_target(
     assert get_server_url() == "https://public.example.com"
 
 
+@pytest.mark.parametrize(
+    "upgrade",
+    [False, True],
+)
 async def test_local_login_starts_runtime_before_selecting_target(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, upgrade
 ) -> None:
     """Local login delegates deployment startup and selects it after success."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
     captured: dict[str, object] = {}
+    interactions: list[str] = []
+    write_progress = interactions.append
 
     async def fake_start(**kwargs):
         captured.update(kwargs)
@@ -225,13 +231,13 @@ async def test_local_login_starts_runtime_before_selecting_target(
 
     monkeypatch.setattr(auth.local_runtime, "start_local_runtime", fake_start)
     monkeypatch.setattr(auth.local_runtime, "open_local_dashboard", opened)
-    monkeypatch.setattr(auth, "write_interaction", lambda message: None)
+    monkeypatch.setattr(auth, "write_interaction", write_progress)
     client = FakeClient(AuthScheme.NONE)
     monkeypatch.setattr(auth, "KitaruAPIClient", lambda **_: client)
     result = await auth.login(
         server=None,
         local=True,
-        upgrade=False,
+        upgrade=upgrade,
         username=None,
         password_stdin=False,
         api_key_stdin=False,
@@ -243,9 +249,12 @@ async def test_local_login_starts_runtime_before_selecting_target(
         package_version="0.21.0",
     )
 
+    progress = captured.pop("progress")
+    assert progress is write_progress
+    assert interactions == []
     assert captured == {
         "package_version": "0.21.0",
-        "upgrade": False,
+        "upgrade": upgrade,
         "timeout": 30,
     }
     assert result.item["deployment"] == "created"
@@ -259,8 +268,10 @@ async def test_failed_local_start_does_not_replace_selected_target(
     """A deployment failure leaves the previously selected server unchanged."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
     auth.set_server_url("https://existing.example.com")
+    captured: dict[str, object] = {}
 
     async def fail_start(**kwargs):
+        captured.update(kwargs)
         raise CLIError("timeout", "unhealthy")
 
     monkeypatch.setattr(auth.local_runtime, "start_local_runtime", fail_start)
@@ -280,6 +291,7 @@ async def test_failed_local_start_does_not_replace_selected_target(
         )
 
     assert get_server_url() == "https://existing.example.com"
+    assert captured["progress"] is None
 
 
 async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) -> None:

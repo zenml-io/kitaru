@@ -91,15 +91,11 @@ async def login(
             api_key_stdin=api_key_stdin,
             scheme=AuthScheme.NONE,
         )
-        if not non_interactive:
-            write_interaction(
-                "Checking the local Docker Compose deployment. "
-                "The first run may download images."
-            )
         item, warnings = await local_runtime.start_local_runtime(
             package_version=package_version,
             upgrade=upgrade,
             timeout=timeout,
+            progress=None if non_interactive else write_interaction,
         )
         client = KitaruAPIClient(
             base_url=local_runtime.LOCAL_SERVER_URL, timeout=timeout
