@@ -33,16 +33,16 @@ By default a worker claims any pending task. Narrow it when environments differ:
 
 ```bash
 # only imports and evaluations — no agent code runs here
-kitaru worker start --kinds importer --kinds evaluator
+kitaru worker start --claim importer --claim evaluator
 
 # only tasks for a specific agent version's environment
-kitaru worker start --selector agent_version=3
+kitaru worker start --claim agent=<AGENT_VERSION_ID>
 
 # drain one job, then exit — useful in CI
 kitaru worker start --job-id <job-id>
 ```
 
-Every option is also an environment variable with the `KITARU_WORKER_` prefix (`KITARU_WORKER_CONCURRENCY`, `KITARU_WORKER_SCOPE__KINDS`, …), so a containerized worker is configured without flags. Deployment patterns — long-running workers on Kubernetes, one-shot workers in CI — are in [Workers in production](../deploy/workers.md).
+Every option is also an environment variable with the `KITARU_WORKER_` prefix (`KITARU_WORKER_CONCURRENCY`, `KITARU_WORKER_SCOPE__CLAIMS`, …), so a containerized worker is configured without flags. Deployment patterns — long-running workers on Kubernetes, one-shot workers in CI — are in [Workers in production](../deploy/workers.md).
 
 Check what's alive:
 

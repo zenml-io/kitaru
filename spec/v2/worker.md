@@ -5,7 +5,7 @@ Spec for the `kitaru/worker/` package. The worker claims tasks from the server, 
 ## Goals
 
 - Instantiate a worker with configurable concurrency, an optional lifetime timeout, and all other knobs in one config object.
-- Scope what a worker claims through one config concept: task kinds, label selectors, or one job, freely combinable.
+- Scope what a worker claims through one config concept: task-kind and agent-version claims, label selectors, or one job, freely combinable.
 - One-off workers that claim one specific job's tasks and drain them, appended tasks included.
 - Execute a claimed task with as little refetching as possible.
 - One class responsible for executing a single task, with per-kind variation isolated in per-kind strategy objects.
@@ -73,11 +73,11 @@ Blob cache roots default to `~/.cache/kitaru/blobs` (code, unbounded) and `~/.ca
 
 ## Class inventory
 
-### WorkerScope and LabelSelector (`api_models/v1/task.py`)
+### WorkerScope and LabelSelector (`api_models/v1/worker.py`)
 
-One value object describing what a worker may claim. Every field narrows the claim, unset fields do not constrain. The fields combine as a conjunction.
+One value object describing what a worker may claim. Claims are alternatives, while selectors and the job id further narrow the result.
 
-`WorkerScope` is a wire model, defined next to `TaskClaimRequest` and shared by the worker config and the worker registration. The worker registers its scope, the server reads it from the worker row at claim time and maps it to the claim filter: `kinds` to `kind IN (...)`, `job_id` to `job_id = :job_id`, and each selector to a label condition on the task's `labels`. An unpinned scope claims any pending task matching its filters.
+`WorkerScope` is a wire model shared by the worker config and the worker registration. The worker registers its scope, the server reads it from the worker row at claim time, and maps each claim to a task-kind and optional agent-version condition. It combines those claim alternatives with `job_id = :job_id` and each selector's label condition. An unpinned scope claims any pending task matching its filters.
 
 ```python
 class LabelSelector(FrozenModel):
@@ -85,8 +85,12 @@ class LabelSelector(FrozenModel):
     values: list[str]          # non-empty
     required: bool = False
 
+class WorkerClaim(FrozenModel):
+    kind: TaskKind
+    agent_version_id: uuid.UUID | None = None
+
 class WorkerScope(FrozenModel):
-    kinds: list[TaskKind] | None = None
+    claims: list[WorkerClaim]          # non-empty, max 16
     selectors: list[LabelSelector] | None = None
     job_id: uuid.UUID | None = None
 ```
@@ -96,13 +100,13 @@ A required selector matches tasks carrying the key with a value in `values`. A n
 | Field | Meaning | Implied stop |
 |---|---|---|
 | none set | any pending task | stop event or lifetime deadline |
-| `kinds` | tasks of these kinds only, e.g. `[importer]` | none, combines |
+| `claims` | task kinds or exact agent versions, e.g. `[{kind: importer}]` | none, combines |
 | `selectors` | label-matched tasks | none, combines |
 | `job_id` | this job's tasks, appended ones included | job settled |
 
-Validation: `kinds` and `selectors` must be non-empty when set, selector keys unique, selector values non-empty.
+Validation: claims and selectors must be non-empty when set, claims must be unique, an agent version requires the `agent` kind, selector keys are unique, and selector values are non-empty.
 
-The one label convention the built-in creators write: agent tasks carry `agent_version`. A worker that can only serve certain agent environments sets a non-required `agent_version` selector, which reproduces the old version scoping: evaluator and importer tasks carry no version label and stay claimable, since they bring their own code and need no version environment. Excluding them is what `kinds` is for. Run-scoped workers are a future improvement, nothing stamps a run label today.
+The built-in creators write `agent_version` on agent tasks. A worker that can serve one exact agent environment can use a versioned `agent` claim. Evaluator and importer tasks carry no agent version because they bring their own code and do not need an agent environment. Use separate unversioned claims to include those task kinds. Run-scoped workers are a future improvement, nothing stamps a run label today.
 
 The scope is also the worker's completion contract: a job pin drains and returns, everything else runs until stopped.
 
@@ -117,7 +121,9 @@ class WorkerConfig(BaseSettings):
     )
 
     name: str | None = None              # default: sanitized hostname-pid
-    scope: WorkerScope = WorkerScope()
+    scope: WorkerScope = WorkerScope(
+        claims=[WorkerClaim(kind=kind) for kind in TaskKind]
+    )
     concurrency: int = 1
     claim_batch_size: int | None = None  # default: free slots per claim
     poll_interval: float = RUN_POLL_INTERVAL_SECONDS
@@ -130,7 +136,7 @@ class WorkerConfig(BaseSettings):
 
 `metadata` is free-form labels stored on the worker row, `KITARU_WORKER_METADATA` takes JSON.
 
-The API connection is not part of the worker config: `KITARU_API_URL` and `KITARU_API_KEY` are read from the process environment and assumed set for any API call. Every field reads as `KITARU_WORKER_<FIELD>`, e.g. `KITARU_WORKER_CONCURRENCY`, `KITARU_WORKER_TIMEOUT`. Scope fields nest with the delimiter: `KITARU_WORKER_SCOPE__KINDS` and `KITARU_WORKER_SCOPE__SELECTORS` take JSON (`'["importer"]'`, a JSON list of selector objects), the only syntax pydantic-settings decodes for nested structured env values, `KITARU_WORKER_SCOPE__JOB_ID` takes a bare value. Comma-separated kind lists are a future improvement.
+The API connection is not part of the worker config: `KITARU_API_URL` and `KITARU_API_KEY` are read from the process environment and assumed set for any API call. Every field reads as `KITARU_WORKER_<FIELD>`, e.g. `KITARU_WORKER_CONCURRENCY`, `KITARU_WORKER_TIMEOUT`. Scope fields nest with the delimiter: `KITARU_WORKER_SCOPE__CLAIMS` and `KITARU_WORKER_SCOPE__SELECTORS` take JSON (`'[{"kind":"importer"}]'`, a JSON list of selector objects), the only syntax pydantic-settings decodes for nested structured env values, and `KITARU_WORKER_SCOPE__JOB_ID` takes a bare value.
 
 The default worker name is derived from `socket.gethostname()` and `os.getpid()`, with characters outside `[A-Za-z0-9_-]` replaced by dashes and leading or trailing dashes and underscores stripped. In Kubernetes the hostname is the pod name, so replicas get unique names without configuration.
 
@@ -169,7 +175,7 @@ One private loop serves every scope, and every claim is the same batch call, fil
 
 | Scope | Claim returns | Stop condition |
 |---|---|---|
-| unpinned | pending tasks matching `kinds` and `selectors` | stop event set, or lifetime deadline |
+| unpinned | pending tasks matching one of the `claims` and all `selectors` | stop event set, or lifetime deadline |
 | `job_id` | the job's tasks, appended ones as they are created | job settled |
 
 With a `job_id` scope there is no phase switch: the `job_id = :job_id` filter returns the initial tasks on the first claim and the appended evaluator tasks as the pipeline creates them. Because appends happen inside the agent task's completion request, the new tasks exist before the agent task reads as completed, so the stop check (one `client.jobs.get`, stop when the job is settled) has no gap to race through. Empty claims are disambiguated by the stop condition read: a settled job ends the loop, tasks held by other workers keep the loop polling until the job settles, a missing job surfaces the 404 from the read.
@@ -365,10 +371,10 @@ The success transition is attempted directly and the server validates it (an age
 
 ## Decisions
 
-- **Claim scoping is generic label matching.** The worker row stores kinds, selectors, and an optional job pin, and the claim filter matches selectors against task labels. Agent version scoping is a label convention written by the task creators, not a scope field, so the claim path never learns a domain concept and new scoping (run-scoped workers, for example) needs no schema change.
+- **Claim scoping is explicit and bounded.** The worker row stores task-kind or agent-version claims, selectors, and an optional job pin. Claim alternatives are ORed, while the job pin and selectors narrow every alternative. Agent version scoping is a first-class claim because workers on one server must not take each other's agent tasks.
 - **Scope is one concept for filter, completion, and wire.** The same `WorkerScope` decides what a claim asks for and when the worker is done. It travels once, in the worker registration, and the server reads it from the worker row at claim time. A job pin drains and returns, everything else runs until stop event or deadline.
 - **No standalone claim endpoint.** A job-pinned scope through the batch claim covers the one-off case with one filter, including re-claiming a requeued task. The fail-fast semantics of a dedicated endpoint are reconstructed by the stop condition read, and a task held by another worker is waited on instead of erroring.
-- **Non-required selectors do not exclude unlabeled tasks.** Evaluator and importer tasks carry their own code and no version label, so they match any worker unless `kinds` says otherwise. Exclusion is an explicit choice, not a side effect of declaring version capabilities.
+- **Non-required selectors do not exclude unlabeled tasks.** Evaluator and importer tasks carry their own code and no version label, so they match any worker unless its claims exclude those task kinds. Exclusion is an explicit choice, not a side effect of declaring version capabilities.
 - **Uniform success transition.** Process success is reported as `completed` for every kind. The server appends a completed agent task's evaluator tasks within the completion request and settles the job when its tasks finish. The worker never writes a job status.
 - **A recorded exit outranks cancel and timeout, cancel outranks timeout.** A process that exits before the kill lands is reported by its exit code, killing it late does not undo finished work. Between the kill reasons the cancel event wins, it is the server-driven signal and the timeout is the local bound.
 - **Strategy over subclasses for kinds.** The only variation is process construction, supervision and the status protocol are identical. Subclasses become the right call only if kinds ever diverge in the execute skeleton itself.

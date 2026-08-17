@@ -16,7 +16,7 @@ Add `POST /v1/tasks/{id}/retry`, re-queueing a terminal failed, timed_out, aband
 
 ## Run-scoped workers
 
-No worker can scope itself to one experiment run today, only kinds, version capabilities, and a job pin exist. The mechanism is already in place: stamp an `experiment_run` label on every task of run-owned replays at fan-out, and a run worker sets a required selector on it. A `WorkerConfig.experiment_run_id` convenience can expand into that selector plus a run-terminal stop condition read via `client.experiment_runs.get`, keeping the wire scope generic labels. Trigger: dedicated worker pools per run, or CLI flows that launch a worker for one run and want it to exit on its own. Hooks: `replay_pipeline` task creation, `WorkerConfig`, the Worker stop check.
+No worker can scope itself to one experiment run today. It can scope by task-kind or agent-version claims, label selectors, and a job pin. The mechanism is already in place: stamp an `experiment_run` label on every task of run-owned replays at fan-out, and a run worker sets a required selector on it. A `WorkerConfig.experiment_run_id` convenience can expand into that selector plus a run-terminal stop condition read via `client.experiment_runs.get`, keeping the wire scope generic labels. Trigger: dedicated worker pools per run, or CLI flows that launch a worker for one run and want it to exit on its own. Hooks: `replay_pipeline` task creation, `WorkerConfig`, the Worker stop check.
 
 ## Declared task dependencies
 
@@ -68,7 +68,7 @@ Two concurrently claimed tasks referencing the same plugin or payload blob can b
 
 ## Comma-separated worker scope env lists
 
-`KITARU_WORKER_SCOPE__KINDS` takes a JSON list, since pydantic-settings only auto-decodes JSON for nested list env values. Add a before-validator on `WorkerConfig` splitting un-bracketed values on commas. Trigger: deployment ergonomics complaints about quoting JSON in env vars. Hook: `WorkerConfig`.
+`KITARU_WORKER_SCOPE__CLAIMS` takes a JSON list of claim objects, since pydantic-settings only auto-decodes JSON for nested list env values. Add a before-validator on `WorkerConfig` splitting un-bracketed values on commas. Trigger: deployment ergonomics complaints about quoting JSON in env vars. Hook: `WorkerConfig`.
 
 ## Time-gate the claim-time staleness sweep
 

@@ -436,7 +436,7 @@ Task lifecycle, claim, and spec models.
 - `labels`: plain dict[str, str] written at task creation, matched by worker scope selectors. The one convention of the built-in creators: agent tasks carry `agent_version`.
 - `TaskListParams`: filter?
 - `LabelSelector` (frozen): key, values (non-empty), required: bool = False. A required selector matches tasks carrying the key with a value in `values`, a non-required selector additionally matches every task lacking the key.
-- `WorkerScope` (frozen): kinds?, selectors?, job_id?. The fields combine as a conjunction. Validator: lists non-empty when set, selector keys unique.
+- `WorkerClaim` (frozen): kind, agent_version_id?. `WorkerScope` (frozen): claims, selectors?, job_id?. Claims are alternatives; selectors and job_id further narrow the match. Validator: claims and selectors are non-empty, claims are unique, an agent version requires the `agent` kind, and selector keys are unique.
 - `TaskClaimRequest`: worker_id, max_tasks (1..100). The scope comes from the worker row, not the request.
 - `TaskRunSpec`: command, working_dir?, env (copied from the version's run spec)
 - `ScriptPluginSpec`: type="script", entrypoint, blob_id, sha256
@@ -713,7 +713,7 @@ Constraints and indexes:
 - partial GIN index on labels where status = 'pending' (selector conditions)
 - partial expression index on coalesce(heartbeat_at, claimed_at) where status in ('claimed', 'running') (staleness query, which covers cancel-requested tasks too since they keep their claimed or running status)
 
-Claim query (`claim_pending`): scope conditions + status = pending, ordered by id, `FOR UPDATE SKIP LOCKED`. Job pin is `job_id = X`, kind filter is `kind IN (...)`. A required selector is `labels->>key IN (values)`, a non-required one is `NOT labels ? key OR labels->>key IN (values)`, terms ANDed. An unpinned scope with no selectors adds no condition and claims any pending task. Staleness (`requeue_stale` and effective-status reads) uses the coalesce expression against the heartbeat timeout.
+Claim query (`claim_pending`): claim terms + status = pending, ordered by id, `FOR UPDATE SKIP LOCKED`. Each unversioned claim adds `kind = X`; each versioned agent claim adds `agent_version_id = X`; claim terms are ORed. Job pin and selector conditions are ANDed with every claim term. A required selector is `labels->>key IN (values)`, and a non-required one is `NOT labels ? key OR labels->>key IN (values)`. An unpinned scope with all task-kind claims and no selectors adds no condition and claims any pending task. Staleness (`requeue_stale` and effective-status reads) uses the coalesce expression against the heartbeat timeout.
 
 ### JSON columns and what is stored in them
 
