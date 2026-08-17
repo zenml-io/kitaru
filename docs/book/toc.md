@@ -4,48 +4,53 @@
 
 - [Welcome to Kitaru](README.md)
 - [Installation](getting-started/installation.md)
-- [TypeScript SDK](typescript-sdk.md)
+- [Deploy Kitaru](deploy/README.md)
+  - [Docker](deploy/docker.md)
+  - [Helm](deploy/helm.md)
+- [Set up your coding agent](agent-native/setup.md)
 - [Quickstart](getting-started/quickstart.md)
+
+## Core Concepts
+
+- [Overview](concepts/README.md)
+- [Agents & Sessions](concepts/agents-and-sessions.md)
+- [Investigations & Annotations](concepts/investigations.md)
+- [Replay](concepts/replay.md)
+- [Evaluators & Evaluations](concepts/evaluators.md)
+- [Cohorts](concepts/cohorts.md)
+- [Experiments](concepts/experiments.md)
+- [Workers](concepts/workers.md)
+- [Under the Hood](concepts/under-the-hood.md)
+
+## Guides
+
 - [Complete returns-agent tutorial](tutorials/returns-agent/README.md)
   - [1. Observe the recorded behavior](tutorials/returns-agent/observe.md)
   - [2. Judge the selected behavior](tutorials/returns-agent/judge.md)
   - [3. Define one behavior to test](tutorials/returns-agent/define.md)
   - [4. Replay one bounded change](tutorials/returns-agent/replay.md)
   - [5. Compare the paired evidence](tutorials/returns-agent/compare.md)
-- [Import your traces](getting-started/import-your-traces.md)
-- [Drive it from your coding agent](agent-native/mcp-server.md)
-- [Agent skills](agent-native/skills.md)
-- [Deploy Kitaru](deploy/README.md)
-  - [Docker](deploy/docker.md)
-  - [Helm](deploy/helm.md)
-- [Troubleshooting](getting-started/troubleshooting.md)
-
-## Core Concepts
-
-- [Overview](concepts/README.md)
-- [Agents & Sessions](concepts/agents-and-sessions.md)
-- [Replay](concepts/replay.md)
-- [Evaluators & Evaluations](concepts/evaluators.md)
-- [Cohorts](concepts/cohorts.md)
-- [Experiments](concepts/experiments.md)
-- [Investigations & Annotations](concepts/investigations.md)
-- [Workers](concepts/workers.md)
-- [Under the Hood](concepts/under-the-hood.md)
-
-## Guides
-
 - [Replay a failure and fork it](guides/replay-and-overrides.md)
 - [Build a regression suite from production](guides/regression-suite.md)
 - [Write an evaluator](guides/write-an-evaluator.md)
-- [Import Langfuse traces](guides/import-langfuse-traces.md)
-- [Import any trace format](guides/importing-sessions.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
 
+## Import your traces
+
+- [Overview](getting-started/import-your-traces.md)
+- [Langfuse](guides/import-langfuse-traces.md)
+- [LangSmith](guides/import-langsmith-traces.md)
+- [Braintrust](guides/import-braintrust-traces.md)
+- [Logfire](guides/import-logfire-traces.md)
+- [Kitaru JSONL](guides/importing-sessions.md)
+- [No importer for your format](guides/custom-importer.md)
+
 ## Adapters
 
 - [Overview](adapters/README.md)
+- [Record in production](adapters/record-in-production.md)
 - [Pydantic AI](adapters/pydantic-ai.md)
 - [LangGraph](adapters/langgraph.md)
 - [OpenAI Agents SDK](adapters/openai-agents.md)
@@ -58,8 +63,10 @@
 - [Workers in production](deploy/workers.md)
 - [Authentication & API keys](deploy/authentication.md)
 - [Secrets](deploy/secrets.md)
+
+## Get Help
+
+- [Troubleshooting](getting-started/troubleshooting.md)
 - [Configuration](deploy/configuration.md)
-
-## Project
-
+- [How to use the SDK](deploy/sdks.md)
 - [Contributing](contributing.md)

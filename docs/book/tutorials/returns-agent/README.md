@@ -15,7 +15,7 @@ The tutorial is intentionally more detailed than the [Quickstart](../../getting-
 
 | Phase | You will create | Why it exists |
 | --- | --- | --- |
-| [1. Observe](observe.md) | A verified [agent version](../../concepts/agents-and-sessions.md#agents-and-agent-versions), ten imported [sessions](../../concepts/agents-and-sessions.md), and descriptive [evaluations](../../concepts/evaluators.md) | Confirm what the template preserved and select a bounded, varied review worklist. |
+| [1. Observe](observe.md) | A verified [agent version](../../concepts/agents-and-sessions.md), ten imported [sessions](../../concepts/agents-and-sessions.md), and descriptive [evaluations](../../concepts/evaluators.md) | Confirm what the template preserved and select a bounded, varied review worklist. |
 | [2. Judge](judge.md) | An [investigation](../../concepts/investigations.md), evidence-linked annotations, and verdicts | Store what a human concluded without rewriting the trace. |
 | [3. Define](define.md) | One accepted behavior, an immutable [cohort version](../../concepts/cohorts.md), and an evaluator version | Turn reviewed evidence into a repeatable measurement. |
 | [4. Replay](replay.md) | A candidate agent version, [experiment](../../concepts/experiments.md), and experiment run | Run one bounded change against the frozen population under an explicit tool policy. |
@@ -42,7 +42,7 @@ Some tutorial commands create jobs. The [worker](../../concepts/workers.md) clai
 
 ## Prefer a coding agent?
 
-The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/skills.md) and use the template-specific prompt in the [`kitaru-template` README](https://github.com/zenml-io/kitaru-template#continue-with-a-coding-agent).
+The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/setup.md) and use the template-specific prompt in the [`kitaru-template` README](https://github.com/zenml-io/kitaru-template#continue-with-a-coding-agent).
 
 ## Start the investigation
 

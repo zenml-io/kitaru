@@ -14,15 +14,15 @@ structure:
 redirects:
   guides/projects: concepts/agents-and-sessions.md
   guides/pydantic-ai-adapter: adapters/pydantic-ai.md
-  guides/openai-agents-adapter: adapters/README.md
+  guides/openai-agents-adapter: adapters/openai-agents.md
   guides/claude-agent-sdk-adapter: adapters/README.md
   guides/gemini-interactions-adapter: adapters/README.md
-  guides/langgraph-adapter: adapters/README.md
+  guides/langgraph-adapter: adapters/langgraph.md
   stacks: deploy/README.md
   concepts/how-it-works: concepts/under-the-hood.md
   concepts/harness-runtime-platform: concepts/under-the-hood.md
   getting-started/deploy: deploy/README.md
-  agent-native/claude-code-skill: agent-native/mcp-server.md
+  agent-native/claude-code-skill: agent-native/setup.md
   getting-started/end-to-end: getting-started/quickstart.md
   getting-started/examples: getting-started/quickstart.md
   guides/secrets-and-model-registration: deploy/secrets.md
@@ -47,14 +47,38 @@ redirects:
   guides/configuration: deploy/configuration.md
   guides/authentication: deploy/authentication.md
   guides/secrets: deploy/secrets.md
-  adapters/openai-agents: adapters/README.md
   adapters/claude-agent-sdk: adapters/README.md
   adapters/gemini-interactions: adapters/README.md
   adapters/google-adk: adapters/README.md
-  adapters/langgraph: adapters/README.md
   stacks/kubernetes-stacks: deploy/README.md
   stacks/modal-stacks: deploy/README.md
   stacks/vertex-stacks: deploy/README.md
   stacks/sagemaker-stacks: deploy/README.md
   stacks/azureml-stacks: deploy/README.md
   stacks/log-store: deploy/README.md
+  # v2 launch restructure: pages moved between toc sections (section slug
+  # is part of the published URL, so each move needs a redirect).
+  typescript-sdk: deploy/sdks.md
+  getting-started/typescript-sdk: deploy/sdks.md
+  adapters/typescript-sdk: deploy/sdks.md
+  getting-started/mcp-server: agent-native/setup.md
+  getting-started/skills: agent-native/setup.md
+  guides/mcp-server: agent-native/setup.md
+  guides/skills: agent-native/setup.md
+  agent-native/mcp-server: agent-native/setup.md
+  agent-native/skills: agent-native/setup.md
+  getting-started/import-your-traces: getting-started/import-your-traces.md
+  getting-started/troubleshooting: getting-started/troubleshooting.md
+  getting-started/returns-agent: tutorials/returns-agent/README.md
+  getting-started/returns-agent/observe: tutorials/returns-agent/observe.md
+  getting-started/returns-agent/judge: tutorials/returns-agent/judge.md
+  getting-started/returns-agent/define: tutorials/returns-agent/define.md
+  getting-started/returns-agent/replay: tutorials/returns-agent/replay.md
+  getting-started/returns-agent/compare: tutorials/returns-agent/compare.md
+  guides/import-langfuse-traces: guides/import-langfuse-traces.md
+  guides/importing-sessions: guides/importing-sessions.md
+  tutorials/returns-agent: tutorials/returns-agent/README.md
+  running-in-production/troubleshooting: getting-started/troubleshooting.md
+  running-in-production/configuration: deploy/configuration.md
+  running-in-production/sdks: deploy/sdks.md
+  project/contributing: contributing.md

@@ -40,3 +40,18 @@ for (const [input, expected] of cases) {
     assert.equal(docsRedirectTarget(input), expected);
   });
 }
+
+import worker from "./redirect.mjs";
+
+const marketingCases = [
+  ["https://kitaru.ai/help", "https://github.com/zenml-io/kitaru/issues"],
+  ["https://kitaru.ai/slack", "https://www.zenml.io/slack"],
+];
+
+for (const [input, expected] of marketingCases) {
+  test(`fetch(${input})`, async () => {
+    const response = await worker.fetch(new Request(input));
+    assert.equal(response.status, 301);
+    assert.equal(response.headers.get("location"), expected);
+  });
+}

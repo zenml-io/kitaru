@@ -126,9 +126,9 @@ The adapter exposes two public exceptions in `kitaru_openai_agents` for failures
 
 ## Data safety
 
-Kitaru capture is independent of OpenAI tracing. Disabling OpenAI tracing does not disable Kitaru session and node capture.
+Kitaru recording is independent of OpenAI tracing. Disabling OpenAI tracing does not disable Kitaru session and node recording.
 
-The adapter excludes caller context, clients, credentials, environment state, callbacks, OpenAI SDK session objects, private SDK fields, provider-internal reasoning, and unknown-object serialization. Captured values use deterministic size, depth, and collection limits with truncation metadata.
+The adapter excludes caller context, clients, credentials, environment state, callbacks, OpenAI SDK session objects, private SDK fields, provider-internal reasoning, and unknown-object serialization. Recorded values use deterministic size, depth, and collection limits with truncation metadata.
 
 Effective prompts, tool arguments, tool results, and exception summaries can still contain sensitive application data. Review what your application sends to models and tools, and apply the same access controls and retention policy to Kitaru data that you apply to the original application payloads.
 

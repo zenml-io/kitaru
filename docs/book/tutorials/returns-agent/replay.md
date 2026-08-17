@@ -5,7 +5,7 @@ icon: rotate-left
 
 # 4. Replay one bounded change
 
-**Observe → Judge → Define → Replay → Compare**
+Observe → Judge → Define → **Replay** → Compare
 
 This is the first phase that runs the agent and can make paid model calls. You will make one change justified by the investigation, register its run specification, review tool safety, and replay the frozen cohort.
 
@@ -71,7 +71,7 @@ This synthetic example uses passthrough:
 
 Passthrough is safe here because every action tool writes only to a fresh in-memory store created for the replay. Do not copy this choice for tools that charge cards, send messages, change production data, or trigger other side effects. For those, prefer recorded history with `on_miss=fail` or a reviewed static result. See [Replay and overrides](../../guides/replay-and-overrides.md).
 
-Replay safety comes from the configured policy and the actual tool implementations, not from the word “replay.” Review both before starting the run.
+Replay safety comes from the configured policy and the actual tool implementations, not from the word "replay." Review both before starting the run.
 
 ## Create the experiment
 
