@@ -164,8 +164,9 @@ async def delete_agent(
 ) -> None:
     """Delete an agent.
 
-    Clients observe HTTP 204 on success, 404 when no agent has this id, and
-    409 when the agent has versions.
+    Deleting an agent cascades its versions, sessions, cohorts, experiments,
+    investigations, and jobs. Clients observe HTTP 204 on success and 404
+    when no agent has this id.
 
     Args:
         agent_id: Id of the agent.

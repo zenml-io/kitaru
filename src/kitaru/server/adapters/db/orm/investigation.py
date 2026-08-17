@@ -48,7 +48,10 @@ class InvestigationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["owner_id"], ["account.id"], name=INVESTIGATION_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=INVESTIGATION_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=INVESTIGATION_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         Index(INVESTIGATION_OWNER_ID_INDEX, "owner_id"),
         Index(INVESTIGATION_AGENT_ID_INDEX, "agent_id"),

@@ -122,19 +122,26 @@ class SessionService:
         Returns:
             Created session.
         """
-        task_id = None
+        principal = (
+            actor.principal if isinstance(actor.principal, TaskPrincipal) else None
+        )
+        task_id = principal.task_id if principal is not None else None
         task = None
-        if isinstance(actor.principal, TaskPrincipal):
-            task_id = actor.principal.task_id
-            task = await self._tasks.get(task_id, exclusive=True)
-            task.check_running()
-            # Check the attempt on the locked task so a requeue cannot race
-            # the result link.
-            task.check_attempt(actor.principal.attempt)
-            if isinstance(task, AgentTask) and task.result_session_id is not None:
-                raise TaskResultSessionAlreadyLinked(task.id)
+        if principal is not None:
+            task = await self._tasks.get(principal.task_id)
+            self._check_task_accepts_result(task, principal)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
+        # The number is allocated on a separate connection that updates the
+        # agent row, so it runs before the task row lock. Holding the task
+        # lock while waiting on the agent row would be a lock wait the
+        # database cannot see and could deadlock undetected with a writer
+        # that locks the agent row before task rows.
         number = await self._repository.allocate_session_number(agent_id)
+        if principal is not None:
+            # Check again on the locked task so a requeue cannot race the
+            # result link.
+            task = await self._tasks.get(principal.task_id, exclusive=True)
+            self._check_task_accepts_result(task, principal)
         session = Session(
             owner_id=actor.account.id,
             agent_id=agent_id,
@@ -168,6 +175,25 @@ class SessionService:
                 analytics_events.build_session_completed_properties(stored),
             )
         return stored
+
+    @staticmethod
+    def _check_task_accepts_result(task: Task, principal: TaskPrincipal) -> None:
+        """Check that a task principal may record a result session.
+
+        Args:
+            task: Task the principal acts for.
+            principal: Task principal.
+
+        Raises:
+            TaskNotRunning: The task is not running.
+            TaskAttemptMismatch: The principal's attempt is superseded.
+            TaskResultSessionAlreadyLinked: The task already has a result
+                session.
+        """
+        task.check_running()
+        task.check_attempt(principal.attempt)
+        if isinstance(task, AgentTask) and task.result_session_id is not None:
+            raise TaskResultSessionAlreadyLinked(task.id)
 
     async def _resolve_agent(
         self, command: SessionCreate, task: Task | None

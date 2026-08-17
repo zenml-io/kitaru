@@ -43,7 +43,10 @@ class CohortORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         UniqueConstraint("name", name=COHORT_NAME_UNIQUE_CONSTRAINT),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=COHORT_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=COHORT_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
     )
 

@@ -121,13 +121,15 @@ class AgentService:
     async def delete_agent(self, agent_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete an agent.
 
+        Deleting an agent cascades its versions, sessions, cohorts, experiments,
+        investigations, and jobs.
+
         Args:
             agent_id: Id of the agent.
             actor: Caller context.
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
         _ = actor
         await self._repository.delete(agent_id)

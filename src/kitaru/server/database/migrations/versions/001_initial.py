@@ -295,7 +295,10 @@ def upgrade() -> None:
             "capabilities", postgresql.JSONB(astext_type=sa.Text()), nullable=False
         ),
         sa.ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name="fk_agent_version_agent_id"
+            ["agent_id"],
+            ["agent.id"],
+            name="fk_agent_version_agent_id",
+            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name="fk_agent_version_owner_id"
@@ -319,7 +322,12 @@ def upgrade() -> None:
         sa.Column("agent_id", sa.Uuid(), nullable=False),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column("latest_version", sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(["agent_id"], ["agent.id"], name="fk_cohort_agent_id"),
+        sa.ForeignKeyConstraint(
+            ["agent_id"],
+            ["agent.id"],
+            name="fk_cohort_agent_id",
+            ondelete="CASCADE",
+        ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("name", name="uq_cohort_name"),
     )
@@ -355,7 +363,10 @@ def upgrade() -> None:
         sa.Column("agent_id", sa.Uuid(), nullable=False),
         sa.Column("replay_config_id", sa.Uuid(), nullable=False),
         sa.ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name="fk_experiment_agent_id"
+            ["agent_id"],
+            ["agent.id"],
+            name="fk_experiment_agent_id",
+            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name="fk_experiment_owner_id"
@@ -532,7 +543,12 @@ def upgrade() -> None:
         sa.Column("reasoning_tokens", sa.BigInteger(), nullable=True),
         sa.Column("llm_call_count", sa.Integer(), nullable=False),
         sa.Column("tool_call_count", sa.Integer(), nullable=False),
-        sa.ForeignKeyConstraint(["agent_id"], ["agent.id"], name="fk_session_agent_id"),
+        sa.ForeignKeyConstraint(
+            ["agent_id"],
+            ["agent.id"],
+            name="fk_session_agent_id",
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(
             ["agent_version_id"],
             ["agent_version.id"],
@@ -759,7 +775,12 @@ def upgrade() -> None:
             postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
             nullable=True,
         ),
-        sa.ForeignKeyConstraint(["agent_id"], ["agent.id"], name="fk_task_agent_id"),
+        sa.ForeignKeyConstraint(
+            ["agent_id"],
+            ["agent.id"],
+            name="fk_task_agent_id",
+            ondelete="CASCADE",
+        ),
         sa.ForeignKeyConstraint(
             ["agent_version_id"], ["agent_version.id"], name="fk_task_agent_version_id"
         ),
@@ -906,7 +927,10 @@ def upgrade() -> None:
         sa.Column("ended_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("metadata", postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name="fk_investigation_agent_id"
+            ["agent_id"],
+            ["agent.id"],
+            name="fk_investigation_agent_id",
+            ondelete="CASCADE",
         ),
         sa.ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name="fk_investigation_owner_id"

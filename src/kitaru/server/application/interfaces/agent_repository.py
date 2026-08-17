@@ -80,11 +80,13 @@ class AgentRepository(Protocol):
     async def delete(self, agent_id: uuid.UUID) -> None:
         """Delete an agent by id.
 
+        Deleting an agent cascades its versions, sessions, cohorts, experiments,
+        investigations, and jobs.
+
         Args:
             agent_id: Id of the agent.
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
         ...

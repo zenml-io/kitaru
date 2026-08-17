@@ -16,22 +16,23 @@
 import uuid
 from collections.abc import Mapping
 
-from sqlalchemy import select
+from sqlalchemy import ColumnElement, Select, delete, or_, select
+from sqlalchemy.orm import InstrumentedAttribute
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
-from kitaru.server.adapters.db.orm.agent_version import (
-    AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
-)
+from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
+from kitaru.server.adapters.db.orm.cohort import CohortORM
+from kitaru.server.adapters.db.orm.experiment import ExperimentORM
+from kitaru.server.adapters.db.orm.experiment_run import ExperimentRunORM
+from kitaru.server.adapters.db.orm.job import JobORM
+from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.session import SessionORM
+from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent import AgentFilter
-from kitaru.server.domain.agent import (
-    Agent,
-    AgentInUse,
-    AgentNotFound,
-    DuplicateAgentName,
-)
+from kitaru.server.domain.agent import Agent, AgentNotFound, DuplicateAgentName
 from kitaru.server.domain.base import NotFoundError
 
 AGENT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
@@ -136,14 +137,107 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
     async def delete(self, agent_id: uuid.UUID) -> None:
         """Delete an agent by id.
 
+        Deleting an agent cascades its versions, sessions, cohorts, experiments,
+        investigations, and jobs.
+
         Args:
             agent_id: Id of the agent.
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
-        await self._delete_row(
-            agent_id,
-            {AGENT_VERSION_AGENT_ID_FOREIGN_KEY: lambda: AgentInUse(agent_id)},
+        session_ids = select(SessionORM.id).where(SessionORM.agent_id == agent_id)
+        version_ids = select(AgentVersionORM.id).where(
+            AgentVersionORM.agent_id == agent_id
+        )
+        experiment_ids = select(ExperimentORM.id).where(
+            ExperimentORM.agent_id == agent_id
+        )
+        # Every row a concurrent writer could reference is locked before any
+        # of the subtree is deleted, so such an insert waits on its parent
+        # and fails on the foreign key once the delete commits instead of
+        # landing between two delete statements. Rows are locked in the order
+        # the write paths take them: task rows first and in id order, then
+        # the agent, experiments, cohorts, sessions, and versions. The job set
+        # is read again once those are locked, since no job for the agent can
+        # commit after that, and tasks of jobs that appeared in between are
+        # locked then.
+        job_ids = await self._get_job_ids(agent_id, session_ids, version_ids)
+        await self._lock_rows(TaskORM.id, TaskORM.job_id.in_(job_ids))
+        row = await self._get_row(agent_id, exclusive=True)
+        await self._lock_rows(ExperimentORM.id, ExperimentORM.agent_id == agent_id)
+        await self._lock_rows(CohortORM.id, CohortORM.agent_id == agent_id)
+        await self._lock_rows(SessionORM.id, SessionORM.agent_id == agent_id)
+        await self._lock_rows(AgentVersionORM.id, AgentVersionORM.agent_id == agent_id)
+        job_ids = await self._get_job_ids(agent_id, session_ids, version_ids)
+        await self._lock_rows(TaskORM.id, TaskORM.job_id.in_(job_ids))
+        await self._lock_rows(JobORM.id, JobORM.id.in_(job_ids))
+        # The database checks a restricting foreign key after each cascade
+        # step rather than at the end of the statement, so rows behind such
+        # keys are deleted before the agent row in dependency order.
+        await self._session.execute(delete(JobORM).where(JobORM.id.in_(job_ids)))
+        await self._session.execute(
+            delete(ExperimentRunORM).where(
+                ExperimentRunORM.experiment_id.in_(experiment_ids)
+            )
+        )
+        await self._session.execute(
+            delete(CohortORM).where(CohortORM.agent_id == agent_id)
+        )
+        await self._session.execute(
+            delete(SessionORM).where(SessionORM.agent_id == agent_id)
+        )
+        await self._session.delete(row)
+        await self._session.flush()
+
+    async def _get_job_ids(
+        self,
+        agent_id: uuid.UUID,
+        session_ids: Select[tuple[uuid.UUID]],
+        version_ids: Select[tuple[uuid.UUID]],
+    ) -> list[uuid.UUID]:
+        """Get the ids of the jobs whose tasks or replays belong to an agent.
+
+        Args:
+            agent_id: Id of the agent.
+            session_ids: Select of the agent's session ids.
+            version_ids: Select of the agent's version ids.
+
+        Returns:
+            Job ids in ascending order.
+        """
+        task_job_ids = select(TaskORM.job_id).where(
+            or_(
+                TaskORM.agent_id == agent_id,
+                TaskORM.agent_version_id.in_(version_ids),
+                TaskORM.input_session_id.in_(session_ids),
+                TaskORM.result_session_id.in_(session_ids),
+            )
+        )
+        replay_job_ids = select(ReplayORM.job_id).where(
+            ReplayORM.baseline_session_id.in_(session_ids)
+        )
+        result = await self._session.scalars(
+            select(JobORM.id)
+            .where(or_(JobORM.id.in_(task_job_ids), JobORM.id.in_(replay_job_ids)))
+            .order_by(JobORM.id.asc())
+        )
+        return list(result.all())
+
+    async def _lock_rows(
+        self,
+        id_column: InstrumentedAttribute[uuid.UUID],
+        condition: ColumnElement[bool],
+    ) -> None:
+        """Lock the matching rows in id order for the rest of the transaction.
+
+        Args:
+            id_column: Id column of the table.
+            condition: Filter selecting the rows to lock.
+        """
+        await self._session.execute(
+            select(id_column)
+            .where(condition)
+            .order_by(id_column.asc())
+            .with_for_update()
         )

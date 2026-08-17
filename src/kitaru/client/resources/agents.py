@@ -150,8 +150,7 @@ class AgentsResource:
             agent_id: Id of the agent.
 
         Raises:
-            APIError: The request failed, including 404 for a missing agent
-                and 409 when the agent has versions.
+            APIError: The request failed, including 404 for a missing agent.
         """
         await self._client.request("DELETE", f"/api/v1/agents/{agent_id}")
 

@@ -9050,7 +9050,7 @@
     },
     "/api/v1/agents/{agent_id}": {
       "delete": {
-        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id, and\n409 when the agent has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
+        "description": "Delete an agent.\n\nDeleting an agent cascades its versions, sessions, cohorts, experiments,\ninvestigations, and jobs. Clients observe HTTP 204 on success and 404\nwhen no agent has this id.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
         "operationId": "delete_agent_api_v1_agents__agent_id__delete",
         "parameters": [
           {

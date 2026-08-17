@@ -80,7 +80,10 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT,
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=SESSION_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=SESSION_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["agent_version_id"],

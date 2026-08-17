@@ -118,12 +118,7 @@ from kitaru.server.domain.account import (
     AccountNotFound,
     DuplicateAccountName,
 )
-from kitaru.server.domain.agent import (
-    Agent,
-    AgentInUse,
-    AgentNotFound,
-    DuplicateAgentName,
-)
+from kitaru.server.domain.agent import Agent, AgentNotFound, DuplicateAgentName
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
@@ -1622,17 +1617,19 @@ class FakeAgentRepository:
         Args:
             agent_id: Id of the agent.
 
+        Deleting an agent cascades its versions.
+
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
         if agent_id not in self._agents:
             raise AgentNotFound(agent_id)
-        if self._agent_versions is not None and any(
-            version.agent_id == agent_id
-            for version in self._agent_versions._versions.values()
-        ):
-            raise AgentInUse(agent_id)
+        if self._agent_versions is not None:
+            self._agent_versions._versions = {
+                version_id: version
+                for version_id, version in self._agent_versions._versions.items()
+                if version.agent_id != agent_id
+            }
         del self._agents[agent_id]
 
 
@@ -1668,8 +1665,8 @@ class FakeAgentVersionRepository:
 
         Args:
             agents: Fake agent repository sharing the version counter. Also
-                wired back onto the agent repository so its delete can check
-                for versions.
+                wired back onto the agent repository so its delete cascades
+                versions.
             tags: Fake tag repository, consulted by the ``tag`` filter.
         """
         self._agents = agents

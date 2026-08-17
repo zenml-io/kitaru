@@ -154,13 +154,167 @@ async def test_create_version_with_secrets_round_trips(
     ]
 
 
-async def test_delete_agent_restricted_by_versions(client: httpx.AsyncClient) -> None:
-    """Translate the FK restriction into HTTP 409 when versions exist."""
+async def test_delete_agent_cascades_related_resources(
+    client: httpx.AsyncClient,
+) -> None:
+    """Delete an agent together with everything that references it."""
     agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
-    await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    agent_id = agent["id"]
+    version = (
+        await client.post(
+            f"/api/v1/agents/{agent_id}/versions",
+            json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
+        )
+    ).json()
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={
+                "agent_id": agent_id,
+                "agent_version_id": version["id"],
+                "origin": "recorded",
+                "inputs": {"q": "hi"},
+                "outputs": None,
+            },
+        )
+    ).json()
+    cohort = (
+        await client.post("/api/v1/cohorts", json={"name": "c1", "agent_id": agent_id})
+    ).json()
+    cohort_version = (
+        await client.post(
+            f"/api/v1/cohorts/{cohort['id']}/versions",
+            json={"add_session_ids": [session["id"]]},
+        )
+    ).json()
+    blob = (
+        await client.post(
+            "/api/v1/blobs",
+            files={"file": ("score.py", b"def score(): pass", "text/plain")},
+        )
+    ).json()
+    evaluator = (
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
+    ).json()
+    await client.post(
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
+        json={
+            "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
+        },
+    )
+    experiment = (
+        await client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "exp1",
+                "agent_id": agent_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    experiment_run = (
+        await client.post(
+            f"/api/v1/experiments/{experiment['id']}/runs",
+            json={
+                "cohort_version_id": cohort_version["id"],
+                "agent_version_id": version["id"],
+            },
+        )
+    ).json()
+    investigation = (
+        await client.post(
+            "/api/v1/investigations",
+            json={
+                "agent_id": agent_id,
+                "name": "inv1",
+                "sessions": [
+                    {
+                        "session_id": session["id"],
+                        "questions": [{"key": "cause", "question": "Why?"}],
+                    }
+                ],
+            },
+        )
+    ).json()
+    replay = (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": session["id"],
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    # Drive the ad hoc replay to its evaluator task so a task referencing
+    # the agent only through its input session exists.
+    registration = (
+        await client.post(
+            "/api/v1/workers",
+            json={
+                "name": "worker-1",
+                "scope": {"claims": [{"kind": "agent"}, {"kind": "evaluator"}]},
+                "runtime": {"platform": "bare"},
+                "metadata": {},
+            },
+        )
+    ).json()
+    worker_headers = {"Authorization": f"Bearer {registration['token']}"}
+    claimed = (
+        await client.post(
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+        )
+    ).json()
+    agent_entry = next(
+        entry
+        for entry in claimed["tasks"]
+        if entry["task"]["kind"] == "agent"
+        and entry["task"]["job_id"] == replay["job_id"]
+    )
+    agent_task_headers = {"Authorization": f"Bearer {agent_entry['token']}"}
+    await client.patch(
+        f"/api/v1/tasks/{agent_entry['task']['id']}",
+        json={"status": "running"},
+        headers=agent_task_headers,
+    )
+    result_session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={"origin": "replay", "inputs": None, "outputs": None},
+            headers=agent_task_headers,
+        )
+    ).json()
+    await client.patch(
+        f"/api/v1/sessions/{result_session['id']}",
+        json={"status": "completed", "outputs": {}},
+    )
+    await client.patch(
+        f"/api/v1/tasks/{agent_entry['task']['id']}",
+        json={"status": "completed"},
+        headers=agent_task_headers,
+    )
+    claimed = (
+        await client.post(
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+        )
+    ).json()
+    assert any(entry["task"]["kind"] == "evaluator" for entry in claimed["tasks"])
 
-    response = await client.delete(f"/api/v1/agents/{agent['id']}")
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Agent {agent['id']} has versions and cannot be deleted"
-    }
+    response = await client.delete(f"/api/v1/agents/{agent_id}")
+    assert response.status_code == 204
+
+    for path in (
+        f"/api/v1/agents/{agent_id}",
+        f"/api/v1/agent-versions/{version['id']}",
+        f"/api/v1/sessions/{session['id']}",
+        f"/api/v1/sessions/{result_session['id']}",
+        f"/api/v1/cohorts/{cohort['id']}",
+        f"/api/v1/cohort-versions/{cohort_version['id']}",
+        f"/api/v1/experiments/{experiment['id']}",
+        f"/api/v1/experiment-runs/{experiment_run['id']}",
+        f"/api/v1/investigations/{investigation['id']}",
+        f"/api/v1/replays/{replay['id']}",
+    ):
+        response = await client.get(path)
+        assert response.status_code == 404, path

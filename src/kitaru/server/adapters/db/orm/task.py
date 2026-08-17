@@ -97,7 +97,10 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=TASK_AGENT_VERSION_ID_FOREIGN_KEY,
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=TASK_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=TASK_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["plugin_version_id"],

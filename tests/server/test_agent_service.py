@@ -31,7 +31,8 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.agent import AgentInUse, AgentNotFound, DuplicateAgentName
+from kitaru.server.domain.agent import AgentNotFound, DuplicateAgentName
+from kitaru.server.domain.agent_version import AgentVersionNotFound
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.filtering import FilterCondition
 
@@ -246,16 +247,16 @@ async def test_delete_agent_not_found(service: AgentService) -> None:
         await service.delete_agent(uuid.uuid4(), actor=ACTOR)
 
 
-async def test_delete_agent_in_use(
+async def test_delete_agent_cascades_versions(
     service: AgentService, repository: FakeAgentRepository
 ) -> None:
-    """Reject deleting an agent that has versions."""
+    """Delete an agent together with its versions."""
     created = await create_agent(repository, ACTOR.account.id)
-    await create_agent_version(
-        FakeAgentVersionRepository(repository), created.id, ACTOR.account.id
-    )
-    with pytest.raises(AgentInUse, match=f"Agent {created.id} has versions"):
-        await service.delete_agent(created.id, actor=ACTOR)
+    versions = FakeAgentVersionRepository(repository)
+    version = await create_agent_version(versions, created.id, ACTOR.account.id)
+    await service.delete_agent(created.id, actor=ACTOR)
+    with pytest.raises(AgentVersionNotFound):
+        await versions.get(version.id)
 
 
 async def test_create_agent_tracks_agent_created(
