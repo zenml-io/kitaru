@@ -57,7 +57,7 @@ class TasksResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/tasks/claim",
+            "/api/v1/tasks/claim",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return TaskClaimResponse.model_validate(response.json())
@@ -74,7 +74,7 @@ class TasksResource:
         Returns:
             Stored task.
         """
-        response = await self._client.request("GET", f"/v1/tasks/{task_id}")
+        response = await self._client.request("GET", f"/api/v1/tasks/{task_id}")
         return TaskResponse.model_validate(response.json())
 
     async def get_spec(self, task_id: uuid.UUID) -> TaskSpecResponse:
@@ -89,7 +89,7 @@ class TasksResource:
         Returns:
             Execution spec.
         """
-        response = await self._client.request("GET", f"/v1/tasks/{task_id}/spec")
+        response = await self._client.request("GET", f"/api/v1/tasks/{task_id}/spec")
         return TaskSpecResponse.model_validate(response.json())
 
     async def list(self, params: TaskListParams | None = None) -> Page[TaskResponse]:
@@ -107,7 +107,7 @@ class TasksResource:
         params = params or TaskListParams()
         response = await self._client.request(
             "GET",
-            "/v1/tasks",
+            "/api/v1/tasks",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[TaskResponse].model_validate(response.json())
@@ -147,7 +147,7 @@ class TasksResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/tasks/{task_id}",
+            f"/api/v1/tasks/{task_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return TaskResponse.model_validate(response.json())

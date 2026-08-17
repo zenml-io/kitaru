@@ -28,7 +28,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     settings = local_settings(use_db=True, DEFAULT_ACCOUNT_PASSWORD="secret")
     async with lifespan_client(settings) as client:
         response = await client.post(
-            "/v1/login", data={"username": "default", "password": "secret"}
+            "/api/v1/login", data={"username": "default", "password": "secret"}
         )
         token = response.json()["access_token"]
         client.headers["Authorization"] = f"Bearer {token}"
@@ -38,17 +38,17 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_accounts_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/users",
+        "/api/v1/users",
         json={"name": "alice", "email": "alice@example.com", "password": "secret"},
     )
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/accounts/{created['id']}")
+    response = await client.get(f"/api/v1/accounts/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
     assert response.status_code == 200
     body = response.json()
     # The lifespan bootstraps the default account before the created one, and
@@ -60,20 +60,20 @@ async def test_accounts_persist_across_requests(client: httpx.AsyncClient) -> No
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/users", json={"name": "alice"})
+    response = await client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 201
-    response = await client.post("/v1/users", json={"name": "alice"})
+    response = await client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Account name 'alice' is already registered"}
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a partial update across requests."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
-    response = await client.post(f"/v1/users/{created['id']}/deactivate")
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
+    response = await client.post(f"/api/v1/users/{created['id']}/deactivate")
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/accounts/{created['id']}")
+    response = await client.get(f"/api/v1/accounts/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["active"] is False
@@ -82,7 +82,7 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
 
 async def test_service_account_lifecycle(client: httpx.AsyncClient) -> None:
     """Create, filter, and update a service account against Postgres."""
-    response = await client.post("/v1/service-accounts", json={"name": "svc"})
+    response = await client.post("/api/v1/service-accounts", json={"name": "svc"})
     assert response.status_code == 201
     created = response.json()
     assert created["is_service_account"] is True
@@ -90,14 +90,14 @@ async def test_service_account_lifecycle(client: httpx.AsyncClient) -> None:
 
     filter_expression = {"field": "is_service_account", "op": "eq", "value": True}
     response = await client.get(
-        "/v1/accounts", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/accounts", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
     assert [item["name"] for item in body["items"]] == ["svc"]
 
     response = await client.patch(
-        f"/v1/service-accounts/{created['id']}", json={"active": False}
+        f"/api/v1/service-accounts/{created['id']}", json={"active": False}
     )
     assert response.status_code == 200
     assert response.json()["active"] is False

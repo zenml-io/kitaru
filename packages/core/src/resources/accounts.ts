@@ -15,7 +15,7 @@ export class AccountsResource {
   ): Promise<AccountResponse> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/accounts/me",
+      path: "/api/v1/accounts/me",
       signal: options.signal,
       validate: validateAccount,
     });

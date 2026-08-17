@@ -79,7 +79,7 @@ describe("blobs resource", () => {
 
     await expect(client.blobs.delete(ID)).resolves.toBeUndefined();
     expect(fetch).toHaveBeenCalledWith(
-      `https://api.example/v1/blobs/${ID}`,
+      `https://api.example/api/v1/blobs/${ID}`,
       expect.objectContaining({ method: "DELETE" }),
     );
   });

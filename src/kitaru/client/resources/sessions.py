@@ -64,7 +64,7 @@ class SessionsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/sessions",
+            "/api/v1/sessions",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return SessionResponse.model_validate(response.json())
@@ -82,7 +82,7 @@ class SessionsResource:
         Returns:
             Stored session.
         """
-        response = await self._client.request("GET", f"/v1/sessions/{session_id}")
+        response = await self._client.request("GET", f"/api/v1/sessions/{session_id}")
         return SessionResponse.model_validate(response.json())
 
     async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
@@ -100,7 +100,9 @@ class SessionsResource:
         Returns:
             Session with every node, ordered by index.
         """
-        response = await self._client.request("GET", f"/v1/sessions/{session_id}/full")
+        response = await self._client.request(
+            "GET", f"/api/v1/sessions/{session_id}/full"
+        )
         return SessionWithNodesResponse.model_validate(response.json())
 
     async def ingest_nodes(
@@ -123,7 +125,7 @@ class SessionsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/sessions/{session_id}/nodes",
+            f"/api/v1/sessions/{session_id}/nodes",
             json=batch.model_dump(mode="json", exclude_unset=True),
         )
         return [SessionNodeResponse.model_validate(item) for item in response.json()]
@@ -150,7 +152,7 @@ class SessionsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/sessions/{session_id}/evaluations",
+            f"/api/v1/sessions/{session_id}/evaluations",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return [EvaluationResponse.model_validate(item) for item in response.json()]
@@ -173,7 +175,7 @@ class SessionsResource:
         params = params or SessionListParams()
         response = await self._client.request(
             "GET",
-            "/v1/sessions",
+            "/api/v1/sessions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[SessionResponse].model_validate(response.json())
@@ -214,7 +216,7 @@ class SessionsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/sessions/{session_id}",
+            f"/api/v1/sessions/{session_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return SessionResponse.model_validate(response.json())
@@ -229,7 +231,7 @@ class SessionsResource:
             APIError: The request failed, including 404 for a missing
                 session.
         """
-        await self._client.request("DELETE", f"/v1/sessions/{session_id}")
+        await self._client.request("DELETE", f"/api/v1/sessions/{session_id}")
 
     async def list_nodes(
         self,
@@ -251,7 +253,7 @@ class SessionsResource:
         params = params or SessionNodeListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/sessions/{session_id}/nodes",
+            f"/api/v1/sessions/{session_id}/nodes",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[SessionNodeResponse].model_validate(response.json())

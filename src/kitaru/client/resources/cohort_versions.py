@@ -50,7 +50,7 @@ class CohortVersionsResource:
             Stored cohort version.
         """
         response = await self._client.request(
-            "GET", f"/v1/cohort-versions/{cohort_version_id}"
+            "GET", f"/api/v1/cohort-versions/{cohort_version_id}"
         )
         return CohortVersionResponse.model_validate(response.json())
 
@@ -73,7 +73,7 @@ class CohortVersionsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/cohort-versions/{cohort_version_id}",
+            f"/api/v1/cohort-versions/{cohort_version_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return CohortVersionResponse.model_validate(response.json())
@@ -88,4 +88,6 @@ class CohortVersionsResource:
             APIError: The request failed, including 404 for a missing cohort
                 version.
         """
-        await self._client.request("DELETE", f"/v1/cohort-versions/{cohort_version_id}")
+        await self._client.request(
+            "DELETE", f"/api/v1/cohort-versions/{cohort_version_id}"
+        )

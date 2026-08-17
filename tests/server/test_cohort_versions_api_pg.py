@@ -31,7 +31,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to attach cohorts and sessions to."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
@@ -39,7 +39,9 @@ async def agent_id(client: httpx.AsyncClient) -> str:
 async def cohort_id(client: httpx.AsyncClient, agent_id: str) -> str:
     """Provide the id of a cohort to version."""
     created = (
-        await client.post("/v1/cohorts", json={"name": "cohort", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+        )
     ).json()
     return created["id"]
 
@@ -47,7 +49,7 @@ async def cohort_id(client: httpx.AsyncClient, agent_id: str) -> str:
 async def _make_session_id(client: httpx.AsyncClient, agent_id: str) -> str:
     """Store a session on the given agent and return its id."""
     response = await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json={
             "agent_id": agent_id,
             "origin": "recorded",
@@ -64,13 +66,13 @@ async def test_create_persists_across_requests(
     """Prove the per-request commit through separate requests."""
     session_id = await _make_session_id(client, agent_id)
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions",
+        f"/api/v1/cohorts/{cohort_id}/versions",
         json={"add_session_ids": [session_id], "display_version": "v1"},
     )
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/cohort-versions/{created['id']}")
+    response = await client.get(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
@@ -81,15 +83,15 @@ async def test_update_persists_across_requests(
     """Persist an update across requests."""
     created = (
         await client.post(
-            f"/v1/cohorts/{cohort_id}/versions", json={"display_version": "v1"}
+            f"/api/v1/cohorts/{cohort_id}/versions", json={"display_version": "v1"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/cohort-versions/{created['id']}", json={"display_version": "v1.1"}
+        f"/api/v1/cohort-versions/{created['id']}", json={"display_version": "v1.1"}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/cohort-versions/{created['id']}")
+    response = await client.get(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["display_version"] == "v1.1"
@@ -100,11 +102,13 @@ async def test_delete_persists_across_requests(
     client: httpx.AsyncClient, cohort_id: str
 ) -> None:
     """Persist a deletion across requests."""
-    created = (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
-    response = await client.delete(f"/v1/cohort-versions/{created['id']}")
+    created = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
+    response = await client.delete(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/cohort-versions/{created['id']}")
+    response = await client.get(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 404
 
 
@@ -112,11 +116,13 @@ async def test_delete_does_not_lower_latest_version(
     client: httpx.AsyncClient, cohort_id: str
 ) -> None:
     """Keep the cohort's latest_version high-water mark after a delete."""
-    await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})
-    second = (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
-    await client.delete(f"/v1/cohort-versions/{second['id']}")
+    await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    second = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
+    await client.delete(f"/api/v1/cohort-versions/{second['id']}")
 
-    response = await client.get(f"/v1/cohorts/{cohort_id}")
+    response = await client.get(f"/api/v1/cohorts/{cohort_id}")
     assert response.json()["latest_version"] == 2
 
 
@@ -126,21 +132,23 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
     """Translate the database restriction into HTTP 409."""
     agent_version = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
         )
     ).json()
     blob = (
         await client.post(
-            "/v1/blobs",
+            "/api/v1/blobs",
             files={"file": ("score.py", b"def score(): pass", "text/plain")},
         )
     ).json()
     evaluator = (
-        await client.post("/v1/evaluators", json={"name": "accuracy", "metadata": {}})
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
     ).json()
     await client.post(
-        f"/v1/evaluators/{evaluator['id']}/versions",
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
         json={
             "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
         },
@@ -148,13 +156,13 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
     session_id = await _make_session_id(client, agent_id)
     cohort_version = (
         await client.post(
-            f"/v1/cohorts/{cohort_id}/versions",
+            f"/api/v1/cohorts/{cohort_id}/versions",
             json={"add_session_ids": [session_id]},
         )
     ).json()
     experiment = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -163,14 +171,14 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
         )
     ).json()
     await client.post(
-        f"/v1/experiments/{experiment['id']}/runs",
+        f"/api/v1/experiments/{experiment['id']}/runs",
         json={
             "cohort_version_id": cohort_version["id"],
             "agent_version_id": agent_version["id"],
         },
     )
 
-    response = await client.delete(f"/v1/cohort-versions/{cohort_version['id']}")
+    response = await client.delete(f"/api/v1/cohort-versions/{cohort_version['id']}")
     assert response.status_code == 409
     assert response.json() == {
         "detail": f"Cohort version {cohort_version['id']} is in use by an "
@@ -181,6 +189,6 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
 async def test_create_cohort_version_missing_cohort(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the cohort does not exist."""
     response = await client.post(
-        "/v1/cohorts/00000000-0000-0000-0000-000000000000/versions", json={}
+        "/api/v1/cohorts/00000000-0000-0000-0000-000000000000/versions", json={}
     )
     assert response.status_code == 404

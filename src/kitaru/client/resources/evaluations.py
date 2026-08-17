@@ -56,7 +56,7 @@ class EvaluationsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/evaluations",
+            "/api/v1/evaluations",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return JobResponse.model_validate(response.json())
@@ -74,7 +74,9 @@ class EvaluationsResource:
         Returns:
             Stored evaluation.
         """
-        response = await self._client.request("GET", f"/v1/evaluations/{evaluation_id}")
+        response = await self._client.request(
+            "GET", f"/api/v1/evaluations/{evaluation_id}"
+        )
         return EvaluationResponse.model_validate(response.json())
 
     async def list(
@@ -95,7 +97,7 @@ class EvaluationsResource:
         params = params or EvaluationListParams()
         response = await self._client.request(
             "GET",
-            "/v1/evaluations",
+            "/api/v1/evaluations",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[EvaluationResponse].model_validate(response.json())

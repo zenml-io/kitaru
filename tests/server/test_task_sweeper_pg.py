@@ -70,40 +70,42 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     thing that can move the task and job forward is the background sweeper
     started from the app lifespan.
     """
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(
-            f"/v1/agents/{agent['id']}/versions",
+            f"/api/v1/agents/{agent['id']}/versions",
             json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
         )
     ).json()
     job = (
         await client.post(
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json={"agent_version_id": version["id"], "inputs": {"q": "hi"}},
         )
     ).json()
     registration = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     task = claimed["tasks"][0]["task"]
     assert task["status"] == "claimed"
 
     task_after = await _wait_until(
-        client, f"/v1/tasks/{task['id']}", "status", "abandoned"
+        client, f"/api/v1/tasks/{task['id']}", "status", "abandoned"
     )
     assert task_after["attempt"] == 1
 
-    job_after = await _wait_until(client, f"/v1/jobs/{job['id']}", "status", "failed")
+    job_after = await _wait_until(
+        client, f"/api/v1/jobs/{job['id']}", "status", "failed"
+    )
     assert job_after["error"] is not None
 
 
@@ -118,16 +120,16 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     tick shares the request's event dispatcher composition rather than
     running the transition without it.
     """
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(
-            f"/v1/agents/{agent['id']}/versions",
+            f"/api/v1/agents/{agent['id']}/versions",
             json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
         )
     ).json()
     baseline = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": agent["id"],
                 "agent_version_id": version["id"],
@@ -139,22 +141,24 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     ).json()
     blob = (
         await client.post(
-            "/v1/blobs",
+            "/api/v1/blobs",
             files={"file": ("score.py", b"def score(): pass", "text/plain")},
         )
     ).json()
     evaluator = (
-        await client.post("/v1/evaluators", json={"name": "accuracy", "metadata": {}})
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
     ).json()
     await client.post(
-        f"/v1/evaluators/{evaluator['id']}/versions",
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
         json={
             "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
         },
     )
     replay = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": baseline["id"],
                 "evaluators": [{"evaluator": "accuracy"}],
@@ -165,19 +169,19 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
 
     registration = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     assert claimed["tasks"][0]["task"]["kind"] == "agent"
 
     replay_after = await _wait_until(
-        client, f"/v1/replays/{replay['id']}", "status", "failed"
+        client, f"/api/v1/replays/{replay['id']}", "status", "failed"
     )
     assert replay_after["status"] == "failed"

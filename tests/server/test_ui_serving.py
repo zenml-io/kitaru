@@ -112,7 +112,7 @@ async def test_unmatched_api_path_returns_json_404(ui_dist_dir: Path) -> None:
     """Report a JSON 404 for an unmatched API path instead of the SPA shell."""
     app = create_app(local_settings())
     async with _build_client(app) as client:
-        response = await client.get("/v1/does-not-exist")
+        response = await client.get("/api/v1/does-not-exist")
 
     assert response.status_code == 404
     assert response.headers["content-type"].startswith("application/json")
@@ -147,7 +147,7 @@ async def test_external_ui_still_404s_unmatched_api_paths() -> None:
     settings = local_settings(EXTERNAL_UI=True, DASHBOARD_URL="https://ui.example.com")
     app = create_app(settings)
     async with _build_client(app) as client:
-        response = await client.get("/v1/does-not-exist")
+        response = await client.get("/api/v1/does-not-exist")
 
     assert response.status_code == 404
 
@@ -162,7 +162,7 @@ async def test_info_reports_bundled_ui_version(ui_dist_dir: Path) -> None:
     """Report the bundled UI version on the info endpoint."""
     app = create_app(local_settings())
     async with _build_client(app) as client:
-        response = await client.get("/v1/info")
+        response = await client.get("/api/v1/info")
 
     assert response.json()["ui_version"] == "kitaru-ui-v0.9.0"
 
@@ -174,6 +174,6 @@ async def test_info_reports_no_ui_version_in_external_mode(
     settings = local_settings(EXTERNAL_UI=True, DASHBOARD_URL="https://ui.example.com")
     app = create_app(settings)
     async with _build_client(app) as client:
-        response = await client.get("/v1/info")
+        response = await client.get("/api/v1/info")
 
     assert response.json()["ui_version"] is None

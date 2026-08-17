@@ -26,7 +26,7 @@ export class BlobsResource {
         : "application/octet-stream");
     return this.#transport.request({
       method: "POST",
-      path: "/v1/blobs",
+      path: "/api/v1/blobs",
       body: multipartBody([
         {
           name: "file",
@@ -46,7 +46,7 @@ export class BlobsResource {
   ): Promise<BlobResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/blobs/${encodeURIComponent(blobId)}`,
+      path: `/api/v1/blobs/${encodeURIComponent(blobId)}`,
       signal: options.signal,
       validate: validateBlob,
     });
@@ -58,7 +58,7 @@ export class BlobsResource {
   ): Promise<Uint8Array> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/blobs/${encodeURIComponent(blobId)}/content`,
+      path: `/api/v1/blobs/${encodeURIComponent(blobId)}/content`,
       responseType: "bytes",
       signal: options.signal,
     });
@@ -70,7 +70,7 @@ export class BlobsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/blobs/${encodeURIComponent(blobId)}`,
+      path: `/api/v1/blobs/${encodeURIComponent(blobId)}`,
       responseType: "empty",
       signal: options.signal,
     });

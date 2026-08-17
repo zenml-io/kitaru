@@ -112,7 +112,9 @@ async def agent_id(agent_repository: FakeAgentRepository) -> str:
 async def cohort_id(client: httpx.AsyncClient, agent_id: str) -> str:
     """Provide the id of a cohort to version."""
     created = (
-        await client.post("/v1/cohorts", json={"name": "cohort", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+        )
     ).json()
     return created["id"]
 
@@ -137,7 +139,7 @@ async def test_create_cohort_version(
         await _make_session_id(session_repository, agent_id),
     ]
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions",
+        f"/api/v1/cohorts/{cohort_id}/versions",
         json={"add_session_ids": session_ids, "display_version": "v1"},
     )
     assert response.status_code == 201
@@ -152,7 +154,7 @@ async def test_create_cohort_version(
 
 async def test_create_cohort_version_missing_cohort(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the cohort does not exist."""
-    response = await client.post(f"/v1/cohorts/{uuid.uuid4()}/versions", json={})
+    response = await client.post(f"/api/v1/cohorts/{uuid.uuid4()}/versions", json={})
     assert response.status_code == 404
 
 
@@ -161,7 +163,7 @@ async def test_create_cohort_version_remove_nonmember(
 ) -> None:
     """Observe HTTP 422 when removing a session absent from the base version."""
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions",
+        f"/api/v1/cohorts/{cohort_id}/versions",
         json={"remove_session_ids": [str(uuid.uuid4())]},
     )
     assert response.status_code == 422
@@ -176,10 +178,10 @@ async def test_create_cohort_version_add_duplicate_member(
     """Observe HTTP 422 when adding a session already in the base version."""
     session_id = await _make_session_id(session_repository, agent_id)
     await client.post(
-        f"/v1/cohorts/{cohort_id}/versions", json={"add_session_ids": [session_id]}
+        f"/api/v1/cohorts/{cohort_id}/versions", json={"add_session_ids": [session_id]}
     )
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions", json={"add_session_ids": [session_id]}
+        f"/api/v1/cohorts/{cohort_id}/versions", json={"add_session_ids": [session_id]}
     )
     assert response.status_code == 422
 
@@ -189,7 +191,7 @@ async def test_create_cohort_version_added_session_missing(
 ) -> None:
     """Observe HTTP 422 when an added session does not exist."""
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions",
+        f"/api/v1/cohorts/{cohort_id}/versions",
         json={"add_session_ids": [str(uuid.uuid4())]},
     )
     assert response.status_code == 422
@@ -207,7 +209,7 @@ async def test_create_cohort_version_added_session_wrong_agent(
         session_repository, ACCOUNT.id, other_agent.id
     )
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions",
+        f"/api/v1/cohorts/{cohort_id}/versions",
         json={"add_session_ids": [str(foreign_session.id)]},
     )
     assert response.status_code == 422
@@ -218,7 +220,7 @@ async def test_create_cohort_version_invalid_display_version(
 ) -> None:
     """Observe HTTP 422 for a display version starting with a separator."""
     response = await client.post(
-        f"/v1/cohorts/{cohort_id}/versions", json={"display_version": "/bad"}
+        f"/api/v1/cohorts/{cohort_id}/versions", json={"display_version": "/bad"}
     )
     assert response.status_code == 422
 
@@ -227,9 +229,9 @@ async def test_latest_version_reflected_on_cohort(
     client: httpx.AsyncClient, cohort_id: str
 ) -> None:
     """Bump the cohort's latest_version on every created version."""
-    await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})
-    await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})
-    response = await client.get(f"/v1/cohorts/{cohort_id}")
+    await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    response = await client.get(f"/api/v1/cohorts/{cohort_id}")
     assert response.json()["latest_version"] == 2
 
 
@@ -238,13 +240,17 @@ async def test_list_cohort_versions(
 ) -> None:
     """List a cohort's versions, newest-first."""
     other_cohort = (
-        await client.post("/v1/cohorts", json={"name": "other", "agent_id": agent_id})
+        await client.post(
+            "/api/v1/cohorts", json={"name": "other", "agent_id": agent_id}
+        )
     ).json()
-    first = (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
-    second = (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
-    await client.post(f"/v1/cohorts/{other_cohort['id']}/versions", json={})
+    first = (await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})).json()
+    second = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
+    await client.post(f"/api/v1/cohorts/{other_cohort['id']}/versions", json={})
 
-    response = await client.get(f"/v1/cohorts/{cohort_id}/versions")
+    response = await client.get(f"/api/v1/cohorts/{cohort_id}/versions")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -256,7 +262,7 @@ async def test_list_cohort_versions_walks_pages(
 ) -> None:
     """Walk every page of a cohort's versions via next_cursor."""
     created = [
-        (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
+        (await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})).json()
         for _ in range(3)
     ]
     expected_order = list(reversed([item["id"] for item in created]))
@@ -267,7 +273,9 @@ async def test_list_cohort_versions_walks_pages(
         params = {"size": 1}
         if cursor is not None:
             params["cursor"] = cursor
-        response = await client.get(f"/v1/cohorts/{cohort_id}/versions", params=params)
+        response = await client.get(
+            f"/api/v1/cohorts/{cohort_id}/versions", params=params
+        )
         body = response.json()
         collected.extend(item["id"] for item in body["items"])
         if body["next_cursor"] is None:
@@ -279,15 +287,17 @@ async def test_list_cohort_versions_walks_pages(
 
 async def test_get_cohort_version(client: httpx.AsyncClient, cohort_id: str) -> None:
     """Get a cohort version by id."""
-    created = (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
-    response = await client.get(f"/v1/cohort-versions/{created['id']}")
+    created = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
+    response = await client.get(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_cohort_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing cohort version."""
-    response = await client.get(f"/v1/cohort-versions/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/cohort-versions/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -295,11 +305,11 @@ async def test_update_cohort_version(client: httpx.AsyncClient, cohort_id: str) 
     """Update a cohort version's display version."""
     created = (
         await client.post(
-            f"/v1/cohorts/{cohort_id}/versions", json={"display_version": "v1"}
+            f"/api/v1/cohorts/{cohort_id}/versions", json={"display_version": "v1"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/cohort-versions/{created['id']}", json={"display_version": "v1.1"}
+        f"/api/v1/cohort-versions/{created['id']}", json={"display_version": "v1.1"}
     )
     assert response.status_code == 200
     assert response.json()["display_version"] == "v1.1"
@@ -311,11 +321,11 @@ async def test_update_cohort_version_clears_display_version(
     """Clear the display version with an explicit null."""
     created = (
         await client.post(
-            f"/v1/cohorts/{cohort_id}/versions", json={"display_version": "v1"}
+            f"/api/v1/cohorts/{cohort_id}/versions", json={"display_version": "v1"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/cohort-versions/{created['id']}", json={"display_version": None}
+        f"/api/v1/cohort-versions/{created['id']}", json={"display_version": None}
     )
     assert response.status_code == 200
     assert response.json()["display_version"] is None
@@ -324,21 +334,23 @@ async def test_update_cohort_version_clears_display_version(
 async def test_update_cohort_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing cohort version."""
     response = await client.patch(
-        f"/v1/cohort-versions/{uuid.uuid4()}", json={"display_version": "v2"}
+        f"/api/v1/cohort-versions/{uuid.uuid4()}", json={"display_version": "v2"}
     )
     assert response.status_code == 404
 
 
 async def test_delete_cohort_version(client: httpx.AsyncClient, cohort_id: str) -> None:
     """Delete a cohort version."""
-    created = (await client.post(f"/v1/cohorts/{cohort_id}/versions", json={})).json()
-    response = await client.delete(f"/v1/cohort-versions/{created['id']}")
+    created = (
+        await client.post(f"/api/v1/cohorts/{cohort_id}/versions", json={})
+    ).json()
+    response = await client.delete(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/cohort-versions/{created['id']}")
+    response = await client.get(f"/api/v1/cohort-versions/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_cohort_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing cohort version."""
-    response = await client.delete(f"/v1/cohort-versions/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/cohort-versions/{uuid.uuid4()}")
     assert response.status_code == 404

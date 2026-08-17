@@ -35,7 +35,7 @@ export class CohortsResource {
   ): Promise<CohortResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/cohorts",
+      path: "/api/v1/cohorts",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateCohort,
@@ -48,7 +48,7 @@ export class CohortsResource {
   ): Promise<CohortResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/cohorts/${encodeURIComponent(cohortId)}`,
+      path: `/api/v1/cohorts/${encodeURIComponent(cohortId)}`,
       signal: options.signal,
       validate: validateCohort,
     });
@@ -61,7 +61,7 @@ export class CohortsResource {
   ): Promise<CohortResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/cohorts/${encodeURIComponent(cohortId)}`,
+      path: `/api/v1/cohorts/${encodeURIComponent(cohortId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateCohort,
@@ -74,7 +74,7 @@ export class CohortsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/cohorts/${encodeURIComponent(cohortId)}`,
+      path: `/api/v1/cohorts/${encodeURIComponent(cohortId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -86,7 +86,7 @@ export class CohortsResource {
   ): Promise<Page<CohortResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/cohorts",
+      path: "/api/v1/cohorts",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateCohortPage,
@@ -107,7 +107,7 @@ export class CohortsResource {
   ): Promise<CohortVersionResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/cohorts/${encodeURIComponent(cohortId)}/versions`,
+      path: `/api/v1/cohorts/${encodeURIComponent(cohortId)}/versions`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateCohortVersion,
@@ -121,7 +121,7 @@ export class CohortsResource {
   ): Promise<Page<CohortVersionResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/cohorts/${encodeURIComponent(cohortId)}/versions`,
+      path: `/api/v1/cohorts/${encodeURIComponent(cohortId)}/versions`,
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateCohortVersionPage,

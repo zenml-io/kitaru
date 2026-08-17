@@ -162,14 +162,14 @@ async def test_control_plane_login_authenticates_token(
     )
 
     response = await client.post(
-        "/v1/login", headers={"Authorization": "Bearer cp-credential"}
+        "/api/v1/login", headers={"Authorization": "Bearer cp-credential"}
     )
     assert response.status_code == 200
     body = response.json()
     assert body["token_type"] == "bearer"
 
     response = await client.get(
-        "/v1/api-keys",
+        "/api/v1/api-keys",
         headers={"Authorization": f"Bearer {body['access_token']}"},
     )
     assert response.status_code == 200
@@ -179,7 +179,7 @@ async def test_control_plane_login_missing_credential(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 401 for control plane login without a bearer credential."""
-    response = await client.post("/v1/login", data={})
+    response = await client.post("/api/v1/login", data={})
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing control plane credential."}
 
@@ -191,7 +191,7 @@ async def test_control_plane_login_rejected_credential(
     control_plane_client.error = ControlPlaneError("Invalid credential.")
 
     response = await client.post(
-        "/v1/login", headers={"Authorization": "Bearer cp-credential"}
+        "/api/v1/login", headers={"Authorization": "Bearer cp-credential"}
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid control plane credential."}
@@ -206,7 +206,7 @@ async def test_control_plane_login_explicit_grant_type(
     authenticate(control_plane_client, settings)
 
     response = await client.post(
-        "/v1/login",
+        "/api/v1/login",
         data={"grant_type": "control-plane"},
         headers={"Authorization": "Bearer cp-credential"},
     )
@@ -216,7 +216,7 @@ async def test_control_plane_login_explicit_grant_type(
 async def test_password_grant_type_rejected(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 for password login under the control plane scheme."""
     response = await client.post(
-        "/v1/login", data={"username": "alice", "password": "secret"}
+        "/api/v1/login", data={"username": "alice", "password": "secret"}
     )
     assert response.status_code == 400
     assert response.json() == {"detail": "Unsupported grant type: password"}
@@ -234,7 +234,7 @@ async def test_local_api_key_rejected(
     _, key = await create_api_key(api_key_repository, account.id)
 
     response = await client.get(
-        "/v1/api-keys", headers={"Authorization": f"Bearer {key}"}
+        "/api/v1/api-keys", headers={"Authorization": f"Bearer {key}"}
     )
     assert response.status_code == 401
     assert response.json() == {
@@ -259,7 +259,7 @@ async def test_session_token_without_external_id_rejected(
     token = auth_service.issue_token(AuthContext(account=account)).token
 
     response = await client.get(
-        "/v1/api-keys", headers={"Authorization": f"Bearer {token}"}
+        "/api/v1/api-keys", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 401
     assert response.json() == {
@@ -278,7 +278,7 @@ async def test_control_plane_api_key_authenticates_directly(
     )
 
     response = await client.get(
-        "/v1/api-keys",
+        "/api/v1/api-keys",
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
     assert response.status_code == 200
@@ -293,7 +293,7 @@ async def test_create_account_forbidden(
     authenticate(control_plane_client, settings)
 
     response = await client.post(
-        "/v1/users",
+        "/api/v1/users",
         json={"name": "alice"},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -312,7 +312,7 @@ async def test_create_service_account_forbidden(
     authenticate(control_plane_client, settings)
 
     response = await client.post(
-        "/v1/service-accounts",
+        "/api/v1/service-accounts",
         json={"name": "svc"},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -331,7 +331,7 @@ async def test_update_service_account_forbidden(
     authenticate(control_plane_client, settings)
 
     response = await client.patch(
-        f"/v1/service-accounts/{uuid.uuid4()}",
+        f"/api/v1/service-accounts/{uuid.uuid4()}",
         json={"metadata": {"theme": "dark"}},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -350,7 +350,7 @@ async def test_update_account_forbidden(
     authenticate(control_plane_client, settings)
 
     response = await client.patch(
-        f"/v1/users/{uuid.uuid4()}",
+        f"/api/v1/users/{uuid.uuid4()}",
         json={"password": "new", "old_password": "old"},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -366,7 +366,7 @@ async def test_update_account_is_admin_forbidden(
     authenticate(control_plane_client, settings)
 
     response = await client.patch(
-        f"/v1/users/{uuid.uuid4()}",
+        f"/api/v1/users/{uuid.uuid4()}",
         json={"is_admin": True},
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
@@ -382,7 +382,7 @@ async def test_list_accounts_allowed(
     authenticate(control_plane_client, settings)
 
     response = await client.get(
-        "/v1/accounts",
+        "/api/v1/accounts",
         headers={"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"},
     )
     assert response.status_code == 200
@@ -416,11 +416,11 @@ async def test_update_own_account_metadata_allowed(
     authenticate(control_plane_client, settings)
     headers = {"Authorization": f"Bearer {CONTROL_PLANE_API_KEY_PREFIX}abc123"}
 
-    listed = await client.get("/v1/accounts", headers=headers)
+    listed = await client.get("/api/v1/accounts", headers=headers)
     account_id = listed.json()["items"][0]["id"]
 
     response = await client.patch(
-        f"/v1/users/{account_id}",
+        f"/api/v1/users/{account_id}",
         json={"metadata": {"theme": "dark"}},
         headers=headers,
     )

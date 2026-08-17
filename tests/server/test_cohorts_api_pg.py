@@ -31,7 +31,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to own cohorts."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
@@ -40,7 +40,7 @@ async def test_cohorts_persist_across_requests(
 ) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/cohorts",
+        "/api/v1/cohorts",
         json={
             "name": "smoke-test",
             "description": "A cohort",
@@ -51,11 +51,11 @@ async def test_cohorts_persist_across_requests(
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/cohorts/{created['id']}")
+    response = await client.get(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/cohorts")
+    response = await client.get("/api/v1/cohorts")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -67,9 +67,9 @@ async def test_duplicate_name_conflict(
 ) -> None:
     """Translate the database constraint into HTTP 409."""
     body = {"name": "smoke-test", "agent_id": agent_id}
-    response = await client.post("/v1/cohorts", json=body)
+    response = await client.post("/api/v1/cohorts", json=body)
     assert response.status_code == 201
-    response = await client.post("/v1/cohorts", json=body)
+    response = await client.post("/api/v1/cohorts", json=body)
     assert response.status_code == 409
     assert response.json() == {
         "detail": "Cohort name 'smoke-test' is already registered"
@@ -82,15 +82,15 @@ async def test_update_persists_across_requests(
     """Persist an update across requests."""
     created = (
         await client.post(
-            "/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
+            "/api/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
         )
     ).json()
     response = await client.patch(
-        f"/v1/cohorts/{created['id']}", json={"description": "Reviews"}
+        f"/api/v1/cohorts/{created['id']}", json={"description": "Reviews"}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/cohorts/{created['id']}")
+    response = await client.get(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["description"] == "Reviews"
@@ -103,13 +103,13 @@ async def test_delete_persists_across_requests(
     """Persist a deletion across requests."""
     created = (
         await client.post(
-            "/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
+            "/api/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
         )
     ).json()
-    response = await client.delete(f"/v1/cohorts/{created['id']}")
+    response = await client.delete(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/cohorts/{created['id']}")
+    response = await client.get(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 404
 
 
@@ -119,24 +119,24 @@ async def test_delete_cascades_versions(
     """Cascade a cohort's versions when the cohort is deleted."""
     created = (
         await client.post(
-            "/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
+            "/api/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
         )
     ).json()
     version = (
-        await client.post(f"/v1/cohorts/{created['id']}/versions", json={})
+        await client.post(f"/api/v1/cohorts/{created['id']}/versions", json={})
     ).json()
 
-    response = await client.delete(f"/v1/cohorts/{created['id']}")
+    response = await client.delete(f"/api/v1/cohorts/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/cohort-versions/{version['id']}")
+    response = await client.get(f"/api/v1/cohort-versions/{version['id']}")
     assert response.status_code == 404
 
 
 async def test_create_cohort_missing_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
     response = await client.post(
-        "/v1/cohorts",
+        "/api/v1/cohorts",
         json={
             "name": "cohort",
             "agent_id": "00000000-0000-0000-0000-000000000000",

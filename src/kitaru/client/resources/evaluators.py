@@ -58,7 +58,7 @@ class EvaluatorsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/evaluators",
+            "/api/v1/evaluators",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return EvaluatorResponse.model_validate(response.json())
@@ -76,7 +76,9 @@ class EvaluatorsResource:
         Returns:
             Stored evaluator.
         """
-        response = await self._client.request("GET", f"/v1/evaluators/{evaluator_id}")
+        response = await self._client.request(
+            "GET", f"/api/v1/evaluators/{evaluator_id}"
+        )
         return EvaluatorResponse.model_validate(response.json())
 
     async def list(
@@ -96,7 +98,7 @@ class EvaluatorsResource:
         params = params or EvaluatorListParams()
         response = await self._client.request(
             "GET",
-            "/v1/evaluators",
+            "/api/v1/evaluators",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[EvaluatorResponse].model_validate(response.json())
@@ -136,7 +138,7 @@ class EvaluatorsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/evaluators/{evaluator_id}",
+            f"/api/v1/evaluators/{evaluator_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return EvaluatorResponse.model_validate(response.json())
@@ -151,7 +153,7 @@ class EvaluatorsResource:
             APIError: The request failed, including 404 for a missing
                 evaluator.
         """
-        await self._client.request("DELETE", f"/v1/evaluators/{evaluator_id}")
+        await self._client.request("DELETE", f"/api/v1/evaluators/{evaluator_id}")
 
     async def create_version(
         self, evaluator_id: uuid.UUID, request: EvaluatorVersionCreateRequest
@@ -171,7 +173,7 @@ class EvaluatorsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/evaluators/{evaluator_id}/versions",
+            f"/api/v1/evaluators/{evaluator_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return EvaluatorVersionResponse.model_validate(response.json())
@@ -194,7 +196,7 @@ class EvaluatorsResource:
         params = params or ListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/evaluators/{evaluator_id}/versions",
+            f"/api/v1/evaluators/{evaluator_id}/versions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[EvaluatorVersionResponse].model_validate(response.json())
@@ -237,7 +239,7 @@ class EvaluatorsResource:
             Stored evaluator version.
         """
         response = await self._client.request(
-            "GET", f"/v1/evaluators/{evaluator_id}/versions/{version}"
+            "GET", f"/api/v1/evaluators/{evaluator_id}/versions/{version}"
         )
         return EvaluatorVersionResponse.model_validate(response.json())
 
@@ -264,7 +266,7 @@ class EvaluatorsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/evaluators/{evaluator_id}/versions/{version}",
+            f"/api/v1/evaluators/{evaluator_id}/versions/{version}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return EvaluatorVersionResponse.model_validate(response.json())

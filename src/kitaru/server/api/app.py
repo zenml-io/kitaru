@@ -320,57 +320,61 @@ def create_app(settings: APISettings) -> FastAPI:
     # other middleware registration.
     configure_otel(settings, app)
     app.include_router(health.router, prefix="/health", tags=["health"])
-    app.include_router(info.router, prefix="/v1/info", tags=["info"])
-    app.include_router(auth.router, prefix="/v1", tags=["auth"])
-    app.include_router(accounts.router, prefix="/v1/accounts", tags=["accounts"])
-    app.include_router(agents.router, prefix="/v1/agents", tags=["agents"])
+    app.include_router(info.router, prefix="/api/v1/info", tags=["info"])
+    app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
+    app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
+    app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
     app.include_router(
-        agent_versions.router, prefix="/v1/agent-versions", tags=["agent-versions"]
+        agent_versions.router, prefix="/api/v1/agent-versions", tags=["agent-versions"]
     )
     app.include_router(
-        annotations.router, prefix="/v1/annotations", tags=["annotations"]
+        annotations.router, prefix="/api/v1/annotations", tags=["annotations"]
     )
-    app.include_router(api_keys.router, prefix="/v1/api-keys", tags=["api-keys"])
-    app.include_router(blobs.router, prefix="/v1/blobs", tags=["blobs"])
-    app.include_router(cohorts.router, prefix="/v1/cohorts", tags=["cohorts"])
+    app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
+    app.include_router(blobs.router, prefix="/api/v1/blobs", tags=["blobs"])
+    app.include_router(cohorts.router, prefix="/api/v1/cohorts", tags=["cohorts"])
     app.include_router(
-        cohort_versions.router, prefix="/v1/cohort-versions", tags=["cohort-versions"]
+        cohort_versions.router,
+        prefix="/api/v1/cohort-versions",
+        tags=["cohort-versions"],
     )
-    app.include_router(devices.router, prefix="/v1/devices", tags=["devices"])
+    app.include_router(devices.router, prefix="/api/v1/devices", tags=["devices"])
     app.include_router(
-        evaluations.router, prefix="/v1/evaluations", tags=["evaluations"]
+        evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
     )
-    app.include_router(evaluators.router, prefix="/v1/evaluators", tags=["evaluators"])
     app.include_router(
-        experiments.router, prefix="/v1/experiments", tags=["experiments"]
+        evaluators.router, prefix="/api/v1/evaluators", tags=["evaluators"]
+    )
+    app.include_router(
+        experiments.router, prefix="/api/v1/experiments", tags=["experiments"]
     )
     app.include_router(
         experiment_runs.router,
-        prefix="/v1/experiment-runs",
+        prefix="/api/v1/experiment-runs",
         tags=["experiment-runs"],
     )
-    app.include_router(importers.router, prefix="/v1/importers", tags=["importers"])
-    app.include_router(imports.router, prefix="/v1/imports", tags=["imports"])
+    app.include_router(importers.router, prefix="/api/v1/importers", tags=["importers"])
+    app.include_router(imports.router, prefix="/api/v1/imports", tags=["imports"])
     app.include_router(
-        investigations.router, prefix="/v1/investigations", tags=["investigations"]
+        investigations.router, prefix="/api/v1/investigations", tags=["investigations"]
     )
-    app.include_router(jobs.router, prefix="/v1/jobs", tags=["jobs"])
-    app.include_router(replays.router, prefix="/v1/replays", tags=["replays"])
-    app.include_router(secrets.router, prefix="/v1/secrets", tags=["secrets"])
+    app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"])
+    app.include_router(replays.router, prefix="/api/v1/replays", tags=["replays"])
+    app.include_router(secrets.router, prefix="/api/v1/secrets", tags=["secrets"])
     app.include_router(
         service_accounts.router,
-        prefix="/v1/service-accounts",
+        prefix="/api/v1/service-accounts",
         tags=["service-accounts"],
     )
     app.include_router(
-        session_runs.router, prefix="/v1/session-runs", tags=["session-runs"]
+        session_runs.router, prefix="/api/v1/session-runs", tags=["session-runs"]
     )
-    app.include_router(sessions.router, prefix="/v1/sessions", tags=["sessions"])
-    app.include_router(tags.router, prefix="/v1/tags", tags=["tags"])
-    app.include_router(tasks.router, prefix="/v1/tasks", tags=["tasks"])
-    app.include_router(ui.router, prefix="/v1/ui", tags=["ui"])
-    app.include_router(users.router, prefix="/v1/users", tags=["users"])
-    app.include_router(workers.router, prefix="/v1/workers", tags=["workers"])
+    app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
+    app.include_router(tags.router, prefix="/api/v1/tags", tags=["tags"])
+    app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
+    app.include_router(ui.router, prefix="/api/v1/ui", tags=["ui"])
+    app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
+    app.include_router(workers.router, prefix="/api/v1/workers", tags=["workers"])
     app.state.ui_version = None if settings.EXTERNAL_UI else get_ui_version()
     # Register last so the UI catch-all only sees paths no API route matched.
     register_ui(app, settings)

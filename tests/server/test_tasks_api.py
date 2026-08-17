@@ -94,14 +94,14 @@ async def test_get_task(
     """Get a task by id."""
     job = await create_job(services.jobs, account.id)
     task = await create_agent_task(services.tasks, job.id)
-    response = await client.get(f"/v1/tasks/{task.id}")
+    response = await client.get(f"/api/v1/tasks/{task.id}")
     assert response.status_code == 200
     assert response.json()["id"] == str(task.id)
 
 
 async def test_get_task_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown task id."""
-    response = await client.get(f"/v1/tasks/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/tasks/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -116,7 +116,7 @@ async def test_list_tasks_filters(
 
     filter_expression = {"field": "job_id", "op": "eq", "value": str(job.id)}
     response = await client.get(
-        "/v1/tasks", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/tasks", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -137,7 +137,7 @@ async def test_claim_tasks(
     token = mint_worker_token(auth_service, worker.id, account)
 
     response = await client.post(
-        "/v1/tasks/claim",
+        "/api/v1/tasks/claim",
         json={"max_tasks": 10},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -158,7 +158,7 @@ async def test_claim_tasks_not_found(
     """Observe HTTP 404 for an unknown worker id."""
     token = mint_worker_token(auth_service, uuid.uuid4(), account)
     response = await client.post(
-        "/v1/tasks/claim",
+        "/api/v1/tasks/claim",
         json={"max_tasks": 10},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -169,7 +169,7 @@ async def test_claim_tasks_rejects_an_account_credential(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 403 when the caller holds only an account credential."""
-    response = await client.post("/v1/tasks/claim", json={"max_tasks": 10})
+    response = await client.post("/api/v1/tasks/claim", json={"max_tasks": 10})
     assert response.status_code == 403
 
 
@@ -179,7 +179,7 @@ async def test_get_task_spec(
     """Get a task's execution spec."""
     job = await create_job(services.jobs, account.id)
     task = await _claimable_agent_task(services, job.id, account)
-    response = await client.get(f"/v1/tasks/{task.id}/spec")
+    response = await client.get(f"/api/v1/tasks/{task.id}/spec")
     assert response.status_code == 200
     assert response.json()["kind"] == "agent"
 
@@ -198,7 +198,7 @@ async def test_get_task_spec_with_a_task_token(
     worker_token = mint_worker_token(auth_service, worker.id, account)
     claimed = (
         await client.post(
-            "/v1/tasks/claim",
+            "/api/v1/tasks/claim",
             json={"max_tasks": 10},
             headers={"Authorization": f"Bearer {worker_token}"},
         )
@@ -210,14 +210,14 @@ async def test_get_task_spec_with_a_task_token(
     )
 
     response = await client.get(
-        f"/v1/tasks/{target.id}/spec",
+        f"/api/v1/tasks/{target.id}/spec",
         headers={"Authorization": f"Bearer {own_token}"},
     )
     assert response.status_code == 200
     assert response.json()["kind"] == "agent"
 
     response = await client.get(
-        f"/v1/tasks/{target.id}/spec",
+        f"/api/v1/tasks/{target.id}/spec",
         headers={"Authorization": f"Bearer {other_token}"},
     )
     assert response.status_code == 403
@@ -236,7 +236,7 @@ async def test_update_task_transitions(
     worker_token = mint_worker_token(auth_service, worker.id, account)
     claimed = (
         await client.post(
-            "/v1/tasks/claim",
+            "/api/v1/tasks/claim",
             json={"max_tasks": 10},
             headers={"Authorization": f"Bearer {worker_token}"},
         )
@@ -244,7 +244,7 @@ async def test_update_task_transitions(
     task_token = claimed["tasks"][0]["token"]
 
     response = await client.patch(
-        f"/v1/tasks/{task.id}",
+        f"/api/v1/tasks/{task.id}",
         json={"status": "running"},
         headers={"Authorization": f"Bearer {task_token}"},
     )
@@ -258,7 +258,9 @@ async def test_update_task_rejects_an_account_credential(
     """Observe HTTP 403 when the caller holds only an account credential."""
     job = await create_job(services.jobs, account.id)
     task = await create_agent_task(services.tasks, job.id)
-    response = await client.patch(f"/v1/tasks/{task.id}", json={"status": "running"})
+    response = await client.patch(
+        f"/api/v1/tasks/{task.id}", json={"status": "running"}
+    )
     assert response.status_code == 403
 
 
@@ -276,7 +278,7 @@ async def test_update_task_with_a_different_tasks_token_is_forbidden(
     worker_token = mint_worker_token(auth_service, worker.id, account)
     claimed = (
         await client.post(
-            "/v1/tasks/claim",
+            "/api/v1/tasks/claim",
             json={"max_tasks": 10},
             headers={"Authorization": f"Bearer {worker_token}"},
         )
@@ -287,7 +289,7 @@ async def test_update_task_with_a_different_tasks_token_is_forbidden(
     )
 
     response = await client.patch(
-        f"/v1/tasks/{target.id}",
+        f"/api/v1/tasks/{target.id}",
         json={"status": "running"},
         headers={"Authorization": f"Bearer {other_token}"},
     )
@@ -307,7 +309,7 @@ async def test_update_task_attempt_fencing_conflicts(
     worker_token = mint_worker_token(auth_service, worker.id, account)
     claimed = (
         await client.post(
-            "/v1/tasks/claim",
+            "/api/v1/tasks/claim",
             json={"max_tasks": 10},
             headers={"Authorization": f"Bearer {worker_token}"},
         )
@@ -322,7 +324,7 @@ async def test_update_task_attempt_fencing_conflicts(
     await services.tasks.update(stored)
 
     response = await client.patch(
-        f"/v1/tasks/{task.id}",
+        f"/api/v1/tasks/{task.id}",
         json={"status": "running"},
         headers={"Authorization": f"Bearer {stale_token}"},
     )
@@ -342,7 +344,7 @@ async def test_update_task_requires_a_status(
     worker_token = mint_worker_token(auth_service, worker.id, account)
     claimed = (
         await client.post(
-            "/v1/tasks/claim",
+            "/api/v1/tasks/claim",
             json={"max_tasks": 10},
             headers={"Authorization": f"Bearer {worker_token}"},
         )
@@ -350,7 +352,7 @@ async def test_update_task_requires_a_status(
     task_token = claimed["tasks"][0]["token"]
 
     response = await client.patch(
-        f"/v1/tasks/{task.id}",
+        f"/api/v1/tasks/{task.id}",
         json={},
         headers={"Authorization": f"Bearer {task_token}"},
     )

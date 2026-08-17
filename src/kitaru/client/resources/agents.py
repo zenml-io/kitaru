@@ -60,7 +60,7 @@ class AgentsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/agents",
+            "/api/v1/agents",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AgentResponse.model_validate(response.json())
@@ -77,7 +77,7 @@ class AgentsResource:
         Returns:
             Stored agent.
         """
-        response = await self._client.request("GET", f"/v1/agents/{agent_id}")
+        response = await self._client.request("GET", f"/api/v1/agents/{agent_id}")
         return AgentResponse.model_validate(response.json())
 
     async def list(
@@ -98,7 +98,7 @@ class AgentsResource:
         params = params or AgentListParams()
         response = await self._client.request(
             "GET",
-            "/v1/agents",
+            "/api/v1/agents",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[AgentResponse].model_validate(response.json())
@@ -138,7 +138,7 @@ class AgentsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/agents/{agent_id}",
+            f"/api/v1/agents/{agent_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AgentResponse.model_validate(response.json())
@@ -153,7 +153,7 @@ class AgentsResource:
             APIError: The request failed, including 404 for a missing agent
                 and 409 when the agent has versions.
         """
-        await self._client.request("DELETE", f"/v1/agents/{agent_id}")
+        await self._client.request("DELETE", f"/api/v1/agents/{agent_id}")
 
     async def create_version(
         self, agent_id: uuid.UUID, request: AgentVersionCreateRequest
@@ -172,7 +172,7 @@ class AgentsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AgentVersionResponse.model_validate(response.json())
@@ -195,7 +195,7 @@ class AgentsResource:
         params = params or AgentVersionListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[AgentVersionResponse].model_validate(response.json())

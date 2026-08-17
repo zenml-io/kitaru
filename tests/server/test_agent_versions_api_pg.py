@@ -31,7 +31,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to version."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
@@ -41,15 +41,15 @@ async def test_update_persists_across_requests(
     """Persist an update across requests."""
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions", json={"display_version": "v1"}
+            f"/api/v1/agents/{agent_id}/versions", json={"display_version": "v1"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}", json={"display_version": "v1.1"}
+        f"/api/v1/agent-versions/{created['id']}", json={"display_version": "v1.1"}
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["display_version"] == "v1.1"
@@ -62,28 +62,28 @@ async def test_update_replaces_run_spec_secrets_across_requests(
     """Persist a replaced run spec's secret ids across requests."""
     old_secret = (
         await client.post(
-            "/v1/secrets", json={"name": "old-secret", "values": {"k": "v"}}
+            "/api/v1/secrets", json={"name": "old-secret", "values": {"k": "v"}}
         )
     ).json()
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json={"run_spec": {"command": "old.sh", "secret_ids": [old_secret["id"]]}},
         )
     ).json()
 
     new_secret = (
         await client.post(
-            "/v1/secrets", json={"name": "new-secret", "values": {"k": "v"}}
+            "/api/v1/secrets", json={"name": "new-secret", "values": {"k": "v"}}
         )
     ).json()
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}",
+        f"/api/v1/agent-versions/{created['id']}",
         json={"run_spec": {"command": "new.sh", "secret_ids": [new_secret["id"]]}},
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["run_spec"]["command"] == "new.sh"
@@ -94,11 +94,11 @@ async def test_delete_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Persist a deletion across requests."""
-    created = (await client.post(f"/v1/agents/{agent_id}/versions", json={})).json()
-    response = await client.delete(f"/v1/agent-versions/{created['id']}")
+    created = (await client.post(f"/api/v1/agents/{agent_id}/versions", json={})).json()
+    response = await client.delete(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 404
 
 
@@ -106,8 +106,8 @@ async def test_delete_version_allows_agent_delete(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Allow deleting the agent once its only version is gone."""
-    created = (await client.post(f"/v1/agents/{agent_id}/versions", json={})).json()
-    await client.delete(f"/v1/agent-versions/{created['id']}")
+    created = (await client.post(f"/api/v1/agents/{agent_id}/versions", json={})).json()
+    await client.delete(f"/api/v1/agent-versions/{created['id']}")
 
-    response = await client.delete(f"/v1/agents/{agent_id}")
+    response = await client.delete(f"/api/v1/agents/{agent_id}")
     assert response.status_code == 204

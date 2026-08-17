@@ -28,7 +28,7 @@ export class AnnotationsResource {
   ): Promise<AnnotationResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/annotations",
+      path: "/api/v1/annotations",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateAnnotation,
@@ -41,7 +41,7 @@ export class AnnotationsResource {
   ): Promise<AnnotationResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/annotations/${encodeURIComponent(annotationId)}`,
+      path: `/api/v1/annotations/${encodeURIComponent(annotationId)}`,
       signal: options.signal,
       validate: validateAnnotation,
     });
@@ -54,7 +54,7 @@ export class AnnotationsResource {
   ): Promise<AnnotationResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/annotations/${encodeURIComponent(annotationId)}`,
+      path: `/api/v1/annotations/${encodeURIComponent(annotationId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateAnnotation,
@@ -67,7 +67,7 @@ export class AnnotationsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/annotations/${encodeURIComponent(annotationId)}`,
+      path: `/api/v1/annotations/${encodeURIComponent(annotationId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -79,7 +79,7 @@ export class AnnotationsResource {
   ): Promise<Page<AnnotationResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/annotations",
+      path: "/api/v1/annotations",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateAnnotationPage,

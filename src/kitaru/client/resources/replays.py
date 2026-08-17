@@ -59,7 +59,7 @@ class ReplaysResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/replays",
+            "/api/v1/replays",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ReplayResponse.model_validate(response.json())
@@ -77,7 +77,7 @@ class ReplaysResource:
         Returns:
             Stored replay.
         """
-        response = await self._client.request("GET", f"/v1/replays/{replay_id}")
+        response = await self._client.request("GET", f"/api/v1/replays/{replay_id}")
         return ReplayResponse.model_validate(response.json())
 
     async def list(
@@ -97,7 +97,7 @@ class ReplaysResource:
         params = params or ReplayListParams()
         response = await self._client.request(
             "GET",
-            "/v1/replays",
+            "/api/v1/replays",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ReplayResponse].model_validate(response.json())
@@ -137,7 +137,7 @@ class ReplaysResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/replays/{replay_id}/tool-lookup",
+            f"/api/v1/replays/{replay_id}/tool-lookup",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ToolLookupResponse.model_validate(response.json())

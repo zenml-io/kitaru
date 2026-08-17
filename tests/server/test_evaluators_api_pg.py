@@ -31,21 +31,21 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_evaluators_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/evaluators", json={"name": "accuracy", "metadata": {"a": 1}}
+        "/api/v1/evaluators", json={"name": "accuracy", "metadata": {"a": 1}}
     )
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/evaluators/{created['id']}")
+    response = await client.get(f"/api/v1/evaluators/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/evaluators", json={"name": "accuracy"})
+    response = await client.post("/api/v1/evaluators", json={"name": "accuracy"})
     assert response.status_code == 201
-    response = await client.post("/v1/evaluators", json={"name": "accuracy"})
+    response = await client.post("/api/v1/evaluators", json={"name": "accuracy"})
     assert response.status_code == 409
 
 
@@ -53,7 +53,9 @@ async def test_version_numbering_persists_across_requests(
     client: httpx.AsyncClient,
 ) -> None:
     """Bump the version number in a real UPDATE ... RETURNING transaction."""
-    created = (await client.post("/v1/evaluators", json={"name": "accuracy"})).json()
+    created = (
+        await client.post("/api/v1/evaluators", json={"name": "accuracy"})
+    ).json()
     body = {
         "source": {
             "type": "package",
@@ -61,20 +63,24 @@ async def test_version_numbering_persists_across_requests(
             "entrypoint": "pkg:score",
         }
     }
-    first = await client.post(f"/v1/evaluators/{created['id']}/versions", json=body)
-    second = await client.post(f"/v1/evaluators/{created['id']}/versions", json=body)
+    first = await client.post(f"/api/v1/evaluators/{created['id']}/versions", json=body)
+    second = await client.post(
+        f"/api/v1/evaluators/{created['id']}/versions", json=body
+    )
     assert first.json()["version"] == 1
     assert second.json()["version"] == 2
 
-    response = await client.get(f"/v1/evaluators/{created['id']}")
+    response = await client.get(f"/api/v1/evaluators/{created['id']}")
     assert response.json()["latest_version"] == 2
 
 
 async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
     """Cascade a plugin's versions when it is deleted."""
-    created = (await client.post("/v1/evaluators", json={"name": "accuracy"})).json()
+    created = (
+        await client.post("/api/v1/evaluators", json={"name": "accuracy"})
+    ).json()
     await client.post(
-        f"/v1/evaluators/{created['id']}/versions",
+        f"/api/v1/evaluators/{created['id']}/versions",
         json={
             "source": {
                 "type": "package",
@@ -83,5 +89,5 @@ async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
             }
         },
     )
-    response = await client.delete(f"/v1/evaluators/{created['id']}")
+    response = await client.delete(f"/api/v1/evaluators/{created['id']}")
     assert response.status_code == 204

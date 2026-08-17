@@ -34,7 +34,7 @@ async def _get_info(settings: APISettings) -> dict[str, object]:
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app), base_url="http://test"
     ) as client:
-        response = await client.get("/v1/info")
+        response = await client.get("/api/v1/info")
     assert response.status_code == 200
     payload: dict[str, object] = response.json()
     return payload

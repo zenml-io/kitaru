@@ -28,7 +28,7 @@ export class TasksResource {
   ): Promise<TaskResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/tasks/${encodeURIComponent(taskId)}`,
+      path: `/api/v1/tasks/${encodeURIComponent(taskId)}`,
       signal: options.signal,
       validate: validateTask,
     });
@@ -40,7 +40,7 @@ export class TasksResource {
   ): Promise<TaskSpecResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/tasks/${encodeURIComponent(taskId)}/spec`,
+      path: `/api/v1/tasks/${encodeURIComponent(taskId)}/spec`,
       signal: options.signal,
       validate: validateTaskSpec,
     });
@@ -52,7 +52,7 @@ export class TasksResource {
   ): Promise<Page<TaskResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/tasks",
+      path: "/api/v1/tasks",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateTaskPage,

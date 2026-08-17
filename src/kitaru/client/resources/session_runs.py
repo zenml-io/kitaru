@@ -48,7 +48,7 @@ class SessionRunsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return JobResponse.model_validate(response.json())

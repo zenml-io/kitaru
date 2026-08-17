@@ -590,7 +590,7 @@ def test_cli_start_network_error_identifies_server(
     server = "https://api.example.com/kitaru"
 
     async def fail_start(target: ResolvedTarget, **options: Any) -> CommandResult:
-        request = httpx.Request("GET", f"{target.server_url}/v1/workers")
+        request = httpx.Request("GET", f"{target.server_url}/api/v1/workers")
         raise httpx.ConnectError(
             "All connection attempts failed",
             request=request,

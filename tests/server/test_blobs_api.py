@@ -68,7 +68,7 @@ async def client(
 async def test_upload_blob(client: httpx.AsyncClient) -> None:
     """Upload a new blob and observe HTTP 201."""
     response = await client.post(
-        "/v1/blobs", files={"file": ("script.py", b"print(1)", "text/x-python")}
+        "/api/v1/blobs", files={"file": ("script.py", b"print(1)", "text/x-python")}
     )
     assert response.status_code == 201
     body = response.json()
@@ -80,7 +80,7 @@ async def test_upload_blob(client: httpx.AsyncClient) -> None:
 
 async def test_upload_blob_default_media_type(client: httpx.AsyncClient) -> None:
     """Default the media type when the upload carries none."""
-    response = await client.post("/v1/blobs", files={"file": ("blob", b"data", "")})
+    response = await client.post("/api/v1/blobs", files={"file": ("blob", b"data", "")})
     assert response.status_code == 201
     assert response.json()["media_type"] == "application/octet-stream"
 
@@ -88,11 +88,11 @@ async def test_upload_blob_default_media_type(client: httpx.AsyncClient) -> None
 async def test_upload_blob_dedup(client: httpx.AsyncClient) -> None:
     """Observe HTTP 200 with the same id on a dedup hit."""
     first = await client.post(
-        "/v1/blobs", files={"file": ("a.txt", b"same", "text/plain")}
+        "/api/v1/blobs", files={"file": ("a.txt", b"same", "text/plain")}
     )
     assert first.status_code == 201
     second = await client.post(
-        "/v1/blobs", files={"file": ("b.txt", b"same", "text/plain")}
+        "/api/v1/blobs", files={"file": ("b.txt", b"same", "text/plain")}
     )
     assert second.status_code == 200
     assert second.json()["id"] == first.json()["id"]
@@ -102,7 +102,8 @@ async def test_upload_blob_dedup(client: httpx.AsyncClient) -> None:
 async def test_upload_blob_too_large(client: httpx.AsyncClient) -> None:
     """Observe HTTP 413 for an upload exceeding the size cap."""
     response = await client.post(
-        "/v1/blobs", files={"file": ("big.bin", b"x" * 17, "application/octet-stream")}
+        "/api/v1/blobs",
+        files={"file": ("big.bin", b"x" * 17, "application/octet-stream")},
     )
     assert response.status_code == 413
     assert response.json() == {"detail": "Blob exceeds 16 bytes"}
@@ -112,10 +113,10 @@ async def test_get_blob(client: httpx.AsyncClient) -> None:
     """Get a blob's metadata by id."""
     created = (
         await client.post(
-            "/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
+            "/api/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
         )
     ).json()
-    response = await client.get(f"/v1/blobs/{created['id']}")
+    response = await client.get(f"/api/v1/blobs/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
@@ -123,7 +124,7 @@ async def test_get_blob(client: httpx.AsyncClient) -> None:
 async def test_get_blob_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown blob id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/blobs/{missing_id}")
+    response = await client.get(f"/api/v1/blobs/{missing_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Blob {missing_id} was not found"}
 
@@ -132,10 +133,10 @@ async def test_download_blob(client: httpx.AsyncClient) -> None:
     """Download a blob's content with attachment headers."""
     created = (
         await client.post(
-            "/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
+            "/api/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
         )
     ).json()
-    response = await client.get(f"/v1/blobs/{created['id']}/content")
+    response = await client.get(f"/api/v1/blobs/{created['id']}/content")
     assert response.status_code == 200
     assert response.content == b"hello"
     assert response.headers["content-type"] == "text/plain; charset=utf-8" or (
@@ -148,7 +149,7 @@ async def test_download_blob(client: httpx.AsyncClient) -> None:
 async def test_download_blob_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown blob id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/blobs/{missing_id}/content")
+    response = await client.get(f"/api/v1/blobs/{missing_id}/content")
     assert response.status_code == 404
 
 
@@ -156,18 +157,18 @@ async def test_delete_blob(client: httpx.AsyncClient) -> None:
     """Delete a blob and observe HTTP 204."""
     created = (
         await client.post(
-            "/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
+            "/api/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
         )
     ).json()
-    response = await client.delete(f"/v1/blobs/{created['id']}")
+    response = await client.delete(f"/api/v1/blobs/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/blobs/{created['id']}")
+    response = await client.get(f"/api/v1/blobs/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_blob_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown blob id."""
-    response = await client.delete(f"/v1/blobs/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/blobs/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -177,7 +178,7 @@ async def test_delete_blob_in_use(
     """Observe HTTP 409 when the blob is referenced by a plugin version."""
     blob = await create_blob(repository, ACCOUNT.id)
     repository.mark_referenced(blob.id)
-    response = await client.delete(f"/v1/blobs/{blob.id}")
+    response = await client.delete(f"/api/v1/blobs/{blob.id}")
     assert response.status_code == 409
     assert response.json() == {
         "detail": f"Blob {blob.id} is in use by a plugin version"

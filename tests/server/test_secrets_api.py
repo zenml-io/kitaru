@@ -62,7 +62,7 @@ async def client(
 async def test_create_secret(client: httpx.AsyncClient) -> None:
     """Create a secret and observe HTTP 201 without the values."""
     response = await client.post(
-        "/v1/secrets", json={"name": "db", "type": "database", "values": VALUES}
+        "/api/v1/secrets", json={"name": "db", "type": "database", "values": VALUES}
     )
     assert response.status_code == 201
     body = response.json()
@@ -79,7 +79,9 @@ async def test_create_secret_response_has_no_internal(
     client: httpx.AsyncClient,
 ) -> None:
     """Never expose the internal flag in the response."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
     assert set(response.json()) == {
         "id",
@@ -93,9 +95,13 @@ async def test_create_secret_response_has_no_internal(
 
 async def test_create_secret_duplicate_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a duplicate secret name."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 409
     assert response.json() == {"detail": "Secret name 'db' is already registered"}
 
@@ -103,7 +109,7 @@ async def test_create_secret_duplicate_name(client: httpx.AsyncClient) -> None:
 async def test_create_secret_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid secret name."""
     response = await client.post(
-        "/v1/secrets", json={"name": "in valid", "values": VALUES}
+        "/api/v1/secrets", json={"name": "in valid", "values": VALUES}
     )
     assert response.status_code == 422
 
@@ -111,35 +117,41 @@ async def test_create_secret_invalid_name(client: httpx.AsyncClient) -> None:
 async def test_create_secret_invalid_type(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an overlong secret type."""
     response = await client.post(
-        "/v1/secrets", json={"name": "db", "type": "x" * 65, "values": VALUES}
+        "/api/v1/secrets", json={"name": "db", "type": "x" * 65, "values": VALUES}
     )
     assert response.status_code == 422
 
 
 async def test_update_secret_invalid_type(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an overlong secret type on update."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
     secret_id = response.json()["id"]
-    response = await client.patch(f"/v1/secrets/{secret_id}", json={"type": "x" * 65})
+    response = await client.patch(
+        f"/api/v1/secrets/{secret_id}", json={"type": "x" * 65}
+    )
     assert response.status_code == 422
 
 
 async def test_create_secret_values_too_large(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for oversized secret values."""
     response = await client.post(
-        "/v1/secrets", json={"name": "db", "values": {"key": "x" * (64 * 1024)}}
+        "/api/v1/secrets", json={"name": "db", "values": {"key": "x" * (64 * 1024)}}
     )
     assert response.status_code == 422
 
 
 async def test_update_secret_values_too_large(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for oversized secret values on update."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
     secret_id = response.json()["id"]
     response = await client.patch(
-        f"/v1/secrets/{secret_id}", json={"values": {"key": "x" * (64 * 1024)}}
+        f"/api/v1/secrets/{secret_id}", json={"values": {"key": "x" * (64 * 1024)}}
     )
     assert response.status_code == 422
 
@@ -148,11 +160,11 @@ async def test_list_secrets(client: httpx.AsyncClient) -> None:
     """List secrets newest-first with filters."""
     for name in ["db", "smtp", "s3"]:
         response = await client.post(
-            "/v1/secrets", json={"name": name, "values": VALUES}
+            "/api/v1/secrets", json={"name": name, "values": VALUES}
         )
         assert response.status_code == 201
 
-    response = await client.get("/v1/secrets")
+    response = await client.get("/api/v1/secrets")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -162,7 +174,7 @@ async def test_list_secrets(client: httpx.AsyncClient) -> None:
 
     filter_expression = {"field": "name", "op": "eq", "value": "smtp"}
     response = await client.get(
-        "/v1/secrets", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/secrets", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -176,14 +188,14 @@ async def test_list_secrets_walks_pages_with_cursor(
     """Walk every page of secrets via next_cursor."""
     for name in ["db", "smtp", "s3"]:
         response = await client.post(
-            "/v1/secrets", json={"name": name, "values": VALUES}
+            "/api/v1/secrets", json={"name": name, "values": VALUES}
         )
         assert response.status_code == 201
 
     collected: list[str] = []
     params: dict[str, str] = {"size": "2"}
     while True:
-        response = await client.get("/v1/secrets", params=params)
+        response = await client.get("/api/v1/secrets", params=params)
         assert response.status_code == 200
         body = response.json()
         collected.extend(item["name"] for item in body["items"])
@@ -196,30 +208,30 @@ async def test_list_secrets_walks_pages_with_cursor(
 
 async def test_list_secrets_invalid_pagination(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for out-of-bounds pagination parameters."""
-    response = await client.get("/v1/secrets", params={"size": 0})
+    response = await client.get("/api/v1/secrets", params={"size": 0})
     assert response.status_code == 422
-    response = await client.get("/v1/secrets", params={"size": 1001})
+    response = await client.get("/api/v1/secrets", params={"size": 1001})
     assert response.status_code == 422
 
 
 async def test_list_secrets_invalid_cursor(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for a cursor string that fails to decode."""
-    response = await client.get("/v1/secrets", params={"cursor": "not-a-cursor"})
+    response = await client.get("/api/v1/secrets", params={"cursor": "not-a-cursor"})
     assert response.status_code == 422
 
 
 async def test_list_secrets_unknown_query_param(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an unknown query parameter."""
-    response = await client.get("/v1/secrets", params={"bogus": "x"})
+    response = await client.get("/api/v1/secrets", params={"bogus": "x"})
     assert response.status_code == 422
 
 
 async def test_get_secret(client: httpx.AsyncClient) -> None:
     """Get a secret by id without the values."""
     created = (
-        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+        await client.post("/api/v1/secrets", json={"name": "db", "values": VALUES})
     ).json()
-    response = await client.get(f"/v1/secrets/{created['id']}")
+    response = await client.get(f"/api/v1/secrets/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body == created
@@ -229,10 +241,10 @@ async def test_get_secret(client: httpx.AsyncClient) -> None:
 async def test_get_secret_with_values(client: httpx.AsyncClient) -> None:
     """Get a secret by id with the values when requested."""
     created = (
-        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+        await client.post("/api/v1/secrets", json={"name": "db", "values": VALUES})
     ).json()
     response = await client.get(
-        f"/v1/secrets/{created['id']}", params={"include_values": "true"}
+        f"/api/v1/secrets/{created['id']}", params={"include_values": "true"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -243,7 +255,7 @@ async def test_get_secret_with_values(client: httpx.AsyncClient) -> None:
 async def test_get_secret_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown secret id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/secrets/{missing_id}")
+    response = await client.get(f"/api/v1/secrets/{missing_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Secret {missing_id} was not found"}
 
@@ -254,11 +266,11 @@ async def test_get_secret_internal(
     """Observe HTTP 404 when reading an internal secret."""
     created = await create_secret(repository, ACCOUNT.id, internal=True)
     response = await client.get(
-        f"/v1/secrets/{created.id}", params={"include_values": "true"}
+        f"/api/v1/secrets/{created.id}", params={"include_values": "true"}
     )
     assert response.status_code == 404
     assert response.json() == {"detail": f"Secret {created.id} was not found"}
-    response = await client.get(f"/v1/secrets/{created.id}")
+    response = await client.get(f"/api/v1/secrets/{created.id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Secret {created.id} was not found"}
 
@@ -267,11 +279,13 @@ async def test_list_secrets_excludes_internal(
     client: httpx.AsyncClient, repository: FakeSecretRepository
 ) -> None:
     """Never list internal secrets."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
     await create_secret(repository, ACCOUNT.id, name="hidden", internal=True)
 
-    response = await client.get("/v1/secrets")
+    response = await client.get("/api/v1/secrets")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -281,10 +295,10 @@ async def test_list_secrets_excludes_internal(
 async def test_update_secret(client: httpx.AsyncClient) -> None:
     """Update a secret."""
     created = (
-        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+        await client.post("/api/v1/secrets", json={"name": "db", "values": VALUES})
     ).json()
     response = await client.patch(
-        f"/v1/secrets/{created['id']}",
+        f"/api/v1/secrets/{created['id']}",
         json={"type": "database", "values": {"password": "hunter3"}},
     )
     assert response.status_code == 200
@@ -294,7 +308,7 @@ async def test_update_secret(client: httpx.AsyncClient) -> None:
     assert "values" not in body
 
     response = await client.get(
-        f"/v1/secrets/{created['id']}", params={"include_values": "true"}
+        f"/api/v1/secrets/{created['id']}", params={"include_values": "true"}
     )
     assert response.status_code == 200
     assert response.json()["values"] == {"password": "hunter3"}
@@ -303,7 +317,7 @@ async def test_update_secret(client: httpx.AsyncClient) -> None:
 async def test_update_secret_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown secret id."""
     response = await client.patch(
-        f"/v1/secrets/{uuid.uuid4()}", json={"type": "database"}
+        f"/api/v1/secrets/{uuid.uuid4()}", json={"type": "database"}
     )
     assert response.status_code == 404
 
@@ -314,7 +328,7 @@ async def test_update_secret_internal(
     """Observe HTTP 404 when updating an internal secret."""
     created = await create_secret(repository, ACCOUNT.id, internal=True)
     response = await client.patch(
-        f"/v1/secrets/{created.id}", json={"type": "database"}
+        f"/api/v1/secrets/{created.id}", json={"type": "database"}
     )
     assert response.status_code == 404
     assert response.json() == {"detail": f"Secret {created.id} was not found"}
@@ -323,17 +337,17 @@ async def test_update_secret_internal(
 async def test_delete_secret(client: httpx.AsyncClient) -> None:
     """Delete a secret and observe HTTP 204."""
     created = (
-        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+        await client.post("/api/v1/secrets", json={"name": "db", "values": VALUES})
     ).json()
-    response = await client.delete(f"/v1/secrets/{created['id']}")
+    response = await client.delete(f"/api/v1/secrets/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/secrets/{created['id']}")
+    response = await client.get(f"/api/v1/secrets/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_secret_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown secret id."""
-    response = await client.delete(f"/v1/secrets/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/secrets/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -342,8 +356,8 @@ async def test_delete_secret_internal(
 ) -> None:
     """Observe HTTP 404 when deleting an internal secret."""
     created = await create_secret(repository, ACCOUNT.id, internal=True)
-    response = await client.delete(f"/v1/secrets/{created.id}")
+    response = await client.delete(f"/api/v1/secrets/{created.id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Secret {created.id} was not found"}
-    response = await client.get(f"/v1/secrets/{created.id}")
+    response = await client.get(f"/api/v1/secrets/{created.id}")
     assert response.status_code == 404

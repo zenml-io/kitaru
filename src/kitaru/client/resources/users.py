@@ -56,7 +56,7 @@ class UsersResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/users",
+            "/api/v1/users",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         payload = response.json()
@@ -81,7 +81,7 @@ class UsersResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/users/{account_id}",
+            f"/api/v1/users/{account_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AccountResponse.model_validate(response.json())
@@ -103,7 +103,7 @@ class UsersResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/users/{account_id}/activate",
+            f"/api/v1/users/{account_id}/activate",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AccountResponse.model_validate(response.json())
@@ -122,6 +122,6 @@ class UsersResource:
             Deactivated account carrying its activation token.
         """
         response = await self._client.request(
-            "POST", f"/v1/users/{account_id}/deactivate"
+            "POST", f"/api/v1/users/{account_id}/deactivate"
         )
         return UserActivationTokenResponse.model_validate(response.json())
