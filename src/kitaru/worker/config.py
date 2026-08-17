@@ -25,6 +25,10 @@ from kitaru.worker.heartbeat import DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 
 RUN_POLL_INTERVAL_SECONDS = 2.0
 
+# Worker tasks spend nearly all their wall time awaiting model and tool calls, so a
+# single slot leaves the process idle while queued work waits for a free worker.
+DEFAULT_CONCURRENCY = 10
+
 
 class WorkerConfig(BaseSettings):
     """Worker configuration."""
@@ -37,7 +41,7 @@ class WorkerConfig(BaseSettings):
     scope: WorkerScope = WorkerScope(
         claims=[WorkerClaim(kind=kind) for kind in TaskKind]
     )
-    concurrency: int = Field(default=1, ge=1)
+    concurrency: int = Field(default=DEFAULT_CONCURRENCY, ge=1)
     claim_batch_size: int | None = Field(default=None, ge=1)
     poll_interval: float = Field(default=RUN_POLL_INTERVAL_SECONDS, gt=0)
     heartbeat_interval: float = Field(default=DEFAULT_HEARTBEAT_INTERVAL_SECONDS, gt=0)

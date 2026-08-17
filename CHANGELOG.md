@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Changed
+
+- Raised the default worker concurrency from 1 to 10, so `kitaru worker start` runs up to ten tasks in parallel without a flag. Set `--concurrency` or `KITARU_WORKER_CONCURRENCY` to restore the previous single-slot behavior.
+
 ## [0.22.0rc10]
 
 ### Added
