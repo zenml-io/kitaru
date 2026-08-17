@@ -78,3 +78,5 @@ redirects:
   guides/import-langfuse-traces: guides/import-langfuse-traces.md
   guides/importing-sessions: guides/importing-sessions.md
   tutorials/returns-agent: tutorials/returns-agent/README.md
+  running-in-production/troubleshooting: getting-started/troubleshooting.md
+  project/contributing: contributing.md

@@ -64,8 +64,8 @@
 - [Authentication & API keys](deploy/authentication.md)
 - [Secrets](deploy/secrets.md)
 - [Configuration](deploy/configuration.md)
+
+## Get Help
+
 - [Troubleshooting](getting-started/troubleshooting.md)
-
-## Project
-
 - [Contributing](contributing.md)
