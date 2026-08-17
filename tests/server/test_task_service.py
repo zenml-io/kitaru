@@ -23,6 +23,7 @@ from pydantic import SecretStr
 
 from conftest import (
     FakeJobRepository,
+    FakePluginRepository,
     FakeTaskRepository,
     JobAndTaskServices,
     build_job_and_task_services,
@@ -60,7 +61,7 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
-from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
     ImportTask,
@@ -874,6 +875,7 @@ class _RecordingAnalytics(ServerAnalytics):
 
 def _build_transitions(
     analytics: ServerAnalytics | None,
+    plugin_repository: FakePluginRepository | None = None,
 ) -> tuple[TaskTransitions, FakeTaskRepository, FakeJobRepository]:
     """Wire a transitions dispatch directly over fresh fake repositories."""
     tasks = FakeTaskRepository()
@@ -883,6 +885,7 @@ def _build_transitions(
         job_repository=jobs,
         dispatcher=EventDispatcher(),
         analytics=analytics,
+        plugin_repository=plugin_repository,
     )
     return transitions, tasks, jobs
 
@@ -939,6 +942,64 @@ async def test_apply_status_evaluator_terminal_tracks_evaluation_completed() -> 
     assert tracked_properties["status"] == "completed"
     assert "plugin_version_id" not in tracked_properties
     assert "session_count" not in tracked_properties
+
+
+async def test_apply_status_import_terminal_tracks_the_importer_plugin() -> None:
+    """Name the builtin importer plugin and provider on the import event."""
+    analytics = _RecordingAnalytics()
+    plugins = FakePluginRepository()
+    plugin = await plugins.create(
+        Plugin(
+            owner_id=None,
+            kind=PluginKind.IMPORTER,
+            name="kitaru/langfuse",
+            provider="langfuse",
+        )
+    )
+    version = await plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="parse"),
+        display_version=None,
+    )
+    transitions, tasks, jobs = _build_transitions(analytics, plugins)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_import_task(tasks, job.id, plugin_version_id=version.id)
+    await create_agent_task(tasks, job.id)
+
+    await _complete_task(transitions, task, result={"created": 1})
+
+    _, _, tracked_properties = analytics.tracked[0]
+    assert tracked_properties["plugin"] == "kitaru/langfuse"
+    assert tracked_properties["provider"] == "langfuse"
+
+
+async def test_apply_status_evaluator_terminal_hides_the_custom_plugin_name() -> None:
+    """Report a custom evaluator plugin as custom without its name."""
+    analytics = _RecordingAnalytics()
+    plugins = FakePluginRepository()
+    plugin = await plugins.create(
+        Plugin(
+            owner_id=ACTOR.account.id,
+            kind=PluginKind.EVALUATOR,
+            name="refund-check",
+        )
+    )
+    version = await plugins.create_version(
+        plugin.id,
+        ScriptPluginSource(blob_id=uuid.uuid4(), entrypoint="score"),
+        display_version=None,
+    )
+    transitions, tasks, jobs = _build_transitions(analytics, plugins)
+    job = await create_job(jobs, ACTOR.account.id)
+    task = await create_evaluation_task(tasks, job.id, plugin_version_id=version.id)
+    await create_agent_task(tasks, job.id)
+
+    result = [{"name": "quality", "score": 1.0}]
+    await _complete_task(transitions, task, result=result)
+
+    _, _, tracked_properties = analytics.tracked[0]
+    assert tracked_properties["plugin"] == "custom"
+    assert "provider" not in tracked_properties
 
 
 async def test_apply_status_agent_terminal_tracks_nothing() -> None:

@@ -15,10 +15,12 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from typing import Any
 
 import pytest
 
 from conftest import UNSCOPED_WORKER_SCOPE, FakeWorkerRepository, create_worker
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
@@ -29,12 +31,36 @@ from kitaru.api_models.v1.worker import (
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.worker import WorkerNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
+
+
+class _RecordingAnalytics(ServerAnalytics):
+    """Analytics tracker recording track calls instead of buffering them."""
+
+    def __init__(self) -> None:
+        """Initialize the tracker."""
+        self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
 
 @pytest.fixture
@@ -63,6 +89,31 @@ async def test_register_worker(service: WorkerService) -> None:
     assert worker.metadata == {"region": "eu"}
     assert worker.created is not None
     assert worker.updated is not None
+
+
+async def test_register_worker_tracks_only_new_registrations(
+    repository: FakeWorkerRepository,
+) -> None:
+    """Track the worker registered event on creation but not on a refresh."""
+    analytics = _RecordingAnalytics()
+    service = WorkerService(repository=repository, analytics=analytics)
+
+    for _ in range(2):
+        await service.register_worker(
+            name="worker-1",
+            scope=UNSCOPED_WORKER_SCOPE,
+            runtime=WorkerRuntime(platform="docker"),
+            metadata={},
+            actor=ACTOR,
+        )
+
+    assert analytics.tracked == [
+        (
+            ACTOR.account.id,
+            AnalyticsEvent.WORKER_REGISTERED,
+            {"worker_platform": "docker"},
+        )
+    ]
 
 
 async def test_register_worker_upsert_keeps_id_and_renews_timestamps(
