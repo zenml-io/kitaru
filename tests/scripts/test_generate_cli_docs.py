@@ -26,7 +26,7 @@ from scripts.generate_cli_docs import (
     write_docs_tree,
 )
 
-FRONTMATTER = re.compile(r'\A---\ntitle: ".+"\ndescription: ".+"\n---\n', re.MULTILINE)
+FRONTMATTER = re.compile(r'\A---\ntitle: ".+"\ndescription: ".+"\n---\n')
 
 
 def make_parameter(name: str, **overrides: Any) -> dict[str, Any]:
@@ -44,15 +44,7 @@ def make_parameter(name: str, **overrides: Any) -> dict[str, Any]:
 
 GLOBAL_PARAMETER = make_parameter("--verbose", description="Global flag.")
 
-SCHEMA_TOP_ITEMS = [
-    {
-        "name": "box",
-        "path": ["box"],
-        "description": "Manage boxes.",
-        "has_children": True,
-    },
-    {"name": "ping", "path": ["ping"], "description": "Ping.", "has_children": False},
-]
+SCHEMA_TOP_DESCRIPTIONS = {"box": "Manage boxes.", "ping": "Ping."}
 
 SCHEMA_COMMANDS = [
     {
@@ -89,7 +81,9 @@ SCHEMA_COMMANDS = [
 @pytest.fixture
 def tree() -> GroupDoc:
     """Build the fixture command tree once per test."""
-    return build_tree(SCHEMA_TOP_ITEMS, [parse_command(c) for c in SCHEMA_COMMANDS])
+    return build_tree(
+        SCHEMA_TOP_DESCRIPTIONS, [parse_command(c) for c in SCHEMA_COMMANDS]
+    )
 
 
 class TestEscaping:
@@ -133,7 +127,7 @@ class TestParsing:
             CommandDoc(path=("box",), description="Box itself."),
             CommandDoc(path=("box", "get"), description="Get a box."),
         ]
-        root = build_tree([], commands)
+        root = build_tree({}, commands)
         assert root.commands == []
         box = root.groups[0]
         assert box.own_command is not None
@@ -216,8 +210,8 @@ V1_COMMAND_NAMES = {"flow", "executions", "stack", "model", "secrets", "log-stor
 @pytest.fixture(scope="module")
 def generated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Generate the full docs tree from the real CLI once for all e2e tests."""
-    top_items, commands = fetch_command_docs()
-    tree = build_tree(top_items, commands)
+    top_descriptions, commands = fetch_command_docs()
+    tree = build_tree(top_descriptions, commands)
     output = tmp_path_factory.mktemp("cli-docs")
     write_docs_tree(tree, collect_global_parameters(commands), output)
     return output

@@ -35,7 +35,8 @@ class SchemaError(Exception):
 # ---------------------------------------------------------------------------
 
 
-@dataclass
+# Frozen so parameters are hashable and can be compared/deduplicated as sets.
+@dataclass(frozen=True)
 class ParameterDoc:
     """A single CLI parameter (argument or option)."""
 
@@ -44,11 +45,6 @@ class ParameterDoc:
     kind: str
     required: bool
     description: str
-
-    @property
-    def identity(self) -> tuple[str, str, str, bool, str]:
-        """Return a hashable value identifying an identical parameter."""
-        return (self.name, self.type_name, self.kind, self.required, self.description)
 
 
 @dataclass
@@ -110,21 +106,25 @@ class GroupDoc:
 
 def run_schema_command(path: list[str]) -> list[dict[str, Any]]:
     """Run ``kitaru schema <path>`` in-process and return the emitted items."""
+    # Going through the real CLI entrypoint (rather than importing the schema
+    # helpers directly) is deliberate: the docs are generated from the same
+    # JSON envelope users and agents consume, so contract drift fails here.
     from kitaru.cli.app import main as cli_main
 
+    label = f"'kitaru schema {' '.join(path)}'"
     stdout = io.StringIO()
     with contextlib.redirect_stdout(stdout):
         exit_code = cli_main(["schema", *path, "--output", "json"])
     if exit_code != 0:
-        raise SchemaError(f"'kitaru schema {' '.join(path)}' exited with {exit_code}")
+        raise SchemaError(f"{label} exited with {exit_code}")
     envelope = json.loads(stdout.getvalue())
     if not envelope.get("ok", False):
-        raise SchemaError(f"'kitaru schema {' '.join(path)}' reported ok=false")
+        raise SchemaError(f"{label} reported ok=false")
     if envelope.get("page", {}).get("truncated", False):
-        raise SchemaError(f"'kitaru schema {' '.join(path)}' returned a truncated page")
+        raise SchemaError(f"{label} returned a truncated page")
     items = envelope.get("items")
     if not isinstance(items, list):
-        raise SchemaError(f"'kitaru schema {' '.join(path)}' emitted no items list")
+        raise SchemaError(f"{label} emitted no items list")
     return items
 
 
@@ -147,27 +147,27 @@ def parse_command(item: dict[str, Any]) -> CommandDoc:
     )
 
 
-def fetch_command_docs() -> tuple[list[dict[str, Any]], list[CommandDoc]]:
-    """Fetch the top-level summaries and every leaf command from the CLI."""
+def fetch_command_docs() -> tuple[dict[str, str], list[CommandDoc]]:
+    """Fetch top-level command descriptions and every leaf command from the CLI."""
     top_items = run_schema_command([])
-    commands: list[CommandDoc] = []
-    for top_item in top_items:
-        commands.extend(
-            parse_command(item) for item in run_schema_command([top_item["name"]])
-        )
-    return top_items, commands
-
-
-def build_tree(top_items: list[dict[str, Any]], commands: list[CommandDoc]) -> GroupDoc:
-    """Assemble the flat leaf-command list into a nested group tree.
-
-    ``top_items`` supplies the human-written descriptions for top-level
-    groups; nested groups have no description in the schema output and get a
-    generated one.
-    """
     top_descriptions = {
         str(item["name"]): str(item.get("description", "")) for item in top_items
     }
+    commands: list[CommandDoc] = []
+    for name in top_descriptions:
+        commands.extend(parse_command(item) for item in run_schema_command([name]))
+    return top_descriptions, commands
+
+
+def build_tree(
+    top_descriptions: dict[str, str], commands: list[CommandDoc]
+) -> GroupDoc:
+    """Assemble the flat leaf-command list into a nested group tree.
+
+    ``top_descriptions`` supplies the human-written descriptions for top-level
+    groups; nested groups have no description in the schema output and get a
+    generated one.
+    """
     root = GroupDoc(path=(), description="")
     groups: dict[tuple[str, ...], GroupDoc] = {(): root}
 
@@ -187,12 +187,13 @@ def build_tree(top_items: list[dict[str, Any]], commands: list[CommandDoc]) -> G
 
     # Any leaf whose path is a strict prefix of another leaf's path doubles as
     # a group; its reference content then lives on the group index page.
-    prefix_paths = {
-        command.path
+    all_proper_prefixes = {
+        command.path[:length]
         for command in commands
-        for other in commands
-        if other.path != command.path
-        and other.path[: len(command.path)] == command.path
+        for length in range(1, len(command.path))
+    }
+    prefix_paths = {
+        command.path for command in commands if command.path in all_proper_prefixes
     }
     for command in commands:
         if command.path in prefix_paths:
@@ -208,17 +209,19 @@ def collect_global_parameters(commands: list[CommandDoc]) -> list[ParameterDoc]:
     The schema repeats the CLI-wide options (output mode, server override,
     ...) on every command; documenting them once on the index page keeps the
     per-command tables down to what is specific to each command.
+
+    This infers "global" from exact repetition because the schema output does
+    not mark the CLI's shared parameter set explicitly. If a command ever
+    rewords or suppresses one of these options, that option falls out of the
+    intersection and reappears in every per-command table — verbose but still
+    correct.
     """
     if not commands:
         return []
-    shared = {parameter.identity for parameter in commands[0].parameters}
+    shared = set(commands[0].parameters)
     for command in commands[1:]:
-        shared &= {parameter.identity for parameter in command.parameters}
-    return [
-        parameter
-        for parameter in commands[0].parameters
-        if parameter.identity in shared
-    ]
+        shared &= set(command.parameters)
+    return [parameter for parameter in commands[0].parameters if parameter in shared]
 
 
 # ---------------------------------------------------------------------------
@@ -249,12 +252,12 @@ def _code_cell(text: str) -> str:
 
 def _render_frontmatter(title: str, description: str) -> list[str]:
     """Render MDX frontmatter with escaped YAML strings."""
-    safe_title = title.replace("\\", "\\\\").replace('"', '\\"')
-    safe_description = description.replace("\\", "\\\\").replace('"', '\\"')
+    # A JSON string literal is a valid YAML scalar, and json.dumps handles
+    # quotes, backslashes, and control characters the hand-rolled way missed.
     return [
         "---",
-        f'title: "{safe_title}"',
-        f'description: "{safe_description}"',
+        f"title: {json.dumps(title)}",
+        f"description: {json.dumps(description)}",
         "---",
         "",
     ]
@@ -296,11 +299,9 @@ def render_command_sections(
     """Render the usage and parameter sections shared by leaf and group pages."""
     lines = ["## Usage", "", "```bash", _render_usage(command), "```", ""]
 
-    global_identities = {parameter.identity for parameter in global_parameters}
+    global_set = set(global_parameters)
     local_parameters = [
-        parameter
-        for parameter in command.parameters
-        if parameter.identity not in global_identities
+        parameter for parameter in command.parameters if parameter not in global_set
     ]
     arguments = [p for p in local_parameters if p.kind == "argument"]
     options = [p for p in local_parameters if p.kind == "option"]
@@ -309,7 +310,7 @@ def render_command_sections(
         lines.extend(["## Arguments", "", *_render_parameter_table(arguments), ""])
     if options:
         lines.extend(["## Options", "", *_render_parameter_table(options), ""])
-    if global_identities:
+    if global_set:
         lines.extend(
             [
                 "Every command also accepts the [global options](/cli/) listed "
@@ -411,7 +412,7 @@ def write_docs_tree(
     created: list[str] = []
 
     def _write_page(path: Path, content: str) -> None:
-        path.write_text(content + "\n" if not content.endswith("\n") else content)
+        path.write_text(content.rstrip("\n") + "\n")
         created.append(str(path.relative_to(output_dir)))
 
     def _write_group(group: GroupDoc, directory: Path, *, is_root: bool) -> None:
@@ -447,12 +448,12 @@ def main() -> int:
     """Generate the CLI reference docs from the CLI schema contract."""
     print("Extracting CLI schema...")
     try:
-        top_items, commands = fetch_command_docs()
+        top_descriptions, commands = fetch_command_docs()
     except (SchemaError, json.JSONDecodeError) as error:
         print(f"ERROR: {error}")
         return 1
 
-    tree = build_tree(top_items, commands)
+    tree = build_tree(top_descriptions, commands)
     global_parameters = collect_global_parameters(commands)
 
     if OUTPUT_DIR.exists():

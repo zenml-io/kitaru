@@ -4,6 +4,7 @@ import ast
 import importlib
 import inspect
 import json
+import pkgutil
 from pathlib import Path
 from typing import ClassVar
 
@@ -222,36 +223,52 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     "kitaru.api_models.v1.replay_config": frozenset({"ToolConfig"}),
     # Annotated union aliases; the concrete filter models are published.
     "kitaru.api_models.v1.filter": frozenset({"Filter", "FilterParam"}),
-    "kitaru.api_models.v1.replay": frozenset(),
-    "kitaru.api_models.v1.session": frozenset(),
-    "kitaru.api_models.v1.session_node": frozenset(),
-    "kitaru.api_models.v1.job": frozenset(),
-    "kitaru.api_models.v1.agent": frozenset(),
-    "kitaru.api_models.v1.agent_version": frozenset(),
-    "kitaru.api_models.v1.cohort": frozenset(),
-    "kitaru.api_models.v1.cohort_version": frozenset(),
-    "kitaru.api_models.v1.evaluator": frozenset(),
-    "kitaru.api_models.v1.experiment": frozenset(),
-    "kitaru.api_models.v1.experiment_run": frozenset(),
-    "kitaru.api_models.v1.investigation": frozenset(),
-    "kitaru.api_models.v1.annotation": frozenset(),
 }
 
-# The published resource classes mapped to the submodule that defines each.
-PUBLISHED_RESOURCE_CLASSES: dict[str, str] = {
-    "SessionsResource": "sessions",
-    "ReplaysResource": "replays",
-    "AgentsResource": "agents",
-    "AgentVersionsResource": "agent_versions",
-    "JobsResource": "jobs",
-    "EvaluatorsResource": "evaluators",
-    "EvaluationsResource": "evaluations",
-    "CohortsResource": "cohorts",
-    "CohortVersionsResource": "cohort_versions",
-    "ExperimentsResource": "experiments",
-    "ExperimentRunsResource": "experiment_runs",
-    "InvestigationsResource": "investigations",
-}
+# Resource classes that exist in kitaru.client.resources but are deliberately
+# not published: CLI/worker/MCP plumbing with no example or guide usage. The
+# discovery test fails when a new resource class is neither allowlisted nor
+# listed here.
+UNPUBLISHED_RESOURCE_CLASSES = frozenset(
+    {
+        "AccountsResource",
+        "AnnotationsResource",
+        "ApiKeysResource",
+        "AuthResource",
+        "BlobsResource",
+        "DevicesResource",
+        "ImportersResource",
+        "ImportsResource",
+        "InfoResource",
+        "SecretsResource",
+        "ServiceAccountsResource",
+        "SessionRunsResource",
+        "TagsResource",
+        "TasksResource",
+        "UsersResource",
+        "WorkersResource",
+    }
+)
+
+
+def discover_resource_classes() -> dict[str, type]:
+    """Find every public ``*Resource`` class defined under client resources."""
+    import kitaru.client.resources as resources_package
+
+    classes: dict[str, type] = {}
+    for info in pkgutil.iter_modules(resources_package.__path__):
+        module = importlib.import_module(f"kitaru.client.resources.{info.name}")
+        classes.update(
+            {
+                name: member
+                for name, member in vars(module).items()
+                if isinstance(member, type)
+                and name.endswith("Resource")
+                and not name.startswith("_")
+                and member.__module__ == module.__name__
+            }
+        )
+    return classes
 
 
 def get_public_source_names(module_path: str) -> set[str]:
@@ -279,52 +296,37 @@ def get_public_source_names(module_path: str) -> set[str]:
 
 class TestAllowlistConfiguration:
     def test_published_module_set_is_exact(self) -> None:
-        api_models_leaves = {
-            f"kitaru.api_models.v1.{name}"
-            for name in (
-                "base",
-                "session",
-                "session_node",
-                "evaluation",
-                "replay",
-                "replay_config",
-                "job",
-                "imports",
-                "agent",
-                "agent_version",
-                "cohort",
-                "cohort_version",
-                "evaluator",
-                "experiment",
-                "experiment_run",
-                "investigation",
-                "annotation",
-                "filter",
-            )
+        # api_models leaves are covered by the source-tracking test below;
+        # here we pin the rest and confirm nothing outside the two approved
+        # namespaces gets published.
+        non_api_models = {
+            path for path in PUBLIC_API if not path.startswith("kitaru.api_models")
         }
-        assert (
-            set(PUBLIC_API)
-            == {
-                "kitaru.client",
-                "kitaru.client.resources",
-                "kitaru.task",
-                "kitaru.task.evaluator",
-                "kitaru.task.importer",
-                "kitaru.api_models",
-                "kitaru.api_models.v1",
-            }
-            | api_models_leaves
-        )
+        assert non_api_models == {
+            "kitaru.client",
+            "kitaru.client.resources",
+            "kitaru.task",
+            "kitaru.task.evaluator",
+            "kitaru.task.importer",
+        }
+        containers = {"kitaru.api_models", "kitaru.api_models.v1"}
+        leaves = set(PUBLIC_API) - non_api_models - containers
+        assert containers <= set(PUBLIC_API)
+        assert leaves
+        assert all(path.startswith("kitaru.api_models.v1.") for path in leaves)
 
     def test_api_models_allowlists_track_module_sources(self) -> None:
         # Structural drift check for modules without __all__: every
         # allowlisted symbol must exist in the module source, and every public
         # name in the source must be either allowlisted or in the documented
         # exclusions above.
-        assert set(API_MODELS_DOC_EXCLUSIONS) == {
+        published_leaves = {
             path for path in PUBLIC_API if path.startswith("kitaru.api_models.v1.")
         }
-        for module_path, excluded in API_MODELS_DOC_EXCLUSIONS.items():
+        stale_keys = set(API_MODELS_DOC_EXCLUSIONS) - published_leaves
+        assert not stale_keys, f"exclusions for unpublished modules: {stale_keys}"
+        for module_path in published_leaves:
+            excluded = API_MODELS_DOC_EXCLUSIONS.get(module_path, frozenset())
             spec = PUBLIC_API[module_path]
             documented = set(spec.symbols) | set(spec.reexports)
             public_names = get_public_source_names(module_path)
@@ -339,11 +341,20 @@ class TestAllowlistConfiguration:
             assert not stale, f"{module_path}: stale exclusions: {sorted(stale)}"
 
     def test_resource_allowlist_matches_defined_classes(self) -> None:
-        spec = PUBLIC_API["kitaru.client.resources"]
-        assert set(PUBLISHED_RESOURCE_CLASSES) | {"iterate_pages"} == set(spec.symbols)
-        for class_name, submodule in PUBLISHED_RESOURCE_CLASSES.items():
-            module = importlib.import_module(f"kitaru.client.resources.{submodule}")
-            assert isinstance(getattr(module, class_name), type), class_name
+        # Discovery-based drift check: a new resource class must be either
+        # allowlisted or deliberately listed as unpublished.
+        discovered = set(discover_resource_classes())
+        published = set(PUBLIC_API["kitaru.client.resources"].symbols) - {
+            "iterate_pages"
+        }
+        assert published <= discovered, (
+            f"allowlisted but absent: {sorted(published - discovered)}"
+        )
+        unaccounted = discovered - published - UNPUBLISHED_RESOURCE_CLASSES
+        assert not unaccounted, f"new resource classes to triage: {sorted(unaccounted)}"
+        stale = UNPUBLISHED_RESOURCE_CLASSES - discovered
+        assert not stale, f"stale unpublished entries: {sorted(stale)}"
+        assert not published & UNPUBLISHED_RESOURCE_CLASSES
 
     def test_no_excluded_segment_in_allowlist(self) -> None:
         for path in PUBLIC_API:
@@ -392,7 +403,10 @@ class TestExtractedPublicApi:
             assert container["classes"] == {}
             assert container["functions"] == {}
         assert set(api_models["modules"]) == {"v1"}
-        assert len(v1["modules"]) == 18
+        published_leaves = {
+            path for path in PUBLIC_API if path.startswith("kitaru.api_models.v1.")
+        }
+        assert len(v1["modules"]) == len(published_leaves)
 
     def test_page_is_published_under_api_models_base(self, public_api: dict) -> None:
         base = public_api["modules"]["api_models"]["modules"]["v1"]["modules"]["base"]
@@ -403,12 +417,14 @@ class TestExtractedPublicApi:
         # resource class must show up on its generated page.
         resources = public_api["modules"]["client"]["modules"]["resources"]
         assert "iterate_pages" in resources["functions"]
-        for class_name, submodule in PUBLISHED_RESOURCE_CLASSES.items():
-            module = importlib.import_module(f"kitaru.client.resources.{submodule}")
-            cls = getattr(module, class_name)
+        discovered = discover_resource_classes()
+        published = set(PUBLIC_API["kitaru.client.resources"].symbols) - {
+            "iterate_pages"
+        }
+        for class_name in sorted(published):
             real_methods = {
                 name
-                for name, member in vars(cls).items()
+                for name, member in vars(discovered[class_name]).items()
                 if inspect.isfunction(member) and not name.startswith("_")
             }
             documented = set(resources["classes"][class_name]["functions"])

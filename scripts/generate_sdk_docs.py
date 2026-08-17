@@ -377,8 +377,11 @@ PUBLIC_API: dict[str, ModuleSpec] = {
 # Pydantic machinery that appears as class members but is not part of the
 # documented API surface. Members inherited from pydantic.BaseModel itself
 # (model_dump, model_validate, ...) never reach the serialized output because
-# griffe only records inherited members from bases inside the loaded package;
-# this set covers the pydantic hooks kitaru models define or override.
+# griffe only records inherited members from bases inside the loaded package.
+# This is a name list, not a general rule: it names the hooks kitaru models
+# currently override, and grows when a newly overridden hook leaks into the
+# docs. A blanket model_* filter would be wrong — model_params/model_provider
+# are genuine Kitaru API fields.
 EXCLUDED_CLASS_MEMBERS = {
     "model_config",
     "model_fields",
