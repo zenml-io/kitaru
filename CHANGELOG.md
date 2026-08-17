@@ -5,11 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
 ## [0.22.0]
 
 ### Changed
 
-- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, nine stable `0.1.0` Python plugin distributions, and the stable `0.1.0` TypeScript packages.
+- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, nine stable `0.1.0` Python plugin distributions, and the stable `0.1.1` TypeScript packages.
+
+## [0.22.0rc10]
+
+### Added
+
+- Restored the SDK reference docs generator (`scripts/generate_sdk_docs.py`) for the v2 SDK: a reviewed `PUBLIC_API` allowlist over `kitaru.client` (including the resource method groups such as `client.sessions`), `kitaru.task`, and the developer-facing `kitaru.api_models.v1` types, re-enabling `just generate-docs` and the `sdkdocs.kitaru.ai` build and deploy pipeline.
+- Added a v2 CLI reference generator (`scripts/generate_cli_docs.py`) that renders `sdkdocs.kitaru.ai` CLI pages from the `kitaru schema` contract, replacing the stale v1 CLI reference.
+
+### Changed
+
+- Prepared the tenth Kitaru 0.22 release candidate with `kitaru-ui-v0.2.0-rc.6` and the Langfuse importer at `0.1.0rc3`.
 
 ## [0.22.0rc9]
 

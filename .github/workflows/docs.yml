@@ -41,7 +41,9 @@ jobs:
       - uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990  # v8.3.2
         with:
           enable-cache: false
-      - run: uv sync --frozen
+      # The cli extra provides cyclopts, which generate_cli_docs.py needs to
+      # run `kitaru schema` in-process.
+      - run: uv sync --frozen --extra cli
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271  # v6.0.9
         with:
           version: 10.33.0
@@ -51,6 +53,8 @@ jobs:
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: docs
+      - name: Generate CLI reference pages
+        run: uv run python scripts/generate_cli_docs.py
       - name: Check SDK reference generator availability
         id: sdk_generator
         run: |
