@@ -57,7 +57,7 @@ const result = await recordedAgent.generate(messages, options);
 console.log(result.text);
 ```
 
-Configure the adapter subprocess with `KITARU_API_URL` and either the worker-provided `KITARU_API_TOKEN` or `KITARU_API_KEY`. A separate Node management driver can use [`createKitaruClient()`](../getting-started/installation.md#reuse-a-developer-login) to reuse `kitaru login` without exporting a token. The wrapper calls the existing agent's public `generate()` method. It does not recreate tools, inspect private agent fields, install model middleware, or replace the returned result.
+Configure the adapter subprocess with `KITARU_API_URL` and either the worker-provided `KITARU_API_TOKEN` or `KITARU_API_KEY`. A separate Node management driver can use [`createKitaruClient()`](typescript-sdk.md#reuse-a-developer-login) to reuse `kitaru login` without exporting a token. The wrapper calls the existing agent's public `generate()` method. It does not recreate tools, inspect private agent fields, install model middleware, or replace the returned result.
 
 `requestedModelId` is the Kitaru model identifier for the normal run. `allowedReplayModels` limits which replay model overrides the process will accept. When a replay selects another allowed model, `resolveModel` turns its Kitaru identifier into a Mastra model configuration. If no replay can change the model, `resolveModel` can be omitted.
 

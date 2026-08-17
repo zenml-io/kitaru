@@ -5,13 +5,13 @@ icon: hand-wave
 
 # Welcome to Kitaru
 
-Your agent has already been tested — thousands of times, in production. Each of those runs is sitting in a trace store as a transcript you can read but not run. Kitaru makes them runnable: it records (or imports) each run as a **session**, then **replays** it against your real code, with the recording answering for the world the original run saw. Change the prompt, swap the model, or point replay at the fix in your working tree, and see what improved and what broke — before it ships.
+Your agent has already been tested thousands of times, in production. Each of those runs is sitting in a trace store as a transcript you can read but not run. Kitaru makes them runnable: it records (or imports) each run as a **session**, then **replays** it against your real code, with the recording answering for the world the original run saw. Change the prompt, swap the model, or point replay at the fix in your working tree, and see what improved and what broke before it ships.
 
 **Who it's for:** teams with an agent in front of real users, where regression testing today means re-running a few samples and eyeballing the output. Kitaru replaces that with [evaluators](concepts/evaluators.md), [cohorts](concepts/cohorts.md), and [experiments](concepts/experiments.md) over your actual traffic. If you're prototyping and haven't shipped, it will feel like more machinery than you need.
 
 **Languages:** Python and TypeScript SDKs, against the same server. The CLI is Python.
 
-**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, and plain JSONL importers are built in) or [build a small adapter](adapters/custom.md) — the recording API is two client calls.
+**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, and plain JSONL importers are built in) or [build a small adapter](adapters/custom.md) (the recording API is two client calls).
 
 Kitaru is open source (Apache 2.0) and self-hosted, from the team behind [ZenML](https://zenml.io): ZenML is for ML pipelines, Kitaru is for agents.
 
@@ -20,7 +20,7 @@ Kitaru is open source (Apache 2.0) and self-hosted, from the team behind [ZenML]
 No. There are two ways to get sessions, and they end in the same place:
 
 - **Import the history you already have.** If your agent logs to Langfuse or anything else you can export from, import it. Nothing in your production path changes: your trace store stays your system of record, and Kitaru gets a runnable copy.
-- **Record with an adapter.** Wrap the agent once, no rewrite, and every run becomes a session — wherever the agent runs: production, staging, or your laptop.
+- **Record with an adapter.** Wrap the agent once, no rewrite, and every run becomes a session wherever the agent runs: production, staging, or your laptop.
 
 {% tabs %}
 {% tab title="Import traces" %}
@@ -44,18 +44,18 @@ def refund_payment(order_id: str) -> str:
     return payments.refund(order_id)  # your real API
 
 support = KitaruAgent(agent, agent_id=AGENT_ID)
-support.run_sync("Refund order #4821 — the card reader was double-charged.")
+support.run_sync("Refund order #4821, the card reader double-charged me.")
 ```
 {% endtab %}
 {% endtabs %}
 
-Replays, imports, and evaluations all execute offline, on [workers](concepts/workers.md) in your environment — none of it touches your production traffic. An adapter does run inside your agent's process to record; if you don't want anything of Kitaru's near production, the import path never gets close to it.
+Replays, imports, and evaluations all execute offline, on [workers](concepts/workers.md) in your environment. None of it touches your production traffic. An adapter does run inside your agent's process to record; if you don't want anything of Kitaru's near production, the import path never gets close to it.
 
 ## The loop
 
-- **Record** — wrap or import, as above. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
-- **Replay** — [re-execute a session](concepts/replay.md) against your real code. Tool calls are answered from the recording, so nothing touches real systems. Unchanged, the replay reproduces the original — the faithful baseline that makes a diff trustworthy. Then fork it: a different model, a new prompt, your working tree's code.
-- **Improve** — [evaluators](concepts/evaluators.md) score both sides; [cohorts](concepts/cohorts.md) freeze the population; [experiments](concepts/experiments.md) replay a cohort against a change and show what improved and what regressed. The cohort that caught a failure becomes the regression gate that keeps it caught.
+- **Record.** Wrap or import, as above. Either way, runs land as [sessions](concepts/agents-and-sessions.md).
+- **Replay.** [Re-execute a session](concepts/replay.md) against your real code. Tool calls are answered from the recording, so nothing touches real systems. Unchanged, the replay reproduces the original: the faithful baseline that makes a diff trustworthy. Then fork it with a different model, a new prompt, or your working tree's code.
+- **Improve.** [Evaluators](concepts/evaluators.md) score both sides; [cohorts](concepts/cohorts.md) freeze the population; [experiments](concepts/experiments.md) replay a cohort against a change and show what improved and what regressed. The cohort that caught a failure becomes the regression gate that keeps it caught.
 
 Read the [Quickstart](getting-started/quickstart.md) for Kitaru's five-step method. To try it in a controlled environment, prepare the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template), then follow the [complete returns-agent tutorial](tutorials/returns-agent/README.md).
 

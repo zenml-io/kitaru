@@ -59,4 +59,4 @@ redirects:
   stacks/azureml-stacks: deploy/README.md
   stacks/log-store: deploy/README.md
   # v2 launch polish: TypeScript SDK page merged into Installation.
-  typescript-sdk: getting-started/installation.md
+  typescript-sdk: adapters/typescript-sdk.md

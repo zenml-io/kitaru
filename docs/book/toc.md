@@ -50,6 +50,7 @@
 - [OpenAI Agents SDK](adapters/openai-agents.md)
 - [Mastra](adapters/mastra.md)
 - [Vercel AI SDK](adapters/vercel-ai.md)
+- [TypeScript SDK](adapters/typescript-sdk.md)
 - [No adapter for your framework](adapters/custom.md)
 
 ## Running in production

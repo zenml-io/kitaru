@@ -86,7 +86,7 @@ const result = await generateText({
 console.log(result.text);
 ```
 
-Configure the adapter subprocess with `KITARU_API_URL` and either `KITARU_API_TOKEN` or `KITARU_API_KEY`. You can also pass `apiUrl` and `apiKey` to `createKitaruGenerateText`. A separate Node management process can use [`createKitaruClient()`](../getting-started/installation.md#reuse-a-developer-login) to reuse `kitaru login` without exporting a token.
+Configure the adapter subprocess with `KITARU_API_URL` and either `KITARU_API_TOKEN` or `KITARU_API_KEY`. You can also pass `apiUrl` and `apiKey` to `createKitaruGenerateText`. A separate Node management process can use [`createKitaruClient()`](typescript-sdk.md#reuse-a-developer-login) to reuse `kitaru login` without exporting a token.
 
 The direct wrapper calls AI SDK's public `generateText`, callbacks, and local tool `execute` functions. It does not reproduce the AI SDK generation loop. Native options, callbacks, generic types, and return behavior therefore remain available. The direct wrapper sets `maxRetries` to `0` so Kitaru records one provider attempt rather than hiding retries inside a node. The Agent API preserves native retry settings.
 
