@@ -142,7 +142,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Endpoints can serve reads from a read replica configured via `KITARU_SERVER_READ_DATABASE_URL` or `KITARU_SERVER_DB_READ_HOST`.
 - Requests to read-replica endpoints are served from the primary database when they carry the `Prefer: consistency=strong` header.
 - The UI session and evaluation-aggregate endpoints serve reads from the read replica when one is configured.
-- Request strongly consistent reads from the Python SDK with `client.with_strong_consistency()`.
+- Request strongly consistent reads from the Python SDK with `client.with_options(consistency="strong")`.
 - Vercel AI SDK 7 `ToolLoopAgent` support for typed, non-streaming agent generation with Kitaru recording and safe replay boundaries.
 - The server now serves the bundled Kitaru UI at its root URL with SPA fallback. Setting `KITARU_SERVER_EXTERNAL_UI=true` makes it redirect to the configured dashboard URL instead of serving files, and `GET /api/v1/info` reports the served UI version.
 - Every filterable entity list filters by `id`, including `in` over a list of ids.

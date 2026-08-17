@@ -302,7 +302,7 @@ async def test_streaming_response_is_not_consumed() -> None:
     assert collected == [b"first", b"second"]
 
 
-async def test_strong_consistency_view_sends_the_prefer_header() -> None:
+async def test_with_options_view_sends_the_prefer_header() -> None:
     """Send the strong consistency preference only through the view."""
     prefers: list[str | None] = []
 
@@ -311,7 +311,7 @@ async def test_strong_consistency_view_sends_the_prefer_header() -> None:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    view = client.with_strong_consistency()
+    view = client.with_options(consistency="strong")
 
     await client.request("GET", "/api/v1/accounts")
     await view.request("GET", "/api/v1/accounts")
@@ -320,14 +320,14 @@ async def test_strong_consistency_view_sends_the_prefer_header() -> None:
     await client.close()
 
 
-async def test_closing_a_strong_consistency_view_keeps_the_parent_usable() -> None:
+async def test_closing_a_with_options_view_keeps_the_parent_usable() -> None:
     """Close a strong consistency view without closing what it shares."""
 
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={})
 
     client = mock_api_client(handler)
-    view = client.with_token("view-token").with_strong_consistency()
+    view = client.with_token("view-token").with_options(consistency="strong")
 
     async with view:
         pass

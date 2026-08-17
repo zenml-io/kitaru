@@ -17,7 +17,7 @@ import copy
 import os
 from collections.abc import AsyncIterable
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -222,22 +222,28 @@ class KitaruAPIClient:
         view._bind_resources()
         return view
 
-    def with_strong_consistency(self) -> "KitaruAPIClient":
-        """Return a view of this client requesting strongly consistent reads.
+    def with_options(
+        self, consistency: Literal["strong"] | None = None
+    ) -> "KitaruAPIClient":
+        """Return a view of this client with request options applied.
 
-        The view sends ``Prefer: consistency=strong`` on every request, so
-        endpoints that serve reads from a replica serve the view from the
-        primary database. It shares this client's HTTP transport and auth
-        flow, and closing it leaves both open.
+        The view shares this client's HTTP transport and auth flow, and
+        closing it leaves both open.
+
+        Args:
+            consistency: ``strong`` sends ``Prefer: consistency=strong`` on
+                every request, so endpoints that serve reads from a replica
+                serve the view from the primary database.
 
         Returns:
-            Client view requesting strongly consistent reads.
+            Client view with the options applied.
         """
         view = copy.copy(self)
-        view._request_headers = {
-            **self._request_headers,
-            "Prefer": "consistency=strong",
-        }
+        if consistency == "strong":
+            view._request_headers = {
+                **self._request_headers,
+                "Prefer": "consistency=strong",
+            }
         view._owns_transport = False
         view._owns_auth = False
         view._bind_resources()
