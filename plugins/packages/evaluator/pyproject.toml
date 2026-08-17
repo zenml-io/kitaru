@@ -1,10 +1,10 @@
 [project]
 name = "kitaru-evaluator"
-version = "0.1.0rc0"
+version = "0.1.0"
 description = "Built-in deterministic evaluators for Kitaru."
 license = "Apache-2.0"
 requires-python = ">=3.11"
-dependencies = ["kitaru>=0.22.0rc0,<0.23"]
+dependencies = ["kitaru>=0.22.0,<0.23"]
 
 [build-system]
 requires = ["hatchling==1.32.0"]

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0]
+
+### Changed
+
+- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, the stable `0.1.0` Python plugin distributions, and the stable `0.1.0` TypeScript packages.
+
 ## [0.22.0rc7]
 
 ### Changed
