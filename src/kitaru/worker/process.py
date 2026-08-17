@@ -330,8 +330,9 @@ def get_python_run_argv(
 ) -> list[str]:
     """Build the argv running a python module with its arguments.
 
-    Runs the module directly when there are no dependencies, otherwise
-    through ``uv run`` with each dependency passed as ``--with``.
+    Runs the module directly when there are no dependencies. Otherwise, it
+    layers each dependency over the worker's Python environment without
+    discovering or synchronizing a project from the worker's current directory.
 
     Args:
         module: Module to run.
@@ -343,7 +344,14 @@ def get_python_run_argv(
     """
     if not dependencies:
         return [sys.executable, "-m", module, *args]
-    parts = ["uv", "run"]
+    parts = [
+        "uv",
+        "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
+    ]
     for dependency in dependencies:
         parts.extend(["--with", dependency])
     parts.extend(["python", "-m", module, *args])
