@@ -14,7 +14,7 @@ The division of labor: **Kitaru observes your production agents; your coding ass
 Kitaru ships an MCP server, so assistants that speak MCP — Claude Code, Cursor, and friends — get typed, bounded tools instead of shelling out:
 
 ```bash
-pip install "kitaru[mcp]"
+uv add "kitaru[mcp]"
 ```
 
 Then register it with your assistant (`.mcp.json` for Claude Code):
@@ -23,12 +23,18 @@ Then register it with your assistant (`.mcp.json` for Claude Code):
 {
   "mcpServers": {
     "kitaru": {
-      "command": "kitaru-mcp",
-      "args": []
+      "command": "uv",
+      "args": ["run", "kitaru-mcp", "--server", "http://localhost:8000", "--mode", "standard"]
     }
   }
 }
 ```
+
+Installing with uv puts the `kitaru-mcp` executable inside your project's virtual environment. Your assistant starts the server as a plain subprocess and never activates that environment, so a bare `kitaru-mcp` is not on `PATH` and the process dies before it says anything. Going through `uv run` avoids that.
+
+Replace the `--server` URL with your own. It has to be the server you are logged into. `http://localhost:8000` is only right after `kitaru login --local`; on a managed or self-hosted workspace, use your workspace URL instead. `kitaru status` tells you which one you are on: the Connection section shows the server URL it resolved, and Health reports `Authentication: authenticated` when your stored credential works there. The MCP server does not follow the CLI's current selection, and a mismatch is easy to miss. Your assistant still reports Kitaru as connected while every tool call reads from a server you never logged into, which usually looks like an empty workspace.
+
+`--mode standard` appears here because the default is `read-only`, which leaves an assistant working through an investigation with nothing it can write, so it falls back to the CLI instead. Read-only is still a sensible place to start, as long as you expect that. The capability modes are described below.
 
 The server needs an explicit target — `--server URL`, `KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails if none selects a server. Credentials come from `KITARU_API_KEY` or the stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is deliberately ignored). The target and credential source are selected at startup. A stored credential may be refreshed or updated while the process runs; restart `kitaru-mcp` after changing the target or an environment-provided API key.
 
