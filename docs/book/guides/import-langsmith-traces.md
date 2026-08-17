@@ -1,6 +1,6 @@
 ---
 description: "Turn LangSmith runs into replayable Kitaru sessions: the accepted export shapes, how threads group into sessions, dedup semantics, and what the importer cannot recover."
-icon: file-import
+icon: hammer
 ---
 
 # LangSmith

@@ -1,6 +1,6 @@
 ---
 description: "Import Braintrust project logs into Kitaru: accepted export shapes, how spans become nodes, multi-turn grouping, and what the importer marks as lossy."
-icon: file-import
+icon: brain
 ---
 
 # Braintrust
