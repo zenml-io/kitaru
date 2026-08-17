@@ -94,7 +94,7 @@ from kitaru.client.config import get_config_path
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.device_grant import DeviceLoginError
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 
 F = TypeVar("F", bound=Callable[..., Any])
 _MACHINE_TRUE = {"1", "true", "yes", "on"}
@@ -657,6 +657,13 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
                 False,
                 "Read API key from stdin.",
             ),
+            ParameterSpec(
+                "--refresh",
+                "boolean",
+                "option",
+                False,
+                "Skip stored credentials and force a new device login.",
+            ),
         ),
         read_only=False,
         side_effects=(
@@ -685,6 +692,7 @@ async def login(
     username: str | None = None,
     password_stdin: bool = False,
     api_key_stdin: bool = False,
+    refresh: bool = False,
 ) -> CommandResult:
     """Authenticate with a server and store its credential when required."""
     invocation = _invocation()
@@ -695,6 +703,7 @@ async def login(
         server=chosen_server,
         local=local,
         upgrade=upgrade,
+        refresh=refresh,
         username=username,
         password_stdin=password_stdin,
         api_key_stdin=api_key_stdin,
@@ -4152,6 +4161,12 @@ def _convert_error(
         return CLIError("invalid_arguments", str(exception))
     if isinstance(exception, (DeviceLoginError, ControlPlaneLoginError)):
         return CLIError("authentication_failed", str(exception))
+    if isinstance(exception, InvalidServerResponseError):
+        return CLIError(
+            "invalid_configuration",
+            str(exception),
+            hint="Check the server URL and that the client and server versions match.",
+        )
     if isinstance(exception, APIError):
         details = {"status_code": exception.status_code}
         if exception.status_code in {401, 403}:

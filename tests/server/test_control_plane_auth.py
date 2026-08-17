@@ -26,6 +26,7 @@ from conftest import (
     FakeControlPlaneClient,
     control_plane_settings,
 )
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.adapters.auth.control_plane import (
     SERVER_ID_HEADER,
     SERVER_URL_HEADER,
@@ -47,7 +48,23 @@ class _RecordingAnalytics(ServerAnalytics):
     def __init__(self) -> None:
         """Initialize the tracker."""
         self.identified: list[tuple[uuid.UUID, dict[str, Any]]] = []
+        self.tracked: list[tuple[uuid.UUID, str, dict[str, Any]]] = []
         self.aliased: list[tuple[uuid.UUID, uuid.UUID]] = []
+
+    def track(
+        self,
+        user_id: uuid.UUID,
+        event: AnalyticsEvent | str,
+        properties: dict[str, Any] | None = None,
+    ) -> None:
+        """Record a track call instead of buffering it.
+
+        Args:
+            user_id: User id.
+            event: Event name.
+            properties: Event properties.
+        """
+        self.tracked.append((user_id, event, properties or {}))
 
     def identify(
         self, user_id: uuid.UUID, traits: dict[str, Any] | None = None
@@ -437,6 +454,13 @@ async def test_authenticate_new_account_identifies_and_aliases(
         "account_origin": "control_plane",
         "email": user.email,
     }
+    assert analytics.tracked == [
+        (
+            context.account.id,
+            AnalyticsEvent.ACCOUNT_CREATED,
+            {"account_origin": "control_plane", "is_service_account": False},
+        )
+    ]
     assert analytics.aliased == [(user.id, context.account.id)]
 
 
@@ -455,6 +479,7 @@ async def test_authenticate_existing_account_does_not_identify(
     await authenticator.authenticate("credential")
 
     assert analytics.identified == []
+    assert analytics.tracked == []
     assert analytics.aliased == []
 
 

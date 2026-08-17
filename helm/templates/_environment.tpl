@@ -63,6 +63,7 @@ jwt_issuer: "{{ .Kitaru.pro.apiURL }}"
 auth_cookie_name: kitaru-server-{{ .Kitaru.pro.workspaceID }}
 server_id: {{ .Kitaru.pro.workspaceID | quote }}
 dashboard_url: {{ .Kitaru.pro.dashboardURL }}/kitaru-workspaces/{{ .Kitaru.pro.workspaceID }}
+external_ui: "True"
 {{- if .Kitaru.pro.organizationID }}
 organization_id: {{ .Kitaru.pro.organizationID | quote }}
 {{- end }}

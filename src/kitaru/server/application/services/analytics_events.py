@@ -17,16 +17,18 @@ from datetime import datetime
 from typing import Any
 
 from kitaru.analytics.events import AccountOrigin
+from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.annotation import Annotation
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.job import Job
-from kitaru.server.domain.plugin import PluginKind, PluginSource
+from kitaru.server.domain.plugin import Plugin, PluginKind, PluginSource
 from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
+from kitaru.server.domain.worker import Worker
 
 
 def _duration_properties(
@@ -63,6 +65,24 @@ def build_account_traits(account: Account, origin: AccountOrigin) -> dict[str, A
     if account.email is not None:
         traits["email"] = account.email
     return traits
+
+
+def build_account_created_properties(
+    account: Account, origin: AccountOrigin
+) -> dict[str, Any]:
+    """Build the properties of an account creation.
+
+    Args:
+        account: Created account.
+        origin: Where the account was created.
+
+    Returns:
+        Event properties.
+    """
+    return {
+        "account_origin": origin.value,
+        "is_service_account": account.is_service_account,
+    }
 
 
 def build_user_enriched_properties(account: Account) -> dict[str, Any]:
@@ -112,17 +132,42 @@ def build_session_completed_properties(session: Session) -> dict[str, Any]:
     return properties
 
 
-def build_import_completed_properties(task: ImportTask) -> dict[str, Any]:
+def _plugin_properties(plugin: Plugin | None) -> dict[str, Any]:
+    """Build the plugin properties, empty without a plugin.
+
+    Args:
+        plugin: Plugin the task ran.
+
+    Returns:
+        Plugin properties.
+    """
+    if plugin is None:
+        return {}
+    # Ownerless plugins are the builtin ones, so only their names are safe to
+    # report.
+    properties: dict[str, Any] = {
+        "plugin": plugin.name if plugin.owner_id is None else "custom"
+    }
+    if plugin.provider is not None:
+        properties["provider"] = plugin.provider
+    return properties
+
+
+def build_import_completed_properties(
+    task: ImportTask, plugin: Plugin | None
+) -> dict[str, Any]:
     """Build the properties of an import task's transition to a terminal status.
 
     Args:
         task: Import task that transitioned to a terminal status.
+        plugin: Importer plugin the task ran.
 
     Returns:
         Event properties.
     """
     properties: dict[str, Any] = {
         "status": task.status.value,
+        **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
     if isinstance(task.result, dict) and isinstance(task.result.get("created"), int):
@@ -130,17 +175,21 @@ def build_import_completed_properties(task: ImportTask) -> dict[str, Any]:
     return properties
 
 
-def build_evaluation_completed_properties(task: EvaluationTask) -> dict[str, Any]:
+def build_evaluation_completed_properties(
+    task: EvaluationTask, plugin: Plugin | None
+) -> dict[str, Any]:
     """Build the properties of an evaluation task's transition to a terminal status.
 
     Args:
         task: Evaluation task that transitioned to a terminal status.
+        plugin: Evaluator plugin the task ran.
 
     Returns:
         Event properties.
     """
     return {
         "status": task.status.value,
+        **_plugin_properties(plugin),
         **_duration_properties(task.started_at, task.ended_at),
     }
 
@@ -159,6 +208,9 @@ def build_job_completed_properties(job: Job, tasks: list[Task]) -> dict[str, Any
         "kind": job.kind.value,
         "status": job.status.value,
         "task_count": len(tasks),
+        "successful_task_count": sum(
+            1 for task in tasks if task.status == TaskStatus.COMPLETED
+        ),
         "task_kinds": sorted({task.kind.value for task in tasks}),
         **_duration_properties(job.started_at, job.ended_at),
     }
@@ -279,6 +331,22 @@ def build_annotation_created_properties(annotation: Annotation) -> dict[str, Any
         "investigation_answer": annotation.investigation_session_id is not None,
         "has_selector": annotation.selector is not None,
     }
+
+
+def build_worker_registered_properties(worker: Worker) -> dict[str, Any]:
+    """Build the properties of a worker registration.
+
+    Args:
+        worker: Registered worker.
+
+    Returns:
+        Event properties.
+    """
+    properties = {"worker_platform": worker.runtime.platform}
+    if worker_os := worker.runtime.os:
+        properties["worker_os"] = worker_os
+
+    return properties
 
 
 def build_plugin_version_registered_properties(
