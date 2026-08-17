@@ -148,10 +148,6 @@ ui-serve:
 example-coverage-audit:
     uv run --with pyyaml python scripts/audit-example-coverage.py
 
-# Validate the canonical example without a server or provider credentials.
-canonical-example-test:
-    cd examples/pydantic_ai_ticket_resolver && uv run --frozen --with pytest python -m pytest -q tests/test_contract.py
-
 # Build and push the dev base image for remote stack testing (K8s, etc.).
 # The image bakes in kitaru from local source + ZenML from PyPI.
 # Remote-smoke operators must pass their own target registry/image.

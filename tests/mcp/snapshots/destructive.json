@@ -8832,6 +8832,16 @@
           ],
           "default": null
         },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "const": "review"
+          },
+          "title": "Links",
+          "type": "object"
+        },
         "ok": {
           "title": "Ok",
           "type": "boolean"
