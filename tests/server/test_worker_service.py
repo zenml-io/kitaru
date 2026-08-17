@@ -18,9 +18,15 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import FakeWorkerRepository, create_worker
+from conftest import UNSCOPED_WORKER_SCOPE, FakeWorkerRepository, create_worker
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerClaim,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.worker_service import WorkerService
@@ -47,7 +53,7 @@ async def test_register_worker(service: WorkerService) -> None:
     """Register a new worker."""
     worker = await service.register_worker(
         name="worker-1",
-        scope=WorkerScope(),
+        scope=UNSCOPED_WORKER_SCOPE,
         runtime=WorkerRuntime(platform="bare"),
         metadata={"region": "eu"},
         actor=ACTOR,
@@ -65,21 +71,21 @@ async def test_register_worker_upsert_keeps_id_and_renews_timestamps(
     """Re-registering under the same name keeps id and created, renews updated."""
     first = await service.register_worker(
         name="worker-1",
-        scope=WorkerScope(kinds=["agent"]),
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
         runtime=WorkerRuntime(platform="bare"),
         metadata={"region": "eu"},
         actor=ACTOR,
     )
     second = await service.register_worker(
         name="worker-1",
-        scope=WorkerScope(kinds=["importer"]),
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
         runtime=WorkerRuntime(platform="docker"),
         metadata={"region": "us"},
         actor=ACTOR,
     )
     assert second.id == first.id
     assert second.created == first.created
-    assert second.scope == WorkerScope(kinds=["importer"])
+    assert second.scope == WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
     assert second.runtime.platform == "docker"
     assert second.metadata == {"region": "us"}
     assert second.last_seen_at >= first.last_seen_at
@@ -92,7 +98,7 @@ async def test_get_worker(service: WorkerService) -> None:
     """Load a stored worker by id."""
     created = await service.register_worker(
         name="worker-1",
-        scope=WorkerScope(),
+        scope=UNSCOPED_WORKER_SCOPE,
         runtime=WorkerRuntime(platform="bare"),
         metadata={},
         actor=ACTOR,
@@ -113,7 +119,7 @@ async def test_list_workers(service: WorkerService) -> None:
     for name in ["worker-1", "worker-2", "worker-3"]:
         await service.register_worker(
             name=name,
-            scope=WorkerScope(),
+            scope=UNSCOPED_WORKER_SCOPE,
             runtime=WorkerRuntime(platform="bare"),
             metadata={},
             actor=ACTOR,
@@ -160,7 +166,7 @@ async def test_delete_worker(service: WorkerService) -> None:
     """Delete a stored worker."""
     created = await service.register_worker(
         name="worker-1",
-        scope=WorkerScope(),
+        scope=UNSCOPED_WORKER_SCOPE,
         runtime=WorkerRuntime(platform="bare"),
         metadata={},
         actor=ACTOR,
@@ -179,7 +185,7 @@ async def test_delete_worker_not_found(service: WorkerService) -> None:
 async def test_worker_scope_round_trip(service: WorkerService) -> None:
     """Round-trip a scope carrying selectors and a job pin."""
     scope = WorkerScope(
-        kinds=["agent", "evaluator"],
+        claims=[WorkerClaim(kind=TaskKind.AGENT), WorkerClaim(kind=TaskKind.EVALUATOR)],
         selectors=[LabelSelector(key="agent_version", values=["v1", "v2"])],
         job_id=uuid.uuid4(),
     )
@@ -198,7 +204,7 @@ async def test_is_live_true(service: WorkerService) -> None:
     """Report a recently seen worker as live."""
     created = await service.register_worker(
         name="worker-1",
-        scope=WorkerScope(),
+        scope=UNSCOPED_WORKER_SCOPE,
         runtime=WorkerRuntime(platform="bare"),
         metadata={},
         actor=ACTOR,

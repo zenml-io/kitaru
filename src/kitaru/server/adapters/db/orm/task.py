@@ -66,11 +66,14 @@ TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
 TASK_JOB_ID_STATUS_INDEX = index_name("task", ["job_id", "status"])
 TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
 TASK_RESULT_SESSION_ID_INDEX = index_name("task", ["result_session_id"])
-# Partial indexes covering the two queue scans: the claim query reads pending
-# rows in id order and matches selectors against labels, the staleness sweep
-# reads in-flight rows by their last sign of life.
+# Partial indexes covering the queue scans: a scope claiming everything reads
+# pending rows in id order, a kind claim reads them per kind, and a
+# version-pinned claim reads them per agent version. The staleness sweep
+# reads in-flight rows by their last sign of life. Selectors filter the rows
+# the claim scans fetch and use no index.
 TASK_PENDING_ID_INDEX = index_name("task", ["id"])
-TASK_PENDING_LABELS_INDEX = index_name("task", ["labels"])
+TASK_PENDING_KIND_INDEX = index_name("task", ["kind", "id"])
+TASK_PENDING_AGENT_VERSION_INDEX = index_name("task", ["agent_version_id", "id"])
 TASK_STALENESS_INDEX = index_name("task", ["heartbeat_at", "claimed_at"])
 
 TERMINAL_STATUS_VALUES = [status.value for status in TERMINAL_TASK_STATUSES]
@@ -131,9 +134,15 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Index(TASK_RESULT_SESSION_ID_INDEX, "result_session_id"),
         Index(TASK_PENDING_ID_INDEX, "id", postgresql_where=text(PENDING_PREDICATE)),
         Index(
-            TASK_PENDING_LABELS_INDEX,
-            "labels",
-            postgresql_using="gin",
+            TASK_PENDING_KIND_INDEX,
+            "kind",
+            "id",
+            postgresql_where=text(PENDING_PREDICATE),
+        ),
+        Index(
+            TASK_PENDING_AGENT_VERSION_INDEX,
+            "agent_version_id",
+            "id",
             postgresql_where=text(PENDING_PREDICATE),
         ),
         Index(

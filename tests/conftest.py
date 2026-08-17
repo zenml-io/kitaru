@@ -52,8 +52,8 @@ from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
-from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
+from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -236,6 +236,11 @@ from kitaru.transport import RetryTransport
 # runs, so register this module under the bare name and keep this file the
 # only conftest in the tree.
 sys.modules.setdefault("conftest", sys.modules[__name__])
+
+# Scope claiming every kind with no agent pin, the former empty-scope default.
+UNSCOPED_WORKER_SCOPE = WorkerScope(
+    claims=[WorkerClaim(kind=kind) for kind in TaskKind]
+)
 
 # Settings built without an explicit ANALYTICS_OPT_IN read this environment
 # variable, so no test server posts analytics to the real endpoint.
@@ -3290,7 +3295,7 @@ async def create_worker(
         Worker(
             owner_id=owner_id,
             name=name,
-            scope=scope if scope is not None else WorkerScope(),
+            scope=scope if scope is not None else UNSCOPED_WORKER_SCOPE,
             runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
             metadata=metadata if metadata is not None else {},
             last_seen_at=last_seen_at
@@ -5049,18 +5054,33 @@ class FakeTaskRepository:
             if task_id in self._tasks
         }
 
-    def _matches_scope(self, task: Task, scope: WorkerScope) -> bool:
-        """Report whether a task matches a claim scope.
+    def _matches_claim(self, task: Task, claim: WorkerClaim) -> bool:
+        """Report whether a task's kind and agent version match a claim.
+
+        Args:
+            task: Candidate task.
+            claim: Claim from the worker's scope.
+
+        Returns:
+            Whether the claim covers the task.
+        """
+        if claim.agent_version_id is not None:
+            return (
+                isinstance(task, AgentTask)
+                and task.agent_version_id == claim.agent_version_id
+            )
+        return task.kind is claim.kind
+
+    def _matches_residual(self, task: Task, scope: WorkerScope) -> bool:
+        """Report whether a task matches a scope's conditions beyond its claims.
 
         Args:
             task: Candidate task.
             scope: Claim scope narrowing the queue.
 
         Returns:
-            Whether every scope term matches.
+            Whether the job pin and every selector match.
         """
-        if scope.kinds and task.kind not in scope.kinds:
-            return False
         if scope.job_id is not None and task.job_id != scope.job_id:
             return False
         for selector in scope.selectors or []:
@@ -5156,8 +5176,9 @@ class FakeTaskRepository:
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
-        Row locking has no in-memory counterpart, a single process never
-        contends with itself.
+        Ordering mirrors the SQL repository: the oldest pending tasks
+        matching the scope are handed out. Row locking has no in-memory
+        counterpart, a single process never contends with itself.
 
         Args:
             scope: Claim scope narrowing the queue.
@@ -5168,17 +5189,22 @@ class FakeTaskRepository:
         Returns:
             Claimed tasks carrying their incremented attempt.
         """
-        candidates = sorted(
+        pending = sorted(
             (
                 task
                 for task in self._tasks.values()
                 if task.status is TaskStatus.PENDING
-                and self._matches_scope(task, scope)
+                and self._matches_residual(task, scope)
             ),
             key=lambda task: task.id,
         )
+        selected = [
+            task
+            for task in pending
+            if any(self._matches_claim(task, claim) for claim in scope.claims)
+        ][:limit]
         claimed: list[Task] = []
-        for task in candidates[:limit]:
+        for task in selected:
             claimed_task = task.model_copy()
             claimed_task.claim(worker_id, now)
             claimed.append(await self.update(claimed_task))

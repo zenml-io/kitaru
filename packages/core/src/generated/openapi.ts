@@ -8032,6 +8032,19 @@ export interface components {
             type: string;
         };
         /**
+         * WorkerClaim
+         * @description Worker claim.
+         */
+        WorkerClaim: {
+            /**
+             * Agent Version Id
+             * @description Agent version the claim covers, None claims every agent version.
+             */
+            agent_version_id?: string | null;
+            /** @description Task kind the claim covers. */
+            kind: components["schemas"]["TaskKind"];
+        };
+        /**
          * WorkerCreateRequest
          * @description Worker create request.
          */
@@ -8204,15 +8217,15 @@ export interface components {
          */
         WorkerScope: {
             /**
+             * Claims
+             * @description Claims the worker serves, combined by disjunction.
+             */
+            claims: components["schemas"]["WorkerClaim"][];
+            /**
              * Job Id
              * @description Job the worker claims tasks from.
              */
             job_id?: string | null;
-            /**
-             * Kinds
-             * @description Task kinds the worker claims.
-             */
-            kinds?: components["schemas"]["TaskKind"][] | null;
             /**
              * Selectors
              * @description Label selectors the worker claims, combined by conjunction.

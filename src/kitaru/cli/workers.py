@@ -27,7 +27,12 @@ from pydantic import ValidationError
 
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import TaskKind
-from kitaru.api_models.v1.worker import LabelSelector, WorkerListParams, WorkerScope
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerClaim,
+    WorkerListParams,
+    WorkerScope,
+)
 from kitaru.cli.config import ResolvedTarget
 from kitaru.cli.output import (
     CLIError,
@@ -89,7 +94,7 @@ def load_worker_runtime() -> tuple[type[Any], type[Any]]:
 def build_worker_config(
     *,
     name: str | None = None,
-    kinds: list[TaskKind] | None = None,
+    claims: list[str] | None = None,
     selectors: list[str] | None = None,
     job_id: uuid.UUID | None = None,
     concurrency: int | None = None,
@@ -104,13 +109,13 @@ def build_worker_config(
 ) -> Any:
     """Merge explicit CLI values over ``KITARU_WORKER_*`` settings.
 
-    The optional job id refines the configured scope; it does not discard
-    configured kinds or selectors.
+    The optional job id refines the configured scope. It does not discard
+    configured claims or selectors.
     """
     _, config_type = load_worker_runtime()
     base = config_type()
     scope = WorkerScope(
-        kinds=kinds if kinds is not None else base.scope.kinds,
+        claims=_parse_claims(claims) if claims is not None else base.scope.claims,
         selectors=(
             _parse_selectors(selectors)
             if selectors is not None
@@ -157,6 +162,26 @@ def _parse_selectors(values: list[str]) -> list[LabelSelector]:
             ) from error
         selectors.append(selector)
     return selectors
+
+
+def _parse_claims(values: list[str]) -> list[WorkerClaim]:
+    """Parse compact ``KIND`` or ``agent=AGENT_VERSION_ID`` claim forms."""
+    claims: list[WorkerClaim] = []
+    for value in values:
+        try:
+            kind_value, separator, raw_agent_version_id = value.partition("=")
+            claim = WorkerClaim(
+                kind=TaskKind(kind_value.strip()),
+                agent_version_id=(
+                    uuid.UUID(raw_agent_version_id.strip()) if separator else None
+                ),
+            )
+        except (ValidationError, ValueError) as error:
+            raise CLIError(
+                "invalid_arguments", f"Invalid --claim {value!r}: {error}"
+            ) from error
+        claims.append(claim)
+    return claims
 
 
 def _parse_metadata(values: list[str]) -> dict[str, str]:
@@ -316,11 +341,7 @@ def _worker_summary(config: Any) -> dict[str, Any]:
     """Return a non-secret lifecycle projection of worker configuration."""
     return {
         "name": config.name,
-        "kinds": (
-            [kind.value for kind in config.scope.kinds]
-            if config.scope.kinds is not None
-            else None
-        ),
+        "claims": [_claim_syntax(claim) for claim in config.scope.claims],
         "selectors": (
             [selector.model_dump(mode="json") for selector in config.scope.selectors]
             if config.scope.selectors is not None
@@ -330,6 +351,13 @@ def _worker_summary(config: Any) -> dict[str, Any]:
         "concurrency": config.concurrency,
         "claim_batch_size": config.claim_batch_size,
     }
+
+
+def _claim_syntax(claim: WorkerClaim) -> str:
+    """Render a claim in the compact syntax ``--claim`` accepts."""
+    if claim.agent_version_id is not None:
+        return f"{claim.kind.value}={claim.agent_version_id}"
+    return claim.kind.value
 
 
 async def list_workers(

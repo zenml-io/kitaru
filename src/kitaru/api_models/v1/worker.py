@@ -29,6 +29,8 @@ from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.base import FrozenModel
 
+_ALL_TASK_KINDS = frozenset(TaskKind)
+
 
 class LabelSelector(FrozenModel):
     """Label selector."""
@@ -40,11 +42,37 @@ class LabelSelector(FrozenModel):
     )
 
 
+class WorkerClaim(FrozenModel):
+    """Worker claim."""
+
+    kind: TaskKind = Field(description="Task kind the claim covers.")
+    agent_version_id: uuid.UUID | None = Field(
+        default=None,
+        description="Agent version the claim covers, None claims every agent version.",
+    )
+
+    @model_validator(mode="after")
+    def _validate_claim(self) -> Self:
+        """Reject an agent version on a non-agent claim.
+
+        Raises:
+            ValueError: agent_version_id is set on a non-agent kind.
+
+        Returns:
+            The validated claim.
+        """
+        if self.agent_version_id is not None and self.kind is not TaskKind.AGENT:
+            raise ValueError("agent_version_id requires the agent kind")
+        return self
+
+
 class WorkerScope(FrozenModel):
     """Worker scope."""
 
-    kinds: list[TaskKind] | None = Field(
-        default=None, description="Task kinds the worker claims."
+    claims: list[WorkerClaim] = Field(
+        min_length=1,
+        max_length=16,
+        description="Claims the worker serves, combined by disjunction.",
     )
     selectors: list[LabelSelector] | None = Field(
         default=None,
@@ -54,19 +82,41 @@ class WorkerScope(FrozenModel):
         default=None, description="Job the worker claims tasks from."
     )
 
+    @property
+    def claims_everything(self) -> bool:
+        """Whether the claims cover every kind with no agent pin.
+
+        Returns:
+            Whether the claims cover every kind with no agent pin.
+        """
+        return {claim.kind for claim in self.claims} == _ALL_TASK_KINDS and all(
+            claim.agent_version_id is None for claim in self.claims
+        )
+
     @model_validator(mode="after")
     def _validate_scope(self) -> Self:
-        """Reject empty scope lists and duplicate selector keys.
+        """Reject redundant claims, empty selector lists, and duplicate selector keys.
 
         Raises:
-            ValueError: kinds or selectors is set but empty, or two selectors
-                share a key.
+            ValueError: Two claims are equal, an agent version claim is
+                subsumed by an unversioned agent claim, selectors is set but
+                empty, or two selectors share a key.
 
         Returns:
             The validated scope.
         """
-        if self.kinds is not None and not self.kinds:
-            raise ValueError("kinds must not be empty when set")
+        seen: set[tuple[TaskKind, uuid.UUID | None]] = set()
+        for claim in self.claims:
+            entry = (claim.kind, claim.agent_version_id)
+            if entry in seen:
+                raise ValueError("claims must be unique")
+            seen.add(entry)
+        if (TaskKind.AGENT, None) in seen and any(
+            claim.agent_version_id is not None for claim in self.claims
+        ):
+            raise ValueError(
+                "agent version claims are redundant with an unversioned agent claim"
+            )
         if self.selectors is not None:
             if not self.selectors:
                 raise ValueError("selectors must not be empty when set")

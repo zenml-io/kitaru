@@ -36,7 +36,6 @@ from kitaru.api_models.v1.investigation import (
     InvestigationStatus,
 )
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.api_models.v1.task import TaskKind
 from kitaru.cli import (
     annotations,
     cohorts,
@@ -3778,7 +3777,12 @@ async def evaluation_get(evaluation: uuid.UUID, /) -> CommandResult:
 _WORKER_START_PARAMETERS = (
     ParameterSpec("--name", "string", "option", False, "Ephemeral worker name."),
     ParameterSpec(
-        "--kinds", "agent|evaluator|importer[]", "option", False, "Task kinds to claim."
+        "--claim",
+        "agent|evaluator|importer|agent=UUID[]",
+        "option",
+        False,
+        "Claim the worker serves: agent, evaluator, importer, or "
+        "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
     ),
     ParameterSpec(
         "--selector",
@@ -3847,7 +3851,14 @@ _WORKER_START_PARAMETERS = (
 async def worker_start(
     *,
     name: str | None = None,
-    kinds: list[TaskKind] | None = None,
+    claims: Annotated[
+        list[str] | None,
+        Parameter(
+            name="--claim",
+            help="Claim the worker serves: agent, evaluator, importer, or "
+            "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
+        ),
+    ] = None,
     selectors: Annotated[
         list[str] | None,
         Parameter(name="--selector", help="KEY=VALUE[,VALUE] or selector JSON."),
@@ -3869,7 +3880,7 @@ async def worker_start(
     return await workers.start_worker(
         target,
         name=name,
-        kinds=kinds,
+        claims=claims,
         selectors=selectors,
         job_id=job_id,
         concurrency=concurrency,

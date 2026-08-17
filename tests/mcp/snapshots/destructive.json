@@ -1903,6 +1903,35 @@
           "title": "ToolPolicyOnMiss",
           "type": "string"
         },
+        "WorkerClaim": {
+          "additionalProperties": false,
+          "description": "Worker claim.",
+          "properties": {
+            "agent_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent version the claim covers, None claims every agent version.",
+              "title": "Agent Version Id"
+            },
+            "kind": {
+              "$ref": "#/$defs/TaskKind",
+              "description": "Task kind the claim covers."
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "WorkerClaim",
+          "type": "object"
+        },
         "WorkerResponse": {
           "description": "Worker response.",
           "properties": {
@@ -2089,6 +2118,16 @@
           "additionalProperties": false,
           "description": "Worker scope.",
           "properties": {
+            "claims": {
+              "description": "Claims the worker serves, combined by disjunction.",
+              "items": {
+                "$ref": "#/$defs/WorkerClaim"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "Claims",
+              "type": "array"
+            },
             "job_id": {
               "anyOf": [
                 {
@@ -2102,22 +2141,6 @@
               "default": null,
               "description": "Job the worker claims tasks from.",
               "title": "Job Id"
-            },
-            "kinds": {
-              "anyOf": [
-                {
-                  "items": {
-                    "$ref": "#/$defs/TaskKind"
-                  },
-                  "type": "array"
-                },
-                {
-                  "type": "null"
-                }
-              ],
-              "default": null,
-              "description": "Task kinds the worker claims.",
-              "title": "Kinds"
             },
             "selectors": {
               "anyOf": [
@@ -2136,6 +2159,9 @@
               "title": "Selectors"
             }
           },
+          "required": [
+            "claims"
+          ],
           "title": "WorkerScope",
           "type": "object"
         }
