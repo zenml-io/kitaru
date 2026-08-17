@@ -4,7 +4,12 @@
 """Narrow destructive-mode handlers."""
 
 from kitaru.mcp.lifecycle import MCPServerState
-from kitaru.mcp.models.workflows import DeleteRequest, JobCancel, WorkflowCancelRequest
+from kitaru.mcp.models.workflows import (
+    DeleteRequest,
+    JobCancel,
+    TagLinkDelete,
+    WorkflowCancelRequest,
+)
 
 
 async def handle_workflow_cancel(
@@ -25,6 +30,17 @@ async def handle_workflow_cancel(
 
 async def handle_delete(state: MCPServerState, request: DeleteRequest) -> object:
     """Delete one exact allowlisted resource."""
+    if isinstance(request, TagLinkDelete):
+        await state.client.tags.delete_link(
+            request.tag_id, request.resource_type, request.resource_id
+        )
+        return {
+            "kind": request.kind,
+            "tag_id": str(request.tag_id),
+            "resource_type": request.resource_type.value,
+            "resource_id": str(request.resource_id),
+            "deleted": True,
+        }
     if request.kind == "cohort":
         await state.client.cohorts.delete(request.id)
     elif request.kind == "cohort_version":
@@ -37,6 +53,8 @@ async def handle_delete(state: MCPServerState, request: DeleteRequest) -> object
         await state.client.investigations.delete(request.id)
     elif request.kind == "annotation":
         await state.client.annotations.delete(request.id)
-    else:
+    elif request.kind == "evaluator":
         await state.client.evaluators.delete(request.id)
+    else:
+        await state.client.tags.delete(request.id)
     return {"kind": request.kind, "id": str(request.id), "deleted": True}

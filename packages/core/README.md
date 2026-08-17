@@ -21,13 +21,18 @@ pnpm add @zenml-io/kitaru@rc
 
 ## Public API
 
-The package exports the Kitaru API client and JSON-safe recorder utilities from its root. Dedicated subpaths expose the client, environment resolution, errors, and the low-level adapter-building API:
+The package exports the resource-oriented Kitaru API client and JSON-safe recorder utilities from its root. Dedicated subpaths expose the client, environment resolution, errors, Node-only stored-login support, and the low-level adapter-building API:
 
 ```ts
 import { KitaruClient } from "@zenml-io/kitaru/client";
 import { resolveKitaruEnvironment } from "@zenml-io/kitaru/environment";
 import { RunRecorder, decideToolCall } from "@zenml-io/kitaru/adapter";
+import { createKitaruClient } from "@zenml-io/kitaru/node";
 ```
+
+Use `createKitaruClient()` in a Node application on a developer machine to reuse the server and renewable credential selected by `kitaru login`. The Node entry reads the Python CLI credential store without rewriting it. The root package does not import filesystem modules or inspect that store, so browser-compatible consumers and processes with explicit credentials keep a runtime-neutral import graph.
+
+The client exposes resource namespaces for accounts, server info, agents and versions, sessions and nodes, session runs, blobs, investigations and annotations, evaluators and evaluations, cohorts and versions, experiments and runs, jobs, tasks, and replays. Paginated resources provide list methods and async iterators. Jobs, experiment runs, and replays provide exact-ID wait helpers; job and experiment-run cancellation remains an explicit remote operation.
 
 The adapter subpath provides lifecycle, normalized-step, replay-override, and tool-policy primitives. It is intended for framework adapter authors. It does not provide a framework-independent `generate`, tool, agent, or streaming abstraction.
 

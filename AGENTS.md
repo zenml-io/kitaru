@@ -93,6 +93,8 @@ they belong in `docs/book/`. Do not hand-edit generated reference output.
 
 Only document shipped features.
 
+The canonical returns example in `examples/pydantic_ai_ticket_resolver/`, the conceptual quickstart in `docs/book/getting-started/quickstart.md`, and the detailed tutorial in `docs/book/tutorials/returns-agent/` describe the same method at different levels. When changing the example's commands, fixtures, behavior, or terminology, inspect both documentation paths and `examples/example-coverage.yaml` in the same change. Apply the same check in the other direction when changing either documentation path.
+
 ## Git, Commits, and PRs
 
 - Default branch is `develop`; PRs normally target `develop`. During the v2 migration, v2 feature work may target its explicitly named integration branch.
