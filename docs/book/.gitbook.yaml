@@ -14,10 +14,10 @@ structure:
 redirects:
   guides/projects: concepts/agents-and-sessions.md
   guides/pydantic-ai-adapter: adapters/pydantic-ai.md
-  guides/openai-agents-adapter: adapters/README.md
+  guides/openai-agents-adapter: adapters/openai-agents.md
   guides/claude-agent-sdk-adapter: adapters/README.md
   guides/gemini-interactions-adapter: adapters/README.md
-  guides/langgraph-adapter: adapters/README.md
+  guides/langgraph-adapter: adapters/langgraph.md
   stacks: deploy/README.md
   concepts/how-it-works: concepts/under-the-hood.md
   concepts/harness-runtime-platform: concepts/under-the-hood.md
@@ -47,11 +47,9 @@ redirects:
   guides/configuration: deploy/configuration.md
   guides/authentication: deploy/authentication.md
   guides/secrets: deploy/secrets.md
-  adapters/openai-agents: adapters/README.md
   adapters/claude-agent-sdk: adapters/README.md
   adapters/gemini-interactions: adapters/README.md
   adapters/google-adk: adapters/README.md
-  adapters/langgraph: adapters/README.md
   stacks/kubernetes-stacks: deploy/README.md
   stacks/modal-stacks: deploy/README.md
   stacks/vertex-stacks: deploy/README.md
