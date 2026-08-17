@@ -77,7 +77,7 @@ just docs-build                          # Static export
 just docs-validate                       # Validate export under /docs
 ```
 
-`scripts/generate_sdk_docs.py` is the v2 SDK-reference generator: griffe extraction filtered to a `PUBLIC_API` allowlist (`kitaru.client`, `kitaru.task` and its evaluator/importer modules). It needs the fumapy bridge (`uv pip install ./docs/node_modules/fumadocs-python`, after `pnpm install` in `docs/`); `just generate-docs` runs generation plus MDX conversion. Edit the allowlist and `tests/scripts/test_generate_sdk_docs.py` together — a drift test compares the allowlist to each published module's `__all__`. CLI reference publishing is deferred; `kitaru schema` is the current offline CLI contract.
+`scripts/generate_sdk_docs.py` is the v2 SDK-reference generator: griffe extraction filtered to a `PUBLIC_API` allowlist (`kitaru.client`, `kitaru.task` and its evaluator/importer modules). It needs the fumapy bridge (`uv pip install ./docs/node_modules/fumadocs-python`, after `pnpm install` in `docs/`); `just generate-docs` runs generation plus MDX conversion. Edit the allowlist and `tests/scripts/test_generate_sdk_docs.py` together — a drift test compares the allowlist to each published module's `__all__`. `scripts/generate_cli_docs.py` generates the CLI reference from the `kitaru schema` JSON contract (run in-process, needs the `cli` extra); it hardcodes no command names, so CLI changes flow through on regeneration.
 
 ## UI and Docker
 

@@ -14,6 +14,6 @@ Set `KITARU_API_URL` and, when required, `KITARU_API_KEY` in your private enviro
 
 Copy `.mcp.json.example` to the configuration location used by your client and replace the command with the absolute path to your environment's `kitaru-mcp` executable when it is not already on `PATH`.
 
-The empty `args` array is deliberate: it keeps the server in `read-only` mode, which advertises only `kitaru_registry_read` and `kitaru_activity_read`. Review the [MCP server documentation](../../../docs/book/agent-native/mcp-server.md) before adding `--mode standard` or `--mode destructive`.
+The empty `args` array is deliberate: it keeps the server in `read-only` mode, which advertises only `kitaru_registry_read` and `kitaru_activity_read`. Review the [MCP server documentation](../../../docs/book/agent-native/setup.md) before adding `--mode standard` or `--mode destructive`.
 
 Try asking your client to list one page of agents, inspect one session by UUID, or list one page of jobs. List operations return an opaque cursor instead of walking the complete collection.

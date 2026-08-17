@@ -51,6 +51,7 @@ SCHEMA_COMMANDS = [
         "command": "box.get",
         "path": ["box", "get"],
         "description": "Get a box.",
+        "output_modes": ["auto", "text", "json"],
         "parameters": [
             GLOBAL_PARAMETER,
             make_parameter("BOX", type="UUID", kind="argument", required=True),
@@ -105,6 +106,7 @@ class TestParsing:
         command = parse_command(SCHEMA_COMMANDS[0])
         assert command.path == ("box", "get")
         assert command.description == "Get a box."
+        assert command.output_modes == ("auto", "text", "json")
         assert command.parameters[1] == ParameterDoc(
             name="BOX",
             type_name="UUID",
@@ -156,6 +158,16 @@ class TestRendering:
         assert "Pick &lt;one&gt; of \\{a, b\\}." in page
         assert "`a\\|b`" in page
         assert "{a, b}" not in page
+
+    def test_command_page_lists_its_output_modes(self) -> None:
+        command = parse_command(SCHEMA_COMMANDS[0])
+        page = render_command_page(command, [])
+        assert "Supported `--output` modes: `auto`, `text`, `json`." in page
+
+    def test_command_page_without_output_modes_omits_the_line(self) -> None:
+        command = parse_command(SCHEMA_COMMANDS[2])
+        page = render_command_page(command, [])
+        assert "Supported `--output` modes" not in page
 
     def test_command_page_omits_global_parameters(self) -> None:
         commands = [parse_command(c) for c in SCHEMA_COMMANDS]
@@ -243,6 +255,13 @@ class TestRealCliSchema:
         assert len(pages) > 20
         for page in pages:
             assert FRONTMATTER.match(page.read_text()), str(page)
+
+    def test_non_streaming_command_does_not_claim_jsonl(self, generated: Path) -> None:
+        # `kitaru version` rejects --output jsonl (streaming-only mode); its
+        # page must list only the modes the schema declares for it.
+        page = (generated / "version.mdx").read_text()
+        assert "Supported `--output` modes: `auto`, `text`, `json`." in page
+        assert "jsonl" not in page
 
     def test_no_meta_lists_index(self, generated: Path) -> None:
         for meta_path in generated.rglob("meta.json"):

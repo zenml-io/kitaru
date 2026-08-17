@@ -54,6 +54,10 @@ class CommandDoc:
     path: tuple[str, ...]
     description: str
     parameters: list[ParameterDoc] = field(default_factory=list)
+    # Not every command supports every serialization mode (jsonl is
+    # streaming-only), so the schema's per-command list must survive into the
+    # rendered page rather than the union type on the shared --output option.
+    output_modes: tuple[str, ...] = ()
 
     @property
     def slug(self) -> str:
@@ -144,6 +148,7 @@ def parse_command(item: dict[str, Any]) -> CommandDoc:
         path=tuple(item["path"]),
         description=str(item.get("description", "")),
         parameters=parameters,
+        output_modes=tuple(str(mode) for mode in item.get("output_modes", [])),
     )
 
 
@@ -298,6 +303,9 @@ def render_command_sections(
 ) -> list[str]:
     """Render the usage and parameter sections shared by leaf and group pages."""
     lines = ["## Usage", "", "```bash", _render_usage(command), "```", ""]
+    if command.output_modes:
+        modes = ", ".join(f"`{mode}`" for mode in command.output_modes)
+        lines.extend([f"Supported `--output` modes: {modes}.", ""])
 
     global_set = set(global_parameters)
     local_parameters = [
@@ -383,6 +391,9 @@ def render_root_page(root: GroupDoc, global_parameters: list[ParameterDoc]) -> s
                 "Every command accepts these options in addition to its own.",
                 "",
                 *_render_parameter_table(global_parameters),
+                "",
+                "The `--output` type above is the union across all commands; "
+                "each command page lists the modes that command supports.",
                 "",
             ]
         )
