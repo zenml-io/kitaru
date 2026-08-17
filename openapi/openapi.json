@@ -630,11 +630,13 @@
         "properties": {
           "end": {
             "description": "End offset of the character range.",
+            "minimum": 0.0,
             "title": "End",
             "type": "integer"
           },
           "start": {
             "description": "Start offset of the character range.",
+            "minimum": 0.0,
             "title": "Start",
             "type": "integer"
           }
@@ -5983,6 +5985,7 @@
             "items": {
               "$ref": "#/components/schemas/SessionNodeCreateRequest"
             },
+            "maxItems": 500,
             "title": "Nodes",
             "type": "array"
           }
@@ -6056,6 +6059,7 @@
           },
           "index": {
             "description": "Position within the session, the wire identity.",
+            "minimum": 0.0,
             "title": "Index",
             "type": "integer"
           },
@@ -6146,6 +6150,7 @@
           "parent_index": {
             "anyOf": [
               {
+                "minimum": 0.0,
                 "type": "integer"
               },
               {
@@ -6182,6 +6187,7 @@
           "secondary_parent_indexes": {
             "description": "Indexes of additional parent nodes.",
             "items": {
+              "minimum": 0.0,
               "type": "integer"
             },
             "title": "Secondary Parent Indexes",

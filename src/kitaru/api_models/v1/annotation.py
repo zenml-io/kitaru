@@ -25,8 +25,22 @@ from kitaru.api_models.v1.filter import FilterableListParams
 class AnnotationSpan(RequestModel):
     """Annotation span."""
 
-    start: int = Field(description="Start offset of the character range.")
-    end: int = Field(description="End offset of the character range.")
+    start: int = Field(ge=0, description="Start offset of the character range.")
+    end: int = Field(ge=0, description="End offset of the character range.")
+
+    @model_validator(mode="after")
+    def _end_follows_start(self) -> Self:
+        """Require the end offset to not precede the start offset.
+
+        Raises:
+            ValueError: end is less than start.
+
+        Returns:
+            The validated span.
+        """
+        if self.end < self.start:
+            raise ValueError("end must not precede start")
+        return self
 
 
 class AnnotationSelector(RequestModel):
