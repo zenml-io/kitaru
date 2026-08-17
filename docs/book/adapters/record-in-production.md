@@ -7,7 +7,7 @@ icon: tower-broadcast
 
 An adapter in production means every real request lands in Kitaru as a [session](../concepts/agents-and-sessions.md) at the moment it happens. There is no export cron, no nightly reconciliation, and no format conversion, because the recording is not a translation of a trace: it is the run itself, written by the same wrapper that will later execute [replays](../concepts/replay.md) of it.
 
-That last point is the one worth internalizing. The wrapper you install today is the thing that answers tool calls and applies overrides when a [worker](../concepts/workers.md) replays a session tomorrow. Recording and replay are one integration, not two.
+The wrapper you install today is the same code that answers tool calls and applies overrides when a [worker](../concepts/workers.md) replays a session tomorrow. Recording and replay are one integration, not two.
 
 You do not have to choose between the two entry paths. [Import the backlog you already have](../getting-started/import-your-traces.md) to get a population worth evaluating this week, and add the adapter with your next deploy so the population keeps growing on its own.
 
@@ -79,7 +79,7 @@ This is the part to read carefully before a production rollout. Recording is **i
 If the Kitaru server is unreachable when a request starts, the run raises before the agent executes. Not one provider call is made, and nothing is silently dropped. Treat Kitaru server availability as a dependency of the agent path, the same way you treat your model provider.
 {% endhint %}
 
-Mid-run behavior is where the adapters genuinely differ, and the difference decides whether a Kitaru outage costs you a request or costs you only a recording.
+Mid-run behavior is where the adapters differ, and the difference decides whether a Kitaru outage costs you a request or costs you only a recording.
 
 | Adapter | Node writes during the run | Recording failure after the agent produced a result |
 | --- | --- | --- |

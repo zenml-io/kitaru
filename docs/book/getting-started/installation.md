@@ -95,7 +95,7 @@ No adapter for your framework? You are not blocked: [import your traces instead,
 
 ## Install the agent skills
 
-Do this now rather than later. Kitaru is a loop with real judgment calls in it: which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result actually supports shipping. The [agent skills](../agent-native/setup.md) teach your coding assistant how to make them with you:
+Do this now rather than later. Kitaru is a loop with real judgment calls in it: which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result supports shipping. The [agent skills](../agent-native/setup.md) teach your coding assistant how to make them with you:
 
 {% tabs %}
 {% tab title="Any skill-aware host" %}
