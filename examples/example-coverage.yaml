@@ -16,38 +16,6 @@ explicit_exclusions:
   - examples/v2/mcp
   - examples/v2/mcp/.mcp.json.example
 examples:
-  - id: canonical-returns
-    path: examples/pydantic_ai_ticket_resolver
-    public_docs:
-      - examples/pydantic_ai_ticket_resolver/README.md
-    owner_area: trace import, evaluation, investigation, cohorts, and experiment replay
-    coverage:
-      deterministic_pytest:
-        status: covered
-        test_file: examples/pydantic_ai_ticket_resolver/tests/test_contract.py
-        notes: provider-free contracts for the agent, mock store, checked-in traces, and locked dependencies
-      local_smoke:
-        status: covered
-        command: cd examples/pydantic_ai_ticket_resolver && KITARU_CANONICAL_E2E=1 KITARU_CANONICAL_SERVER_URL=http://127.0.0.1:8000 KITARU_CANONICAL_API_KEY=local-development-worker uv run --with pytest python -m pytest -q tests/test_e2e.py
-        requires_server: true
-        required_env: [KITARU_CANONICAL_SERVER_URL, KITARU_CANONICAL_API_KEY]
-        timeout_seconds: 600
-        notes: CI covers import, built-in evaluation, persisted investigation answers, cohort creation, evaluator registration, and provider-free replay through test-only deterministic fixtures; the open-ended documentation choices still require manual review.
-      live_provider:
-        status: manual_only
-        provider: openai-langfuse
-        required_env:
-          - OPENAI_API_KEY
-          - LANGFUSE_PUBLIC_KEY
-          - LANGFUSE_SECRET_KEY
-        timeout_seconds: 900
-        cost_class: low
-        command: cd examples/pydantic_ai_ticket_resolver && ./generate.sh
-        waiver:
-          reason: Trace generation makes paid model calls and writes to a user-selected Langfuse project.
-          reviewer_action: Regenerate the traces manually when the agent or trace export changes.
-    release_policy:
-      required_when_changed: true
   - id: mastra-support-triage
     path: v2_examples/mastra_support_triage
     public_docs:
@@ -118,7 +86,7 @@ examples:
         command: cd v2_examples/vercel_ai_ticket_resolver && pnpm build && pnpm test && pnpm test:evaluator && pnpm typecheck && pnpm lint && pnpm test:e2e
         requires_server: true
         timeout_seconds: 600
-        notes: The canonical example end-to-end CI job runs this complete standalone validation.
+        notes: The TypeScript ticket resolver CI job runs this complete standalone validation.
       live_provider:
         status: manual_only
         provider: openai
