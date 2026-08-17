@@ -23,10 +23,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-from conftest import pg_session_with_engine, postgres_available
+from conftest import UNSCOPED_WORKER_SCOPE, pg_session_with_engine, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.task import TaskStatus
-from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import WorkerRuntime
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -168,7 +168,7 @@ async def test_hard_failure_report_survives_concurrent_job_cancel() -> None:
             Worker(
                 owner_id=owner.id,
                 name="worker",
-                scope=WorkerScope(),
+                scope=UNSCOPED_WORKER_SCOPE,
                 runtime=WorkerRuntime(platform="bare"),
                 last_seen_at=now,
             )
@@ -295,7 +295,7 @@ async def test_job_cancel_survives_concurrent_task_claim(
             Worker(
                 owner_id=owner.id,
                 name="worker",
-                scope=WorkerScope(),
+                scope=UNSCOPED_WORKER_SCOPE,
                 runtime=WorkerRuntime(platform="bare"),
                 last_seen_at=now,
             )
@@ -501,7 +501,7 @@ async def test_job_cancel_survives_concurrent_job_delete(
             Worker(
                 owner_id=owner.id,
                 name="worker",
-                scope=WorkerScope(),
+                scope=UNSCOPED_WORKER_SCOPE,
                 runtime=WorkerRuntime(platform="bare"),
                 last_seen_at=now,
             )

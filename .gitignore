@@ -272,6 +272,8 @@ AGENTS.override.md
 !.agents/skills/kitaru-dev/**
 !.agents/skills/kitaru-docs/
 !.agents/skills/kitaru-docs/**
+!.agents/skills/kitaru-release/
+!.agents/skills/kitaru-release/**
 !.agents/skills/kitaru-evaluator-authoring/
 !.agents/skills/kitaru-evaluator-authoring/**
 !.agents/skills/kitaru-session-improvement/

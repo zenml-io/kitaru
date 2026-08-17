@@ -8,13 +8,13 @@ icon: code
 `@zenml-io/kitaru` is the framework-neutral TypeScript SDK. It creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The existing Python `kitaru` command remains the CLI for login and worker operations. There is no separate TypeScript CLI.
 
 {% hint style="info" %}
-The TypeScript packages are pre-1.0 release candidates and require Node `>=22.22.0 <23`.
+The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together.
 {% endhint %}
 
 ## Install
 
 ```bash
-pnpm add @zenml-io/kitaru@rc
+pnpm add @zenml-io/kitaru
 ```
 
 ## Reuse a developer login

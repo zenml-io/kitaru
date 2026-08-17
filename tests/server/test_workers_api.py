@@ -55,6 +55,7 @@ from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
 
 RUNTIME = {"platform": "bare"}
+SCOPE = {"claims": [{"kind": "agent"}]}
 
 
 @pytest.fixture
@@ -134,7 +135,7 @@ async def test_register_worker(client: httpx.AsyncClient, account: Account) -> N
         "/api/v1/workers",
         json={
             "name": "worker-1",
-            "scope": {},
+            "scope": SCOPE,
             "runtime": RUNTIME,
             "metadata": {"region": "eu"},
         },
@@ -157,7 +158,7 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
             "/api/v1/workers",
             json={
                 "name": "worker-1",
-                "scope": {"kinds": ["agent"]},
+                "scope": {"claims": [{"kind": "agent"}]},
                 "runtime": RUNTIME,
                 "metadata": {"region": "eu"},
             },
@@ -168,7 +169,7 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
             "/api/v1/workers",
             json={
                 "name": "worker-1",
-                "scope": {"kinds": ["importer"]},
+                "scope": {"claims": [{"kind": "importer"}]},
                 "runtime": {"platform": "docker"},
                 "metadata": {"region": "us"},
             },
@@ -176,7 +177,9 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
     ).json()
     assert second["worker"]["id"] == first["worker"]["id"]
     assert second["worker"]["created"] == first["worker"]["created"]
-    assert second["worker"]["scope"]["kinds"] == ["importer"]
+    assert second["worker"]["scope"]["claims"] == [
+        {"kind": "importer", "agent_version_id": None}
+    ]
     assert second["worker"]["runtime"]["platform"] == "docker"
     assert second["worker"]["metadata"] == {"region": "us"}
     assert second["worker"]["updated"] > first["worker"]["updated"]
@@ -187,7 +190,7 @@ async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid worker name."""
     response = await client.post(
         "/api/v1/workers",
-        json={"name": "in valid", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+        json={"name": "in valid", "scope": SCOPE, "runtime": RUNTIME, "metadata": {}},
     )
     assert response.status_code == 422
 
@@ -197,7 +200,12 @@ async def test_get_worker(client: httpx.AsyncClient) -> None:
     created = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     response = await client.get(f"/api/v1/workers/{created['worker']['id']}")
@@ -212,7 +220,12 @@ async def test_get_worker_with_its_own_token(
     created = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     worker_id = uuid.UUID(created["worker"]["id"])
@@ -231,13 +244,23 @@ async def test_get_worker_with_a_different_workers_token_is_forbidden(
     first = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     second = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-2", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-2",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     token = mint_worker_token(auth_service, uuid.UUID(first["worker"]["id"]), account)
@@ -261,7 +284,7 @@ async def test_list_workers(client: httpx.AsyncClient) -> None:
     for name in ["worker-1", "worker-2", "worker-3"]:
         response = await client.post(
             "/api/v1/workers",
-            json={"name": name, "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={"name": name, "scope": SCOPE, "runtime": RUNTIME, "metadata": {}},
         )
         assert response.status_code == 200
 
@@ -288,7 +311,12 @@ async def test_delete_worker(client: httpx.AsyncClient) -> None:
     created = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     response = await client.delete(f"/api/v1/workers/{created['worker']['id']}")

@@ -47,12 +47,12 @@ Adapters are **not** extras — each ships as its own distribution, so you insta
 
 ## Install a TypeScript adapter
 
-Install the adapter in the Node project that runs your agent. The packages are currently release candidates, so use the `rc` tag:
+Install the adapter in the Node project that runs your agent:
 
 {% tabs %}
 {% tab title="Mastra" %}
 ```bash
-pnpm add @zenml-io/kitaru-mastra@rc @mastra/core@1.51.0
+pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
 ```
 
 See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior, and supported boundary.
@@ -60,7 +60,7 @@ See the [Mastra adapter](../adapters/mastra.md) for the wrapper, replay behavior
 
 {% tab title="Vercel AI SDK" %}
 ```bash
-pnpm add @zenml-io/kitaru-vercel-ai@rc ai@7.0.65
+pnpm add @zenml-io/kitaru-vercel-ai ai@7.0.65
 ```
 
 See the [Vercel AI SDK adapter](../adapters/vercel-ai.md) for Agent and `generateText` recording, replay behavior, and the supported boundary.
@@ -68,7 +68,7 @@ See the [Vercel AI SDK adapter](../adapters/vercel-ai.md) for Agent and `generat
 
 {% tab title="Build an adapter" %}
 ```bash
-pnpm add @zenml-io/kitaru@rc
+pnpm add @zenml-io/kitaru
 ```
 
 The core package provides the TypeScript client and adapter primitives. It does not provide a framework-neutral agent or streaming abstraction.

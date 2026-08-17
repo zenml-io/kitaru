@@ -17,6 +17,8 @@ import json
 import uuid
 from typing import Any
 
+import httpx
+
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationSessionHighlight,
@@ -30,6 +32,8 @@ from kitaru.api_models.v1.investigation import (
 )
 from kitaru.cli.output import CLIError, CommandResult
 from kitaru.cli.registration import list_params, page_result, resolve_asset
+from kitaru.client.dashboard_urls import get_investigation_review_url
+from kitaru.client.exceptions import APIError
 
 
 def _parse_session_key_token(token: str, *, option: str) -> tuple[uuid.UUID, str]:
@@ -170,8 +174,29 @@ async def create_investigation(
             sessions=sessions,
         )
     )
+    review_url: str | None = None
+    warnings: list[str] = []
+    try:
+        info = await client.info.get()
+    # ValueError covers malformed info payloads: JSON decoding and Pydantic
+    # validation errors both derive from it, and a version-skewed server must
+    # not fail a create that already succeeded.
+    except (APIError, httpx.HTTPError, ValueError):
+        warnings.append(
+            "Could not resolve a dashboard review link because the server "
+            "info request failed. The investigation was created."
+        )
+    else:
+        review_url = get_investigation_review_url(
+            info,
+            client.base_url,
+            agent_id=investigation.agent_id,
+            investigation_id=investigation.id,
+        )
     return CommandResult(
         item=investigation.model_dump(mode="json"),
+        links={"review": review_url} if review_url else {},
+        warnings=warnings,
         next_actions=[
             f"kitaru investigation session list {investigation.id}",
             f"kitaru investigation get {investigation.id}",

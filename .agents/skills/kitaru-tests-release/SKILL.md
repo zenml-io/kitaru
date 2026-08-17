@@ -99,6 +99,8 @@ Do not describe the inherited `llm-integration.yml` provider markers or absent `
 
 ## Release Workflows
 
+Use `.agents/skills/kitaru-release/SKILL.md` for the release interview, metadata edits, validation, and preparation PR. Keep this skill focused on selecting and running test surfaces.
+
 `.github/workflows/release-plugins.yml` publishes one Python distribution from an immutable namespaced tag. A core tag such as `python/kitaru/v0.22.0rc1` publishes Kitaru to PyPI and creates its GitHub Release. Plugin tags publish independently and do not gate the core release.
 
 After a successful core Python workflow, `.github/workflows/release.yml` automatically publishes the matching client, server, worker, and managed images plus the Helm chart. It converts Python RC versions such as `0.22.0rc1` to deployable tags such as `0.22.0-rc.1`. No separate bundle tag is used. A manual dispatch with the existing core package tag is the recovery path.

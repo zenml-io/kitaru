@@ -17,7 +17,16 @@ import uuid
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 
-from sqlalchemy import ColumnElement, func, not_, or_, select, update
+from sqlalchemy import (
+    ColumnElement,
+    func,
+    not_,
+    or_,
+    select,
+    true,
+    union_all,
+    update,
+)
 
 from kitaru.api_models.v1.task import TaskKind, TaskStatus
 from kitaru.api_models.v1.worker import WorkerScope
@@ -32,11 +41,7 @@ from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.task import (
-    DuplicateEvaluationTask,
-    Task,
-    TaskNotFound,
-)
+from kitaru.server.domain.task import DuplicateEvaluationTask, Task, TaskNotFound
 
 IN_FLIGHT_STATUS_VALUES = [TaskStatus.CLAIMED.value, TaskStatus.RUNNING.value]
 
@@ -51,21 +56,39 @@ TASK_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
 }
 
 
-def _scope_conditions(scope: WorkerScope) -> list[ColumnElement[bool]]:
-    """Build the claim conditions a worker scope narrows the queue by.
+def _claim_terms(scope: WorkerScope) -> list[ColumnElement[bool]]:
+    """Build the claim conditions of a scope, one per bounded index scan.
 
-    An unpinned scope without selectors adds no condition and claims any
-    pending task.
+    A scope claiming everything collapses to one unconditioned term over the
+    whole pending queue.
 
     Args:
         scope: Claim scope stored on the worker row.
 
     Returns:
-        Conditions to AND into the claim query.
+        Conditions, each read by its own bounded index scan.
+    """
+    if scope.claims_everything:
+        return [true()]
+    terms: list[ColumnElement[bool]] = []
+    for claim in scope.claims:
+        if claim.agent_version_id is not None:
+            terms.append(TaskORM.agent_version_id == claim.agent_version_id)
+        else:
+            terms.append(TaskORM.kind == claim.kind.value)
+    return terms
+
+
+def _residual_conditions(scope: WorkerScope) -> list[ColumnElement[bool]]:
+    """Build the claim conditions a worker scope adds beyond its claims.
+
+    Args:
+        scope: Claim scope stored on the worker row.
+
+    Returns:
+        Conditions to AND into every claim term's query.
     """
     conditions: list[ColumnElement[bool]] = []
-    if scope.kinds:
-        conditions.append(TaskORM.kind.in_([kind.value for kind in scope.kinds]))
     if scope.job_id is not None:
         conditions.append(TaskORM.job_id == scope.job_id)
     for selector in scope.selectors or []:
@@ -255,6 +278,13 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
+        A scope claiming everything runs one id-ordered locking scan. Any
+        other scope reads up to ``limit`` candidate ids per claim term
+        through the partial indexes and locks the oldest ``limit`` of the
+        merged candidates in the same statement, re-checking status because
+        the candidate scans run unlocked. Each term is an equality read in
+        id order, so the merge is exactly oldest-first across the scope.
+
         Args:
             scope: Claim scope narrowing the queue.
             worker_id: Worker claiming the tasks.
@@ -264,16 +294,44 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         Returns:
             Claimed tasks carrying their incremented attempt.
         """
-        statement = (
-            select(TaskORM)
-            .where(
-                TaskORM.status == TaskStatus.PENDING.value, *_scope_conditions(scope)
+        terms = _claim_terms(scope)
+        residual = _residual_conditions(scope)
+        if len(terms) == 1:
+            statement = (
+                select(TaskORM)
+                .where(
+                    TaskORM.status == TaskStatus.PENDING.value,
+                    terms[0],
+                    *residual,
+                )
+                .order_by(TaskORM.id.asc())
+                .limit(limit)
+                .with_for_update(skip_locked=True)
             )
-            .order_by(TaskORM.id.asc())
-            .limit(limit)
-            .with_for_update(skip_locked=True)
-        )
-        rows = (await self._session.scalars(statement)).all()
+            rows = (await self._session.scalars(statement)).all()
+        else:
+            peeks = [
+                select(TaskORM.id)
+                .where(TaskORM.status == TaskStatus.PENDING.value, term, *residual)
+                .order_by(TaskORM.id.asc())
+                .limit(limit)
+                for term in terms
+            ]
+            candidates = union_all(
+                *[select(peek.subquery()) for peek in peeks]
+            ).subquery()
+            oldest = (
+                select(candidates.c.id).order_by(candidates.c.id.asc()).limit(limit)
+            ).scalar_subquery()
+            statement = (
+                select(TaskORM)
+                .where(
+                    TaskORM.id.in_(oldest), TaskORM.status == TaskStatus.PENDING.value
+                )
+                .order_by(TaskORM.id.asc())
+                .with_for_update(skip_locked=True)
+            )
+            rows = (await self._session.scalars(statement)).all()
         if not rows:
             return []
         for row in rows:

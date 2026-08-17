@@ -41,11 +41,11 @@ def test_handler_parameters_match_command_schema() -> None:
                 "all_sessions" if name == "all" else name for name in schema_names
             ]
         if spec.path == ("worker", "start"):
-            # The singular public --selector option intentionally maps to the
-            # plural handler parameter that receives its repeatable values.
-            schema_names = [
-                "selectors" if name == "selector" else name for name in schema_names
-            ]
+            # The singular public --claim and --selector options intentionally
+            # map to the plural handler parameters that receive their
+            # repeatable values.
+            plural = {"claim": "claims", "selector": "selectors"}
+            schema_names = [plural.get(name, name) for name in schema_names]
         assert len(schema_names) == len(set(schema_names)), spec.command
         assert set(schema_names) == set(handler_names), spec.command
 

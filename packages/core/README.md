@@ -7,10 +7,10 @@ The public package name is `@zenml-io/kitaru`; `packages/core/` is only its repo
 - `@zenml-io/kitaru-mastra` adapts Mastra 1.51.x.
 - `@zenml-io/kitaru-vercel-ai` adapts AI SDK 7.
 
-Release candidates use npm's `rc` tag and remain pre-1.0 compatibility previews.
+The TypeScript packages are versioned and released together.
 
 ```bash
-pnpm add @zenml-io/kitaru@rc
+pnpm add @zenml-io/kitaru
 ```
 
 ## Links

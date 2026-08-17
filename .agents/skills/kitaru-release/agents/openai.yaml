@@ -1,0 +1,4 @@
+interface:
+  display_name: "Kitaru Release"
+  short_description: "Prepare and publish Kitaru releases"
+  default_prompt: "Use $kitaru-release to prepare or execute a Kitaru release."

@@ -8231,6 +8231,34 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WorkerClaim": {
+        "additionalProperties": false,
+        "description": "Worker claim.",
+        "properties": {
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version the claim covers, None claims every agent version.",
+            "title": "Agent Version Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind",
+            "description": "Task kind the claim covers."
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "WorkerClaim",
+        "type": "object"
+      },
       "WorkerCreateRequest": {
         "additionalProperties": false,
         "description": "Worker create request.",
@@ -8512,6 +8540,16 @@
         "additionalProperties": false,
         "description": "Worker scope.",
         "properties": {
+          "claims": {
+            "description": "Claims the worker serves, combined by disjunction.",
+            "items": {
+              "$ref": "#/components/schemas/WorkerClaim"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Claims",
+            "type": "array"
+          },
           "job_id": {
             "anyOf": [
               {
@@ -8524,21 +8562,6 @@
             ],
             "description": "Job the worker claims tasks from.",
             "title": "Job Id"
-          },
-          "kinds": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TaskKind"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Task kinds the worker claims.",
-            "title": "Kinds"
           },
           "selectors": {
             "anyOf": [
@@ -8556,6 +8579,9 @@
             "title": "Selectors"
           }
         },
+        "required": [
+          "claims"
+        ],
         "title": "WorkerScope",
         "type": "object"
       }
