@@ -17,6 +17,7 @@ import getpass
 from collections.abc import Callable
 from typing import TextIO
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.cli import local_runtime
@@ -98,7 +99,9 @@ async def login(
             progress=None if non_interactive else write_interaction,
         )
         client = KitaruAPIClient(
-            base_url=local_runtime.LOCAL_SERVER_URL, timeout=timeout
+            base_url=local_runtime.LOCAL_SERVER_URL,
+            timeout=timeout,
+            analytics_source=AnalyticsSource.CLI,
         )
         try:
             info = await client.info.get()
@@ -133,7 +136,9 @@ async def login(
             next_actions=["Run `kitaru status` to inspect the local server."],
         )
     server_url = validate_server_url(LOCAL_SERVER_URL if local else str(server))
-    client = KitaruAPIClient(base_url=server_url, timeout=timeout)
+    client = KitaruAPIClient(
+        base_url=server_url, timeout=timeout, analytics_source=AnalyticsSource.CLI
+    )
     credential_stored = False
     credential_kind = "none"
     try:

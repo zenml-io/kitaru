@@ -20,7 +20,7 @@ import pytest
 from fastapi import FastAPI
 
 from conftest import asgi_api_client, local_settings
-from kitaru.analytics.source import current_attribution
+from kitaru.analytics.source import AnalyticsSource, current_attribution
 from kitaru.server.api.app import create_app
 
 
@@ -102,6 +102,16 @@ async def test_sdk_client_reports_python_source() -> None:
     api_client = asgi_api_client(create_app_with_attribution_probe())
     response = await api_client.request("GET", "/probe-attribution")
     assert response.json() == {"source": "kitaru-python", "skill": None}
+    await api_client.close()
+
+
+async def test_sdk_client_reports_configured_source() -> None:
+    """Attribute SDK requests to the source configured on the client."""
+    api_client = asgi_api_client(
+        create_app_with_attribution_probe(), analytics_source=AnalyticsSource.CLI
+    )
+    response = await api_client.request("GET", "/probe-attribution")
+    assert response.json() == {"source": "kitaru-cli", "skill": None}
     await api_client.close()
 
 
