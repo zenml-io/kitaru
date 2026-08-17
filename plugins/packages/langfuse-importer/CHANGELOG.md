@@ -2,7 +2,11 @@
 
 ## 0.1.0
 
-- Promote the Langfuse importer, including inferred tool-call links, to stable.
+- Promote the Langfuse importer, including inferred tool-call links and normalized tool outputs, to stable.
+
+## 0.1.0rc3
+
+- Nest matched tool calls under requesting LLM calls, retain their source parent as a secondary link, decode JSON tool-call arguments, and select structured final-answer text.
 
 ## 0.1.0rc2
 
