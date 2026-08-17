@@ -61,26 +61,20 @@ npx skills add zenml-io/kitaru-skills
 }
 ```
 
-**3. Get your runs in.** Wrap the agent (one line), or import the history you already have:
-
-```python
-from kitaru_pydantic_ai import KitaruAgent
-
-support = KitaruAgent(agent, agent_id=AGENT_ID)  # id from `kitaru agent register`
-```
+**3. Get an agent with traces.** The fastest way to feel the loop is the template: a ready PydanticAI agent with checked-in Langfuse traces to investigate.
 
 ```bash
-kitaru session import langfuse-export.jsonl \
-  --importer kitaru/langfuse@latest --agent support-agent@latest --wait
+git clone https://github.com/zenml-io/kitaru-template
+cd kitaru-template    # its README has the setup and import commands
 ```
 
-**4. Drive results.** Open your agent repo in Claude Code, Codex, or Cursor and ask:
+Already have an agent in production? [Import its traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) from Langfuse, LangSmith, or Braintrust, or [record with an adapter](https://docs.zenml.io/kitaru/adapters/record-in-production): one wrapper, no rewrite.
+
+**4. Drive results.** Open the repo (the template or your own agent) in Claude Code, Codex, or Cursor and ask:
 
 > Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Show me the recorded evidence before asking for a judgment, and ask before creating resources or starting paid replay.
 
-The assistant sweeps your sessions with the built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it does the legwork.
-
-**No agent in production yet?** Start from [`kitaru-template`](https://github.com/zenml-io/kitaru-template), a ready PydanticAI agent with checked-in Langfuse traces, and follow the [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) that runs the whole loop on it.
+The assistant sweeps the sessions with the built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it does the legwork. The [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) walks the same loop on the template, step by step.
 
 ## 🔌 Languages and frameworks
 
