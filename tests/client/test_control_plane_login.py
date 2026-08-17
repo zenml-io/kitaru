@@ -31,6 +31,7 @@ from conftest import (
     asgi_api_client,
     control_plane_settings,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import CredentialStoreTokenSource
@@ -159,7 +160,7 @@ async def api_client(
         ),
     )
     app.dependency_overrides[get_auth_service] = lambda: service
-    app.dependency_overrides[get_auth_session] = lambda: None
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     async with asgi_api_client(app, credential_store=credential_store) as client:
         yield client
 

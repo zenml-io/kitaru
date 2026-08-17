@@ -25,6 +25,7 @@ from conftest import (
     FakePasswordHasher,
     create_api_key,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
@@ -87,7 +88,7 @@ def build_app(
         password_hasher=FakePasswordHasher(),
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
-    app.dependency_overrides[get_auth_session] = lambda: None
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     api_key_service = ApiKeyService(repository=api_key_repository)
     app.dependency_overrides[get_api_key_service] = lambda: api_key_service
     return app

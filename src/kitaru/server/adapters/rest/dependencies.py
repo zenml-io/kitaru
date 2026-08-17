@@ -194,13 +194,11 @@ async def get_auth_session(
 ) -> AsyncGenerator[AsyncSession, None]:
     """Provide the database session the auth path runs on.
 
-    On most routes this is the shared request session, committed by
-    ``CommitRoute`` like any other write. A ``read_only`` route binds the
-    request session to the read-replica engine, so the auth path instead
-    gets its own session on the writer engine here, letting auth writes
-    such as an API key's ``last_used`` timestamp persist even though the
-    rest of the request only reads. ``_resolve_auth_context`` commits and
-    closes that session once authentication resolves.
+    On most routes this is the shared request session. A ``read_only``
+    route binds the request session to the read-replica engine, so the
+    auth path instead gets its own session on the writer engine here.
+    ``_resolve_auth_context`` commits the session once authentication
+    resolves, and closes it when it is the writer-bound one.
 
     Args:
         request: Incoming request.
@@ -1020,7 +1018,7 @@ async def _resolve_auth_context(
     """Resolve a request into its auth context, gating on nothing but validity.
 
     The resolved account is published as the analytics actor for the rest of
-    the request.
+    the request. Auth writes commit once authentication succeeds.
 
     Args:
         request: Incoming request.
@@ -1037,11 +1035,13 @@ async def _resolve_auth_context(
         Resolved account and principal for use-case calls.
     """
     context = await _authenticate(settings, credential, auth_service)
+    # The credential was used no matter how the rest of the request ends,
+    # so auth writes such as last_used commit here instead of with the
+    # handler's work.
+    await auth_session.commit()
     if request_uses_read_engine(request):
         # Nothing after authentication uses the writer-bound auth session.
-        # Commit and close it here so its connection frees before the
-        # handler runs.
-        await auth_session.commit()
+        # Close it here so its connection frees before the handler runs.
         await auth_session.close()
     token = current_actor.set(context.account)
     try:

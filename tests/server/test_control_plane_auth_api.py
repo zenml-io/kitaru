@@ -28,6 +28,7 @@ from conftest import (
     control_plane_settings,
     create_api_key,
     lifespan_client,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -108,7 +109,7 @@ def build_app(
         control_plane=control_plane,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
-    app.dependency_overrides[get_auth_session] = lambda: None
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     api_key_service = ApiKeyService(repository=api_key_repository)
     app.dependency_overrides[get_api_key_service] = lambda: api_key_service
     account_service = AccountService(

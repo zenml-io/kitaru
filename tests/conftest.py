@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, TypeVar
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -536,6 +537,15 @@ def base_asgi_scope(**overrides: Any) -> dict[str, Any]:
         **overrides,
     }
     return values
+
+
+def stub_auth_session() -> AsyncMock:
+    """Stand in for the auth session in apps that override authentication.
+
+    Returns:
+        Session double accepting the commit issued after authentication.
+    """
+    return AsyncMock()
 
 
 @pytest.fixture

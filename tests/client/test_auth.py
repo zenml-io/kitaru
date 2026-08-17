@@ -24,6 +24,7 @@ from conftest import (
     asgi_api_client,
     create_api_key,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.auth import (
     API_KEY_PREFIX,
@@ -76,7 +77,7 @@ async def api_client(
         password_hasher=FakePasswordHasher(),
     )
     app.dependency_overrides[get_auth_service] = lambda: service
-    app.dependency_overrides[get_auth_session] = lambda: None
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     async with asgi_api_client(app) as client:
         yield client
 

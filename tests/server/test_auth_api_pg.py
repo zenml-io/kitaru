@@ -14,9 +14,11 @@
 """End-to-end auth tests against PostgreSQL."""
 
 from collections.abc import AsyncGenerator
+from typing import Annotated
 
 import httpx
 import pytest
+from fastapi import APIRouter, Depends, FastAPI
 
 from conftest import (
     drop_test_database,
@@ -27,8 +29,11 @@ from conftest import (
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.rest.dependencies import authorize
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.database.service import DatabaseService
 
 
@@ -115,3 +120,37 @@ async def test_default_account_bootstrap_idempotent() -> None:
     finally:
         await drop_test_database(settings)
     assert account_ids[0] == account_ids[1]
+
+
+async def test_failed_request_still_records_api_key_last_used() -> None:
+    """A handler failure after authentication keeps the last_used update."""
+    probe_router = APIRouter(route_class=KitaruAPIRoute)
+
+    @probe_router.get("/api/v1/__test__/boom")
+    async def boom(actor: Annotated[AuthContext, Depends(authorize)]) -> None:
+        raise RuntimeError("handler failure after authentication")
+
+    def mount(app: FastAPI) -> None:
+        app.include_router(probe_router)
+
+    async with lifespan_client(pg_settings(), mutate_app=mount) as client:
+        response = await client.post(
+            "/api/v1/login", data={"username": "default", "password": "secret"}
+        )
+        assert response.status_code == 200
+        user_headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+        created = (
+            await client.post(
+                "/api/v1/api-keys", json={"name": "boom"}, headers=user_headers
+            )
+        ).json()
+        key_headers = {"Authorization": f"Bearer {created['key']}"}
+
+        with pytest.raises(RuntimeError, match="handler failure"):
+            await client.get("/api/v1/__test__/boom", headers=key_headers)
+
+        response = await client.get(
+            f"/api/v1/api-keys/{created['id']}", headers=user_headers
+        )
+        assert response.json()["last_used"] is not None

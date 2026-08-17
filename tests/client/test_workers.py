@@ -39,6 +39,7 @@ from conftest import (
     create_job,
     local_settings,
     mint_worker_token,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import TaskKind
@@ -158,7 +159,7 @@ async def api_client(
     app.dependency_overrides[get_worker_service] = lambda: service
     app.dependency_overrides[get_task_service] = lambda: task_service
     app.dependency_overrides[get_auth_service] = lambda: auth_service
-    app.dependency_overrides[get_auth_session] = lambda: None
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     client = asgi_api_client(app, api_key=account_token)
     async with client:
         yield client

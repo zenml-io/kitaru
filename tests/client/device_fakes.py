@@ -23,7 +23,12 @@ from typing import Any
 
 from fastapi import FastAPI
 
-from conftest import FakeAccountRepository, FakeApiKeyRepository, FakePasswordHasher
+from conftest import (
+    FakeAccountRepository,
+    FakeApiKeyRepository,
+    FakePasswordHasher,
+    stub_auth_session,
+)
 from conftest import local_settings as base_local_settings
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -287,6 +292,6 @@ def build_device_auth_app(
         device_service=device_service,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
-    app.dependency_overrides[get_auth_session] = lambda: None
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     app.dependency_overrides[get_device_service] = lambda: device_service
     return app
