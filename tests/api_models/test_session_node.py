@@ -62,3 +62,30 @@ def test_parent_index_after_index_rejected() -> None:
     """Reject a node whose parent_index is greater than its own index."""
     with pytest.raises(ValidationError):
         SessionNodeBatchRequest(nodes=[_node(0, None), _node(1, 2)])
+
+
+def test_negative_index_rejected() -> None:
+    """Reject a node with a negative index."""
+    with pytest.raises(ValidationError):
+        _node(-1, None)
+
+
+def test_negative_parent_index_rejected() -> None:
+    """Reject a node with a negative parent index."""
+    with pytest.raises(ValidationError):
+        _node(1, -1)
+
+
+def test_negative_secondary_parent_index_rejected() -> None:
+    """Reject a node with a negative secondary parent index."""
+    with pytest.raises(ValidationError):
+        SessionNodeCreateRequest(
+            index=1,
+            secondary_parent_indexes=[-1],
+            node_type=NodeType.SPAN,
+            name="node",
+            status=NodeStatus.COMPLETED,
+            inputs=None,
+            outputs=None,
+            attributes=None,
+        )
