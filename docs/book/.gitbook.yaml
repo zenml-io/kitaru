@@ -79,4 +79,6 @@ redirects:
   guides/importing-sessions: guides/importing-sessions.md
   tutorials/returns-agent: tutorials/returns-agent/README.md
   running-in-production/troubleshooting: getting-started/troubleshooting.md
+  running-in-production/configuration: deploy/configuration.md
+  running-in-production/sdks: deploy/sdks.md
   project/contributing: contributing.md

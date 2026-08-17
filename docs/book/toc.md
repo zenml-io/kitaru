@@ -59,13 +59,13 @@
 
 ## Running in production
 
-- [How to use the SDK](deploy/sdks.md)
 - [Workers in production](deploy/workers.md)
 - [Authentication & API keys](deploy/authentication.md)
 - [Secrets](deploy/secrets.md)
-- [Configuration](deploy/configuration.md)
 
 ## Get Help
 
 - [Troubleshooting](getting-started/troubleshooting.md)
+- [Configuration](deploy/configuration.md)
+- [How to use the SDK](deploy/sdks.md)
 - [Contributing](contributing.md)
