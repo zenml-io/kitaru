@@ -18,29 +18,7 @@ in the host.
 
 ## Install
 
-{% tabs %}
-{% tab title="Any skill-aware host" %}
-```bash
-npx skills add zenml-io/kitaru-skills
-```
-{% endtab %}
-
-{% tab title="Claude Code plugin" %}
-```
-/plugin marketplace add zenml-io/kitaru-skills
-/plugin install kitaru@kitaru
-```
-{% endtab %}
-{% endtabs %}
-
-If your host supports neither, copy the skill directory you want into
-wherever it reads skills from.
-
-Running `kitaru` with no arguments searches for installed Kitaru skills
-in project and user locations and in the Claude Code marketplace. If it
-finds none, it prints the installation command. Machine-readable output
-reports the result under the `skills` key, which lets an assistant check
-whether the procedures are installed.
+Installation is covered in [Set up your coding agent](README.md): `npx skills add zenml-io/kitaru-skills`, or the Claude Code plugin marketplace. Running `kitaru` with no arguments reports whether the skills are installed; machine-readable output reports the result under the `skills` key, which lets an assistant check for itself.
 
 ## The investigation skill
 

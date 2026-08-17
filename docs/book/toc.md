@@ -7,7 +7,7 @@
 - [Deploy Kitaru](deploy/README.md)
   - [Docker](deploy/docker.md)
   - [Helm](deploy/helm.md)
-- [Agent skills](agent-native/skills.md)
+- [Set up your coding agent](agent-native/README.md)
 - [Quickstart](getting-started/quickstart.md)
 
 ## Core Concepts
@@ -33,13 +33,17 @@
 - [Replay a failure and fork it](guides/replay-and-overrides.md)
 - [Build a regression suite from production](guides/regression-suite.md)
 - [Write an evaluator](guides/write-an-evaluator.md)
-- [Import your traces](getting-started/import-your-traces.md)
-- [Import Langfuse traces](guides/import-langfuse-traces.md)
-- [Import any trace format](guides/importing-sessions.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
 - [Drive it from your coding agent](agent-native/mcp-server.md)
+- [Agent skills](agent-native/skills.md)
+
+## Import your traces
+
+- [Overview](getting-started/import-your-traces.md)
+- [Import Langfuse traces](guides/import-langfuse-traces.md)
+- [Import any trace format](guides/importing-sessions.md)
 
 ## Adapters
 

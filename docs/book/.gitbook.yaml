@@ -56,5 +56,19 @@ redirects:
   stacks/sagemaker-stacks: deploy/README.md
   stacks/azureml-stacks: deploy/README.md
   stacks/log-store: deploy/README.md
-  # v2 launch polish: TypeScript SDK page merged into Installation.
+  # v2 launch restructure: pages moved between toc sections (section slug
+  # is part of the published URL, so each move needs a redirect).
   typescript-sdk: adapters/typescript-sdk.md
+  getting-started/typescript-sdk: adapters/typescript-sdk.md
+  getting-started/mcp-server: agent-native/mcp-server.md
+  getting-started/skills: agent-native/skills.md
+  getting-started/import-your-traces: getting-started/import-your-traces.md
+  getting-started/troubleshooting: getting-started/troubleshooting.md
+  getting-started/returns-agent: tutorials/returns-agent/README.md
+  getting-started/returns-agent/observe: tutorials/returns-agent/observe.md
+  getting-started/returns-agent/judge: tutorials/returns-agent/judge.md
+  getting-started/returns-agent/define: tutorials/returns-agent/define.md
+  getting-started/returns-agent/replay: tutorials/returns-agent/replay.md
+  getting-started/returns-agent/compare: tutorials/returns-agent/compare.md
+  guides/import-langfuse-traces: guides/import-langfuse-traces.md
+  guides/importing-sessions: guides/importing-sessions.md
