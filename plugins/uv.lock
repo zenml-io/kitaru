@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-10T10:08:22.409882Z"
+exclude-newer = "2026-08-14T14:14:47.699825Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -20,6 +20,7 @@ members = [
     "kitaru-langfuse-importer",
     "kitaru-langgraph",
     "kitaru-langsmith-importer",
+    "kitaru-logfire-importer",
     "kitaru-openai-agents",
     "kitaru-pydantic-ai",
 ]
@@ -922,7 +923,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc8"
+version = "0.22.0rc9"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1025,7 +1026,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1064,6 +1065,17 @@ provides-extras = ["deepagents"]
 name = "kitaru-langsmith-importer"
 version = "0.1.0rc0"
 source = { editable = "packages/langsmith-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
+
+[[package]]
+name = "kitaru-logfire-importer"
+version = "0.1.0rc0"
+source = { editable = "packages/logfire-importer" }
 dependencies = [
     { name = "kitaru" },
 ]

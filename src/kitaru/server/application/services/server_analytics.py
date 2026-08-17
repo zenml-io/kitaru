@@ -26,6 +26,7 @@ from sqlalchemy.orm import Session
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.environment import get_environment
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.analytics.source import current_attribution
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.domain.account import Account
 
@@ -148,6 +149,9 @@ class ServerAnalytics:
             properties["service_account"] = actor.is_service_account
             if actor.external_id is not None:
                 properties["control_plane_user_id"] = actor.external_id
+        skill = current_attribution.get().skill
+        if skill is not None:
+            properties["skill"] = skill
         self._get_buffer().messages.append(
             _BufferedTrack(user_id=user_id, event=event, properties=properties)
         )

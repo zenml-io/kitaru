@@ -22,13 +22,16 @@ from typing import Any
 import httpx
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from kitaru.analytics.events import AccountOrigin
+from kitaru.analytics.events import AccountOrigin, AnalyticsEvent
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.account_repository import (
     AccountRepository,
 )
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.analytics_events import build_account_traits
+from kitaru.server.application.services.analytics_events import (
+    build_account_created_properties,
+    build_account_traits,
+)
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import (
     Account,
@@ -304,6 +307,11 @@ class ControlPlaneAuthenticator:
             self._analytics.identify(
                 account.id,
                 build_account_traits(account, AccountOrigin.CONTROL_PLANE),
+            )
+            self._analytics.track(
+                account.id,
+                AnalyticsEvent.ACCOUNT_CREATED,
+                build_account_created_properties(account, AccountOrigin.CONTROL_PLANE),
             )
             self._analytics.alias(user_id=user.id, previous_id=account.id)
         return account

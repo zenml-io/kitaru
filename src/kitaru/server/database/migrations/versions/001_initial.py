@@ -793,6 +793,12 @@ def upgrade() -> None:
     )
     with op.batch_alter_table("task", schema=None) as batch_op:
         batch_op.create_index(
+            "ix_task_agent_version_id_id",
+            ["agent_version_id", "id"],
+            unique=False,
+            postgresql_where=sa.text("status = 'pending'"),
+        )
+        batch_op.create_index(
             "ix_task_heartbeat_at_claimed_at",
             [sa.literal_column("coalesce(heartbeat_at, claimed_at)")],  # ty: ignore[invalid-argument-type]
             unique=False,
@@ -811,10 +817,9 @@ def upgrade() -> None:
             "ix_task_job_id_status", ["job_id", "status"], unique=False
         )
         batch_op.create_index(
-            "ix_task_labels",
-            ["labels"],
+            "ix_task_kind_id",
+            ["kind", "id"],
             unique=False,
-            postgresql_using="gin",
             postgresql_where=sa.text("status = 'pending'"),
         )
         batch_op.create_index(
@@ -1013,9 +1018,7 @@ def downgrade() -> None:
     with op.batch_alter_table("task", schema=None) as batch_op:
         batch_op.drop_index("ix_task_result_session_id")
         batch_op.drop_index(
-            "ix_task_labels",
-            postgresql_using="gin",
-            postgresql_where=sa.text("status = 'pending'"),
+            "ix_task_kind_id", postgresql_where=sa.text("status = 'pending'")
         )
         batch_op.drop_index("ix_task_job_id_status")
         batch_op.drop_index("ix_task_input_session_id")
@@ -1025,6 +1028,10 @@ def downgrade() -> None:
         batch_op.drop_index(
             "ix_task_heartbeat_at_claimed_at",
             postgresql_where=sa.text("status IN ('claimed', 'running')"),
+        )
+        batch_op.drop_index(
+            "ix_task_agent_version_id_id",
+            postgresql_where=sa.text("status = 'pending'"),
         )
 
     op.drop_table("task")

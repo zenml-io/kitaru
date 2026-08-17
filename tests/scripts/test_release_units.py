@@ -25,6 +25,7 @@ EXPECTED_UNITS = {
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
     "langgraph": "kitaru-langgraph",
+    "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
     "pydantic-ai": "kitaru-pydantic-ai",
@@ -35,6 +36,7 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
+    "kitaru-logfire-importer",
     "kitaru-langsmith-importer",
 }
 
@@ -61,7 +63,7 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_nine_python_distributions() -> None:
+def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -435,7 +437,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 9 release units."),
+        (["validate"], "Validated 10 release units."),
     ],
 )
 def test_cli_text_commands_succeed(

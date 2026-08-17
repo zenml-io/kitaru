@@ -23,6 +23,7 @@ import httpx
 
 from kitaru.analytics.source import (
     CLIENT_HEADER,
+    SKILL_HEADER,
     AnalyticsSource,
     format_client_header,
 )
@@ -35,7 +36,10 @@ from kitaru.client.auth import (
 )
 from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.exceptions import raise_for_response
+from kitaru.client.exceptions import (
+    InvalidServerResponseError,
+    raise_for_response,
+)
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.agent_versions import AgentVersionsResource
 from kitaru.client.resources.agents import AgentsResource
@@ -78,6 +82,7 @@ class KitaruAPIClient:
         timeout: float = 30.0,
         retries: int = 3,
         pool_size: int = 20,
+        analytics_source: AnalyticsSource = AnalyticsSource.PYTHON,
     ) -> None:
         """Initialize the client.
 
@@ -94,6 +99,7 @@ class KitaruAPIClient:
             timeout: Request timeout in seconds.
             retries: Retry count for failed requests.
             pool_size: Connection pool size.
+            analytics_source: Client sending the requests.
 
         Raises:
             RuntimeError: No server URL is configured.
@@ -108,8 +114,10 @@ class KitaruAPIClient:
 
         self._base_url = base_url
         self._owns_transport = True
-        identification = format_client_header(AnalyticsSource.PYTHON)
+        identification = format_client_header(analytics_source)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
+        if skill := os.environ.get("KITARU_ACTIVE_SKILL"):
+            headers[SKILL_HEADER] = skill
         self._http = build_async_client(
             base_url, headers, timeout=timeout, retries=retries, pool_size=pool_size
         )
@@ -240,6 +248,7 @@ class KitaruAPIClient:
 
         Raises:
             APIError: The response has an error status code.
+            InvalidServerResponseError: The response is not an API response.
 
         Returns:
             HTTP response.
@@ -260,6 +269,13 @@ class KitaruAPIClient:
             auth=self._auth if authenticate else None,
         )
         raise_for_response(response)
+        # A UI catch-all or proxy answers an unknown path with an HTML page
+        # and a success status, usually on a client/server version mismatch.
+        if response.headers.get("Content-Type", "").startswith("text/html"):
+            raise InvalidServerResponseError(
+                f"The server answered {method} {path} with an HTML page "
+                "instead of an API response"
+            )
         return response
 
     async def close(self) -> None:
