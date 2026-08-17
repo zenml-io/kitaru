@@ -294,10 +294,25 @@ async def test_create_omits_review_link_for_api_only_server() -> None:
     assert result.warnings == []
 
 
-async def test_create_warns_when_server_info_is_unavailable() -> None:
-    """A failed info request keeps the created investigation and warns."""
+def _validation_error() -> Exception:
+    try:
+        ServerInfoResponse.model_validate({})
+    except Exception as error:
+        return error
+    raise AssertionError("expected validation to fail")
+
+
+@pytest.mark.parametrize(
+    "info_error",
+    [APIError(503, "unavailable"), _validation_error()],
+    ids=["api_error", "malformed_payload"],
+)
+async def test_create_warns_when_server_info_is_unavailable(
+    info_error: Exception,
+) -> None:
+    """A failed or unparseable info request keeps the investigation and warns."""
     client = StubInvestigationClient()
-    client.info_error = APIError(503, "unavailable")
+    client.info_error = info_error
 
     result = await _create_minimal(client)
 

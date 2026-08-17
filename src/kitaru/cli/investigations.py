@@ -178,7 +178,10 @@ async def create_investigation(
     warnings: list[str] = []
     try:
         info = await client.info.get()
-    except (APIError, httpx.HTTPError):
+    # ValueError covers malformed info payloads: JSON decoding and Pydantic
+    # validation errors both derive from it, and a version-skewed server must
+    # not fail a create that already succeeded.
+    except (APIError, httpx.HTTPError, ValueError):
         warnings.append(
             "Could not resolve a dashboard review link because the server "
             "info request failed. The investigation was created."
