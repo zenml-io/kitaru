@@ -24,6 +24,7 @@ from conftest import db_settings, lifespan_client
 from kitaru.cache_keys import compute_tool_cache_key
 
 RUNTIME = {"platform": "bare"}
+SCOPE = {"claims": [{"kind": "agent"}, {"kind": "evaluator"}, {"kind": "importer"}]}
 
 
 @pytest.fixture
@@ -39,16 +40,16 @@ async def _setup_replayable_session(client: httpx.AsyncClient) -> tuple[str, str
     Returns:
         Agent id, agent version id, and baseline session id.
     """
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(
-            f"/v1/agents/{agent['id']}/versions",
+            f"/api/v1/agents/{agent['id']}/versions",
             json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
         )
     ).json()
     session = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": agent["id"],
                 "agent_version_id": version["id"],
@@ -66,15 +67,15 @@ async def _register_evaluator(
 ) -> None:
     blob = (
         await client.post(
-            "/v1/blobs",
+            "/api/v1/blobs",
             files={"file": ("score.py", b"def score(): pass", "text/plain")},
         )
     ).json()
     evaluator = (
-        await client.post("/v1/evaluators", json={"name": name, "metadata": {}})
+        await client.post("/api/v1/evaluators", json={"name": name, "metadata": {}})
     ).json()
     await client.post(
-        f"/v1/evaluators/{evaluator['id']}/versions",
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
         json={
             "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
         },
@@ -90,7 +91,7 @@ async def test_replay_pipeline_completes_through_the_api(
 
     replay = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": baseline_id,
                 "evaluators": [{"evaluator": "accuracy"}],
@@ -101,14 +102,19 @@ async def test_replay_pipeline_completes_through_the_api(
 
     registration = (
         await client.post(
-            "/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            "/api/v1/workers",
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     agent_entry = claimed["tasks"][0]
@@ -117,13 +123,13 @@ async def test_replay_pipeline_completes_through_the_api(
     agent_task_headers = {"Authorization": f"Bearer {agent_entry['token']}"}
 
     await client.patch(
-        f"/v1/tasks/{agent_task['id']}",
+        f"/api/v1/tasks/{agent_task['id']}",
         json={"status": "running"},
         headers=agent_task_headers,
     )
     result_session = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "origin": "replay",
                 "inputs": None,
@@ -135,23 +141,23 @@ async def test_replay_pipeline_completes_through_the_api(
     assert result_session["agent_id"] == agent_id
     assert result_session["agent_version_id"] == version_id
     await client.patch(
-        f"/v1/sessions/{result_session['id']}",
+        f"/api/v1/sessions/{result_session['id']}",
         json={"status": "completed", "outputs": {}},
     )
     response = await client.patch(
-        f"/v1/tasks/{agent_task['id']}",
+        f"/api/v1/tasks/{agent_task['id']}",
         json={"status": "completed"},
         headers=agent_task_headers,
     )
     assert response.status_code == 200
 
-    replay_after = (await client.get(f"/v1/replays/{replay['id']}")).json()
+    replay_after = (await client.get(f"/api/v1/replays/{replay['id']}")).json()
     assert replay_after["status"] == "evaluating"
     assert replay_after["result_session_id"] == result_session["id"]
 
     filtered = (
         await client.get(
-            "/v1/replays",
+            "/api/v1/replays",
             params={
                 "filter": json.dumps(
                     {
@@ -166,7 +172,7 @@ async def test_replay_pipeline_completes_through_the_api(
     assert [item["id"] for item in filtered] == [replay["id"]]
     unmatched = (
         await client.get(
-            "/v1/replays",
+            "/api/v1/replays",
             params={
                 "filter": json.dumps(
                     {
@@ -183,7 +189,7 @@ async def test_replay_pipeline_completes_through_the_api(
     # assertion below distinguishes the correct answer from an empty page.
     other_baseline = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": agent_id,
                 "agent_version_id": version_id,
@@ -195,7 +201,7 @@ async def test_replay_pipeline_completes_through_the_api(
     ).json()
     unfinished = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": other_baseline["id"],
                 "evaluators": [{"evaluator": "accuracy"}],
@@ -204,7 +210,7 @@ async def test_replay_pipeline_completes_through_the_api(
     ).json()
     pending = (
         await client.get(
-            "/v1/replays",
+            "/api/v1/replays",
             params={
                 "filter": json.dumps({"field": "result_session_id", "op": "is_null"})
             },
@@ -214,7 +220,7 @@ async def test_replay_pipeline_completes_through_the_api(
 
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     eval_entry = claimed["tasks"][0]
@@ -223,12 +229,12 @@ async def test_replay_pipeline_completes_through_the_api(
     eval_task_headers = {"Authorization": f"Bearer {eval_entry['token']}"}
 
     await client.patch(
-        f"/v1/tasks/{eval_task['id']}",
+        f"/api/v1/tasks/{eval_task['id']}",
         json={"status": "running"},
         headers=eval_task_headers,
     )
     await client.patch(
-        f"/v1/tasks/{eval_task['id']}",
+        f"/api/v1/tasks/{eval_task['id']}",
         json={
             "status": "completed",
             "result": [{"name": "accuracy", "score": 0.9}],
@@ -236,7 +242,7 @@ async def test_replay_pipeline_completes_through_the_api(
         headers=eval_task_headers,
     )
 
-    replay_final = (await client.get(f"/v1/replays/{replay['id']}")).json()
+    replay_final = (await client.get(f"/api/v1/replays/{replay['id']}")).json()
     assert replay_final["status"] == "completed"
 
     filter_expression = {
@@ -246,7 +252,7 @@ async def test_replay_pipeline_completes_through_the_api(
     }
     evaluations = (
         await client.get(
-            "/v1/evaluations", params={"filter": json.dumps(filter_expression)}
+            "/api/v1/evaluations", params={"filter": json.dumps(filter_expression)}
         )
     ).json()["items"]
     assert len(evaluations) == 1
@@ -264,7 +270,7 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
 
     replay = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": baseline_id,
                 "evaluators": [{"evaluator": "accuracy"}],
@@ -284,7 +290,7 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
 
     tool_inputs = {"query": "hi"}
     await client.post(
-        f"/v1/sessions/{baseline_id}/nodes",
+        f"/api/v1/sessions/{baseline_id}/nodes",
         json={
             "nodes": [
                 {
@@ -304,7 +310,7 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
 
     cache_key = compute_tool_cache_key("search", tool_inputs)
     response = await client.post(
-        f"/v1/replays/{replay['id']}/tool-lookup",
+        f"/api/v1/replays/{replay['id']}/tool-lookup",
         json={"tool_name": "search", "cache_key": cache_key},
     )
     assert response.status_code == 200
@@ -314,7 +320,7 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
 
     miss = (
         await client.post(
-            f"/v1/replays/{replay['id']}/tool-lookup",
+            f"/api/v1/replays/{replay['id']}/tool-lookup",
             json={"tool_name": "search", "cache_key": "b" * 64},
         )
     ).json()

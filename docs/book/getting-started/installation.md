@@ -133,6 +133,8 @@ export KITARU_API_KEY="KITKEY_..."
 
 See [Authentication & API keys](../deploy/authentication.md) for how keys are issued and managed.
 
+Node applications can also reuse a developer's selected CLI login without exporting its token. See the [TypeScript SDK](../typescript-sdk.md). Use dedicated API keys or worker task tokens for CI and production rather than copying a developer credential store.
+
 ## Verify
 
 ```bash
@@ -144,4 +146,4 @@ kitaru doctor
 
 ## Next steps
 
-Head to the [Quickstart](quickstart.md) to record and replay your first run — or, if you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).
+Read the [Quickstart](quickstart.md) to understand Kitaru's five-step method. For a controlled hands-on path, prepare the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) and continue with the [complete returns-agent tutorial](../tutorials/returns-agent/README.md). If you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).

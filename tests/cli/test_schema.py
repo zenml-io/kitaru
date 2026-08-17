@@ -41,11 +41,11 @@ def test_handler_parameters_match_command_schema() -> None:
                 "all_sessions" if name == "all" else name for name in schema_names
             ]
         if spec.path == ("worker", "start"):
-            # The singular public --selector option intentionally maps to the
-            # plural handler parameter that receives its repeatable values.
-            schema_names = [
-                "selectors" if name == "selector" else name for name in schema_names
-            ]
+            # The singular public --claim and --selector options intentionally
+            # map to the plural handler parameters that receive their
+            # repeatable values.
+            plural = {"claim": "claims", "selector": "selectors"}
+            schema_names = [plural.get(name, name) for name in schema_names]
         assert len(schema_names) == len(set(schema_names)), spec.command
         assert set(schema_names) == set(handler_names), spec.command
 
@@ -70,6 +70,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
         "login",
         "local",
         "logout",
+        "replay",
         "schema",
         "session",
         "status",
@@ -94,6 +95,7 @@ def test_top_level_schema_includes_completed_stage_one_slices() -> None:
     )
     assert descriptions["evaluator"] == "Develop, register, and inspect evaluators."
     assert descriptions["session"] == "Import and inspect sessions and their nodes."
+    assert descriptions["replay"] == "Create and inspect standalone replays."
 
 
 def test_command_schema_contains_behavior_and_error_contracts() -> None:
@@ -134,6 +136,20 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert worker_start["streams"] is True
     assert worker_start["output_modes"] == ["auto", "text", "json", "jsonl"]
     assert worker_start["side_effects"]["executes_local_code"] is True
+
+    replay_commands = {item["command"]: item for item in describe_schema(("replay",))}
+    assert set(replay_commands) == {"replay.create", "replay.get", "replay.list"}
+    replay_create = replay_commands["replay.create"]
+    assert replay_create["read_only"] is False
+    assert replay_create["side_effects"]["creates_remote_state"] is True
+    assert replay_create["idempotency"] == "non_idempotent_replay_created_per_request"
+    policy = next(
+        parameter
+        for parameter in replay_create["parameters"]
+        if parameter["name"] == "--tool-policy"
+    )
+    assert "server default" in policy["description"]
+    assert "live tools" in policy["description"]
 
     [annotation_create] = describe_schema(("annotation", "create"))
     selector = next(
@@ -253,6 +269,12 @@ def test_cohort_schema_describes_exact_and_destructive_commands() -> None:
     assert commands["cohort.version.create"]["idempotency"] == (
         "non_idempotent_server_assigned_version"
     )
+    parameters = {
+        parameter["name"]: parameter
+        for parameter in commands["cohort.version.create"]["parameters"]
+    }
+    assert parameters["--baseline"]["type"] == "UUID"
+    assert parameters["--baseline"]["required"] is False
     assert commands["cohort.update"]["idempotency"] == "idempotent replacement"
     assert commands["cohort.version.update"]["idempotency"] == (
         "idempotent replacement"

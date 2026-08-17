@@ -92,12 +92,13 @@ jobs:
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run generate:check
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run test:built
       - name: Build and test exact package tarballs
         run: pnpm run pack:release:built
-      - run: uv sync --frozen --extra server
+      - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Test compiled TypeScript adapters through Worker
         run: uv run pytest -q tests/typescript
       - name: Record artifact checksums

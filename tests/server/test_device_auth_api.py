@@ -153,20 +153,20 @@ async def _authorize_and_activate(
         Device authorization body, the account's bearer token, and the
         device's bearer token.
     """
-    authorization = (await client.post("/v1/device_authorization", data={})).json()
+    authorization = (await client.post("/api/v1/device_authorization", data={})).json()
     account_token = (
         await client.post(
-            "/v1/login", data={"username": account.name, "password": "secret"}
+            "/api/v1/login", data={"username": account.name, "password": "secret"}
         )
     ).json()["access_token"]
     await client.post(
-        f"/v1/devices/{authorization['device_id']}/verify",
+        f"/api/v1/devices/{authorization['device_id']}/verify",
         json={"user_code": authorization["user_code"], "trusted": False},
         headers={"Authorization": f"Bearer {account_token}"},
     )
     device_token = (
         await client.post(
-            "/v1/login",
+            "/api/v1/login",
             data={
                 "grant_type": DEVICE_CODE_GRANT_TYPE,
                 "device_id": authorization["device_id"],
@@ -179,7 +179,9 @@ async def _authorize_and_activate(
 
 async def test_device_authorization_returns_codes(client: httpx.AsyncClient) -> None:
     """Start a device authorization and receive its codes."""
-    response = await client.post("/v1/device_authorization", data={"hostname": "ci"})
+    response = await client.post(
+        "/api/v1/device_authorization", data={"hostname": "ci"}
+    )
     assert response.status_code == 200
     body = response.json()
     assert uuid.UUID(body["device_id"])
@@ -193,10 +195,10 @@ async def test_device_authorization_returns_codes(client: httpx.AsyncClient) -> 
 
 async def test_poll_before_verification_is_pending(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 with authorization_pending before an account confirms."""
-    authorization = (await client.post("/v1/device_authorization", data={})).json()
+    authorization = (await client.post("/api/v1/device_authorization", data={})).json()
 
     response = await client.post(
-        "/v1/login",
+        "/api/v1/login",
         data={
             "grant_type": DEVICE_CODE_GRANT_TYPE,
             "device_id": authorization["device_id"],
@@ -217,7 +219,7 @@ async def test_full_device_flow(
     authorization, _, device_token = await _authorize_and_activate(client, account)
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}",
+        f"/api/v1/devices/{authorization['device_id']}",
         headers={"Authorization": f"Bearer {device_token}"},
     )
     assert response.status_code == 200
@@ -235,19 +237,19 @@ async def test_locking_device_revokes_token(
     device_headers = {"Authorization": f"Bearer {device_token}"}
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=device_headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=device_headers
     )
     assert response.status_code == 200
 
     response = await client.patch(
-        f"/v1/devices/{authorization['device_id']}",
+        f"/api/v1/devices/{authorization['device_id']}",
         json={"locked": True},
         headers={"Authorization": f"Bearer {account_token}"},
     )
     assert response.status_code == 200
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=device_headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=device_headers
     )
     assert response.status_code == 401
 
@@ -263,13 +265,13 @@ async def test_deleting_device_revokes_token(
     device_headers = {"Authorization": f"Bearer {device_token}"}
 
     response = await client.delete(
-        f"/v1/devices/{authorization['device_id']}",
+        f"/api/v1/devices/{authorization['device_id']}",
         headers={"Authorization": f"Bearer {account_token}"},
     )
     assert response.status_code == 204
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=device_headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=device_headers
     )
     assert response.status_code == 401
 
@@ -289,7 +291,7 @@ async def test_device_grant_rejected_under_none_scheme(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/v1/login", data={"grant_type": DEVICE_CODE_GRANT_TYPE}
+            "/api/v1/login", data={"grant_type": DEVICE_CODE_GRANT_TYPE}
         )
     assert response.status_code == 400
     assert response.json() == {

@@ -146,7 +146,10 @@ def test_typescript_release_workflow_contract() -> None:
     assert "needs: build" in publish_source
     assert "needs: [build, publish]" in verify_source
     assert "node scripts/typescript-packages.mjs --tag" in workflow_source
+    assert "run: pnpm run generate:check" in build_source
     assert "run: pnpm run pack:release:built" in build_source
+    assert "uv sync --frozen --extra server --extra cli --extra worker" in build_source
+    assert "run: uv run pytest -q tests/typescript" in build_source
     assert "environment: npm-publish" in publish_source
     assert "contents: read\n      id-token: write" in publish_source
     assert "permissions:\n      contents: write" in verify_source
@@ -188,6 +191,9 @@ def test_typescript_ci_owns_cross_language_tests() -> None:
 
     assert base_matrix.count("--ignore=tests/typescript") == 4
     assert "run: uv run pytest -q tests/typescript" in typescript_job
+    assert (
+        "uv sync --frozen --extra server --extra cli --extra worker" in typescript_job
+    )
 
 
 def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
@@ -210,3 +216,16 @@ def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
         "pnpm test:e2e",
     ):
         assert command in job
+
+
+def test_canonical_example_ci_installs_candidate_python_artifacts() -> None:
+    workflow_source = CI_WORKFLOW_PATH.read_text()
+    job = workflow_source.split("\n  canonical-example:\n", maxsplit=1)[1].split(
+        "\n  links:\n", maxsplit=1
+    )[0]
+
+    assert "Install candidate artifacts in standalone example" in job
+    assert "../../plugins/candidate-wheels/kitaru-*.whl" in job
+    assert "../../plugins/candidate-wheels/kitaru_pydantic_ai-*.whl" in job
+    assert "../../plugins/candidate-wheels/kitaru_langfuse_importer-*.whl" in job
+    assert job.count("uv run --no-sync --with pytest") == 2

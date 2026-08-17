@@ -29,7 +29,7 @@ publish.
 - **Adapter `agent_id` is now optional** — task-bound (replay) runs
   infer the agent from the task's agent version; explicit id still the
   way for production recording. Adapter page updated.
-- **API key rotation (#662)** — `POST /v1/api-keys/{id}/rotate`, client
+- **API key rotation (#662)** — `POST /api/v1/api-keys/{id}/rotate`, client
   `api_keys.rotate(...)` with `retain_period_minutes` grace window.
   Documented in `deploy/authentication.md` (still client-only, no CLI
   noun).
@@ -337,11 +337,11 @@ split wants a deliberate decision before publish.
 ### Review fixes (Aug 13, reported by dev)
 
 - **Accounts section was wrong end to end (#705)** — it documented
-  `POST /v1/accounts/{id}/deactivate` and
+  `POST /api/v1/accounts/{id}/deactivate` and
   `client.accounts.create(AccountCreateRequest(...))`. None of that
-  exists. `/v1/accounts` is now **read-only** (list, `/me`, get by id);
-  writes moved to `/v1/users` (create, patch, `/deactivate`,
-  `/activate`) and `/v1/service-accounts` (create, patch).
+  exists. `/api/v1/accounts` is now **read-only** (list, `/me`, get by id);
+  writes moved to `/api/v1/users` (create, patch, `/deactivate`,
+  `/activate`) and `/api/v1/service-accounts` (create, patch).
   `AccountCreateRequest` is gone — it is `UserCreateRequest` via
   `client.users.create`. Service accounts have no activation dance and
   are disabled with `active=False` through

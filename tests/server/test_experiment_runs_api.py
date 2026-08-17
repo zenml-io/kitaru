@@ -143,7 +143,7 @@ async def run_setup(services: ReplayServices) -> dict[str, str]:
 async def test_start_run(client: httpx.AsyncClient, run_setup: dict[str, str]) -> None:
     """Start a run and observe HTTP 201 with progress inlined."""
     response = await client.post(
-        f"/v1/experiments/{run_setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
         json={
             "cohort_version_id": run_setup["cohort_version_id"],
             "agent_version_id": run_setup["agent_version_id"],
@@ -161,21 +161,21 @@ async def test_get_run(client: httpx.AsyncClient, run_setup: dict[str, str]) -> 
     """Get an experiment run by id."""
     created = (
         await client.post(
-            f"/v1/experiments/{run_setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": run_setup["cohort_version_id"],
                 "agent_version_id": run_setup["agent_version_id"],
             },
         )
     ).json()
-    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    response = await client.get(f"/api/v1/experiment-runs/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_run_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing run."""
-    response = await client.get(f"/v1/experiment-runs/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/experiment-runs/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -184,7 +184,7 @@ async def test_list_runs_filters_by_experiment(
 ) -> None:
     """List runs filters by experiment id."""
     await client.post(
-        f"/v1/experiments/{run_setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
         json={
             "cohort_version_id": run_setup["cohort_version_id"],
             "agent_version_id": run_setup["agent_version_id"],
@@ -196,7 +196,7 @@ async def test_list_runs_filters_by_experiment(
         "value": run_setup["experiment_id"],
     }
     response = await client.get(
-        "/v1/experiment-runs", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/experiment-runs", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     assert len(response.json()["items"]) == 1
@@ -207,7 +207,7 @@ async def test_list_runs_filters_by_experiment(
         "value": str(uuid.uuid4()),
     }
     response = await client.get(
-        "/v1/experiment-runs", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/experiment-runs", params={"filter": json.dumps(filter_expression)}
     )
     assert response.json()["items"] == []
 
@@ -218,14 +218,14 @@ async def test_list_run_jobs(
     """List the jobs backing a run's replays."""
     created = (
         await client.post(
-            f"/v1/experiments/{run_setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": run_setup["cohort_version_id"],
                 "agent_version_id": run_setup["agent_version_id"],
             },
         )
     ).json()
-    response = await client.get(f"/v1/experiment-runs/{created['id']}/jobs")
+    response = await client.get(f"/api/v1/experiment-runs/{created['id']}/jobs")
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
@@ -236,14 +236,14 @@ async def test_cancel_run(client: httpx.AsyncClient, run_setup: dict[str, str]) 
     """Cancel a run and observe it drain to canceled since all tasks are pending."""
     created = (
         await client.post(
-            f"/v1/experiments/{run_setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": run_setup["cohort_version_id"],
                 "agent_version_id": run_setup["agent_version_id"],
             },
         )
     ).json()
-    response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
+    response = await client.post(f"/api/v1/experiment-runs/{created['id']}/cancel")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "canceled"
@@ -256,15 +256,15 @@ async def test_cancel_run_conflicts_when_not_running(
     """Observe HTTP 409 when canceling a run that already settled."""
     created = (
         await client.post(
-            f"/v1/experiments/{run_setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": run_setup["cohort_version_id"],
                 "agent_version_id": run_setup["agent_version_id"],
             },
         )
     ).json()
-    await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
-    response = await client.post(f"/v1/experiment-runs/{created['id']}/cancel")
+    await client.post(f"/api/v1/experiment-runs/{created['id']}/cancel")
+    response = await client.post(f"/api/v1/experiment-runs/{created['id']}/cancel")
     assert response.status_code == 409
 
 
@@ -272,22 +272,22 @@ async def test_delete_run(client: httpx.AsyncClient, run_setup: dict[str, str]) 
     """Delete a run and observe HTTP 204."""
     created = (
         await client.post(
-            f"/v1/experiments/{run_setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": run_setup["cohort_version_id"],
                 "agent_version_id": run_setup["agent_version_id"],
             },
         )
     ).json()
-    response = await client.delete(f"/v1/experiment-runs/{created['id']}")
+    response = await client.delete(f"/api/v1/experiment-runs/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/experiment-runs/{created['id']}")
+    response = await client.get(f"/api/v1/experiment-runs/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_run_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when deleting an unknown run."""
-    response = await client.delete(f"/v1/experiment-runs/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/experiment-runs/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -302,7 +302,7 @@ async def test_start_run_rejects_empty_cohort_version(
         services.cohort_versions, ACCOUNT.id, empty_cohort.id
     )
     response = await client.post(
-        f"/v1/experiments/{run_setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
         json={
             "cohort_version_id": str(empty_cohort_version.id),
             "agent_version_id": run_setup["agent_version_id"],
@@ -316,7 +316,7 @@ async def test_start_run_unknown_cohort_version(
 ) -> None:
     """Observe HTTP 404 when the cohort version id does not exist."""
     response = await client.post(
-        f"/v1/experiments/{run_setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
         json={
             "cohort_version_id": str(uuid.uuid4()),
             "agent_version_id": run_setup["agent_version_id"],

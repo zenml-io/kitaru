@@ -62,7 +62,7 @@ class CohortsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/cohorts",
+            "/api/v1/cohorts",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return CohortResponse.model_validate(response.json())
@@ -80,7 +80,7 @@ class CohortsResource:
         Returns:
             Stored cohort.
         """
-        response = await self._client.request("GET", f"/v1/cohorts/{cohort_id}")
+        response = await self._client.request("GET", f"/api/v1/cohorts/{cohort_id}")
         return CohortResponse.model_validate(response.json())
 
     async def list(
@@ -101,7 +101,7 @@ class CohortsResource:
         params = params or CohortListParams()
         response = await self._client.request(
             "GET",
-            "/v1/cohorts",
+            "/api/v1/cohorts",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[CohortResponse].model_validate(response.json())
@@ -142,7 +142,7 @@ class CohortsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/cohorts/{cohort_id}",
+            f"/api/v1/cohorts/{cohort_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return CohortResponse.model_validate(response.json())
@@ -157,7 +157,7 @@ class CohortsResource:
             APIError: The request failed, including 404 for a missing
                 cohort.
         """
-        await self._client.request("DELETE", f"/v1/cohorts/{cohort_id}")
+        await self._client.request("DELETE", f"/api/v1/cohorts/{cohort_id}")
 
     async def create_version(
         self, cohort_id: uuid.UUID, request: CohortVersionCreateRequest
@@ -178,7 +178,7 @@ class CohortsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/cohorts/{cohort_id}/versions",
+            f"/api/v1/cohorts/{cohort_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return CohortVersionResponse.model_validate(response.json())
@@ -201,7 +201,7 @@ class CohortsResource:
         params = params or CohortVersionListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/cohorts/{cohort_id}/versions",
+            f"/api/v1/cohorts/{cohort_id}/versions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[CohortVersionResponse].model_validate(response.json())

@@ -47,7 +47,8 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
 )
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
-from kitaru.api_models.v1.worker import WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.worker import Worker, WorkerConfig
 
@@ -154,7 +155,10 @@ async def _run_job(
     worker = Worker(
         WorkerConfig(
             name=f"vercel-ai-demo-{job_id}",
-            scope=WorkerScope(job_id=job_id),
+            scope=WorkerScope(
+                claims=[WorkerClaim(kind=kind) for kind in TaskKind],
+                job_id=job_id,
+            ),
             poll_interval=0.05,
             timeout=180,
             blob_cache_root=state_dir / "worker-blobs",

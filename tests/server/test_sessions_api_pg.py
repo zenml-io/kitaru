@@ -32,7 +32,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to attach sessions to."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
@@ -52,15 +52,15 @@ async def test_sessions_persist_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Prove the per-request commit through separate requests."""
-    response = await client.post("/v1/sessions", json=_session_body(agent_id))
+    response = await client.post("/api/v1/sessions", json=_session_body(agent_id))
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/sessions/{created['id']}")
+    response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/sessions")
+    response = await client.get("/api/v1/sessions")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -71,11 +71,13 @@ async def test_sessions_number_sequentially_per_agent(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Number an agent's sessions sequentially, each agent counting alone."""
-    first = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
-    second = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
-    other_agent = (await client.post("/v1/agents", json={"name": "other"})).json()
+    first = (await client.post("/api/v1/sessions", json=_session_body(agent_id))).json()
+    second = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
+    other_agent = (await client.post("/api/v1/agents", json={"name": "other"})).json()
     other = (
-        await client.post("/v1/sessions", json=_session_body(other_agent["id"]))
+        await client.post("/api/v1/sessions", json=_session_body(other_agent["id"]))
     ).json()
     assert first["number"] == 1
     assert second["number"] == 2
@@ -89,9 +91,9 @@ async def test_duplicate_external_id_conflict(
     body = _session_body(
         agent_id, origin="imported", imported_from="langsmith", external_id="run-1"
     )
-    response = await client.post("/v1/sessions", json=body)
+    response = await client.post("/api/v1/sessions", json=body)
     assert response.status_code == 201
-    response = await client.post("/v1/sessions", json=body)
+    response = await client.post("/api/v1/sessions", json=body)
     assert response.status_code == 409
 
 
@@ -99,14 +101,16 @@ async def test_update_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Persist a status transition and outputs update across requests."""
-    created = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
     response = await client.patch(
-        f"/v1/sessions/{created['id']}",
+        f"/api/v1/sessions/{created['id']}",
         json={"status": "completed", "outputs": {"answer": 42}},
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/sessions/{created['id']}")
+    response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "completed"
@@ -118,11 +122,13 @@ async def test_delete_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Persist a deletion across requests."""
-    created = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
-    response = await client.delete(f"/v1/sessions/{created['id']}")
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
+    response = await client.delete(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/sessions/{created['id']}")
+    response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 404
 
 
@@ -130,10 +136,12 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Persist ingested nodes and their session rollups across requests."""
-    created = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
 
     response = await client.post(
-        f"/v1/sessions/{created['id']}/nodes",
+        f"/api/v1/sessions/{created['id']}/nodes",
         json={
             "nodes": [
                 {
@@ -168,19 +176,19 @@ async def test_ingest_and_list_nodes_persist_across_requests(
     assert nodes[1]["parent_id"] == nodes[0]["id"]
     assert nodes[1]["cache_key"] is not None
 
-    session = (await client.get(f"/v1/sessions/{created['id']}")).json()
+    session = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
     assert session["cost"] == "1.50"
     assert session["llm_call_count"] == 1
     assert session["tool_call_count"] == 1
 
-    response = await client.get(f"/v1/sessions/{created['id']}/nodes")
+    response = await client.get(f"/api/v1/sessions/{created['id']}/nodes")
     assert response.status_code == 200
     items = response.json()["items"]
     assert [item["index"] for item in items] == [0, 1]
     assert items[0]["inputs"] is None
 
     response = await client.get(
-        f"/v1/sessions/{created['id']}/nodes", params={"include_payloads": "true"}
+        f"/api/v1/sessions/{created['id']}/nodes", params={"include_payloads": "true"}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -191,10 +199,14 @@ async def test_ingest_into_terminal_recorded_session_rejected(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Reject node ingest into a terminal recorded session."""
-    created = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
-    await client.patch(f"/v1/sessions/{created['id']}", json={"status": "completed"})
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
+    await client.patch(
+        f"/api/v1/sessions/{created['id']}", json={"status": "completed"}
+    )
     response = await client.post(
-        f"/v1/sessions/{created['id']}/nodes",
+        f"/api/v1/sessions/{created['id']}/nodes",
         json={
             "nodes": [
                 {
@@ -217,13 +229,17 @@ async def test_list_sessions_filters_by_status_filter(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Filter sessions by a status filter expression end to end."""
-    completed = (await client.post("/v1/sessions", json=_session_body(agent_id))).json()
-    await client.patch(f"/v1/sessions/{completed['id']}", json={"status": "completed"})
-    await client.post("/v1/sessions", json=_session_body(agent_id))
+    completed = (
+        await client.post("/api/v1/sessions", json=_session_body(agent_id))
+    ).json()
+    await client.patch(
+        f"/api/v1/sessions/{completed['id']}", json={"status": "completed"}
+    )
+    await client.post("/api/v1/sessions", json=_session_body(agent_id))
 
     filter_expression = {"field": "status", "op": "eq", "value": "completed"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]

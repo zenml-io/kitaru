@@ -36,7 +36,6 @@ from kitaru.api_models.v1.investigation import (
     InvestigationStatus,
 )
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
-from kitaru.api_models.v1.task import TaskKind
 from kitaru.cli import (
     annotations,
     cohorts,
@@ -48,6 +47,7 @@ from kitaru.cli import (
     jobs,
     local_runtime,
     registration,
+    replays,
     scaffold,
     sessions,
     workers,
@@ -199,6 +199,11 @@ job_app = App(
     help=GROUP_DESCRIPTIONS["job"],
     default_parameter=Parameter(negative=False),
 )
+replay_app = App(
+    name="replay",
+    help=GROUP_DESCRIPTIONS["replay"],
+    default_parameter=Parameter(negative=False),
+)
 local_app = App(
     name="local",
     help=GROUP_DESCRIPTIONS["local"],
@@ -222,6 +227,7 @@ app.command(session_app, name="session")
 app.command(evaluation_app, name="evaluation")
 app.command(worker_app, name="worker")
 app.command(job_app, name="job")
+app.command(replay_app, name="replay")
 app.command(local_app, name="local")
 
 
@@ -235,6 +241,7 @@ class Invocation:
     no_browser: bool
     stdin: TextIO
     _credential_store: CredentialStore | None = None
+    _resolved_target: ResolvedTarget | None = None
 
     @property
     def credential_store(self) -> CredentialStore:
@@ -242,6 +249,13 @@ class Invocation:
         if self._credential_store is None:
             self._credential_store = CredentialStore()
         return self._credential_store
+
+    @property
+    def resolved_server_url(self) -> str | None:
+        """Return the server resolved during this invocation, if any."""
+        if self._resolved_target is None:
+            return None
+        return self._resolved_target.server_url
 
     def resolve_target(self, explicit_server: str | None = None) -> ResolvedTarget:
         """Resolve a server from command and global inputs."""
@@ -254,7 +268,9 @@ class Invocation:
                     "The command SERVER and global --server identify "
                     "different servers.",
                 )
-        return resolve_target(explicit_server=explicit_server or self.server)
+        target = resolve_target(explicit_server=explicit_server or self.server)
+        self._resolved_target = target
+        return target
 
 
 _INVOCATION: ContextVar[Invocation | None] = ContextVar(
@@ -428,7 +444,10 @@ async def _launch(
     except asyncio.CancelledError:
         raise
     except BaseException as exception:
-        error = _convert_error(exception)
+        error = _convert_error(
+            exception,
+            server_url=invocation.resolved_server_url,
+        )
         return emit_error(
             error,
             exception=exception,
@@ -670,7 +689,7 @@ async def login(
     """Authenticate with a server and store its credential when required."""
     invocation = _invocation()
     chosen_server = server or invocation.server
-    if server and invocation.server:
+    if chosen_server and not local:
         invocation.resolve_target(server)
     return await auth_commands.login(
         server=chosen_server,
@@ -1629,6 +1648,13 @@ async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult
                 "Ordered session IDs to remove.",
             ),
             ParameterSpec(
+                "--baseline",
+                "UUID",
+                "option",
+                False,
+                "Exact cohort version the membership delta applies to.",
+            ),
+            ParameterSpec(
                 "--display-version",
                 "string",
                 "option",
@@ -1648,6 +1674,7 @@ async def cohort_version_create(
     *,
     add_session: list[uuid.UUID] | None = None,
     remove_session: list[uuid.UUID] | None = None,
+    baseline: uuid.UUID | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
@@ -1657,6 +1684,7 @@ async def cohort_version_create(
             cohort,
             add_session_ids=add_session,
             remove_session_ids=remove_session,
+            baseline_id=baseline,
             display_version=display_version,
         )
 
@@ -2448,6 +2476,126 @@ async def experiment_delete(
     """Delete one exact experiment."""
     async with _open_asset_client() as client:
         return await experiments.delete_experiment(client, experiment, force=force)
+
+
+@_register(
+    replay_app,
+    _spec(
+        ("replay", "create"),
+        "Create one standalone replay from an exact baseline session.",
+        parameters=(
+            ParameterSpec("BASELINE", "UUID", "argument", True, "Baseline session ID."),
+            ParameterSpec(
+                "--evaluator",
+                "EVALUATOR@VERSION[]",
+                "option",
+                True,
+                "Exact evaluator version; repeat for additional evaluators.",
+            ),
+            ParameterSpec(
+                "--evaluator-params",
+                "EVALUATOR@VERSION=JSON_OBJECT[]",
+                "option",
+                False,
+                "Parameters for a selected evaluator token.",
+            ),
+            ParameterSpec(
+                "--agent",
+                "AGENT@VERSION",
+                "option",
+                False,
+                "Exact agent version; omit to use the baseline's recorded version.",
+            ),
+            ParameterSpec(
+                "--override",
+                "JSON object",
+                "option",
+                False,
+                "Replay model, prompt, or model-parameter override.",
+            ),
+            ParameterSpec(
+                "--tool-policy",
+                "JSON object",
+                "option",
+                False,
+                "Tool policy; omitting it uses the server default and may execute "
+                "live tools.",
+            ),
+            ParameterSpec(
+                "--evaluate-baselines",
+                "boolean",
+                "option",
+                False,
+                "Also score the baseline session.",
+            ),
+        ),
+        read_only=False,
+        side_effects=("creates_remote_state",),
+        idempotency="non_idempotent_replay_created_per_request",
+        errors=_ASSET_WRITE_ERRORS,
+    ),
+)
+async def replay_create(
+    baseline: uuid.UUID,
+    /,
+    *,
+    evaluator: list[str],
+    evaluator_params: list[str] | None = None,
+    agent: str | None = None,
+    override: str | None = None,
+    tool_policy: str | None = None,
+    evaluate_baselines: bool = False,
+) -> CommandResult:
+    """Create one standalone replay without waiting for its job."""
+    async with _open_asset_client() as client:
+        return await replays.create_replay(
+            client,
+            baseline,
+            evaluators=evaluator,
+            evaluator_params=evaluator_params,
+            agent=agent,
+            override=override,
+            tool_policy=tool_policy,
+            evaluate_baselines=evaluate_baselines,
+        )
+
+
+@_register(
+    replay_app,
+    _spec(
+        ("replay", "list"),
+        "List standalone and experiment-created replays.",
+        parameters=_LIST_PARAMETERS,
+        errors=_COLLECTION_READ_ERRORS,
+    ),
+)
+async def replay_list(
+    *,
+    size: int = 20,
+    cursor: str | None = None,
+    sort: str = "created:desc",
+    filter: str | None = None,
+) -> CommandResult:
+    """List one server page of replays."""
+    async with _open_asset_client() as client:
+        return await replays.list_replays(
+            client, size=size, cursor=cursor, sort=sort, filter=filter
+        )
+
+
+@_register(
+    replay_app,
+    _spec(
+        ("replay", "get"),
+        "Get one replay by exact UUID.",
+        parameters=(ParameterSpec("REPLAY", "UUID", "argument", True, "Replay ID."),),
+        errors=_UUID_READ_ERRORS,
+    ),
+)
+async def replay_get(replay: uuid.UUID, /) -> CommandResult:
+    """Get one replay without remapping its status."""
+    async with _open_asset_client() as client:
+        return await replays.get_replay(client, replay)
 
 
 @_register(
@@ -3629,7 +3777,12 @@ async def evaluation_get(evaluation: uuid.UUID, /) -> CommandResult:
 _WORKER_START_PARAMETERS = (
     ParameterSpec("--name", "string", "option", False, "Ephemeral worker name."),
     ParameterSpec(
-        "--kinds", "agent|evaluator|importer[]", "option", False, "Task kinds to claim."
+        "--claim",
+        "agent|evaluator|importer|agent=UUID[]",
+        "option",
+        False,
+        "Claim the worker serves: agent, evaluator, importer, or "
+        "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
     ),
     ParameterSpec(
         "--selector",
@@ -3698,7 +3851,14 @@ _WORKER_START_PARAMETERS = (
 async def worker_start(
     *,
     name: str | None = None,
-    kinds: list[TaskKind] | None = None,
+    claims: Annotated[
+        list[str] | None,
+        Parameter(
+            name="--claim",
+            help="Claim the worker serves: agent, evaluator, importer, or "
+            "agent=AGENT_VERSION_ID. Repeat for multiple claims.",
+        ),
+    ] = None,
     selectors: Annotated[
         list[str] | None,
         Parameter(name="--selector", help="KEY=VALUE[,VALUE] or selector JSON."),
@@ -3720,7 +3880,7 @@ async def worker_start(
     return await workers.start_worker(
         target,
         name=name,
-        kinds=kinds,
+        claims=claims,
         selectors=selectors,
         job_id=job_id,
         concurrency=concurrency,
@@ -3976,7 +4136,9 @@ def _emit_early_error(
         reset_output_context(token)
 
 
-def _convert_error(exception: BaseException) -> CLIError:
+def _convert_error(
+    exception: BaseException, *, server_url: str | None = None
+) -> CLIError:
     """Map SDK, validation, and transport failures to stable CLI errors."""
     if isinstance(exception, CLIError):
         return exception
@@ -4005,21 +4167,72 @@ def _convert_error(exception: BaseException) -> CLIError:
                 "network_error", exception.detail, retryable=True, details=details
             )
         return CLIError("internal_error", str(exception), details=details)
+    if isinstance(exception, httpx.TransportError):
+        server_url = _get_transport_server_url(exception, server_url)
     if isinstance(exception, httpx.TimeoutException):
+        message = (
+            f"The request to {server_url} timed out."
+            if server_url
+            else "The server request timed out."
+        )
         return CLIError(
             "network_error",
-            "The server request timed out.",
+            message,
             retryable=True,
+            details={"server_url": server_url} if server_url else None,
             hint="Check the selected server with `kitaru status`, then retry.",
         )
     if isinstance(exception, httpx.TransportError):
+        location = f" at {server_url}" if server_url else ""
         return CLIError(
             "network_error",
-            f"The server is unavailable: {exception}",
+            f"The server{location} is unavailable: {exception}",
             retryable=True,
+            details={"server_url": server_url} if server_url else None,
             hint="Check the selected server with `kitaru status`, then retry.",
         )
     return CLIError("internal_error", str(exception) or type(exception).__name__)
+
+
+def _get_transport_server_url(
+    exception: httpx.TransportError,
+    selected_server_url: str | None = None,
+) -> str | None:
+    """Return the selected server or a secret-safe failed request origin."""
+    try:
+        request_url = exception.request.url
+    except RuntimeError:
+        request_url = None
+    if selected_server_url:
+        selected_url = httpx.URL(selected_server_url)
+        if request_url is None or (
+            request_url.scheme,
+            request_url.host,
+            request_url.port,
+        ) == (
+            selected_url.scheme,
+            selected_url.host,
+            selected_url.port,
+        ):
+            return str(
+                selected_url.copy_with(
+                    username=None,
+                    password=None,
+                    query=None,
+                    fragment=None,
+                )
+            ).rstrip("/")
+    if request_url is None:
+        return None
+    return str(
+        request_url.copy_with(
+            username=None,
+            password=None,
+            path="/",
+            query=None,
+            fragment=None,
+        )
+    ).rstrip("/")
 
 
 def _parse_bool(value: str) -> bool:

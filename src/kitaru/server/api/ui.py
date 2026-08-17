@@ -27,7 +27,7 @@ from kitaru.server.api.config import APISettings
 
 logger = logging.getLogger(__name__)
 
-_RESERVED_PREFIXES = ("v1", "health", "docs", "redoc", "openapi.json")
+_RESERVED_PREFIXES = ("api", "health", "docs", "redoc", "openapi.json")
 
 
 def _is_reserved_path(path: str) -> bool:

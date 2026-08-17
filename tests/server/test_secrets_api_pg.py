@@ -34,22 +34,24 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_secrets_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
     created = response.json()
     assert "values" not in created
 
-    response = await client.get(f"/v1/secrets/{created['id']}")
+    response = await client.get(f"/api/v1/secrets/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
     response = await client.get(
-        f"/v1/secrets/{created['id']}", params={"include_values": "true"}
+        f"/api/v1/secrets/{created['id']}", params={"include_values": "true"}
     )
     assert response.status_code == 200
     assert response.json()["values"] == VALUES
 
-    response = await client.get("/v1/secrets")
+    response = await client.get("/api/v1/secrets")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -58,9 +60,13 @@ async def test_secrets_persist_across_requests(client: httpx.AsyncClient) -> Non
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 201
-    response = await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+    response = await client.post(
+        "/api/v1/secrets", json={"name": "db", "values": VALUES}
+    )
     assert response.status_code == 409
     assert response.json() == {"detail": "Secret name 'db' is already registered"}
 
@@ -68,16 +74,16 @@ async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist an update across requests."""
     created = (
-        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+        await client.post("/api/v1/secrets", json={"name": "db", "values": VALUES})
     ).json()
     response = await client.patch(
-        f"/v1/secrets/{created['id']}",
+        f"/api/v1/secrets/{created['id']}",
         json={"type": "database", "values": {"password": "hunter3"}},
     )
     assert response.status_code == 200
 
     response = await client.get(
-        f"/v1/secrets/{created['id']}", params={"include_values": "true"}
+        f"/api/v1/secrets/{created['id']}", params={"include_values": "true"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -89,10 +95,10 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
 async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> None:
     """Persist a deletion across requests."""
     created = (
-        await client.post("/v1/secrets", json={"name": "db", "values": VALUES})
+        await client.post("/api/v1/secrets", json={"name": "db", "values": VALUES})
     ).json()
-    response = await client.delete(f"/v1/secrets/{created['id']}")
+    response = await client.delete(f"/api/v1/secrets/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/secrets/{created['id']}")
+    response = await client.get(f"/api/v1/secrets/{created['id']}")
     assert response.status_code == 404

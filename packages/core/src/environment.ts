@@ -16,9 +16,13 @@ export interface KitaruEnvironment {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+function getProcessEnvironment(): KitaruEnvironmentVariables {
+  return typeof process === "undefined" ? {} : (process.env ?? {});
+}
+
 export function resolveKitaruEnvironment(
   options: KitaruEnvironmentOptions = {},
-  environment: KitaruEnvironmentVariables = process.env,
+  environment: KitaruEnvironmentVariables = getProcessEnvironment(),
 ): KitaruEnvironment {
   const apiUrl = options.apiUrl ?? environment.KITARU_API_URL;
   if (!apiUrl) {

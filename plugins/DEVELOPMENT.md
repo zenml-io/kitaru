@@ -107,7 +107,7 @@ unset KITARU_API_KEY KITARU_API_TOKEN KITARU_TASK_TOKEN
 docker compose -f plugins/docker-compose.candidate.yml up -d --wait
 docker compose -f plugins/docker-compose.candidate.yml ps
 curl -fsS "$KITARU_API_URL/health/live"
-curl -fsS "$KITARU_API_URL/v1/info"
+curl -fsS "$KITARU_API_URL/api/v1/info"
 uv run --no-sync kitaru login "$KITARU_API_URL"
 ```
 
@@ -222,8 +222,8 @@ export PATH="/tmp/kitaru-plugin-worker-venv/bin:$PATH"
 kitaru worker start \
   --server "$KITARU_API_URL" \
   --name local-wheel-worker \
-  --kinds importer \
-  --kinds evaluator
+  --claim importer \
+  --claim evaluator
 ```
 
 Keep the worker active while you create an import or evaluation job. Task subprocesses inherit `UV_FIND_LINKS` and resolve the candidate wheels.

@@ -7,6 +7,7 @@ import type { RuntimeGenerateOptions } from "../src/types.js";
 export const AGENT_ID = "018f0000-0000-7000-8000-000000000100";
 export const REPLAY_ID = "018f0000-0000-7000-8000-000000000101";
 export const ORIGINAL_SESSION_ID = "018f0000-0000-7000-8000-000000000102";
+const REPLAY_JOB_ID = "018f0000-0000-7000-8000-000000000103";
 
 export interface ApiCall {
   body: Record<string, unknown> | undefined;
@@ -51,7 +52,7 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
       : undefined;
     calls.push({ body, method, path: url.pathname });
 
-    if (method === "POST" && url.pathname === "/v1/sessions") {
+    if (method === "POST" && url.pathname === "/api/v1/sessions") {
       const id = sessionId(sessionIds.length);
       sessionIds.push(id);
       return jsonResponse(
@@ -59,7 +60,7 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
         201,
       );
     }
-    if (method === "PATCH" && url.pathname.startsWith("/v1/sessions/")) {
+    if (method === "PATCH" && url.pathname.startsWith("/api/v1/sessions/")) {
       return jsonResponse({
         id: url.pathname.split("/").at(-1),
         origin: "recorded",
@@ -77,16 +78,17 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
         })),
       );
     }
-    if (method === "GET" && url.pathname === `/v1/replays/${REPLAY_ID}`) {
-      return jsonResponse(
-        options.replaySpec ?? {
+    if (method === "GET" && url.pathname === `/api/v1/replays/${REPLAY_ID}`) {
+      return jsonResponse({
+        job_id: REPLAY_JOB_ID,
+        ...(options.replaySpec ?? {
           baseline_session_id: ORIGINAL_SESSION_ID,
           id: REPLAY_ID,
           override: null,
           status: "pending",
           tool_policy: { default: { type: "passthrough" }, tools: {} },
-        },
-      );
+        }),
+      });
     }
     if (method === "POST" && url.pathname.endsWith("/tool-lookup")) {
       return jsonResponse(

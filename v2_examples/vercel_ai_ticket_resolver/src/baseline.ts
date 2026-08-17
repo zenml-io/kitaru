@@ -3,14 +3,14 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
-import {
-  createTicketRun,
-  type ModelProvider,
-  validateModelProviderEnvironment,
-} from "./agent.js";
+import { createTicketRun } from "./agent.js";
 import { ticketCases } from "./fixtures.js";
 import type { TicketInput } from "./models.js";
 import { renderTicketPrompt } from "./models.js";
+import {
+  type ModelProvider,
+  validateWorkflowEnvironment,
+} from "./preflight.js";
 
 const UUID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -233,7 +233,7 @@ export async function recordBaseline(
   const stateDir = resolve(options.stateDir ?? ".state");
   const provider = options.provider ?? "deterministic";
   const baseEnvironment = options.environment ?? process.env;
-  validateModelProviderEnvironment(provider, baseEnvironment);
+  validateWorkflowEnvironment(provider, baseEnvironment);
   const adoptions = options.adoptions ?? {};
   const retries = options.retries ?? {};
   validateAdoptions(adoptions);

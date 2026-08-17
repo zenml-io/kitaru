@@ -919,7 +919,7 @@
         "title": "BlobResponse",
         "type": "object"
       },
-      "Body_device_authorization_v1_device_authorization_post": {
+      "Body_device_authorization_api_v1_device_authorization_post": {
         "properties": {
           "client_version": {
             "anyOf": [
@@ -966,10 +966,10 @@
             "title": "Python Version"
           }
         },
-        "title": "Body_device_authorization_v1_device_authorization_post",
+        "title": "Body_device_authorization_api_v1_device_authorization_post",
         "type": "object"
       },
-      "Body_login_v1_login_post": {
+      "Body_login_api_v1_login_post": {
         "properties": {
           "device_code": {
             "anyOf": [
@@ -1028,10 +1028,10 @@
             "title": "Username"
           }
         },
-        "title": "Body_login_v1_login_post",
+        "title": "Body_login_api_v1_login_post",
         "type": "object"
       },
-      "Body_upload_blob_v1_blobs_post": {
+      "Body_upload_blob_api_v1_blobs_post": {
         "properties": {
           "file": {
             "contentMediaType": "application/octet-stream",
@@ -1042,7 +1042,7 @@
         "required": [
           "file"
         ],
-        "title": "Body_upload_blob_v1_blobs_post",
+        "title": "Body_upload_blob_api_v1_blobs_post",
         "type": "object"
       },
       "CohortCreateRequest": {
@@ -8231,6 +8231,34 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WorkerClaim": {
+        "additionalProperties": false,
+        "description": "Worker claim.",
+        "properties": {
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version the claim covers, None claims every agent version.",
+            "title": "Agent Version Id"
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TaskKind",
+            "description": "Task kind the claim covers."
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "title": "WorkerClaim",
+        "type": "object"
+      },
       "WorkerCreateRequest": {
         "additionalProperties": false,
         "description": "Worker create request.",
@@ -8512,6 +8540,16 @@
         "additionalProperties": false,
         "description": "Worker scope.",
         "properties": {
+          "claims": {
+            "description": "Claims the worker serves, combined by disjunction.",
+            "items": {
+              "$ref": "#/components/schemas/WorkerClaim"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Claims",
+            "type": "array"
+          },
           "job_id": {
             "anyOf": [
               {
@@ -8524,21 +8562,6 @@
             ],
             "description": "Job the worker claims tasks from.",
             "title": "Job Id"
-          },
-          "kinds": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/TaskKind"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Task kinds the worker claims.",
-            "title": "Kinds"
           },
           "selectors": {
             "anyOf": [
@@ -8556,6 +8579,9 @@
             "title": "Selectors"
           }
         },
+        "required": [
+          "claims"
+        ],
         "title": "WorkerScope",
         "type": "object"
       }
@@ -8567,62 +8593,10 @@
   },
   "openapi": "3.1.0",
   "paths": {
-    "/health": {
-      "get": {
-        "description": "Report service and database readiness.\n\nArgs:\n    db: Database session for the readiness probe.\n\nRaises:\n    HTTPException: HTTP 503 when the database probe fails.\n\nReturns:\n    JSON object with ``status`` and ``database`` fields.",
-        "operationId": "health_health_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Health Health Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Health",
-        "tags": [
-          "health"
-        ]
-      }
-    },
-    "/health/live": {
-      "get": {
-        "description": "Confirm the API process is running.\n\nReturns:\n    Minimal liveness JSON body.",
-        "operationId": "liveness_health_live_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Liveness Health Live Get",
-                  "type": "object"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "summary": "Liveness",
-        "tags": [
-          "health"
-        ]
-      }
-    },
-    "/v1/accounts": {
+    "/api/v1/accounts": {
       "get": {
         "description": "List accounts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Account service.\n    actor: Caller context.\n    params: Account list params.\n\nReturns:\n    Page of accounts.",
-        "operationId": "list_accounts_v1_accounts_get",
+        "operationId": "list_accounts_api_v1_accounts_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -8725,10 +8699,10 @@
         ]
       }
     },
-    "/v1/accounts/me": {
+    "/api/v1/accounts/me": {
       "get": {
         "description": "Get the calling account.\n\nClients observe HTTP 200 on success.\n\nArgs:\n    actor: Caller context.\n\nReturns:\n    Calling account.",
-        "operationId": "get_current_account_v1_accounts_me_get",
+        "operationId": "get_current_account_api_v1_accounts_me_get",
         "responses": {
           "200": {
             "content": {
@@ -8747,10 +8721,10 @@
         ]
       }
     },
-    "/v1/accounts/{account_id}": {
+    "/api/v1/accounts/{account_id}": {
       "get": {
         "description": "Get an account by id.\n\nClients observe HTTP 200 on success and 404 when the account does not\nexist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Stored account.",
-        "operationId": "get_account_v1_accounts__account_id__get",
+        "operationId": "get_account_api_v1_accounts__account_id__get",
         "parameters": [
           {
             "in": "path",
@@ -8791,10 +8765,10 @@
         ]
       }
     },
-    "/v1/agent-versions/{agent_version_id}": {
+    "/api/v1/agent-versions/{agent_version_id}": {
       "delete": {
         "description": "Delete an agent version.\n\nClients observe HTTP 204 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
-        "operationId": "delete_agent_version_v1_agent_versions__agent_version_id__delete",
+        "operationId": "delete_agent_version_api_v1_agent_versions__agent_version_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -8829,7 +8803,7 @@
       },
       "get": {
         "description": "Get an agent version by id.\n\nClients observe HTTP 200 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Stored agent version.",
-        "operationId": "get_agent_version_v1_agent_versions__agent_version_id__get",
+        "operationId": "get_agent_version_api_v1_agent_versions__agent_version_id__get",
         "parameters": [
           {
             "in": "path",
@@ -8871,7 +8845,7 @@
       },
       "patch": {
         "description": "Update an agent version.\n\nClients observe HTTP 200 on success, 404 when no agent version has this\nid, and 422 on invalid input.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    body: Agent version update request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Updated agent version.",
-        "operationId": "update_agent_version_v1_agent_versions__agent_version_id__patch",
+        "operationId": "update_agent_version_api_v1_agent_versions__agent_version_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -8922,10 +8896,10 @@
         ]
       }
     },
-    "/v1/agents": {
+    "/api/v1/agents": {
       "get": {
         "description": "List agents.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Agent service.\n    actor: Caller context.\n    params: Agent list params.\n\nReturns:\n    Page of agents.",
-        "operationId": "list_agents_v1_agents_get",
+        "operationId": "list_agents_api_v1_agents_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -9029,7 +9003,7 @@
       },
       "post": {
         "description": "Create an agent.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Agent create request.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Created agent.",
-        "operationId": "create_agent_v1_agents_post",
+        "operationId": "create_agent_api_v1_agents_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9068,10 +9042,10 @@
         ]
       }
     },
-    "/v1/agents/{agent_id}": {
+    "/api/v1/agents/{agent_id}": {
       "delete": {
         "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id, and\n409 when the agent has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
-        "operationId": "delete_agent_v1_agents__agent_id__delete",
+        "operationId": "delete_agent_api_v1_agents__agent_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -9106,7 +9080,7 @@
       },
       "get": {
         "description": "Get an agent by id.\n\nClients observe HTTP 200 on success and 404 when no agent has this id.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Stored agent.",
-        "operationId": "get_agent_v1_agents__agent_id__get",
+        "operationId": "get_agent_api_v1_agents__agent_id__get",
         "parameters": [
           {
             "in": "path",
@@ -9148,7 +9122,7 @@
       },
       "patch": {
         "description": "Update an agent.\n\nClients observe HTTP 200 on success, 404 when no agent has this id, and\n422 on invalid input, including an attempt to clear the name.\n\nArgs:\n    agent_id: Id of the agent.\n    body: Agent update request.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Updated agent.",
-        "operationId": "update_agent_v1_agents__agent_id__patch",
+        "operationId": "update_agent_api_v1_agents__agent_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -9199,10 +9173,10 @@
         ]
       }
     },
-    "/v1/agents/{agent_id}/versions": {
+    "/api/v1/agents/{agent_id}/versions": {
       "get": {
         "description": "List the versions of an agent.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent version service.\n    actor: Caller context.\n    params: Agent version list params.\n\nReturns:\n    Page of agent versions.",
-        "operationId": "list_agent_versions_v1_agents__agent_id__versions_get",
+        "operationId": "list_agent_versions_api_v1_agents__agent_id__versions_get",
         "parameters": [
           {
             "in": "path",
@@ -9316,7 +9290,7 @@
       },
       "post": {
         "description": "Create a new version of an agent.\n\nClients observe HTTP 201 on success, 404 when no agent has this id, and\n422 on invalid input.\n\nArgs:\n    agent_id: Id of the agent.\n    body: Agent version create request.\n    service: Agent version service.\n    actor: Caller context.\n\nReturns:\n    Created agent version.",
-        "operationId": "create_agent_version_v1_agents__agent_id__versions_post",
+        "operationId": "create_agent_version_api_v1_agents__agent_id__versions_post",
         "parameters": [
           {
             "in": "path",
@@ -9367,10 +9341,10 @@
         ]
       }
     },
-    "/v1/annotations": {
+    "/api/v1/annotations": {
       "get": {
         "description": "List annotations.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Annotation service.\n    actor: Caller context.\n    params: Annotation list params.\n\nReturns:\n    Page of annotations.",
-        "operationId": "list_annotations_v1_annotations_get",
+        "operationId": "list_annotations_api_v1_annotations_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -9474,7 +9448,7 @@
       },
       "post": {
         "description": "Create a manual annotation, or answer an investigation session.\n\nA body carrying session_id creates a manual annotation. A body carrying\ninvestigation_session_id answers an investigation session, moving a\npending investigation to in_progress on its first answer.\n\nClients observe HTTP 201 on success, 404 when the session or the\ninvestigation session does not exist, and 422 when the selector names a\nnode outside the session.\n\nArgs:\n    body: Manual annotation or investigation answer create request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Created annotation.",
-        "operationId": "create_annotation_v1_annotations_post",
+        "operationId": "create_annotation_api_v1_annotations_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9521,10 +9495,10 @@
         ]
       }
     },
-    "/v1/annotations/{annotation_id}": {
+    "/api/v1/annotations/{annotation_id}": {
       "delete": {
         "description": "Delete an annotation.\n\nClients observe HTTP 204 on success and 404 when no annotation has this\nid.\n\nArgs:\n    annotation_id: Id of the annotation.\n    service: Annotation service.\n    actor: Caller context.",
-        "operationId": "delete_annotation_v1_annotations__annotation_id__delete",
+        "operationId": "delete_annotation_api_v1_annotations__annotation_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -9559,7 +9533,7 @@
       },
       "get": {
         "description": "Get an annotation by id.\n\nClients observe HTTP 200 on success and 404 when no annotation has this\nid.\n\nArgs:\n    annotation_id: Id of the annotation.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Stored annotation.",
-        "operationId": "get_annotation_v1_annotations__annotation_id__get",
+        "operationId": "get_annotation_api_v1_annotations__annotation_id__get",
         "parameters": [
           {
             "in": "path",
@@ -9601,7 +9575,7 @@
       },
       "patch": {
         "description": "Set a new value on an annotation.\n\nClients observe HTTP 200 on success and 404 when no annotation has this\nid.\n\nArgs:\n    annotation_id: Id of the annotation.\n    body: Annotation update request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Updated annotation.",
-        "operationId": "update_annotation_v1_annotations__annotation_id__patch",
+        "operationId": "update_annotation_api_v1_annotations__annotation_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -9652,10 +9626,10 @@
         ]
       }
     },
-    "/v1/api-keys": {
+    "/api/v1/api-keys": {
       "get": {
         "description": "List API keys of the caller.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: API key service.\n    actor: Caller context.\n    params: API key list params.\n\nReturns:\n    Page of API keys.",
-        "operationId": "list_api_keys_v1_api_keys_get",
+        "operationId": "list_api_keys_api_v1_api_keys_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -9759,7 +9733,7 @@
       },
       "post": {
         "description": "Create an API key.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input. The response carries the plaintext\nkey exactly once.\n\nArgs:\n    body: API key create request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Created API key including the plaintext key.",
-        "operationId": "create_api_key_v1_api_keys_post",
+        "operationId": "create_api_key_api_v1_api_keys_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -9798,10 +9772,10 @@
         ]
       }
     },
-    "/v1/api-keys/{api_key_id}": {
+    "/api/v1/api-keys/{api_key_id}": {
       "delete": {
         "description": "Delete an API key.\n\nClients observe HTTP 204 on success and 404 when the caller owns no api\nkey with this id.\n\nArgs:\n    api_key_id: Id of the API key.\n    service: API key service.\n    actor: Caller context.",
-        "operationId": "delete_api_key_v1_api_keys__api_key_id__delete",
+        "operationId": "delete_api_key_api_v1_api_keys__api_key_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -9836,7 +9810,7 @@
       },
       "get": {
         "description": "Get an API key by id.\n\nClients observe HTTP 200 on success and 404 when the caller owns no api\nkey with this id.\n\nArgs:\n    api_key_id: Id of the API key.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Stored API key.",
-        "operationId": "get_api_key_v1_api_keys__api_key_id__get",
+        "operationId": "get_api_key_api_v1_api_keys__api_key_id__get",
         "parameters": [
           {
             "in": "path",
@@ -9878,7 +9852,7 @@
       },
       "patch": {
         "description": "Update an API key.\n\nClients observe HTTP 200 on success, 404 when the caller owns no API key\nwith this id, and 422 on invalid input.\n\nArgs:\n    api_key_id: Id of the API key.\n    body: API key update request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Updated API key.",
-        "operationId": "update_api_key_v1_api_keys__api_key_id__patch",
+        "operationId": "update_api_key_api_v1_api_keys__api_key_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -9929,10 +9903,10 @@
         ]
       }
     },
-    "/v1/api-keys/{api_key_id}/rotate": {
+    "/api/v1/api-keys/{api_key_id}/rotate": {
       "post": {
         "description": "Rotate an API key.\n\nClients observe HTTP 200 on success, 404 when the caller owns no API key\nwith this id, and 422 on invalid input. The response carries the new\nplaintext key exactly once.\n\nArgs:\n    api_key_id: Id of the API key.\n    body: API key rotate request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Rotated API key including the new plaintext key.",
-        "operationId": "rotate_api_key_v1_api_keys__api_key_id__rotate_post",
+        "operationId": "rotate_api_key_api_v1_api_keys__api_key_id__rotate_post",
         "parameters": [
           {
             "in": "path",
@@ -9983,15 +9957,15 @@
         ]
       }
     },
-    "/v1/blobs": {
+    "/api/v1/blobs": {
       "post": {
         "description": "Upload a blob, deduping identical content by sha256.\n\nClients observe HTTP 201 for a new blob, 200 on a dedup hit, and 413\nwhen the upload exceeds the size cap.\n\nArgs:\n    response: Response, its status code is set to 201 or 200.\n    file: Uploaded file.\n    service: Blob service.\n    actor: Caller context.\n\nReturns:\n    Stored blob metadata.",
-        "operationId": "upload_blob_v1_blobs_post",
+        "operationId": "upload_blob_api_v1_blobs_post",
         "requestBody": {
           "content": {
             "multipart/form-data": {
               "schema": {
-                "$ref": "#/components/schemas/Body_upload_blob_v1_blobs_post"
+                "$ref": "#/components/schemas/Body_upload_blob_api_v1_blobs_post"
               }
             }
           },
@@ -10025,10 +9999,10 @@
         ]
       }
     },
-    "/v1/blobs/{blob_id}": {
+    "/api/v1/blobs/{blob_id}": {
       "delete": {
         "description": "Delete a blob.\n\nClients observe HTTP 204 on success, 404 when no blob has this id, and\n409 when the blob is referenced by a plugin version.\n\nArgs:\n    blob_id: Id of the blob.\n    service: Blob service.\n    actor: Caller context.",
-        "operationId": "delete_blob_v1_blobs__blob_id__delete",
+        "operationId": "delete_blob_api_v1_blobs__blob_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -10063,7 +10037,7 @@
       },
       "get": {
         "description": "Get a blob's metadata by id.\n\nClients observe HTTP 200 on success and 404 when no blob has this id.\n\nArgs:\n    blob_id: Id of the blob.\n    service: Blob service.\n    actor: Caller context.\n\nReturns:\n    Stored blob metadata.",
-        "operationId": "get_blob_v1_blobs__blob_id__get",
+        "operationId": "get_blob_api_v1_blobs__blob_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10104,10 +10078,10 @@
         ]
       }
     },
-    "/v1/blobs/{blob_id}/content": {
+    "/api/v1/blobs/{blob_id}/content": {
       "get": {
         "description": "Download a blob's raw content.\n\nClients observe HTTP 200 with the blob's media type and 404 when no\nblob has this id. The response never renders inline: it carries\n``Content-Disposition: attachment`` and ``X-Content-Type-Options:\nnosniff``.\n\nArgs:\n    blob_id: Id of the blob.\n    service: Blob service.\n    actor: Caller context.\n\nReturns:\n    Raw blob content.",
-        "operationId": "download_blob_v1_blobs__blob_id__content_get",
+        "operationId": "download_blob_api_v1_blobs__blob_id__content_get",
         "parameters": [
           {
             "in": "path",
@@ -10146,10 +10120,10 @@
         ]
       }
     },
-    "/v1/cohort-versions/{cohort_version_id}": {
+    "/api/v1/cohort-versions/{cohort_version_id}": {
       "delete": {
         "description": "Delete a cohort version.\n\nClients observe HTTP 204 on success and 404 when no cohort version has\nthis id.\n\nArgs:\n    cohort_version_id: Id of the cohort version.\n    service: Cohort version service.\n    actor: Caller context.",
-        "operationId": "delete_cohort_version_v1_cohort_versions__cohort_version_id__delete",
+        "operationId": "delete_cohort_version_api_v1_cohort_versions__cohort_version_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -10184,7 +10158,7 @@
       },
       "get": {
         "description": "Get a cohort version by id.\n\nClients observe HTTP 200 on success and 404 when no cohort version has\nthis id.\n\nArgs:\n    cohort_version_id: Id of the cohort version.\n    service: Cohort version service.\n    actor: Caller context.\n\nReturns:\n    Stored cohort version.",
-        "operationId": "get_cohort_version_v1_cohort_versions__cohort_version_id__get",
+        "operationId": "get_cohort_version_api_v1_cohort_versions__cohort_version_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10226,7 +10200,7 @@
       },
       "patch": {
         "description": "Update a cohort version.\n\nClients observe HTTP 200 on success, 404 when no cohort version has this\nid, and 422 on invalid input.\n\nArgs:\n    cohort_version_id: Id of the cohort version.\n    body: Cohort version update request.\n    service: Cohort version service.\n    actor: Caller context.\n\nReturns:\n    Updated cohort version.",
-        "operationId": "update_cohort_version_v1_cohort_versions__cohort_version_id__patch",
+        "operationId": "update_cohort_version_api_v1_cohort_versions__cohort_version_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -10277,10 +10251,10 @@
         ]
       }
     },
-    "/v1/cohorts": {
+    "/api/v1/cohorts": {
       "get": {
         "description": "List cohorts.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Cohort service.\n    actor: Caller context.\n    params: Cohort list params.\n\nReturns:\n    Page of cohorts.",
-        "operationId": "list_cohorts_v1_cohorts_get",
+        "operationId": "list_cohorts_api_v1_cohorts_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -10384,7 +10358,7 @@
       },
       "post": {
         "description": "Create a cohort namespace.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\n409 when the cohort name is already registered, and 422 on invalid\ninput.\n\nArgs:\n    body: Cohort create request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Created cohort.",
-        "operationId": "create_cohort_v1_cohorts_post",
+        "operationId": "create_cohort_api_v1_cohorts_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -10423,10 +10397,10 @@
         ]
       }
     },
-    "/v1/cohorts/{cohort_id}": {
+    "/api/v1/cohorts/{cohort_id}": {
       "delete": {
         "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess and 404 when no cohort has this id.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
-        "operationId": "delete_cohort_v1_cohorts__cohort_id__delete",
+        "operationId": "delete_cohort_api_v1_cohorts__cohort_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -10461,7 +10435,7 @@
       },
       "get": {
         "description": "Get a cohort by id.\n\nClients observe HTTP 200 on success and 404 when no cohort has this id.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Stored cohort.",
-        "operationId": "get_cohort_v1_cohorts__cohort_id__get",
+        "operationId": "get_cohort_api_v1_cohorts__cohort_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10503,7 +10477,7 @@
       },
       "patch": {
         "description": "Update a cohort's name, description, and metadata.\n\nClients observe HTTP 200 on success, 404 when no cohort has this id,\n409 when the new name is already registered, and 422 when the update\nclears the name.\n\nArgs:\n    cohort_id: Id of the cohort.\n    body: Cohort update request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Updated cohort.",
-        "operationId": "update_cohort_v1_cohorts__cohort_id__patch",
+        "operationId": "update_cohort_api_v1_cohorts__cohort_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -10554,10 +10528,10 @@
         ]
       }
     },
-    "/v1/cohorts/{cohort_id}/versions": {
+    "/api/v1/cohorts/{cohort_id}/versions": {
       "get": {
         "description": "List the versions of a cohort.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort version service.\n    actor: Caller context.\n    params: Cohort version list params.\n\nReturns:\n    Page of cohort versions.",
-        "operationId": "list_cohort_versions_v1_cohorts__cohort_id__versions_get",
+        "operationId": "list_cohort_versions_api_v1_cohorts__cohort_id__versions_get",
         "parameters": [
           {
             "in": "path",
@@ -10671,7 +10645,7 @@
       },
       "post": {
         "description": "Create a new version of a cohort from a membership delta.\n\nClients observe HTTP 201 on success, 404 when no cohort has this id or\nno cohort version has the baseline id, and 422 when the baseline belongs\nto a different cohort, the delta removes a session absent from the base\nversion, adds a session already present, repeats a session id, or an\nadded session is missing or belongs to a different agent.\n\nArgs:\n    cohort_id: Id of the cohort.\n    body: Cohort version create request.\n    service: Cohort version service.\n    actor: Caller context.\n\nReturns:\n    Created cohort version.",
-        "operationId": "create_cohort_version_v1_cohorts__cohort_id__versions_post",
+        "operationId": "create_cohort_version_api_v1_cohorts__cohort_id__versions_post",
         "parameters": [
           {
             "in": "path",
@@ -10722,15 +10696,15 @@
         ]
       }
     },
-    "/v1/device_authorization": {
+    "/api/v1/device_authorization": {
       "post": {
-        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    HTTPException: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
-        "operationId": "device_authorization_v1_device_authorization_post",
+        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/api/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    HTTPException: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
+        "operationId": "device_authorization_api_v1_device_authorization_post",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/Body_device_authorization_v1_device_authorization_post"
+                "$ref": "#/components/schemas/Body_device_authorization_api_v1_device_authorization_post"
               }
             }
           }
@@ -10763,10 +10737,10 @@
         ]
       }
     },
-    "/v1/devices": {
+    "/api/v1/devices": {
       "get": {
         "description": "List devices of the caller.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Device service.\n    actor: Caller context.\n    params: Device list params.\n\nReturns:\n    Page of devices.",
-        "operationId": "list_devices_v1_devices_get",
+        "operationId": "list_devices_api_v1_devices_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -10869,10 +10843,10 @@
         ]
       }
     },
-    "/v1/devices/{device_id}": {
+    "/api/v1/devices/{device_id}": {
       "delete": {
         "description": "Delete a device.\n\nEvery token issued for the device stops authenticating. Clients observe\nHTTP 204 on success and 404 when the caller owns no device with this id.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.",
-        "operationId": "delete_device_v1_devices__device_id__delete",
+        "operationId": "delete_device_api_v1_devices__device_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -10907,7 +10881,7 @@
       },
       "get": {
         "description": "Get a device by id.\n\nClients observe HTTP 200 on success and 404 when no device has this id,\nanother account already approved it, or the user code of an unapproved\ndevice is missing or wrong.\n\nArgs:\n    device_id: Id of the device.\n    service: Device service.\n    actor: Caller context.\n    user_code: User code of a device no account approved yet.\n\nReturns:\n    Stored device.",
-        "operationId": "get_device_v1_devices__device_id__get",
+        "operationId": "get_device_api_v1_devices__device_id__get",
         "parameters": [
           {
             "in": "path",
@@ -10965,7 +10939,7 @@
       },
       "patch": {
         "description": "Update a device.\n\nLocking a device rejects every token issued for it. Clients observe HTTP\n200 on success, 404 when the caller owns no device with this id, and 422 on\ninvalid input.\n\nArgs:\n    device_id: Id of the device.\n    body: Device update request.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Updated device.",
-        "operationId": "update_device_v1_devices__device_id__patch",
+        "operationId": "update_device_api_v1_devices__device_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -11016,10 +10990,10 @@
         ]
       }
     },
-    "/v1/devices/{device_id}/verify": {
+    "/api/v1/devices/{device_id}/verify": {
       "post": {
         "description": "Approve a pending device authorization.\n\nThe device polling the token endpoint receives a token for the caller's\naccount on its next poll. Clients observe HTTP 200 on success, 404 when no\nsuch device exists or another account already approved it, and 422 when\nthe user code does not match, the authorization expired, or the device is\nlocked. Three failed attempts lock the device.\n\nArgs:\n    device_id: Id of the device.\n    body: Device verify request.\n    service: Device service.\n    actor: Caller context.\n\nReturns:\n    Verified device.",
-        "operationId": "verify_device_v1_devices__device_id__verify_post",
+        "operationId": "verify_device_api_v1_devices__device_id__verify_post",
         "parameters": [
           {
             "in": "path",
@@ -11070,10 +11044,10 @@
         ]
       }
     },
-    "/v1/evaluations": {
+    "/api/v1/evaluations": {
       "get": {
         "description": "List evaluations.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Evaluation service.\n    actor: Caller context.\n    params: Evaluation list params.\n\nReturns:\n    Page of evaluations.",
-        "operationId": "list_evaluations_v1_evaluations_get",
+        "operationId": "list_evaluations_api_v1_evaluations_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -11177,7 +11151,7 @@
       },
       "post": {
         "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, and 422 when the pair count exceeds the cap or an input\nsession does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
-        "operationId": "create_evaluations_v1_evaluations_post",
+        "operationId": "create_evaluations_api_v1_evaluations_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11216,10 +11190,10 @@
         ]
       }
     },
-    "/v1/evaluations/{evaluation_id}": {
+    "/api/v1/evaluations/{evaluation_id}": {
       "get": {
         "description": "Get an evaluation by id.\n\nClients observe HTTP 200 on success and 404 when no evaluation has this\nid.\n\nArgs:\n    evaluation_id: Id of the evaluation.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluation.",
-        "operationId": "get_evaluation_v1_evaluations__evaluation_id__get",
+        "operationId": "get_evaluation_api_v1_evaluations__evaluation_id__get",
         "parameters": [
           {
             "in": "path",
@@ -11260,10 +11234,10 @@
         ]
       }
     },
-    "/v1/evaluators": {
+    "/api/v1/evaluators": {
       "get": {
         "description": "List evaluators.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Evaluator service.\n    actor: Caller context.\n    params: Evaluator list params.\n\nReturns:\n    Page of evaluators.",
-        "operationId": "list_evaluators_v1_evaluators_get",
+        "operationId": "list_evaluators_api_v1_evaluators_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -11367,7 +11341,7 @@
       },
       "post": {
         "description": "Create an evaluator.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Evaluator create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator.",
-        "operationId": "create_evaluator_v1_evaluators_post",
+        "operationId": "create_evaluator_api_v1_evaluators_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -11406,10 +11380,10 @@
         ]
       }
     },
-    "/v1/evaluators/{evaluator_id}": {
+    "/api/v1/evaluators/{evaluator_id}": {
       "delete": {
         "description": "Delete an evaluator, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no evaluator has this\nid.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.",
-        "operationId": "delete_evaluator_v1_evaluators__evaluator_id__delete",
+        "operationId": "delete_evaluator_api_v1_evaluators__evaluator_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -11444,7 +11418,7 @@
       },
       "get": {
         "description": "Get an evaluator by id.\n\nClients observe HTTP 200 on success and 404 when no evaluator has this\nid.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluator.",
-        "operationId": "get_evaluator_v1_evaluators__evaluator_id__get",
+        "operationId": "get_evaluator_api_v1_evaluators__evaluator_id__get",
         "parameters": [
           {
             "in": "path",
@@ -11486,7 +11460,7 @@
       },
       "patch": {
         "description": "Update an evaluator.\n\nClients observe HTTP 200 on success, 404 when no evaluator has this id,\nand 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator.",
-        "operationId": "update_evaluator_v1_evaluators__evaluator_id__patch",
+        "operationId": "update_evaluator_api_v1_evaluators__evaluator_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -11537,10 +11511,10 @@
         ]
       }
     },
-    "/v1/evaluators/{evaluator_id}/versions": {
+    "/api/v1/evaluators/{evaluator_id}/versions": {
       "get": {
         "description": "List an evaluator's versions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    service: Evaluator service.\n    actor: Caller context.\n    params: List params.\n\nReturns:\n    Page of evaluator versions.",
-        "operationId": "list_evaluator_versions_v1_evaluators__evaluator_id__versions_get",
+        "operationId": "list_evaluator_versions_api_v1_evaluators__evaluator_id__versions_get",
         "parameters": [
           {
             "in": "path",
@@ -11627,7 +11601,7 @@
       },
       "post": {
         "description": "Create an evaluator version.\n\nClients observe HTTP 201 on success, 404 when no evaluator has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    body: Evaluator version create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator version.",
-        "operationId": "create_evaluator_version_v1_evaluators__evaluator_id__versions_post",
+        "operationId": "create_evaluator_version_api_v1_evaluators__evaluator_id__versions_post",
         "parameters": [
           {
             "in": "path",
@@ -11678,10 +11652,10 @@
         ]
       }
     },
-    "/v1/evaluators/{evaluator_id}/versions/{version}": {
+    "/api/v1/evaluators/{evaluator_id}/versions/{version}": {
       "get": {
         "description": "Get an evaluator version by version number.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this evaluator.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    version: Version number.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluator version.",
-        "operationId": "get_evaluator_version_v1_evaluators__evaluator_id__versions__version__get",
+        "operationId": "get_evaluator_version_api_v1_evaluators__evaluator_id__versions__version__get",
         "parameters": [
           {
             "in": "path",
@@ -11732,7 +11706,7 @@
       },
       "patch": {
         "description": "Update an evaluator version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this evaluator.\n\nArgs:\n    evaluator_id: Id of the evaluator.\n    version: Version number.\n    body: Evaluator version update request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Updated evaluator version.",
-        "operationId": "update_evaluator_version_v1_evaluators__evaluator_id__versions__version__patch",
+        "operationId": "update_evaluator_version_api_v1_evaluators__evaluator_id__versions__version__patch",
         "parameters": [
           {
             "in": "path",
@@ -11792,10 +11766,10 @@
         ]
       }
     },
-    "/v1/experiment-runs": {
+    "/api/v1/experiment-runs": {
       "get": {
         "description": "List experiment runs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Experiment run service.\n    actor: Caller context.\n    params: Experiment run list params.\n\nReturns:\n    Page of experiment runs.",
-        "operationId": "list_experiment_runs_v1_experiment_runs_get",
+        "operationId": "list_experiment_runs_api_v1_experiment_runs_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -11898,10 +11872,10 @@
         ]
       }
     },
-    "/v1/experiment-runs/{experiment_run_id}": {
+    "/api/v1/experiment-runs/{experiment_run_id}": {
       "delete": {
         "description": "Delete an experiment run and its jobs.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
-        "operationId": "delete_experiment_run_v1_experiment_runs__experiment_run_id__delete",
+        "operationId": "delete_experiment_run_api_v1_experiment_runs__experiment_run_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -11936,7 +11910,7 @@
       },
       "get": {
         "description": "Get an experiment run by id.\n\nClients observe HTTP 200 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.\n\nReturns:\n    Stored experiment run.",
-        "operationId": "get_experiment_run_v1_experiment_runs__experiment_run_id__get",
+        "operationId": "get_experiment_run_api_v1_experiment_runs__experiment_run_id__get",
         "parameters": [
           {
             "in": "path",
@@ -11977,10 +11951,10 @@
         ]
       }
     },
-    "/v1/experiment-runs/{experiment_run_id}/cancel": {
+    "/api/v1/experiment-runs/{experiment_run_id}/cancel": {
       "post": {
         "description": "Request cancellation of a running experiment run.\n\nClients observe HTTP 200 on success, 404 when no run has this id, and\n409 when the run is not running.\n\nArgs:\n    experiment_run_id: Id of the run.\n    actor: Caller context.\n    cancel: Run cancellation flow, committed across its own transactions.\n\nReturns:\n    Run carrying the cancel request.",
-        "operationId": "cancel_experiment_run_v1_experiment_runs__experiment_run_id__cancel_post",
+        "operationId": "cancel_experiment_run_api_v1_experiment_runs__experiment_run_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -12021,10 +11995,10 @@
         ]
       }
     },
-    "/v1/experiment-runs/{experiment_run_id}/jobs": {
+    "/api/v1/experiment-runs/{experiment_run_id}/jobs": {
       "get": {
         "description": "List the jobs backing an experiment run's replays.\n\nClients observe HTTP 200 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.\n    params: Experiment run jobs list params.\n\nReturns:\n    Page of jobs.",
-        "operationId": "list_experiment_run_jobs_v1_experiment_runs__experiment_run_id__jobs_get",
+        "operationId": "list_experiment_run_jobs_api_v1_experiment_runs__experiment_run_id__jobs_get",
         "parameters": [
           {
             "in": "path",
@@ -12137,10 +12111,10 @@
         ]
       }
     },
-    "/v1/experiments": {
+    "/api/v1/experiments": {
       "get": {
         "description": "List experiments.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Experiment service.\n    actor: Caller context.\n    params: Experiment list params.\n\nReturns:\n    Page of experiments.",
-        "operationId": "list_experiments_v1_experiments_get",
+        "operationId": "list_experiments_api_v1_experiments_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -12244,7 +12218,7 @@
       },
       "post": {
         "description": "Create an experiment.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist\nor an evaluator config names an unknown evaluator or version, 409 when\nthe name is already registered, and 422 on invalid input, including a\nduplicate resolved evaluator version.\n\nArgs:\n    body: Experiment create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment.",
-        "operationId": "create_experiment_v1_experiments_post",
+        "operationId": "create_experiment_api_v1_experiments_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12283,10 +12257,10 @@
         ]
       }
     },
-    "/v1/experiments/{experiment_id}": {
+    "/api/v1/experiments/{experiment_id}": {
       "delete": {
         "description": "Delete an experiment.\n\nClients observe HTTP 204 on success and 404 when no experiment has this\nid.\n\nArgs:\n    experiment_id: Id of the experiment.\n    service: Experiment service.\n    actor: Caller context.",
-        "operationId": "delete_experiment_v1_experiments__experiment_id__delete",
+        "operationId": "delete_experiment_api_v1_experiments__experiment_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -12321,7 +12295,7 @@
       },
       "get": {
         "description": "Get an experiment by id.\n\nClients observe HTTP 200 on success and 404 when no experiment has this\nid.\n\nArgs:\n    experiment_id: Id of the experiment.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Stored experiment.",
-        "operationId": "get_experiment_v1_experiments__experiment_id__get",
+        "operationId": "get_experiment_api_v1_experiments__experiment_id__get",
         "parameters": [
           {
             "in": "path",
@@ -12363,7 +12337,7 @@
       },
       "patch": {
         "description": "Update an experiment.\n\nClients observe HTTP 200 on success, 404 when no experiment has this id\nor a new evaluator config names an unknown evaluator or version, and 422\non invalid input, including an attempt to clear the name, the tool\npolicy, or every evaluator.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment update request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Updated experiment.",
-        "operationId": "update_experiment_v1_experiments__experiment_id__patch",
+        "operationId": "update_experiment_api_v1_experiments__experiment_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -12414,10 +12388,10 @@
         ]
       }
     },
-    "/v1/experiments/{experiment_id}/runs": {
+    "/api/v1/experiments/{experiment_id}/runs": {
       "post": {
         "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, and 422\nwhen the cohort version has no sessions, the cohort version or agent\nversion belongs to another agent, or the resolved agent version has no\nrun spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
-        "operationId": "start_run_v1_experiments__experiment_id__runs_post",
+        "operationId": "start_run_api_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {
             "in": "path",
@@ -12468,10 +12442,10 @@
         ]
       }
     },
-    "/v1/importers": {
+    "/api/v1/importers": {
       "get": {
         "description": "List importers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Importer service.\n    actor: Caller context.\n    params: Importer list params.\n\nReturns:\n    Page of importers.",
-        "operationId": "list_importers_v1_importers_get",
+        "operationId": "list_importers_api_v1_importers_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -12575,7 +12549,7 @@
       },
       "post": {
         "description": "Create an importer.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Importer create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer.",
-        "operationId": "create_importer_v1_importers_post",
+        "operationId": "create_importer_api_v1_importers_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -12614,10 +12588,10 @@
         ]
       }
     },
-    "/v1/importers/{importer_id}": {
+    "/api/v1/importers/{importer_id}": {
       "delete": {
         "description": "Delete an importer, cascading its versions.\n\nClients observe HTTP 204 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.",
-        "operationId": "delete_importer_v1_importers__importer_id__delete",
+        "operationId": "delete_importer_api_v1_importers__importer_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -12652,7 +12626,7 @@
       },
       "get": {
         "description": "Get an importer by id.\n\nClients observe HTTP 200 on success and 404 when no importer has this\nid.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Stored importer.",
-        "operationId": "get_importer_v1_importers__importer_id__get",
+        "operationId": "get_importer_api_v1_importers__importer_id__get",
         "parameters": [
           {
             "in": "path",
@@ -12694,7 +12668,7 @@
       },
       "patch": {
         "description": "Update an importer.\n\nClients observe HTTP 200 on success, 404 when no importer has this id,\nand 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer.",
-        "operationId": "update_importer_v1_importers__importer_id__patch",
+        "operationId": "update_importer_api_v1_importers__importer_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -12745,10 +12719,10 @@
         ]
       }
     },
-    "/v1/importers/{importer_id}/versions": {
+    "/api/v1/importers/{importer_id}/versions": {
       "get": {
         "description": "List an importer's versions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    importer_id: Id of the importer.\n    service: Importer service.\n    actor: Caller context.\n    params: List params.\n\nReturns:\n    Page of importer versions.",
-        "operationId": "list_importer_versions_v1_importers__importer_id__versions_get",
+        "operationId": "list_importer_versions_api_v1_importers__importer_id__versions_get",
         "parameters": [
           {
             "in": "path",
@@ -12835,7 +12809,7 @@
       },
       "post": {
         "description": "Create an importer version.\n\nClients observe HTTP 201 on success, 404 when no importer has this id\nor a script source names an unknown blob, and 422 on invalid input.\n\nArgs:\n    importer_id: Id of the importer.\n    body: Importer version create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer version.",
-        "operationId": "create_importer_version_v1_importers__importer_id__versions_post",
+        "operationId": "create_importer_version_api_v1_importers__importer_id__versions_post",
         "parameters": [
           {
             "in": "path",
@@ -12886,10 +12860,10 @@
         ]
       }
     },
-    "/v1/importers/{importer_id}/versions/{version}": {
+    "/api/v1/importers/{importer_id}/versions/{version}": {
       "get": {
         "description": "Get an importer version by version number.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this importer.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Stored importer version.",
-        "operationId": "get_importer_version_v1_importers__importer_id__versions__version__get",
+        "operationId": "get_importer_version_api_v1_importers__importer_id__versions__version__get",
         "parameters": [
           {
             "in": "path",
@@ -12940,7 +12914,7 @@
       },
       "patch": {
         "description": "Update an importer version's display version.\n\nClients observe HTTP 200 on success and 404 when no version with this\nnumber exists for this importer.\n\nArgs:\n    importer_id: Id of the importer.\n    version: Version number.\n    body: Importer version update request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Updated importer version.",
-        "operationId": "update_importer_version_v1_importers__importer_id__versions__version__patch",
+        "operationId": "update_importer_version_api_v1_importers__importer_id__versions__version__patch",
         "parameters": [
           {
             "in": "path",
@@ -13000,10 +12974,10 @@
         ]
       }
     },
-    "/v1/imports": {
+    "/api/v1/imports": {
       "post": {
         "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success and 404 when the importer, the\nversion, the payload blob, or the agent does not exist.\n\nArgs:\n    body: Import create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
-        "operationId": "create_import_v1_imports_post",
+        "operationId": "create_import_api_v1_imports_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -13042,10 +13016,10 @@
         ]
       }
     },
-    "/v1/info": {
+    "/api/v1/info": {
       "get": {
         "description": "Report how this server identifies itself and authenticates its callers.\n\nThe endpoint is unauthenticated, because a client has to read it before it\ncan know which credential to present.\n\nArgs:\n    settings: Service settings governing auth behavior.\n    server_id: Persisted server id.\n    ui_version: UI version served by this process.\n\nReturns:\n    Server info.",
-        "operationId": "get_info_v1_info_get",
+        "operationId": "get_info_api_v1_info_get",
         "responses": {
           "200": {
             "content": {
@@ -13064,10 +13038,10 @@
         ]
       }
     },
-    "/v1/investigations": {
+    "/api/v1/investigations": {
       "get": {
         "description": "List investigations.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Investigation service.\n    actor: Caller context.\n    params: Investigation list params.\n\nReturns:\n    Page of investigations.",
-        "operationId": "list_investigations_v1_investigations_get",
+        "operationId": "list_investigations_api_v1_investigations_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -13171,7 +13145,7 @@
       },
       "post": {
         "description": "Create an investigation with its linked sessions in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 when a linked session id repeats, is missing, or belongs to a\ndifferent agent.\n\nArgs:\n    body: Investigation create request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Created investigation.",
-        "operationId": "create_investigation_v1_investigations_post",
+        "operationId": "create_investigation_api_v1_investigations_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -13210,10 +13184,10 @@
         ]
       }
     },
-    "/v1/investigations/{investigation_id}": {
+    "/api/v1/investigations/{investigation_id}": {
       "delete": {
         "description": "Delete an investigation, cascading its linked sessions and answers.\n\nClients observe HTTP 204 on success and 404 when no investigation has\nthis id.\n\nArgs:\n    investigation_id: Id of the investigation.\n    service: Investigation service.\n    actor: Caller context.",
-        "operationId": "delete_investigation_v1_investigations__investigation_id__delete",
+        "operationId": "delete_investigation_api_v1_investigations__investigation_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -13248,7 +13222,7 @@
       },
       "get": {
         "description": "Get an investigation by id.\n\nClients observe HTTP 200 on success and 404 when no investigation has\nthis id.\n\nArgs:\n    investigation_id: Id of the investigation.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Stored investigation.",
-        "operationId": "get_investigation_v1_investigations__investigation_id__get",
+        "operationId": "get_investigation_api_v1_investigations__investigation_id__get",
         "parameters": [
           {
             "in": "path",
@@ -13290,7 +13264,7 @@
       },
       "patch": {
         "description": "Update an investigation's name, description, and status.\n\nClients observe HTTP 200 on success, 404 when no investigation has this\nid, 409 when the update moves the status backwards, and 422 when the\nupdate clears the investigation name or status.\n\nArgs:\n    investigation_id: Id of the investigation.\n    body: Investigation update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation.",
-        "operationId": "update_investigation_v1_investigations__investigation_id__patch",
+        "operationId": "update_investigation_api_v1_investigations__investigation_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -13341,10 +13315,10 @@
         ]
       }
     },
-    "/v1/investigations/{investigation_id}/sessions": {
+    "/api/v1/investigations/{investigation_id}/sessions": {
       "get": {
         "description": "List an investigation's linked sessions, ordered by position ascending.\n\nClients observe HTTP 200 on success, 404 when no investigation has this\nid, and 422 on invalid pagination parameters.\n\nArgs:\n    investigation_id: Id of the investigation.\n    service: Investigation service.\n    actor: Caller context.\n    params: Investigation sessions list params.\n\nReturns:\n    Page of investigation sessions.",
-        "operationId": "list_investigation_sessions_v1_investigations__investigation_id__sessions_get",
+        "operationId": "list_investigation_sessions_api_v1_investigations__investigation_id__sessions_get",
         "parameters": [
           {
             "in": "path",
@@ -13417,10 +13391,10 @@
         ]
       }
     },
-    "/v1/investigations/{investigation_id}/sessions/{session_id}": {
+    "/api/v1/investigations/{investigation_id}/sessions/{session_id}": {
       "patch": {
         "description": "Set or clear a linked session's verdict.\n\nClients observe HTTP 200 on success and 404 when no investigation has\nthis id or no investigation session links this investigation and\nsession.\n\nArgs:\n    investigation_id: Id of the investigation.\n    session_id: Id of the linked session.\n    body: Investigation session update request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Updated investigation session.",
-        "operationId": "update_investigation_session_verdict_v1_investigations__investigation_id__sessions__session_id__patch",
+        "operationId": "update_investigation_session_verdict_api_v1_investigations__investigation_id__sessions__session_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -13481,10 +13455,10 @@
         ]
       }
     },
-    "/v1/jobs": {
+    "/api/v1/jobs": {
       "get": {
         "description": "List jobs.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Job service.\n    actor: Caller context.\n    params: Job list params.\n\nReturns:\n    Page of jobs.",
-        "operationId": "list_jobs_v1_jobs_get",
+        "operationId": "list_jobs_api_v1_jobs_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -13587,10 +13561,10 @@
         ]
       }
     },
-    "/v1/jobs/{job_id}": {
+    "/api/v1/jobs/{job_id}": {
       "delete": {
         "description": "Delete a job, cascading its tasks.\n\nClients observe HTTP 204 on success and 404 when no job has this id.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
-        "operationId": "delete_job_v1_jobs__job_id__delete",
+        "operationId": "delete_job_api_v1_jobs__job_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -13625,7 +13599,7 @@
       },
       "get": {
         "description": "Get a job by id.\n\nClients observe HTTP 200 on success and 404 when no job has this id.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Stored job.",
-        "operationId": "get_job_v1_jobs__job_id__get",
+        "operationId": "get_job_api_v1_jobs__job_id__get",
         "parameters": [
           {
             "in": "path",
@@ -13666,10 +13640,10 @@
         ]
       }
     },
-    "/v1/jobs/{job_id}/cancel": {
+    "/api/v1/jobs/{job_id}/cancel": {
       "post": {
         "description": "Request cancellation of a job.\n\nClients observe HTTP 200 on success, 404 when no job has this id, and\n409 when the job already settled.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Job carrying the cancel request.",
-        "operationId": "cancel_job_v1_jobs__job_id__cancel_post",
+        "operationId": "cancel_job_api_v1_jobs__job_id__cancel_post",
         "parameters": [
           {
             "in": "path",
@@ -13710,10 +13684,10 @@
         ]
       }
     },
-    "/v1/jobs/{job_id}/tasks": {
+    "/api/v1/jobs/{job_id}/tasks": {
       "get": {
         "description": "List the tasks of a job.\n\nClients observe HTTP 200 on success and 404 when no job has this id.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.\n    params: Job tasks list params.\n\nReturns:\n    Page of tasks.",
-        "operationId": "list_job_tasks_v1_jobs__job_id__tasks_get",
+        "operationId": "list_job_tasks_api_v1_jobs__job_id__tasks_get",
         "parameters": [
           {
             "in": "path",
@@ -13826,15 +13800,15 @@
         ]
       }
     },
-    "/v1/login": {
+    "/api/v1/login": {
       "post": {
         "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``api-key`` grant type reads\nan API key from the authorization header and is accepted under the same\nscheme. The ``control-plane`` grant type reads a control plane credential\nfrom the authorization header and mirrors the control plane user into a\nlocal account. The device grant type takes the ``device_id`` and\n``device_code`` of a device authorization and returns a token once an\naccount has confirmed it.\n\nClients observe HTTP 200 on success, 400 when the grant type is not\naccepted by this server or a device authorization is not ready, and 401\nwhen the credentials cannot be validated. A 400 for the device grant type\ncarries an OAuth 2.0 ``error`` code, of which ``authorization_pending``\nmeans the caller should poll again.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
-        "operationId": "login_v1_login_post",
+        "operationId": "login_api_v1_login_post",
         "requestBody": {
           "content": {
             "application/x-www-form-urlencoded": {
               "schema": {
-                "$ref": "#/components/schemas/Body_login_v1_login_post"
+                "$ref": "#/components/schemas/Body_login_api_v1_login_post"
               }
             }
           }
@@ -13877,10 +13851,10 @@
         ]
       }
     },
-    "/v1/logout": {
+    "/api/v1/logout": {
       "post": {
         "description": "Log out and clear the auth cookie.\n\nClients observe HTTP 204.\n\nArgs:\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.",
-        "operationId": "logout_v1_logout_post",
+        "operationId": "logout_api_v1_logout_post",
         "responses": {
           "204": {
             "description": "Successful Response"
@@ -13892,10 +13866,10 @@
         ]
       }
     },
-    "/v1/replays": {
+    "/api/v1/replays": {
       "get": {
         "description": "List replays.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Replay service.\n    actor: Caller context.\n    params: Replay list params.\n\nReturns:\n    Page of replays.",
-        "operationId": "list_replays_v1_replays_get",
+        "operationId": "list_replays_api_v1_replays_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -13999,7 +13973,7 @@
       },
       "post": {
         "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, and\n422 when the baseline session carries no agent version and none was\ngiven, the resolved agent version has no run spec, the tool policy uses\ncohort-version-scoped history, or an evaluator version repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
-        "operationId": "create_replay_v1_replays_post",
+        "operationId": "create_replay_api_v1_replays_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14038,10 +14012,10 @@
         ]
       }
     },
-    "/v1/replays/{replay_id}": {
+    "/api/v1/replays/{replay_id}": {
       "get": {
         "description": "Get a replay by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, and 404 when no replay has this id.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
-        "operationId": "get_replay_v1_replays__replay_id__get",
+        "operationId": "get_replay_api_v1_replays__replay_id__get",
         "parameters": [
           {
             "in": "path",
@@ -14082,10 +14056,10 @@
         ]
       }
     },
-    "/v1/replays/{replay_id}/tool-lookup": {
+    "/api/v1/replays/{replay_id}/tool-lookup": {
       "post": {
         "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, 404 when no replay has this id, and 422 when\nthe tool is not configured for history.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Whether a cached result was found, and the result if so.",
-        "operationId": "tool_lookup_v1_replays__replay_id__tool_lookup_post",
+        "operationId": "tool_lookup_api_v1_replays__replay_id__tool_lookup_post",
         "parameters": [
           {
             "in": "path",
@@ -14136,10 +14110,10 @@
         ]
       }
     },
-    "/v1/secrets": {
+    "/api/v1/secrets": {
       "get": {
         "description": "List secrets.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters. List responses never include secret values.\n\nArgs:\n    service: Secret service.\n    actor: Caller context.\n    params: Secret list params.\n\nReturns:\n    Page of secrets without values.",
-        "operationId": "list_secrets_v1_secrets_get",
+        "operationId": "list_secrets_api_v1_secrets_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -14243,7 +14217,7 @@
       },
       "post": {
         "description": "Create a secret.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input. The response omits the secret\nvalues.\n\nArgs:\n    body: Secret create request.\n    service: Secret service.\n    actor: Caller context.\n\nReturns:\n    Created secret without values.",
-        "operationId": "create_secret_v1_secrets_post",
+        "operationId": "create_secret_api_v1_secrets_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14282,10 +14256,10 @@
         ]
       }
     },
-    "/v1/secrets/{secret_id}": {
+    "/api/v1/secrets/{secret_id}": {
       "delete": {
         "description": "Delete a secret.\n\nClients observe HTTP 204 on success and 404 when no secret has this\nid.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
-        "operationId": "delete_secret_v1_secrets__secret_id__delete",
+        "operationId": "delete_secret_api_v1_secrets__secret_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -14320,7 +14294,7 @@
       },
       "get": {
         "description": "Get a secret by id.\n\nClients observe HTTP 200 on success and 404 when no secret has this\nid.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.\n    include_values: Whether to include the secret values.\n\nReturns:\n    Stored secret.",
-        "operationId": "get_secret_v1_secrets__secret_id__get",
+        "operationId": "get_secret_api_v1_secrets__secret_id__get",
         "parameters": [
           {
             "in": "path",
@@ -14356,7 +14330,7 @@
                       "$ref": "#/components/schemas/SecretWithValuesResponse"
                     }
                   ],
-                  "title": "Response Get Secret V1 Secrets  Secret Id  Get"
+                  "title": "Response Get Secret Api V1 Secrets  Secret Id  Get"
                 }
               }
             },
@@ -14380,7 +14354,7 @@
       },
       "patch": {
         "description": "Update a secret.\n\nClients observe HTTP 200 on success, 404 when no secret has this id,\nand 422 on invalid input.\n\nArgs:\n    secret_id: Id of the secret.\n    body: Secret update request.\n    service: Secret service.\n    actor: Caller context.\n\nReturns:\n    Updated secret without values.",
-        "operationId": "update_secret_v1_secrets__secret_id__patch",
+        "operationId": "update_secret_api_v1_secrets__secret_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -14431,10 +14405,10 @@
         ]
       }
     },
-    "/v1/service-accounts": {
+    "/api/v1/service-accounts": {
       "post": {
         "description": "Create a service account, active without credentials.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme and when the caller may not create accounts, 409 when the name is\nalready registered, and 422 on invalid input.\n\nArgs:\n    body: Service account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
-        "operationId": "create_service_account_v1_service_accounts_post",
+        "operationId": "create_service_account_api_v1_service_accounts_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14473,10 +14447,10 @@
         ]
       }
     },
-    "/v1/service-accounts/{account_id}": {
+    "/api/v1/service-accounts/{account_id}": {
       "patch": {
         "description": "Partially update a service account.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth\nscheme and when the caller may not update service accounts, 404 when the\nservice account does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: Service account update request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Updated account.",
-        "operationId": "update_service_account_v1_service_accounts__account_id__patch",
+        "operationId": "update_service_account_api_v1_service_accounts__account_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -14527,10 +14501,10 @@
         ]
       }
     },
-    "/v1/session-runs": {
+    "/api/v1/session-runs": {
       "post": {
         "description": "Run an agent version once, as a job holding one agent task.\n\nClients observe HTTP 201 on success, 404 when no agent version has this\nid, and 422 when the agent version carries no run spec.\n\nArgs:\n    body: Session run create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
-        "operationId": "create_session_run_v1_session_runs_post",
+        "operationId": "create_session_run_api_v1_session_runs_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14569,10 +14543,10 @@
         ]
       }
     },
-    "/v1/sessions": {
+    "/api/v1/sessions": {
       "get": {
         "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions.",
-        "operationId": "list_sessions_v1_sessions_get",
+        "operationId": "list_sessions_api_v1_sessions_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -14676,7 +14650,7 @@
       },
       "post": {
         "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe imported_from and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
-        "operationId": "create_session_v1_sessions_post",
+        "operationId": "create_session_api_v1_sessions_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -14715,10 +14689,10 @@
         ]
       }
     },
-    "/v1/sessions/{session_id}": {
+    "/api/v1/sessions/{session_id}": {
       "delete": {
         "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
-        "operationId": "delete_session_v1_sessions__session_id__delete",
+        "operationId": "delete_session_api_v1_sessions__session_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -14753,7 +14727,7 @@
       },
       "get": {
         "description": "Get a session by id.\n\nClients observe HTTP 200 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Stored session.",
-        "operationId": "get_session_v1_sessions__session_id__get",
+        "operationId": "get_session_api_v1_sessions__session_id__get",
         "parameters": [
           {
             "in": "path",
@@ -14795,7 +14769,7 @@
       },
       "patch": {
         "description": "Update a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the update moves a terminal session back to in_progress, and\n422 on invalid input, including an attempt to clear the status.\n\nArgs:\n    session_id: Id of the session.\n    body: Session update request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
-        "operationId": "update_session_v1_sessions__session_id__patch",
+        "operationId": "update_session_api_v1_sessions__session_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -14846,10 +14820,10 @@
         ]
       }
     },
-    "/v1/sessions/{session_id}/evaluations": {
+    "/api/v1/sessions/{session_id}/evaluations": {
       "post": {
         "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\nand 422 when the request names the same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
-        "operationId": "merge_session_evaluations_v1_sessions__session_id__evaluations_post",
+        "operationId": "merge_session_evaluations_api_v1_sessions__session_id__evaluations_post",
         "parameters": [
           {
             "in": "path",
@@ -14880,7 +14854,7 @@
                   "items": {
                     "$ref": "#/components/schemas/EvaluationResponse"
                   },
-                  "title": "Response Merge Session Evaluations V1 Sessions  Session Id  Evaluations Post",
+                  "title": "Response Merge Session Evaluations Api V1 Sessions  Session Id  Evaluations Post",
                   "type": "array"
                 }
               }
@@ -14904,10 +14878,10 @@
         ]
       }
     },
-    "/v1/sessions/{session_id}/full": {
+    "/api/v1/sessions/{session_id}/full": {
       "get": {
         "description": "Get a session together with every one of its nodes.\n\nThe node list is not paginated, so one call carries a whole session.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    node_service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Session with every node, ordered by index.",
-        "operationId": "get_session_with_nodes_v1_sessions__session_id__full_get",
+        "operationId": "get_session_with_nodes_api_v1_sessions__session_id__full_get",
         "parameters": [
           {
             "in": "path",
@@ -14948,10 +14922,10 @@
         ]
       }
     },
-    "/v1/sessions/{session_id}/nodes": {
+    "/api/v1/sessions/{session_id}/nodes": {
       "get": {
         "description": "List the nodes of a session, ordered by index ascending.\n\nClients observe HTTP 200 on success, 403 when a task token neither owns\nnor reads this session, and 422 on invalid pagination parameters.\n\nArgs:\n    session_id: Id of the session.\n    service: Session node service.\n    actor: Caller context.\n    params: Session node list params.\n\nReturns:\n    Page of session nodes, ordered by index.",
-        "operationId": "list_session_nodes_v1_sessions__session_id__nodes_get",
+        "operationId": "list_session_nodes_api_v1_sessions__session_id__nodes_get",
         "parameters": [
           {
             "in": "path",
@@ -15036,8 +15010,8 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with inputs, outputs, and attributes\n    populated.",
-        "operationId": "ingest_session_nodes_v1_sessions__session_id__nodes_post",
+        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with inputs, outputs, and attributes\n    populated.",
+        "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {
             "in": "path",
@@ -15068,7 +15042,7 @@
                   "items": {
                     "$ref": "#/components/schemas/SessionNodeResponse"
                   },
-                  "title": "Response Ingest Session Nodes V1 Sessions  Session Id  Nodes Post",
+                  "title": "Response Ingest Session Nodes Api V1 Sessions  Session Id  Nodes Post",
                   "type": "array"
                 }
               }
@@ -15092,10 +15066,10 @@
         ]
       }
     },
-    "/v1/tags": {
+    "/api/v1/tags": {
       "get": {
         "description": "List tags.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Tag service.\n    actor: Caller context.\n    params: Tag list params.\n\nReturns:\n    Page of tags.",
-        "operationId": "list_tags_v1_tags_get",
+        "operationId": "list_tags_api_v1_tags_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -15199,7 +15173,7 @@
       },
       "post": {
         "description": "Create a tag.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Tag create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag.",
-        "operationId": "create_tag_v1_tags_post",
+        "operationId": "create_tag_api_v1_tags_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -15238,10 +15212,10 @@
         ]
       }
     },
-    "/v1/tags/{tag_id}": {
+    "/api/v1/tags/{tag_id}": {
       "delete": {
         "description": "Delete a tag.\n\nDeleting a tag cascades its links. Clients observe HTTP 204 on success\nand 404 when no tag has this id.\n\nArgs:\n    tag_id: Id of the tag.\n    service: Tag service.\n    actor: Caller context.",
-        "operationId": "delete_tag_v1_tags__tag_id__delete",
+        "operationId": "delete_tag_api_v1_tags__tag_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -15276,7 +15250,7 @@
       },
       "patch": {
         "description": "Update a tag.\n\nClients observe HTTP 200 on success, 404 when no tag has this id, 409\nwhen the new name is already registered, and 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag update request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Updated tag.",
-        "operationId": "update_tag_v1_tags__tag_id__patch",
+        "operationId": "update_tag_api_v1_tags__tag_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -15327,10 +15301,10 @@
         ]
       }
     },
-    "/v1/tags/{tag_id}/links": {
+    "/api/v1/tags/{tag_id}/links": {
       "post": {
         "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag has this id, 409\nwhen the link is already registered, and 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
-        "operationId": "create_tag_link_v1_tags__tag_id__links_post",
+        "operationId": "create_tag_link_api_v1_tags__tag_id__links_post",
         "parameters": [
           {
             "in": "path",
@@ -15381,10 +15355,10 @@
         ]
       }
     },
-    "/v1/tags/{tag_id}/links/{resource_type}/{resource_id}": {
+    "/api/v1/tags/{tag_id}/links/{resource_type}/{resource_id}": {
       "delete": {
         "description": "Unlink a tag from a resource.\n\nClients observe HTTP 204 on success and 404 when no link matches the\ntag and resource.\n\nArgs:\n    tag_id: Id of the tag.\n    resource_type: Kind of the linked resource.\n    resource_id: Id of the linked resource.\n    service: Tag service.\n    actor: Caller context.",
-        "operationId": "delete_tag_link_v1_tags__tag_id__links__resource_type___resource_id__delete",
+        "operationId": "delete_tag_link_api_v1_tags__tag_id__links__resource_type___resource_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -15436,10 +15410,10 @@
         ]
       }
     },
-    "/v1/tasks": {
+    "/api/v1/tasks": {
       "get": {
         "description": "List tasks.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Task service.\n    actor: Caller context.\n    params: Task list params.\n\nReturns:\n    Page of tasks.",
-        "operationId": "list_tasks_v1_tasks_get",
+        "operationId": "list_tasks_api_v1_tasks_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -15542,10 +15516,10 @@
         ]
       }
     },
-    "/v1/tasks/claim": {
+    "/api/v1/tasks/claim": {
       "post": {
         "description": "Claim pending tasks matching the worker's stored scope.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken, 404 when no worker has the claiming principal's id, and 422 on\ninvalid input.\n\nArgs:\n    body: Task claim request.\n    service: Task service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n\nReturns:\n    Claimed tasks with their execution specs and a task token each.",
-        "operationId": "claim_tasks_v1_tasks_claim_post",
+        "operationId": "claim_tasks_api_v1_tasks_claim_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -15584,10 +15558,10 @@
         ]
       }
     },
-    "/v1/tasks/{task_id}": {
+    "/api/v1/tasks/{task_id}": {
       "get": {
         "description": "Get a task by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a\ndifferent task, and 404 when no task has this id.\n\nArgs:\n    task_id: Id of the task.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Stored task.",
-        "operationId": "get_task_v1_tasks__task_id__get",
+        "operationId": "get_task_api_v1_tasks__task_id__get",
         "parameters": [
           {
             "in": "path",
@@ -15629,7 +15603,7 @@
       },
       "patch": {
         "description": "Apply an executor transition to a task.\n\nClients observe HTTP 200 on success, 403 when the caller holds no task\ntoken for this task, 404 when no task has this id, 409 when the attempt\ndoes not match or the transition is illegal, 413 when the result exceeds\nthe size cap, and 422 when the body carries no status.\n\nArgs:\n    task_id: Id of the task.\n    body: Task update request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Task carrying its new status.",
-        "operationId": "update_task_v1_tasks__task_id__patch",
+        "operationId": "update_task_api_v1_tasks__task_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -15680,10 +15654,10 @@
         ]
       }
     },
-    "/v1/tasks/{task_id}/spec": {
+    "/api/v1/tasks/{task_id}/spec": {
       "get": {
         "description": "Get the execution spec of a task.\n\nClients observe HTTP 200 on success, 403 when a task token names a\ndifferent task, and 404 when no task has this id or the spec references\na missing resource.\n\nArgs:\n    task_id: Id of the task.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Execution spec.",
-        "operationId": "get_task_spec_v1_tasks__task_id__spec_get",
+        "operationId": "get_task_spec_api_v1_tasks__task_id__spec_get",
         "parameters": [
           {
             "in": "path",
@@ -15724,10 +15698,10 @@
         ]
       }
     },
-    "/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
+    "/api/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
       "get": {
         "description": "Aggregate the evaluations of an experiment run's replays.\n\nBaseline and result sessions are aggregated separately, and each\naggregate carries the per-replay evaluation values of the 50 most\nrecent replays. Clients observe HTTP 200 on success and 404 when no\nexperiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair, sorted by\n    name.",
-        "operationId": "list_experiment_run_evaluation_aggregates_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
+        "operationId": "list_experiment_run_evaluation_aggregates_api_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
         "parameters": [
           {
             "in": "path",
@@ -15748,7 +15722,7 @@
                   "items": {
                     "$ref": "#/components/schemas/EvaluationAggregateResponse"
                   },
-                  "title": "Response List Experiment Run Evaluation Aggregates V1 Ui Experiment Runs  Experiment Run Id  Evaluation Aggregates Get",
+                  "title": "Response List Experiment Run Evaluation Aggregates Api V1 Ui Experiment Runs  Experiment Run Id  Evaluation Aggregates Get",
                   "type": "array"
                 }
               }
@@ -15772,10 +15746,10 @@
         ]
       }
     },
-    "/v1/ui/sessions": {
+    "/api/v1/ui/sessions": {
       "get": {
         "description": "List sessions, each with every evaluation of the session.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    session_service: Session service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions with their evaluations.",
-        "operationId": "list_sessions_with_evaluations_v1_ui_sessions_get",
+        "operationId": "list_sessions_with_evaluations_api_v1_ui_sessions_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -15878,10 +15852,10 @@
         ]
       }
     },
-    "/v1/ui/sessions/{session_id}": {
+    "/api/v1/ui/sessions/{session_id}": {
       "get": {
         "description": "Get a session by id, with every evaluation of the session.\n\nClients observe HTTP 200 on success and 404 when no session has this\nid.\n\nArgs:\n    session_id: Id of the session.\n    session_service: Session service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored session with its evaluations.",
-        "operationId": "get_session_with_evaluations_v1_ui_sessions__session_id__get",
+        "operationId": "get_session_with_evaluations_api_v1_ui_sessions__session_id__get",
         "parameters": [
           {
             "in": "path",
@@ -15922,10 +15896,10 @@
         ]
       }
     },
-    "/v1/users": {
+    "/api/v1/users": {
       "post": {
         "description": "Create a user.\n\nA user created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: User create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
-        "operationId": "create_user_v1_users_post",
+        "operationId": "create_user_api_v1_users_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -15949,7 +15923,7 @@
                       "$ref": "#/components/schemas/UserActivationTokenResponse"
                     }
                   ],
-                  "title": "Response Create User V1 Users Post"
+                  "title": "Response Create User Api V1 Users Post"
                 }
               }
             },
@@ -15972,10 +15946,10 @@
         ]
       }
     },
-    "/v1/users/{account_id}": {
+    "/api/v1/users/{account_id}": {
       "patch": {
         "description": "Partially update a user.\n\nA password write carries the current password in ``old_password``.\n\nClients observe HTTP 200 on success, 403 when writing a password or the\nadmin flag outside the ``local`` auth scheme, when writing another\naccount's password or metadata, when changing the calling account's own\nadmin flag, and when the supplied current password is missing or wrong,\n404 when the user does not exist, and 422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: User update request.\n    service: Account service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Updated account.",
-        "operationId": "update_user_v1_users__account_id__patch",
+        "operationId": "update_user_api_v1_users__account_id__patch",
         "parameters": [
           {
             "in": "path",
@@ -16026,10 +16000,10 @@
         ]
       }
     },
-    "/v1/users/{account_id}/activate": {
+    "/api/v1/users/{account_id}/activate": {
       "post": {
         "description": "Activate a user with its activation token and a new password.\n\nThe route is unauthenticated, because the account it activates cannot log\nin until it holds a password.\n\nClients observe HTTP 200 on success, 403 when the account has no pending\ntoken or the token does not match, 404 when the user does not exist, and\n422 on invalid input.\n\nArgs:\n    account_id: Id of the account.\n    body: User activate request.\n    service: Account service.\n\nReturns:\n    Activated account.",
-        "operationId": "activate_user_v1_users__account_id__activate_post",
+        "operationId": "activate_user_api_v1_users__account_id__activate_post",
         "parameters": [
           {
             "in": "path",
@@ -16080,10 +16054,10 @@
         ]
       }
     },
-    "/v1/users/{account_id}/deactivate": {
+    "/api/v1/users/{account_id}/deactivate": {
       "post": {
         "description": "Deactivate a user and return its fresh activation token once.\n\nClients observe HTTP 200 on success, 403 outside the ``local`` auth scheme\nand when deactivating the calling account, and 404 when the user does not\nexist.\n\nArgs:\n    account_id: Id of the account.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Deactivated account carrying its activation token.",
-        "operationId": "deactivate_user_v1_users__account_id__deactivate_post",
+        "operationId": "deactivate_user_api_v1_users__account_id__deactivate_post",
         "parameters": [
           {
             "in": "path",
@@ -16124,10 +16098,10 @@
         ]
       }
     },
-    "/v1/workers": {
+    "/api/v1/workers": {
       "get": {
         "description": "List workers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n    params: Worker list params.\n\nReturns:\n    Page of workers.",
-        "operationId": "list_workers_v1_workers_get",
+        "operationId": "list_workers_api_v1_workers_get",
         "parameters": [
           {
             "description": "Cursor from the previous page.",
@@ -16231,7 +16205,7 @@
       },
       "post": {
         "description": "Register a worker, upserting by name.\n\nRe-registration refreshes the scope, runtime, and metadata, stamps\nlast_seen_at, and mints a fresh token, keeping the id and created time.\nRe-registering with a fresh token is how a worker renews before its\ncurrent token expires. Clients observe HTTP 200 on both the first\nregistration and every re-registration, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
-        "operationId": "register_worker_v1_workers_post",
+        "operationId": "register_worker_api_v1_workers_post",
         "requestBody": {
           "content": {
             "application/json": {
@@ -16270,10 +16244,10 @@
         ]
       }
     },
-    "/v1/workers/{worker_id}": {
+    "/api/v1/workers/{worker_id}": {
       "delete": {
         "description": "Delete a worker.\n\nClients observe HTTP 204 on success and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    actor: Caller context.",
-        "operationId": "delete_worker_v1_workers__worker_id__delete",
+        "operationId": "delete_worker_api_v1_workers__worker_id__delete",
         "parameters": [
           {
             "in": "path",
@@ -16308,7 +16282,7 @@
       },
       "get": {
         "description": "Get a worker by id.\n\nClients observe HTTP 200 on success, 403 when a worker token names a\ndifferent worker, and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker.",
-        "operationId": "get_worker_v1_workers__worker_id__get",
+        "operationId": "get_worker_api_v1_workers__worker_id__get",
         "parameters": [
           {
             "in": "path",
@@ -16349,10 +16323,10 @@
         ]
       }
     },
-    "/v1/workers/{worker_id}/heartbeat": {
+    "/api/v1/workers/{worker_id}/heartbeat": {
       "post": {
         "description": "Report the tasks a worker currently holds.\n\nClients observe HTTP 200 on success, 403 when the caller holds no worker\ntoken for this worker, and 404 when no worker has this id.\n\nArgs:\n    worker_id: Id of the worker.\n    body: Worker heartbeat request.\n    service: Task service.\n    actor: Caller context.\n\nReturns:\n    Held tasks the worker should stop running.",
-        "operationId": "heartbeat_worker_v1_workers__worker_id__heartbeat_post",
+        "operationId": "heartbeat_worker_api_v1_workers__worker_id__heartbeat_post",
         "parameters": [
           {
             "in": "path",
@@ -16400,6 +16374,58 @@
         "summary": "Heartbeat Worker",
         "tags": [
           "workers"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "description": "Report service and database readiness.\n\nArgs:\n    db: Database session for the readiness probe.\n\nRaises:\n    HTTPException: HTTP 503 when the database probe fails.\n\nReturns:\n    JSON object with ``status`` and ``database`` fields.",
+        "operationId": "health_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/health/live": {
+      "get": {
+        "description": "Confirm the API process is running.\n\nReturns:\n    Minimal liveness JSON body.",
+        "operationId": "liveness_health_live_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Liveness Health Live Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Liveness",
+        "tags": [
+          "health"
         ]
       }
     }

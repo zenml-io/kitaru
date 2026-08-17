@@ -49,7 +49,15 @@ kitaru cohort version create refund-regression \
   --add-session <id> --remove-session <id> --display-version week-33
 ```
 
-The first version starts from an empty list; each later version is the previous list minus `remove_session_ids` plus `add_session_ids`. The delta applies to the latest version by default — pass `baseline_id` to branch from an earlier one. Versions are server-numbered, `display_version` carries whatever you call the snapshot, and versions can be tagged and filtered by tag like sessions.
+The first version starts from an empty list; each later version is the previous list minus `remove_session_ids` plus `add_session_ids`. The delta applies to the latest version by default. To branch from an exact earlier version in the CLI, pass its UUID with `--baseline`:
+
+```bash
+kitaru cohort version create refund-regression \
+  --baseline <cohort-version-id> \
+  --add-session <id> --display-version alternative-week-33
+```
+
+In the Python client and REST request, the same field is named `baseline_id`. Versions are server-numbered, `display_version` carries whatever you call the snapshot, and versions can be tagged and filtered by tag like sessions.
 
 Immutability is the point. When an experiment run reports "12 of 14 sessions improved," that claim stays checkable forever, because cohort version 3 will always contain exactly those 14 sessions. Re-running the experiment on the same version is an apples-to-apples comparison; adding this week's failures is a new version, and the numbers say which version they came from.
 

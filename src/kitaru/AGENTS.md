@@ -18,7 +18,7 @@ The package also has four first-class delivery surfaces outside that five-part c
 Module naming: modules that define per-entity types are singular
 (`domain/order.py`, `orm/order.py`, `application/models/order.py`,
 `api_models/v1/order.py`). Routers and client resources are named after the
-URL segment they serve (`/v1/orders` → `orders.py`), and mapping modules
+URL segment they serve (`/api/v1/orders` → `orders.py`), and mapping modules
 follow their router.
 
 ## New resource checklist

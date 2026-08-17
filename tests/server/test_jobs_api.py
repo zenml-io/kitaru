@@ -73,7 +73,7 @@ async def client(
 async def test_get_job(client: httpx.AsyncClient, services: JobAndTaskServices) -> None:
     """Get a job by id."""
     job = await create_job(services.jobs, ACCOUNT.id)
-    response = await client.get(f"/v1/jobs/{job.id}")
+    response = await client.get(f"/api/v1/jobs/{job.id}")
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == str(job.id)
@@ -84,7 +84,7 @@ async def test_get_job(client: httpx.AsyncClient, services: JobAndTaskServices) 
 async def test_get_job_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown job id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/jobs/{missing_id}")
+    response = await client.get(f"/api/v1/jobs/{missing_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Job {missing_id} was not found"}
 
@@ -96,13 +96,13 @@ async def test_list_jobs_filters_by_status(
     await create_job(services.jobs, ACCOUNT.id, status=JobStatus.PENDING)
     await create_job(services.jobs, ACCOUNT.id, status=JobStatus.COMPLETED)
 
-    response = await client.get("/v1/jobs")
+    response = await client.get("/api/v1/jobs")
     assert response.status_code == 200
     assert len(response.json()["items"]) == 2
 
     filter_expression = {"field": "status", "op": "eq", "value": "completed"}
     response = await client.get(
-        "/v1/jobs", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/jobs", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -119,7 +119,7 @@ async def test_list_jobs_filters_by_kind(
 
     filter_expression = {"field": "kind", "op": "eq", "value": "replay"}
     response = await client.get(
-        "/v1/jobs", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/jobs", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -134,7 +134,7 @@ async def test_list_job_tasks(
     job = await create_job(services.jobs, ACCOUNT.id)
     task = await create_agent_task(services.tasks, job.id)
 
-    response = await client.get(f"/v1/jobs/{job.id}/tasks")
+    response = await client.get(f"/api/v1/jobs/{job.id}/tasks")
     assert response.status_code == 200
     items = response.json()["items"]
     assert len(items) == 1
@@ -144,7 +144,7 @@ async def test_list_job_tasks(
 
 async def test_list_job_tasks_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when listing the tasks of an unknown job."""
-    response = await client.get(f"/v1/jobs/{uuid.uuid4()}/tasks")
+    response = await client.get(f"/api/v1/jobs/{uuid.uuid4()}/tasks")
     assert response.status_code == 404
 
 
@@ -155,7 +155,7 @@ async def test_cancel_job(
     job = await create_job(services.jobs, ACCOUNT.id)
     task = await create_agent_task(services.tasks, job.id)
 
-    response = await client.post(f"/v1/jobs/{job.id}/cancel")
+    response = await client.post(f"/api/v1/jobs/{job.id}/cancel")
     assert response.status_code == 200
     body = response.json()
     assert body["cancel_requested_at"] is not None
@@ -169,7 +169,7 @@ async def test_cancel_job_conflicts_when_already_settled(
 ) -> None:
     """Observe HTTP 409 when canceling a settled job."""
     job = await create_job(services.jobs, ACCOUNT.id, status=JobStatus.COMPLETED)
-    response = await client.post(f"/v1/jobs/{job.id}/cancel")
+    response = await client.post(f"/api/v1/jobs/{job.id}/cancel")
     assert response.status_code == 409
 
 
@@ -178,13 +178,13 @@ async def test_delete_job(
 ) -> None:
     """Delete a job and observe HTTP 204."""
     job = await create_job(services.jobs, ACCOUNT.id)
-    response = await client.delete(f"/v1/jobs/{job.id}")
+    response = await client.delete(f"/api/v1/jobs/{job.id}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/jobs/{job.id}")
+    response = await client.get(f"/api/v1/jobs/{job.id}")
     assert response.status_code == 404
 
 
 async def test_delete_job_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when deleting an unknown job."""
-    response = await client.delete(f"/v1/jobs/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/jobs/{uuid.uuid4()}")
     assert response.status_code == 404

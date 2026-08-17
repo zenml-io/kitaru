@@ -2,6 +2,7 @@ import { historyCacheKey } from "../cache-key.js";
 import { ToolPolicyError, ToolPolicyMissError } from "../errors.js";
 import { recorderError, toRecorderJson } from "../json.js";
 import type { JsonValue, ToolPolicy } from "../types.js";
+import { isRecord } from "../validation.js";
 import { recordedToolPayloadJson } from "./recorded-json.js";
 import type { AdapterRunState } from "./run-state.js";
 
@@ -23,10 +24,6 @@ export interface ToolCallInput {
   // these instead of the bounded/redacted ledger value.
   originalInputs?: unknown;
   toolName: string;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function deepJsonEqual(left: JsonValue, right: JsonValue): boolean {

@@ -6,7 +6,7 @@
       "openWorldHint": true,
       "readOnlyHint": true
     },
-    "description": "Read Kitaru registry parents and versions using bounded exact operations.",
+    "description": "Read registry parents, versions, tags, and workers with bounded operations.",
     "inputSchema": {
       "$defs": {
         "AndFilter": {
@@ -252,9 +252,31 @@
           "title": "RegistryGetVersionRequest",
           "type": "object"
         },
+        "RegistryGetWorkerRequest": {
+          "additionalProperties": false,
+          "description": "Get one worker by its exact UUID.",
+          "properties": {
+            "operation": {
+              "const": "get_worker",
+              "title": "Operation",
+              "type": "string"
+            },
+            "worker_id": {
+              "format": "uuid",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "operation",
+            "worker_id"
+          ],
+          "title": "RegistryGetWorkerRequest",
+          "type": "object"
+        },
         "RegistryListRequest": {
           "additionalProperties": false,
-          "description": "List one page of registry parents.",
+          "description": "List one page of registry parents, tags, or workers.",
           "properties": {
             "cursor": {
               "anyOf": [
@@ -290,7 +312,19 @@
               "title": "Filter"
             },
             "kind": {
-              "$ref": "#/$defs/ParentKind"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ParentKind"
+                },
+                {
+                  "enum": [
+                    "tag",
+                    "worker"
+                  ],
+                  "type": "string"
+                }
+              ],
+              "title": "Kind"
             },
             "operation": {
               "const": "list",
@@ -333,6 +367,27 @@
               ],
               "default": null,
               "title": "Cursor"
+            },
+            "filter": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/FilterCondition"
+                },
+                {
+                  "$ref": "#/$defs/AndFilter"
+                },
+                {
+                  "$ref": "#/$defs/OrFilter"
+                },
+                {
+                  "$ref": "#/$defs/NotFilter"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Filter"
             },
             "kind": {
               "enum": [
@@ -383,6 +438,7 @@
             "mapping": {
               "get": "#/$defs/RegistryGetRequest",
               "get_version": "#/$defs/RegistryGetVersionRequest",
+              "get_worker": "#/$defs/RegistryGetWorkerRequest",
               "list": "#/$defs/RegistryListRequest",
               "list_versions": "#/$defs/RegistryListVersionsRequest"
             },
@@ -397,6 +453,9 @@
             },
             {
               "$ref": "#/$defs/RegistryListVersionsRequest"
+            },
+            {
+              "$ref": "#/$defs/RegistryGetWorkerRequest"
             },
             {
               "$ref": "#/$defs/RegistryGetVersionRequest"
@@ -1283,6 +1342,38 @@
           "title": "LLMConfig",
           "type": "object"
         },
+        "LabelSelector": {
+          "additionalProperties": false,
+          "description": "Label selector.",
+          "properties": {
+            "key": {
+              "description": "Label key.",
+              "title": "Key",
+              "type": "string"
+            },
+            "required": {
+              "default": false,
+              "description": "Whether a task lacking the key fails the match.",
+              "title": "Required",
+              "type": "boolean"
+            },
+            "values": {
+              "description": "Values the label may take.",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1,
+              "title": "Values",
+              "type": "array"
+            }
+          },
+          "required": [
+            "key",
+            "values"
+          ],
+          "title": "LabelSelector",
+          "type": "object"
+        },
         "PackagePluginSource": {
           "additionalProperties": false,
           "description": "Package plugin source.",
@@ -1311,7 +1402,7 @@
           "title": "PackagePluginSource",
           "type": "object"
         },
-        "PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__": {
+        "PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__TagResponse__WorkerResponse__": {
           "additionalProperties": false,
           "properties": {
             "items": {
@@ -1343,6 +1434,12 @@
                   },
                   {
                     "$ref": "#/$defs/AgentResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/TagResponse"
+                  },
+                  {
+                    "$ref": "#/$defs/WorkerResponse"
                   }
                 ]
               },
@@ -1357,7 +1454,7 @@
             "items",
             "page"
           ],
-          "title": "PageData[Union[CohortResponse, ExperimentResponse, ImporterResponse, EvaluatorResponse, AgentVersionResponse, CohortVersionResponse, ImporterVersionResponse, EvaluatorVersionResponse, AgentResponse]]",
+          "title": "PageData[Union[CohortResponse, ExperimentResponse, ImporterResponse, EvaluatorResponse, AgentVersionResponse, CohortVersionResponse, ImporterVersionResponse, EvaluatorVersionResponse, AgentResponse, TagResponse, WorkerResponse]]",
           "type": "object"
         },
         "PageMetadata": {
@@ -1625,6 +1722,59 @@
           "title": "StaticMatchMode",
           "type": "string"
         },
+        "TagResponse": {
+          "description": "Tag response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Tag id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "name": {
+              "description": "Tag name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name"
+          ],
+          "title": "TagResponse",
+          "type": "object"
+        },
+        "TaskKind": {
+          "description": "Kind of work a task runs.",
+          "enum": [
+            "agent",
+            "evaluator",
+            "importer"
+          ],
+          "title": "TaskKind",
+          "type": "string"
+        },
         "ToolError": {
           "additionalProperties": false,
           "description": "Stable, bounded error returned by a tool handler.",
@@ -1752,6 +1902,268 @@
           ],
           "title": "ToolPolicyOnMiss",
           "type": "string"
+        },
+        "WorkerClaim": {
+          "additionalProperties": false,
+          "description": "Worker claim.",
+          "properties": {
+            "agent_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent version the claim covers, None claims every agent version.",
+              "title": "Agent Version Id"
+            },
+            "kind": {
+              "$ref": "#/$defs/TaskKind",
+              "description": "Task kind the claim covers."
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "title": "WorkerClaim",
+          "type": "object"
+        },
+        "WorkerResponse": {
+          "description": "Worker response.",
+          "properties": {
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "id": {
+              "description": "Worker id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "last_seen_at": {
+              "description": "Time of the worker's last heartbeat.",
+              "format": "date-time",
+              "title": "Last Seen At",
+              "type": "string"
+            },
+            "live": {
+              "description": "Whether the worker is considered alive.",
+              "title": "Live",
+              "type": "boolean"
+            },
+            "metadata": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "description": "Worker name.",
+              "title": "Name",
+              "type": "string"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "runtime": {
+              "$ref": "#/$defs/WorkerRuntime",
+              "description": "Runtime the worker reports."
+            },
+            "scope": {
+              "$ref": "#/$defs/WorkerScope",
+              "description": "Tasks this worker is willing to claim."
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "name",
+            "scope",
+            "runtime",
+            "last_seen_at",
+            "live",
+            "metadata"
+          ],
+          "title": "WorkerResponse",
+          "type": "object"
+        },
+        "WorkerRuntime": {
+          "additionalProperties": false,
+          "description": "Worker runtime.",
+          "properties": {
+            "arch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported architecture.",
+              "title": "Arch"
+            },
+            "hostname": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported hostname.",
+              "title": "Hostname"
+            },
+            "kitaru_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported Kitaru version.",
+              "title": "Kitaru Version"
+            },
+            "namespace": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported Kubernetes namespace.",
+              "title": "Namespace"
+            },
+            "os": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported operating system.",
+              "title": "Os"
+            },
+            "platform": {
+              "description": "Runtime platform, e.g. kubernetes, docker, bare.",
+              "title": "Platform",
+              "type": "string"
+            },
+            "pod": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported Kubernetes pod name.",
+              "title": "Pod"
+            },
+            "python_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Reported Python version.",
+              "title": "Python Version"
+            }
+          },
+          "required": [
+            "platform"
+          ],
+          "title": "WorkerRuntime",
+          "type": "object"
+        },
+        "WorkerScope": {
+          "additionalProperties": false,
+          "description": "Worker scope.",
+          "properties": {
+            "claims": {
+              "description": "Claims the worker serves, combined by disjunction.",
+              "items": {
+                "$ref": "#/$defs/WorkerClaim"
+              },
+              "maxItems": 16,
+              "minItems": 1,
+              "title": "Claims",
+              "type": "array"
+            },
+            "job_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Job the worker claims tasks from.",
+              "title": "Job Id"
+            },
+            "selectors": {
+              "anyOf": [
+                {
+                  "items": {
+                    "$ref": "#/$defs/LabelSelector"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Label selectors the worker claims, combined by conjunction.",
+              "title": "Selectors"
+            }
+          },
+          "required": [
+            "claims"
+          ],
+          "title": "WorkerScope",
+          "type": "object"
         }
       },
       "additionalProperties": false,
@@ -1787,7 +2199,13 @@
               "$ref": "#/$defs/AgentResponse"
             },
             {
-              "$ref": "#/$defs/PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__"
+              "$ref": "#/$defs/TagResponse"
+            },
+            {
+              "$ref": "#/$defs/WorkerResponse"
+            },
+            {
+              "$ref": "#/$defs/PageData_Union_CohortResponse__ExperimentResponse__ImporterResponse__EvaluatorResponse__AgentVersionResponse__CohortVersionResponse__ImporterVersionResponse__EvaluatorVersionResponse__AgentResponse__TagResponse__WorkerResponse__"
             },
             {
               "type": "null"

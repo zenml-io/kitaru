@@ -22,7 +22,7 @@ import secrets
 import shutil
 import socket
 import webbrowser
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -88,7 +88,11 @@ class DockerCommandRunner(Protocol):
     async def run(self, *arguments: str, timeout: float = 120) -> ProcessResult:
         """Run one Docker command."""
 
-    def stream(self, *arguments: str) -> AsyncIterator[str]:
+    def stream(
+        self,
+        *arguments: str,
+        failure_message: str = "Docker command failed.",
+    ) -> AsyncIterator[str]:
         """Stream output from one Docker command."""
 
 
@@ -131,7 +135,11 @@ class DockerRunner:
             stderr=_decode_output(stderr),
         )
 
-    async def stream(self, *arguments: str) -> AsyncIterator[str]:
+    async def stream(
+        self,
+        *arguments: str,
+        failure_message: str = "Docker command failed.",
+    ) -> AsyncIterator[str]:
         """Yield merged output lines from a running Docker command."""
         try:
             process = await asyncio.create_subprocess_exec(
@@ -152,7 +160,7 @@ class DockerRunner:
                 yield line.decode("utf-8", errors="replace").rstrip("\r\n")
             returncode = await process.wait()
             if returncode:
-                raise CLIError("internal_error", "Docker Compose logs failed.")
+                raise CLIError("internal_error", failure_message)
         finally:
             await _terminate_process(process)
 
@@ -174,6 +182,7 @@ async def start_local_runtime(
     package_version: str,
     upgrade: bool,
     timeout: float,
+    progress: Callable[[str], None] | None = None,
     runner: DockerCommandRunner | None = None,
     paths: LocalRuntimePaths | None = None,
 ) -> tuple[dict[str, object], list[str]]:
@@ -219,22 +228,47 @@ async def start_local_runtime(
                 pull_if_missing=not overridden,
                 refresh=upgrade and not overridden,
                 platform="linux/amd64",
+                progress=progress,
             )
-            await _ensure_image(runner, POSTGRES_IMAGE, pull_if_missing=True)
+            await _ensure_image(
+                runner,
+                POSTGRES_IMAGE,
+                pull_if_missing=True,
+                progress=progress,
+            )
             if state is not None and state.server_image != image:
                 _write_runtime_files(paths, image=image, existing_state=state)
             action = "upgraded" if upgrade else ("started" if state else "created")
             try:
-                await _run_compose(
-                    runner,
-                    paths,
+                compose_arguments = (
                     "up",
                     "-d",
                     "--pull",
                     "never",
                     "--remove-orphans",
-                    timeout=max(timeout, 120),
                 )
+                if progress is None:
+                    await _run_compose(
+                        runner,
+                        paths,
+                        *compose_arguments,
+                        timeout=max(timeout, 120),
+                    )
+                else:
+                    base_arguments = _compose_arguments(paths)
+                    await _stream_docker_command(
+                        runner,
+                        (
+                            base_arguments[0],
+                            "--progress",
+                            "plain",
+                            *base_arguments[1:],
+                            *compose_arguments,
+                        ),
+                        progress=progress,
+                        timeout=max(timeout, 120),
+                        failure_message="Docker Compose up failed.",
+                    )
                 await _wait_for_health(max(timeout, 120))
             except BaseException:
                 if state is None:
@@ -345,7 +379,7 @@ async def get_local_logs(
     if service:
         arguments.append(service)
     if follow:
-        return runner.stream(*arguments)
+        return runner.stream(*arguments, failure_message="Docker Compose logs failed.")
     result = await runner.run(*arguments, timeout=60)
     _raise_for_docker(result, "Docker Compose logs failed.")
     return result.stdout.splitlines()
@@ -446,6 +480,7 @@ async def _ensure_image(
     pull_if_missing: bool,
     refresh: bool = False,
     platform: str | None = None,
+    progress: Callable[[str], None] | None = None,
 ) -> None:
     inspection = await runner.run("image", "inspect", image, timeout=30)
     if inspection.returncode == 0 and not refresh:
@@ -460,8 +495,38 @@ async def _ensure_image(
     if platform:
         arguments.extend(("--platform", platform))
     arguments.append(image)
+    if progress is not None:
+        await _stream_docker_command(
+            runner,
+            tuple(arguments),
+            progress=progress,
+            timeout=600,
+            failure_message=f"Docker could not pull {image!r}.",
+        )
+        return
     pulled = await runner.run(*arguments, timeout=600)
     _raise_for_docker(pulled, f"Docker could not pull {image!r}.")
+
+
+async def _stream_docker_command(
+    runner: DockerCommandRunner,
+    arguments: tuple[str, ...],
+    *,
+    progress: Callable[[str], None],
+    timeout: float,
+    failure_message: str,
+) -> None:
+    """Forward one bounded Docker command's output as it arrives."""
+    try:
+        async with asyncio.timeout(timeout):
+            async for line in runner.stream(
+                *arguments, failure_message=failure_message
+            ):
+                progress(line)
+    except TimeoutError as error:
+        raise CLIError(
+            "timeout", "Docker did not finish before the timeout expired."
+        ) from error
 
 
 _RESOURCE_QUERIES: tuple[tuple[str, tuple[str, ...]], ...] = (

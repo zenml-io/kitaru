@@ -73,7 +73,7 @@ async def non_admin_client_with_target() -> AsyncGenerator[
 async def test_create_service_account(client: httpx.AsyncClient) -> None:
     """Create a service account active with no activation token."""
     response = await client.post(
-        "/v1/service-accounts", json={"name": "svc", "email": "svc@example.com"}
+        "/api/v1/service-accounts", json={"name": "svc", "email": "svc@example.com"}
     )
     assert response.status_code == 201
     body = response.json()
@@ -86,18 +86,21 @@ async def test_create_service_account(client: httpx.AsyncClient) -> None:
 
 async def test_create_service_account_duplicate_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a duplicate account name."""
-    response = await client.post("/v1/service-accounts", json={"name": "svc"})
+    response = await client.post("/api/v1/service-accounts", json={"name": "svc"})
     assert response.status_code == 201
-    response = await client.post("/v1/service-accounts", json={"name": "svc"})
+    response = await client.post("/api/v1/service-accounts", json={"name": "svc"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Account name 'svc' is already registered"}
 
 
 async def test_update_service_account_metadata(client: httpx.AsyncClient) -> None:
     """Write a service account's metadata as an admin actor."""
-    created = (await client.post("/v1/service-accounts", json={"name": "svc"})).json()
+    created = (
+        await client.post("/api/v1/service-accounts", json={"name": "svc"})
+    ).json()
     response = await client.patch(
-        f"/v1/service-accounts/{created['id']}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/service-accounts/{created['id']}",
+        json={"metadata": {"theme": "dark"}},
     )
     assert response.status_code == 200
     assert response.json()["metadata"] == {"theme": "dark"}
@@ -105,15 +108,17 @@ async def test_update_service_account_metadata(client: httpx.AsyncClient) -> Non
 
 async def test_update_service_account_active(client: httpx.AsyncClient) -> None:
     """Flip a service account's active state and flip it back."""
-    created = (await client.post("/v1/service-accounts", json={"name": "svc"})).json()
+    created = (
+        await client.post("/api/v1/service-accounts", json={"name": "svc"})
+    ).json()
     response = await client.patch(
-        f"/v1/service-accounts/{created['id']}", json={"active": False}
+        f"/api/v1/service-accounts/{created['id']}", json={"active": False}
     )
     assert response.status_code == 200
     assert response.json()["active"] is False
 
     response = await client.patch(
-        f"/v1/service-accounts/{created['id']}", json={"active": True}
+        f"/api/v1/service-accounts/{created['id']}", json={"active": True}
     )
     assert response.status_code == 200
     assert response.json()["active"] is True
@@ -125,7 +130,7 @@ async def test_update_service_account_forbidden_for_non_admin(
     """Observe HTTP 403 when a non-admin actor updates a service account."""
     client, target_id = non_admin_client_with_target
     response = await client.patch(
-        f"/v1/service-accounts/{target_id}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/service-accounts/{target_id}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 403
 
@@ -134,9 +139,10 @@ async def test_update_service_account_user_not_found(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 404 when a service account update targets a user account id."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     response = await client.patch(
-        f"/v1/service-accounts/{created['id']}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/service-accounts/{created['id']}",
+        json={"metadata": {"theme": "dark"}},
     )
     assert response.status_code == 404
 
@@ -144,6 +150,6 @@ async def test_update_service_account_user_not_found(
 async def test_update_service_account_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown account id."""
     response = await client.patch(
-        f"/v1/service-accounts/{uuid.uuid4()}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/service-accounts/{uuid.uuid4()}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 404

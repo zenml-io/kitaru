@@ -96,7 +96,7 @@ async def session_id(client: httpx.AsyncClient) -> str:
     """Provide the id of a recorded, in-progress session."""
     created = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": str(uuid.uuid4()),
                 "origin": "recorded",
@@ -127,7 +127,7 @@ def _node(index: int, **overrides: object) -> dict[str, object]:
 async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     """Ingest a batch of nodes and observe the stored rows in batch order."""
     response = await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={
             "nodes": [
                 _node(
@@ -167,7 +167,7 @@ async def test_ingest_nodes_unresolved_parent_index(
 ) -> None:
     """Observe HTTP 422 when a parent_index does not resolve."""
     response = await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(1, parent_index=0)]},
     )
     assert response.status_code == 422
@@ -176,7 +176,7 @@ async def test_ingest_nodes_unresolved_parent_index(
 async def test_ingest_nodes_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when no session has this id."""
     response = await client.post(
-        f"/v1/sessions/{uuid.uuid4()}/nodes",
+        f"/api/v1/sessions/{uuid.uuid4()}/nodes",
         json={"nodes": [_node(0)]},
     )
     assert response.status_code == 404
@@ -186,9 +186,9 @@ async def test_ingest_nodes_terminal_recorded_session_rejected(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
     """Observe HTTP 409 when the session does not accept node ingestion."""
-    await client.patch(f"/v1/sessions/{session_id}", json={"status": "completed"})
+    await client.patch(f"/api/v1/sessions/{session_id}", json={"status": "completed"})
     response = await client.post(
-        f"/v1/sessions/{session_id}/nodes", json={"nodes": [_node(0)]}
+        f"/api/v1/sessions/{session_id}/nodes", json={"nodes": [_node(0)]}
     )
     assert response.status_code == 409
 
@@ -198,10 +198,10 @@ async def test_list_nodes_ordered_by_index(
 ) -> None:
     """List nodes ordered by index ascending."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(2), _node(0), _node(1)]},
     )
-    response = await client.get(f"/v1/sessions/{session_id}/nodes")
+    response = await client.get(f"/api/v1/sessions/{session_id}/nodes")
     assert response.status_code == 200
     items = response.json()["items"]
     assert [item["index"] for item in items] == [0, 1, 2]
@@ -212,7 +212,7 @@ async def test_list_nodes_include_payloads_default_false(
 ) -> None:
     """Null inputs, outputs, and attributes by default."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={
             "nodes": [
                 _node(
@@ -228,7 +228,7 @@ async def test_list_nodes_include_payloads_default_false(
             ]
         },
     )
-    response = await client.get(f"/v1/sessions/{session_id}/nodes")
+    response = await client.get(f"/api/v1/sessions/{session_id}/nodes")
     assert response.status_code == 200
     item = response.json()["items"][0]
     assert item["inputs"] is None
@@ -244,7 +244,7 @@ async def test_list_nodes_include_payloads_true(
 ) -> None:
     """Populate reasoning, inputs, outputs, and attributes when requested."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={
             "nodes": [
                 _node(
@@ -261,7 +261,7 @@ async def test_list_nodes_include_payloads_true(
         },
     )
     response = await client.get(
-        f"/v1/sessions/{session_id}/nodes", params={"include_payloads": "true"}
+        f"/api/v1/sessions/{session_id}/nodes", params={"include_payloads": "true"}
     )
     assert response.status_code == 200
     item = response.json()["items"][0]
@@ -278,7 +278,7 @@ async def test_list_nodes_pagination_walks_pages(
 ) -> None:
     """Walk every page of nodes via next_cursor without duplicates or gaps."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(index) for index in range(5)]},
     )
 
@@ -288,7 +288,9 @@ async def test_list_nodes_pagination_walks_pages(
         params: dict[str, Any] = {"size": 2}
         if cursor is not None:
             params["cursor"] = cursor
-        response = await client.get(f"/v1/sessions/{session_id}/nodes", params=params)
+        response = await client.get(
+            f"/api/v1/sessions/{session_id}/nodes", params=params
+        )
         assert response.status_code == 200
         page = response.json()
         collected.extend(item["index"] for item in page["items"])
@@ -304,11 +306,11 @@ async def test_get_session_with_nodes_returns_every_node_unpaginated(
 ) -> None:
     """Carry a whole session in one call, past the default page size."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(index) for index in range(45)]},
     )
 
-    response = await client.get(f"/v1/sessions/{session_id}/full")
+    response = await client.get(f"/api/v1/sessions/{session_id}/full")
 
     assert response.status_code == 200
     body = response.json()
@@ -321,11 +323,11 @@ async def test_get_session_with_nodes_populates_payloads(
 ) -> None:
     """Populate inputs, outputs, and attributes without asking for them."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(0, inputs={"q": "hi"}, attributes={"k": 1})]},
     )
 
-    response = await client.get(f"/v1/sessions/{session_id}/full")
+    response = await client.get(f"/api/v1/sessions/{session_id}/full")
 
     assert response.status_code == 200
     node = response.json()["nodes"][0]
@@ -338,11 +340,11 @@ async def test_get_session_with_nodes_resolves_parent_indexes(
 ) -> None:
     """Resolve parent ids to their indexes across the whole session."""
     await client.post(
-        f"/v1/sessions/{session_id}/nodes",
+        f"/api/v1/sessions/{session_id}/nodes",
         json={"nodes": [_node(0), _node(1, parent_index=0)]},
     )
 
-    response = await client.get(f"/v1/sessions/{session_id}/full")
+    response = await client.get(f"/api/v1/sessions/{session_id}/full")
 
     assert response.status_code == 200
     nodes = response.json()["nodes"]
@@ -354,6 +356,6 @@ async def test_get_session_with_nodes_session_not_found(
     client: httpx.AsyncClient,
 ) -> None:
     """Report 404 for a session that does not exist."""
-    response = await client.get(f"/v1/sessions/{uuid.uuid4()}/full")
+    response = await client.get(f"/api/v1/sessions/{uuid.uuid4()}/full")
 
     assert response.status_code == 404

@@ -108,7 +108,7 @@ async def client(
 async def test_password_login(client: httpx.AsyncClient) -> None:
     """Log in with a password and use the token on a protected route."""
     response = await client.post(
-        "/v1/login", data={"username": "alice", "password": "secret"}
+        "/api/v1/login", data={"username": "alice", "password": "secret"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -117,7 +117,7 @@ async def test_password_login(client: httpx.AsyncClient) -> None:
     assert body["csrf_token"] is None
 
     response = await client.get(
-        "/v1/api-keys",
+        "/api/v1/api-keys",
         headers={"Authorization": f"Bearer {body['access_token']}"},
     )
     assert response.status_code == 200
@@ -131,7 +131,7 @@ async def test_direct_api_key_bearer(
     """Use a raw API key as a bearer token on a protected route."""
     api_key, key = await create_api_key(api_key_repository, account.id)
     response = await client.get(
-        "/v1/api-keys", headers={"Authorization": f"Bearer {key}"}
+        "/api/v1/api-keys", headers={"Authorization": f"Bearer {key}"}
     )
     assert response.status_code == 200
     stored = await api_key_repository.get(api_key.id)
@@ -146,7 +146,7 @@ async def test_api_key_login(
     """Exchange an API key for a token and use the token on a protected route."""
     _, key = await create_api_key(api_key_repository, account.id)
     response = await client.post(
-        "/v1/login",
+        "/api/v1/login",
         data={"grant_type": "api-key"},
         headers={"Authorization": f"Bearer {key}"},
     )
@@ -156,7 +156,7 @@ async def test_api_key_login(
     assert body["expires_in"] > 0
 
     response = await client.get(
-        "/v1/api-keys",
+        "/api/v1/api-keys",
         headers={"Authorization": f"Bearer {body['access_token']}"},
     )
     assert response.status_code == 200
@@ -170,7 +170,7 @@ async def test_api_key_login_rejects_a_deactivated_key(
     """Observe HTTP 401 when the key was deactivated before the exchange."""
     _, key = await create_api_key(api_key_repository, account.id, active=False)
     response = await client.post(
-        "/v1/login",
+        "/api/v1/login",
         data={"grant_type": "api-key"},
         headers={"Authorization": f"Bearer {key}"},
     )
@@ -180,7 +180,7 @@ async def test_api_key_login_rejects_a_deactivated_key(
 
 async def test_api_key_login_without_a_credential(client: httpx.AsyncClient) -> None:
     """Observe HTTP 401 when the api-key grant carries no authorization header."""
-    response = await client.post("/v1/login", data={"grant_type": "api-key"})
+    response = await client.post("/api/v1/login", data={"grant_type": "api-key"})
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing API key."}
 
@@ -188,7 +188,7 @@ async def test_api_key_login_without_a_credential(client: httpx.AsyncClient) -> 
 async def test_login_wrong_password(client: httpx.AsyncClient) -> None:
     """Observe HTTP 401 for a wrong password."""
     response = await client.post(
-        "/v1/login", data={"username": "alice", "password": "wrong"}
+        "/api/v1/login", data={"username": "alice", "password": "wrong"}
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid username or password."}
@@ -197,7 +197,7 @@ async def test_login_wrong_password(client: httpx.AsyncClient) -> None:
 async def test_login_unknown_user(client: httpx.AsyncClient) -> None:
     """Observe HTTP 401 with the same detail for an unknown user."""
     response = await client.post(
-        "/v1/login", data={"username": "unknown", "password": "secret"}
+        "/api/v1/login", data={"username": "unknown", "password": "secret"}
     )
     assert response.status_code == 401
     assert response.json() == {"detail": "Invalid username or password."}
@@ -205,24 +205,26 @@ async def test_login_unknown_user(client: httpx.AsyncClient) -> None:
 
 async def test_login_missing_fields(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 when the login form omits the username."""
-    response = await client.post("/v1/login", data={})
+    response = await client.post("/api/v1/login", data={})
     assert response.status_code == 400
     assert response.json() == {"detail": "Invalid request: username is required."}
 
-    response = await client.post("/v1/login", data={"username": "alice"})
+    response = await client.post("/api/v1/login", data={"username": "alice"})
     assert response.status_code == 401
 
 
 async def test_login_unknown_grant_type(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 for a grant type this server does not know."""
-    response = await client.post("/v1/login", data={"grant_type": "client_credentials"})
+    response = await client.post(
+        "/api/v1/login", data={"grant_type": "client_credentials"}
+    )
     assert response.status_code == 400
     assert response.json() == {"detail": "Unsupported grant type: client_credentials"}
 
 
 async def test_login_grant_type_rejected_by_scheme(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 for the control plane grant type under the local scheme."""
-    response = await client.post("/v1/login", data={"grant_type": "control-plane"})
+    response = await client.post("/api/v1/login", data={"grant_type": "control-plane"})
     assert response.status_code == 400
     assert response.json() == {"detail": "Unsupported grant type: control-plane"}
 
@@ -246,7 +248,7 @@ async def test_login_unavailable_under_none_scheme(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/v1/login", data={"username": "alice", "password": "secret"}
+            "/api/v1/login", data={"username": "alice", "password": "secret"}
         )
         assert response.status_code == 400
         assert response.json() == {"detail": "Unsupported grant type: password"}
@@ -275,7 +277,7 @@ async def test_none_scheme_requires_bootstrap(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         with pytest.raises(RuntimeError, match="Default account is not initialized"):
-            await client.get("/v1/accounts")
+            await client.get("/api/v1/accounts")
 
 
 async def test_none_scheme_resolves_default_account(
@@ -296,14 +298,14 @@ async def test_none_scheme_resolves_default_account(
     )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
-        response = await client.get("/v1/api-keys")
+        response = await client.get("/api/v1/api-keys")
         assert response.status_code == 200
         assert len(response.json()["items"]) == 1
 
 
 async def test_missing_bearer_credential(client: httpx.AsyncClient) -> None:
     """Observe HTTP 401 for a protected route without a credential."""
-    response = await client.get("/v1/api-keys")
+    response = await client.get("/api/v1/api-keys")
     assert response.status_code == 401
     assert response.json() == {"detail": "Missing bearer credential."}
 
@@ -323,7 +325,7 @@ async def test_api_key_login_never_sets_the_auth_cookie(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/v1/login",
+            "/api/v1/login",
             data={"grant_type": "api-key"},
             headers={"Authorization": f"Bearer {key}"},
         )
@@ -347,7 +349,7 @@ async def test_cookie_login_and_logout(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/v1/login", data={"username": "alice", "password": "secret"}
+            "/api/v1/login", data={"username": "alice", "password": "secret"}
         )
         assert response.status_code == 200
         csrf_token = response.json()["csrf_token"]
@@ -356,14 +358,14 @@ async def test_cookie_login_and_logout(
         assert "httponly" in response.headers["set-cookie"].lower()
 
         # The cookie session requires the CSRF token header.
-        response = await client.get("/v1/api-keys")
+        response = await client.get("/api/v1/api-keys")
         assert response.status_code == 401
         response = await client.get(
-            "/v1/api-keys", headers={"X-CSRF-Token": csrf_token}
+            "/api/v1/api-keys", headers={"X-CSRF-Token": csrf_token}
         )
         assert response.status_code == 200
 
-        response = await client.post("/v1/logout")
+        response = await client.post("/api/v1/logout")
         assert response.status_code == 204
         assert COOKIE_NAME not in client.cookies
 
@@ -383,7 +385,7 @@ async def test_header_credential_skips_csrf_check(
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         response = await client.post(
-            "/v1/login", data={"username": "alice", "password": "secret"}
+            "/api/v1/login", data={"username": "alice", "password": "secret"}
         )
         assert response.status_code == 200
         assert response.json()["csrf_token"] is not None
@@ -391,6 +393,6 @@ async def test_header_credential_skips_csrf_check(
 
         client.cookies.clear()
         response = await client.get(
-            "/v1/api-keys", headers={"Authorization": f"Bearer {token}"}
+            "/api/v1/api-keys", headers={"Authorization": f"Bearer {token}"}
         )
         assert response.status_code == 200

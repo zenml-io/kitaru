@@ -69,7 +69,7 @@ async def test_info_is_unauthenticated() -> None:
     """Answer without a bearer token, so a client can read it before login."""
     app = create_app(control_plane_settings())
     async with asgi_api_client(app) as client:
-        response = await client.request("GET", "/v1/info", authenticate=False)
+        response = await client.request("GET", "/api/v1/info", authenticate=False)
 
     assert response.status_code == 200
     assert "Authorization" not in response.request.headers

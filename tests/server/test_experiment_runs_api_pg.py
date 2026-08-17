@@ -35,24 +35,26 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
     Returns:
         Ids for the experiment, cohort version, and agent version.
     """
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(
-            f"/v1/agents/{agent['id']}/versions",
+            f"/api/v1/agents/{agent['id']}/versions",
             json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
         )
     ).json()
     blob = (
         await client.post(
-            "/v1/blobs",
+            "/api/v1/blobs",
             files={"file": ("score.py", b"def score(): pass", "text/plain")},
         )
     ).json()
     evaluator = (
-        await client.post("/v1/evaluators", json={"name": "accuracy", "metadata": {}})
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
     ).json()
     await client.post(
-        f"/v1/evaluators/{evaluator['id']}/versions",
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
         json={
             "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
         },
@@ -61,7 +63,7 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
     for _ in range(2):
         session = (
             await client.post(
-                "/v1/sessions",
+                "/api/v1/sessions",
                 json={
                     "agent_id": agent["id"],
                     "agent_version_id": version["id"],
@@ -74,18 +76,18 @@ async def _setup_run(client: httpx.AsyncClient) -> dict[str, str]:
         session_ids.append(session["id"])
     cohort = (
         await client.post(
-            "/v1/cohorts", json={"name": "cohort-1", "agent_id": agent["id"]}
+            "/api/v1/cohorts", json={"name": "cohort-1", "agent_id": agent["id"]}
         )
     ).json()
     cohort_version = (
         await client.post(
-            f"/v1/cohorts/{cohort['id']}/versions",
+            f"/api/v1/cohorts/{cohort['id']}/versions",
             json={"add_session_ids": session_ids},
         )
     ).json()
     experiment = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent["id"],
@@ -106,7 +108,7 @@ async def test_start_run_fans_out_one_replay_per_session(
     """A run creates one replay per cohort session, reflected in progress."""
     setup = await _setup_run(client)
     response = await client.post(
-        f"/v1/experiments/{setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{setup['experiment_id']}/runs",
         json={
             "cohort_version_id": setup["cohort_version_id"],
             "agent_version_id": setup["agent_version_id"],
@@ -120,7 +122,7 @@ async def test_start_run_fans_out_one_replay_per_session(
 
     replays = (
         await client.get(
-            "/v1/replays",
+            "/api/v1/replays",
             params={
                 "filter": json.dumps(
                     {"field": "experiment_run_id", "op": "eq", "value": run["id"]}
@@ -130,7 +132,9 @@ async def test_start_run_fans_out_one_replay_per_session(
     ).json()["items"]
     assert len(replays) == 2
 
-    jobs = (await client.get(f"/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
+        "items"
+    ]
     assert len(jobs) == 2
     assert all(job["status"] == "pending" for job in jobs)
 
@@ -144,7 +148,7 @@ async def test_list_run_jobs_scoped_to_the_run(
     for _ in range(2):
         run = (
             await client.post(
-                f"/v1/experiments/{setup['experiment_id']}/runs",
+                f"/api/v1/experiments/{setup['experiment_id']}/runs",
                 json={
                     "cohort_version_id": setup["cohort_version_id"],
                     "agent_version_id": setup["agent_version_id"],
@@ -153,7 +157,7 @@ async def test_list_run_jobs_scoped_to_the_run(
         ).json()
         replays = (
             await client.get(
-                "/v1/replays",
+                "/api/v1/replays",
                 params={
                     "filter": json.dumps(
                         {"field": "experiment_run_id", "op": "eq", "value": run["id"]}
@@ -161,7 +165,7 @@ async def test_list_run_jobs_scoped_to_the_run(
                 },
             )
         ).json()["items"]
-        jobs = (await client.get(f"/v1/experiment-runs/{run['id']}/jobs")).json()[
+        jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
             "items"
         ]
         assert len(jobs) == 2
@@ -177,7 +181,7 @@ async def test_cancel_run_drains_pending_replicas_immediately(
     setup = await _setup_run(client)
     run = (
         await client.post(
-            f"/v1/experiments/{setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": setup["cohort_version_id"],
                 "agent_version_id": setup["agent_version_id"],
@@ -185,13 +189,13 @@ async def test_cancel_run_drains_pending_replicas_immediately(
         )
     ).json()
 
-    response = await client.post(f"/v1/experiment-runs/{run['id']}/cancel")
+    response = await client.post(f"/api/v1/experiment-runs/{run['id']}/cancel")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "canceled"
     assert body["progress"]["canceled"] == 2
 
-    reloaded = (await client.get(f"/v1/experiment-runs/{run['id']}")).json()
+    reloaded = (await client.get(f"/api/v1/experiment-runs/{run['id']}")).json()
     assert reloaded["status"] == "canceled"
 
 
@@ -202,17 +206,19 @@ async def test_delete_run_cascades_its_jobs_and_replays(
     setup = await _setup_run(client)
     run = (
         await client.post(
-            f"/v1/experiments/{setup['experiment_id']}/runs",
+            f"/api/v1/experiments/{setup['experiment_id']}/runs",
             json={
                 "cohort_version_id": setup["cohort_version_id"],
                 "agent_version_id": setup["agent_version_id"],
             },
         )
     ).json()
-    jobs = (await client.get(f"/v1/experiment-runs/{run['id']}/jobs")).json()["items"]
+    jobs = (await client.get(f"/api/v1/experiment-runs/{run['id']}/jobs")).json()[
+        "items"
+    ]
     replays = (
         await client.get(
-            "/v1/replays",
+            "/api/v1/replays",
             params={
                 "filter": json.dumps(
                     {"field": "experiment_run_id", "op": "eq", "value": run["id"]}
@@ -221,14 +227,14 @@ async def test_delete_run_cascades_its_jobs_and_replays(
         )
     ).json()["items"]
 
-    response = await client.delete(f"/v1/experiment-runs/{run['id']}")
+    response = await client.delete(f"/api/v1/experiment-runs/{run['id']}")
     assert response.status_code == 204
 
-    assert (await client.get(f"/v1/experiment-runs/{run['id']}")).status_code == 404
+    assert (await client.get(f"/api/v1/experiment-runs/{run['id']}")).status_code == 404
     for job in jobs:
-        assert (await client.get(f"/v1/jobs/{job['id']}")).status_code == 404
+        assert (await client.get(f"/api/v1/jobs/{job['id']}")).status_code == 404
     for replay in replays:
-        assert (await client.get(f"/v1/replays/{replay['id']}")).status_code == 404
+        assert (await client.get(f"/api/v1/replays/{replay['id']}")).status_code == 404
 
 
 async def test_experiment_config_update_conflicts_once_it_has_runs(
@@ -237,14 +243,14 @@ async def test_experiment_config_update_conflicts_once_it_has_runs(
     """Updating an experiment's replay config conflicts once it has a run."""
     setup = await _setup_run(client)
     await client.post(
-        f"/v1/experiments/{setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{setup['experiment_id']}/runs",
         json={
             "cohort_version_id": setup["cohort_version_id"],
             "agent_version_id": setup["agent_version_id"],
         },
     )
     response = await client.patch(
-        f"/v1/experiments/{setup['experiment_id']}",
+        f"/api/v1/experiments/{setup['experiment_id']}",
         json={"evaluators": [{"evaluator": "accuracy"}]},
     )
     assert response.status_code == 409
@@ -256,14 +262,14 @@ async def test_agent_version_update_allowed_once_tasks_reference_it(
     """Updating an agent version's run spec stays legal once a task references it."""
     setup = await _setup_run(client)
     await client.post(
-        f"/v1/experiments/{setup['experiment_id']}/runs",
+        f"/api/v1/experiments/{setup['experiment_id']}/runs",
         json={
             "cohort_version_id": setup["cohort_version_id"],
             "agent_version_id": setup["agent_version_id"],
         },
     )
     response = await client.patch(
-        f"/v1/agent-versions/{setup['agent_version_id']}",
+        f"/api/v1/agent-versions/{setup['agent_version_id']}",
         json={"run_spec": {"command": "new.sh"}},
     )
     assert response.status_code == 200

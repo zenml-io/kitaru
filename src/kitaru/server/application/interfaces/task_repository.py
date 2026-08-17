@@ -137,9 +137,9 @@ class TaskRepository(Protocol):
     ) -> list[Task]:
         """Hand pending tasks matching a scope to a worker, oldest first.
 
-        Rows are locked with ``FOR UPDATE SKIP LOCKED``, so concurrent claims
-        never hand the same task to two workers and never block on each
-        other.
+        Rows are locked with ``FOR UPDATE SKIP LOCKED``, so concurrent
+        claims never hand the same task to two workers and never block on
+        each other.
 
         Args:
             scope: Claim scope narrowing the queue.

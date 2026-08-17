@@ -174,7 +174,7 @@ async def test_aggregates_float_evaluations(
     )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -239,7 +239,7 @@ async def test_aggregates_bool_and_pass_rate(
         )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -288,7 +288,7 @@ async def test_aggregates_categorical_value_counts(
         )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -337,7 +337,7 @@ async def test_aggregates_dedupes_shared_baseline_session(
     )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -379,7 +379,7 @@ async def test_aggregates_caps_replays_to_most_recent(
         )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -403,7 +403,7 @@ async def test_aggregates_include_baseline_only_names(
     )
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -436,7 +436,7 @@ async def test_aggregates_empty_run(
     run_id = await _create_run(services)
 
     response = await client.get(
-        f"/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
     )
 
     assert response.status_code == 200
@@ -446,6 +446,6 @@ async def test_aggregates_empty_run(
 async def test_aggregates_run_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown experiment run id."""
     response = await client.get(
-        f"/v1/ui/experiment-runs/{uuid.uuid4()}/evaluation-aggregates"
+        f"/api/v1/ui/experiment-runs/{uuid.uuid4()}/evaluation-aggregates"
     )
     assert response.status_code == 404

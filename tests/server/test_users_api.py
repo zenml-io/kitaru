@@ -109,7 +109,7 @@ async def self_client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_create_user(client: httpx.AsyncClient) -> None:
     """Create a user and observe HTTP 201."""
     response = await client.post(
-        "/v1/users",
+        "/api/v1/users",
         json={"name": "alice", "email": "alice@example.com", "password": "secret"},
     )
     assert response.status_code == 201
@@ -128,7 +128,7 @@ async def test_create_user_response_has_no_password(
 ) -> None:
     """Never expose password data in the response."""
     response = await client.post(
-        "/v1/users", json={"name": "alice", "password": "secret"}
+        "/api/v1/users", json={"name": "alice", "password": "secret"}
     )
     assert response.status_code == 201
     assert set(response.json()) == {
@@ -146,23 +146,23 @@ async def test_create_user_response_has_no_password(
 
 async def test_create_user_duplicate_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a duplicate account name."""
-    response = await client.post("/v1/users", json={"name": "alice"})
+    response = await client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 201
-    response = await client.post("/v1/users", json={"name": "alice"})
+    response = await client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Account name 'alice' is already registered"}
 
 
 async def test_create_user_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid account name."""
-    response = await client.post("/v1/users", json={"name": "in valid"})
+    response = await client.post("/api/v1/users", json={"name": "in valid"})
     assert response.status_code == 422
 
 
 async def test_update_user(self_client: httpx.AsyncClient) -> None:
     """Partially update a user."""
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/users/{ACTOR.account.id}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 200
     body = response.json()
@@ -172,7 +172,7 @@ async def test_update_user(self_client: httpx.AsyncClient) -> None:
 
 async def test_update_user_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown account id."""
-    response = await client.patch(f"/v1/users/{uuid.uuid4()}", json={})
+    response = await client.patch(f"/api/v1/users/{uuid.uuid4()}", json={})
     assert response.status_code == 404
 
 
@@ -180,9 +180,11 @@ async def test_update_user_service_account_not_found(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 404 when a user update targets a service account id."""
-    created = (await client.post("/v1/service-accounts", json={"name": "svc"})).json()
+    created = (
+        await client.post("/api/v1/service-accounts", json={"name": "svc"})
+    ).json()
     response = await client.patch(
-        f"/v1/users/{created['id']}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/users/{created['id']}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 404
 
@@ -191,7 +193,7 @@ async def test_create_user_metadata_defaults_empty(
     client: httpx.AsyncClient,
 ) -> None:
     """Start a new account with empty metadata."""
-    response = await client.post("/v1/users", json={"name": "alice"})
+    response = await client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 201
     assert response.json()["metadata"] == {}
 
@@ -199,13 +201,13 @@ async def test_create_user_metadata_defaults_empty(
 async def test_update_own_user_metadata(self_client: httpx.AsyncClient) -> None:
     """Replace the caller's own metadata whole."""
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/users/{ACTOR.account.id}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 200
     assert response.json()["metadata"] == {"theme": "dark"}
 
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}", json={"metadata": {"locale": "de"}}
+        f"/api/v1/users/{ACTOR.account.id}", json={"metadata": {"locale": "de"}}
     )
     assert response.status_code == 200
     assert response.json()["metadata"] == {"locale": "de"}
@@ -216,9 +218,9 @@ async def test_update_own_user_metadata_omitted_keeps_value(
 ) -> None:
     """Leave metadata unchanged when the field is omitted."""
     await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/users/{ACTOR.account.id}", json={"metadata": {"theme": "dark"}}
     )
-    response = await self_client.patch(f"/v1/users/{ACTOR.account.id}", json={})
+    response = await self_client.patch(f"/api/v1/users/{ACTOR.account.id}", json={})
     assert response.status_code == 200
     assert response.json()["metadata"] == {"theme": "dark"}
 
@@ -227,9 +229,9 @@ async def test_update_other_user_metadata_forbidden(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 403 when writing another account's metadata."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     response = await client.patch(
-        f"/v1/users/{created['id']}", json={"metadata": {"theme": "dark"}}
+        f"/api/v1/users/{created['id']}", json={"metadata": {"theme": "dark"}}
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Accounts can only update their own metadata"}
@@ -238,7 +240,7 @@ async def test_update_other_user_metadata_forbidden(
 async def test_update_own_user_password(self_client: httpx.AsyncClient) -> None:
     """Replace the caller's own password with the current one supplied."""
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}",
+        f"/api/v1/users/{ACTOR.account.id}",
         json={"password": "new", "old_password": "old"},
     )
     assert response.status_code == 200
@@ -249,7 +251,7 @@ async def test_update_own_user_password_without_old_password(
 ) -> None:
     """Observe HTTP 403 when the current password is not supplied."""
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}", json={"password": "new"}
+        f"/api/v1/users/{ACTOR.account.id}", json={"password": "new"}
     )
     assert response.status_code == 403
     assert response.json() == {
@@ -262,7 +264,7 @@ async def test_update_own_user_password_wrong_old_password(
 ) -> None:
     """Observe HTTP 403 when the supplied current password does not match."""
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}",
+        f"/api/v1/users/{ACTOR.account.id}",
         json={"password": "new", "old_password": "wrong"},
     )
     assert response.status_code == 403
@@ -273,9 +275,9 @@ async def test_update_other_user_password_forbidden(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 403 when writing another account's password."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     response = await client.patch(
-        f"/v1/users/{created['id']}", json={"password": "new"}
+        f"/api/v1/users/{created['id']}", json={"password": "new"}
     )
     assert response.status_code == 403
     assert response.json() == {
@@ -287,7 +289,7 @@ async def test_create_user_without_password_returns_activation_token(
     client: httpx.AsyncClient,
 ) -> None:
     """Start a password-less account inactive with an activation token."""
-    response = await client.post("/v1/users", json={"name": "alice"})
+    response = await client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 201
     body = response.json()
     assert body["active"] is False
@@ -299,7 +301,7 @@ async def test_create_user_with_password_has_no_activation_token(
 ) -> None:
     """Start an account with a password active and without a token."""
     response = await client.post(
-        "/v1/users", json={"name": "alice", "password": "secret"}
+        "/api/v1/users", json={"name": "alice", "password": "secret"}
     )
     assert response.status_code == 201
     body = response.json()
@@ -309,9 +311,9 @@ async def test_create_user_with_password_has_no_activation_token(
 
 async def test_activate_user(client: httpx.AsyncClient) -> None:
     """Activate a pending account with its token."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     response = await client.post(
-        f"/v1/users/{created['id']}/activate",
+        f"/api/v1/users/{created['id']}/activate",
         json={"activation_token": created["activation_token"], "password": "secret"},
     )
     assert response.status_code == 200
@@ -322,9 +324,9 @@ async def test_activate_user(client: httpx.AsyncClient) -> None:
 
 async def test_activate_user_wrong_token(client: httpx.AsyncClient) -> None:
     """Observe HTTP 403 when the activation token does not match."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     response = await client.post(
-        f"/v1/users/{created['id']}/activate",
+        f"/api/v1/users/{created['id']}/activate",
         json={"activation_token": "wrong", "password": "secret"},
     )
     assert response.status_code == 403
@@ -333,15 +335,15 @@ async def test_activate_user_wrong_token(client: httpx.AsyncClient) -> None:
 
 async def test_activate_user_twice(client: httpx.AsyncClient) -> None:
     """Reject a replay of an activation token that was already spent."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     token = created["activation_token"]
     first = await client.post(
-        f"/v1/users/{created['id']}/activate",
+        f"/api/v1/users/{created['id']}/activate",
         json={"activation_token": token, "password": "secret"},
     )
     assert first.status_code == 200
     second = await client.post(
-        f"/v1/users/{created['id']}/activate",
+        f"/api/v1/users/{created['id']}/activate",
         json={"activation_token": token, "password": "other"},
     )
     assert second.status_code == 403
@@ -352,9 +354,9 @@ async def test_deactivate_user_returns_activation_token(
 ) -> None:
     """Mint a fresh activation token when an account is deactivated."""
     created = (
-        await client.post("/v1/users", json={"name": "alice", "password": "secret"})
+        await client.post("/api/v1/users", json={"name": "alice", "password": "secret"})
     ).json()
-    response = await client.post(f"/v1/users/{created['id']}/deactivate")
+    response = await client.post(f"/api/v1/users/{created['id']}/deactivate")
     assert response.status_code == 200
     body = response.json()
     assert body["active"] is False
@@ -365,8 +367,10 @@ async def test_deactivate_user_service_account_not_found(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 404 when a user deactivate targets a service account id."""
-    created = (await client.post("/v1/service-accounts", json={"name": "svc"})).json()
-    response = await client.post(f"/v1/users/{created['id']}/deactivate")
+    created = (
+        await client.post("/api/v1/service-accounts", json={"name": "svc"})
+    ).json()
+    response = await client.post(f"/api/v1/users/{created['id']}/deactivate")
     assert response.status_code == 404
 
 
@@ -374,7 +378,7 @@ async def test_deactivate_own_user_forbidden(
     self_client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 403 when an account deactivates itself."""
-    response = await self_client.post(f"/v1/users/{ACTOR.account.id}/deactivate")
+    response = await self_client.post(f"/api/v1/users/{ACTOR.account.id}/deactivate")
     assert response.status_code == 403
     assert response.json() == {"detail": "Accounts cannot deactivate themselves"}
 
@@ -383,9 +387,9 @@ async def test_activate_user_is_unauthenticated(
     client: httpx.AsyncClient,
 ) -> None:
     """Reach the activate route without a credential."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
     response = await client.post(
-        f"/v1/users/{created['id']}/activate",
+        f"/api/v1/users/{created['id']}/activate",
         json={"activation_token": created["activation_token"], "password": "secret"},
     )
     assert response.status_code == 200
@@ -395,7 +399,7 @@ async def test_create_user_forbidden_for_non_admin(
     non_admin_client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 403 when a non-admin actor creates an account."""
-    response = await non_admin_client.post("/v1/users", json={"name": "alice"})
+    response = await non_admin_client.post("/api/v1/users", json={"name": "alice"})
     assert response.status_code == 403
 
 
@@ -404,7 +408,7 @@ async def test_deactivate_user_forbidden_for_non_admin(
 ) -> None:
     """Observe HTTP 403 when a non-admin actor deactivates another account."""
     client, target_id = non_admin_client_with_target
-    response = await client.post(f"/v1/users/{target_id}/deactivate")
+    response = await client.post(f"/api/v1/users/{target_id}/deactivate")
     assert response.status_code == 403
 
 
@@ -413,7 +417,7 @@ async def test_update_own_user_is_admin_forbidden(
 ) -> None:
     """Observe HTTP 403 when an account changes its own admin flag."""
     response = await self_client.patch(
-        f"/v1/users/{ACTOR.account.id}", json={"is_admin": False}
+        f"/api/v1/users/{ACTOR.account.id}", json={"is_admin": False}
     )
     assert response.status_code == 403
     assert response.json() == {"detail": "Accounts cannot change their own admin flag"}
@@ -424,13 +428,15 @@ async def test_update_user_is_admin_forbidden_for_non_admin(
 ) -> None:
     """Observe HTTP 403 when a non-admin actor sets another account's admin flag."""
     client, target_id = non_admin_client_with_target
-    response = await client.patch(f"/v1/users/{target_id}", json={"is_admin": True})
+    response = await client.patch(f"/api/v1/users/{target_id}", json={"is_admin": True})
     assert response.status_code == 403
 
 
 async def test_update_user_is_admin(client: httpx.AsyncClient) -> None:
     """Set another account's admin flag as an admin actor."""
-    created = (await client.post("/v1/users", json={"name": "alice"})).json()
-    response = await client.patch(f"/v1/users/{created['id']}", json={"is_admin": True})
+    created = (await client.post("/api/v1/users", json={"name": "alice"})).json()
+    response = await client.patch(
+        f"/api/v1/users/{created['id']}", json={"is_admin": True}
+    )
     assert response.status_code == 200
     assert response.json()["is_admin"] is True

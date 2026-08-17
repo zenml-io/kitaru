@@ -37,6 +37,7 @@ from kitaru.api_models.v1.task import (
     TaskWithSpec,
 )
 from kitaru.api_models.v1.worker import (
+    WorkerClaim,
     WorkerHeartbeatResponse,
     WorkerRegistrationResponse,
     WorkerResponse,
@@ -217,7 +218,7 @@ def make_worker_response(**overrides: Any) -> WorkerResponse:
         "id": uuid.uuid4(),
         "owner_id": OWNER_ID,
         "name": "worker-1",
-        "scope": WorkerScope(),
+        "scope": WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
         "runtime": WorkerRuntime(platform="bare"),
         "last_seen_at": _now(),
         "live": True,

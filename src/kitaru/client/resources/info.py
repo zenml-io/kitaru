@@ -41,5 +41,5 @@ class InfoResource:
         Returns:
             Server info.
         """
-        response = await self._client.request("GET", "/v1/info", authenticate=False)
+        response = await self._client.request("GET", "/api/v1/info", authenticate=False)
         return ServerInfoResponse.model_validate(response.json())

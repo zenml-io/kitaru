@@ -118,6 +118,7 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
     });
     let effectiveMessages = replay.effectiveRuntimeInput;
     const effectiveOptions: RuntimeGenerateOptions = { ...callerOptions };
+    let replayAbortController: AbortController | undefined;
 
     if (replay.replacementModelId !== undefined) {
       if (!this.#options.resolveModel) {
@@ -153,6 +154,13 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       };
     }
     if (replay.spec) {
+      replayAbortController = new AbortController();
+      effectiveOptions.abortSignal = callerOptions.abortSignal
+        ? AbortSignal.any([
+            callerOptions.abortSignal,
+            replayAbortController.signal,
+          ])
+        : replayAbortController.signal;
       stripLiveMemoryOptions(effectiveOptions);
       await assertReplayToolCoverage({
         agent: this.#agent,
@@ -215,6 +223,7 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
         }
       };
       effectiveOptions.hooks = createToolHooks({
+        abortReplay: (reason) => replayAbortController?.abort(reason),
         callerHooks: callerOptions.hooks,
         configuredAfterToolCall: this.#options.configuredAfterToolCall,
         configuredBeforeToolCall: this.#options.configuredBeforeToolCall,

@@ -99,7 +99,7 @@ async def _registered_evaluator(plugin_repository: FakePluginRepository) -> None
 async def test_create_experiment(client: httpx.AsyncClient, agent_id: str) -> None:
     """Create an experiment and observe HTTP 201."""
     response = await client.post(
-        "/v1/experiments",
+        "/api/v1/experiments",
         json={
             "name": "exp1",
             "agent_id": agent_id,
@@ -124,7 +124,7 @@ async def test_create_experiment_unknown_evaluator(
 ) -> None:
     """Observe HTTP 404 when an evaluator config names an unknown evaluator."""
     response = await client.post(
-        "/v1/experiments",
+        "/api/v1/experiments",
         json={
             "name": "exp1",
             "agent_id": agent_id,
@@ -137,7 +137,7 @@ async def test_create_experiment_unknown_evaluator(
 async def test_create_experiment_unknown_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
     response = await client.post(
-        "/v1/experiments",
+        "/api/v1/experiments",
         json={
             "name": "exp1",
             "agent_id": str(uuid.uuid4()),
@@ -156,9 +156,9 @@ async def test_create_experiment_duplicate_name(
         "agent_id": agent_id,
         "evaluators": [{"evaluator": "accuracy"}],
     }
-    response = await client.post("/v1/experiments", json=body)
+    response = await client.post("/api/v1/experiments", json=body)
     assert response.status_code == 201
-    response = await client.post("/v1/experiments", json=body)
+    response = await client.post("/api/v1/experiments", json=body)
     assert response.status_code == 409
     assert response.json() == {"detail": "Experiment name 'exp1' is already registered"}
 
@@ -168,7 +168,8 @@ async def test_create_experiment_requires_at_least_one_evaluator(
 ) -> None:
     """Observe HTTP 422 when no evaluator is given."""
     response = await client.post(
-        "/v1/experiments", json={"name": "exp1", "agent_id": agent_id, "evaluators": []}
+        "/api/v1/experiments",
+        json={"name": "exp1", "agent_id": agent_id, "evaluators": []},
     )
     assert response.status_code == 422
 
@@ -177,7 +178,7 @@ async def test_get_experiment(client: httpx.AsyncClient, agent_id: str) -> None:
     """Get an experiment by id."""
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -185,14 +186,14 @@ async def test_get_experiment(client: httpx.AsyncClient, agent_id: str) -> None:
             },
         )
     ).json()
-    response = await client.get(f"/v1/experiments/{created['id']}")
+    response = await client.get(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_experiment_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing experiment."""
-    response = await client.get(f"/v1/experiments/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/experiments/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -200,7 +201,7 @@ async def test_list_experiments(client: httpx.AsyncClient, agent_id: str) -> Non
     """List experiments newest-first with a name filter."""
     for name in ["assistant-eval", "reviewer-eval"]:
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": name,
                 "agent_id": agent_id,
@@ -208,7 +209,7 @@ async def test_list_experiments(client: httpx.AsyncClient, agent_id: str) -> Non
             },
         )
 
-    response = await client.get("/v1/experiments")
+    response = await client.get("/api/v1/experiments")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -219,7 +220,7 @@ async def test_list_experiments(client: httpx.AsyncClient, agent_id: str) -> Non
 
     filter_expression = {"field": "name", "op": "eq", "value": "assistant-eval"}
     response = await client.get(
-        "/v1/experiments", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/experiments", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "assistant-eval"
@@ -229,7 +230,7 @@ async def test_update_experiment_name(client: httpx.AsyncClient, agent_id: str) 
     """Update an experiment's name."""
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -238,7 +239,7 @@ async def test_update_experiment_name(client: httpx.AsyncClient, agent_id: str) 
         )
     ).json()
     response = await client.patch(
-        f"/v1/experiments/{created['id']}", json={"name": "renamed"}
+        f"/api/v1/experiments/{created['id']}", json={"name": "renamed"}
     )
     assert response.status_code == 200
     assert response.json()["name"] == "renamed"
@@ -250,7 +251,7 @@ async def test_update_experiment_cannot_clear_name(
     """Observe HTTP 422 when clearing the experiment name."""
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -259,7 +260,7 @@ async def test_update_experiment_cannot_clear_name(
         )
     ).json()
     response = await client.patch(
-        f"/v1/experiments/{created['id']}", json={"name": None}
+        f"/api/v1/experiments/{created['id']}", json={"name": None}
     )
     assert response.status_code == 422
 
@@ -270,7 +271,7 @@ async def test_update_experiment_override_explicit_null_clears(
     """Clear the override with an explicit null."""
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -286,7 +287,7 @@ async def test_update_experiment_override_explicit_null_clears(
         "model_params": None,
     }
     response = await client.patch(
-        f"/v1/experiments/{created['id']}", json={"override": None}
+        f"/api/v1/experiments/{created['id']}", json={"override": None}
     )
     assert response.status_code == 200
     assert response.json()["override"] is None
@@ -305,7 +306,7 @@ async def test_update_experiment_new_evaluators_replaces_config(
 
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -314,7 +315,7 @@ async def test_update_experiment_new_evaluators_replaces_config(
         )
     ).json()
     response = await client.patch(
-        f"/v1/experiments/{created['id']}",
+        f"/api/v1/experiments/{created['id']}",
         json={"evaluators": [{"evaluator": "relevance"}]},
     )
     assert response.status_code == 200
@@ -330,7 +331,7 @@ async def test_update_experiment_cannot_clear_evaluators(
     """Observe HTTP 422 when clearing every evaluator."""
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -339,7 +340,7 @@ async def test_update_experiment_cannot_clear_evaluators(
         )
     ).json()
     response = await client.patch(
-        f"/v1/experiments/{created['id']}", json={"evaluators": []}
+        f"/api/v1/experiments/{created['id']}", json={"evaluators": []}
     )
     assert response.status_code == 422
 
@@ -347,7 +348,7 @@ async def test_update_experiment_cannot_clear_evaluators(
 async def test_update_experiment_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing experiment."""
     response = await client.patch(
-        f"/v1/experiments/{uuid.uuid4()}", json={"description": "x"}
+        f"/api/v1/experiments/{uuid.uuid4()}", json={"description": "x"}
     )
     assert response.status_code == 404
 
@@ -356,7 +357,7 @@ async def test_delete_experiment(client: httpx.AsyncClient, agent_id: str) -> No
     """Delete an experiment."""
     created = (
         await client.post(
-            "/v1/experiments",
+            "/api/v1/experiments",
             json={
                 "name": "exp1",
                 "agent_id": agent_id,
@@ -364,13 +365,13 @@ async def test_delete_experiment(client: httpx.AsyncClient, agent_id: str) -> No
             },
         )
     ).json()
-    response = await client.delete(f"/v1/experiments/{created['id']}")
+    response = await client.delete(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/experiments/{created['id']}")
+    response = await client.get(f"/api/v1/experiments/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_experiment_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing experiment."""
-    response = await client.delete(f"/v1/experiments/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/experiments/{uuid.uuid4()}")
     assert response.status_code == 404

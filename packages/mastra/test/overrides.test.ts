@@ -70,7 +70,7 @@ describe("replay overrides", () => {
     });
     expect(agent.calls[0]?.options).not.toHaveProperty("system");
     expect(
-      api.calls.find((call) => call.path === "/v1/sessions")?.body,
+      api.calls.find((call) => call.path === "/api/v1/sessions")?.body,
     ).toMatchObject({
       inputs: {
         prompt: "replacement prompt",
