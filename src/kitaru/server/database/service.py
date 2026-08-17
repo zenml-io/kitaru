@@ -189,6 +189,10 @@ class DatabaseService:
             pool_size=settings.DB_POOL_SIZE,
             max_overflow=settings.DB_MAX_OVERFLOW,
             pool_timeout=settings.DB_POOL_TIMEOUT_SECONDS,
+            # Liveness-check a pooled connection on checkout so a connection the
+            # database dropped while idle is transparently replaced rather than
+            # failing the next request.
+            pool_pre_ping=True,
             echo=False,
         )
 

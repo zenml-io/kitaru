@@ -29,3 +29,21 @@ def test_span_with_path_accepted() -> None:
     """Accept a span alongside a path."""
     selector = AnnotationSelector(path="/message", span=AnnotationSpan(start=0, end=4))
     assert selector.span == AnnotationSpan(start=0, end=4)
+
+
+def test_negative_span_offset_rejected() -> None:
+    """Reject a span with a negative offset."""
+    with pytest.raises(ValidationError):
+        AnnotationSpan(start=-1, end=4)
+
+
+def test_span_end_before_start_rejected() -> None:
+    """Reject a span whose end precedes its start."""
+    with pytest.raises(ValidationError):
+        AnnotationSpan(start=5, end=2)
+
+
+def test_empty_span_accepted() -> None:
+    """Accept a zero-length span."""
+    span = AnnotationSpan(start=3, end=3)
+    assert span.start == span.end

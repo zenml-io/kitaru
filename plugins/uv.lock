@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-14T14:14:47.699825Z"
+exclude-newer = "2026-08-14T16:31:31.289253Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -923,7 +923,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc8"
+version = "0.22.0rc9"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1026,7 +1026,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },

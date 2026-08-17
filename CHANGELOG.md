@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [0.22.0rc9]
+
+### Added
+
+- Added the Logfire records-query importer as a default plugin at `0.1.0rc0`.
+
+### Changed
+
+- Prepared the ninth Kitaru 0.22 release candidate with `kitaru-ui-v0.2.0-rc.5` and the Langfuse importer at `0.1.0rc2`.
+
 ## [0.22.0rc8]
 
 ### Changed

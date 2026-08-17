@@ -17,7 +17,7 @@ import uuid
 from datetime import datetime
 from decimal import Decimal
 from enum import StrEnum
-from typing import Any, Self
+from typing import Annotated, Any, Self
 
 from pydantic import AwareDatetime, Field, model_validator
 
@@ -50,11 +50,13 @@ class NodeStatus(StrEnum):
 class SessionNodeCreateRequest(RequestModel):
     """Session node create request."""
 
-    index: int = Field(description="Position within the session, the wire identity.")
-    parent_index: int | None = Field(
-        default=None, description="Index of the parent node."
+    index: int = Field(
+        ge=0, description="Position within the session, the wire identity."
     )
-    secondary_parent_indexes: list[int] = Field(
+    parent_index: int | None = Field(
+        default=None, ge=0, description="Index of the parent node."
+    )
+    secondary_parent_indexes: list[Annotated[int, Field(ge=0)]] = Field(
         default_factory=list, description="Indexes of additional parent nodes."
     )
     external_id: str | None = Field(
@@ -121,7 +123,8 @@ class SessionNodeBatchRequest(RequestModel):
     """Session node batch request."""
 
     nodes: list[SessionNodeCreateRequest] = Field(
-        description="Nodes to upsert, parent before child."
+        max_length=500,
+        description="Nodes to upsert, parent before child.",
     )
 
     @model_validator(mode="after")
