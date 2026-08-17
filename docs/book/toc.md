@@ -40,7 +40,6 @@
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)
 - [Drive it from your coding agent](agent-native/mcp-server.md)
-- [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Adapters
 
@@ -59,6 +58,7 @@
 - [Authentication & API keys](deploy/authentication.md)
 - [Secrets](deploy/secrets.md)
 - [Configuration](deploy/configuration.md)
+- [Troubleshooting](getting-started/troubleshooting.md)
 
 ## Project
 
