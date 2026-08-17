@@ -70,6 +70,10 @@ class TokenGrantError(APIError):
         self.error = error
 
 
+class InvalidServerResponseError(KitaruClientError):
+    """Invalid server response error."""
+
+
 _STATUS_ERRORS: dict[int, type[APIError]] = {
     401: AuthenticationError,
     403: AuthorizationError,

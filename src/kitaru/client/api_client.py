@@ -36,7 +36,10 @@ from kitaru.client.auth import (
 )
 from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.exceptions import raise_for_response
+from kitaru.client.exceptions import (
+    InvalidServerResponseError,
+    raise_for_response,
+)
 from kitaru.client.resources.accounts import AccountsResource
 from kitaru.client.resources.agent_versions import AgentVersionsResource
 from kitaru.client.resources.agents import AgentsResource
@@ -245,6 +248,7 @@ class KitaruAPIClient:
 
         Raises:
             APIError: The response has an error status code.
+            InvalidServerResponseError: The response is not an API response.
 
         Returns:
             HTTP response.
@@ -265,6 +269,13 @@ class KitaruAPIClient:
             auth=self._auth if authenticate else None,
         )
         raise_for_response(response)
+        # A UI catch-all or proxy answers an unknown path with an HTML page
+        # and a success status, usually on a client/server version mismatch.
+        if response.headers.get("Content-Type", "").startswith("text/html"):
+            raise InvalidServerResponseError(
+                f"The server answered {method} {path} with an HTML page "
+                "instead of an API response"
+            )
         return response
 
     async def close(self) -> None:

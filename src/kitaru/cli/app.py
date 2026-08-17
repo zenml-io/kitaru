@@ -94,7 +94,7 @@ from kitaru.client.config import get_config_path
 from kitaru.client.control_plane import ControlPlaneLoginError
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.device_grant import DeviceLoginError
-from kitaru.client.exceptions import APIError
+from kitaru.client.exceptions import APIError, InvalidServerResponseError
 
 F = TypeVar("F", bound=Callable[..., Any])
 _MACHINE_TRUE = {"1", "true", "yes", "on"}
@@ -4161,6 +4161,12 @@ def _convert_error(
         return CLIError("invalid_arguments", str(exception))
     if isinstance(exception, (DeviceLoginError, ControlPlaneLoginError)):
         return CLIError("authentication_failed", str(exception))
+    if isinstance(exception, InvalidServerResponseError):
+        return CLIError(
+            "invalid_configuration",
+            str(exception),
+            hint="Check the server URL and that the client and server versions match.",
+        )
     if isinstance(exception, APIError):
         details = {"status_code": exception.status_code}
         if exception.status_code in {401, 403}:
