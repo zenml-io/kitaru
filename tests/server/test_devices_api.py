@@ -72,7 +72,7 @@ async def test_list_devices(
         await create_device(repository, account_id=ACCOUNT.id)
     await create_device(repository, account_id=FOREIGN_ACCOUNT.id)
 
-    response = await client.get("/v1/devices")
+    response = await client.get("/api/v1/devices")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -86,7 +86,7 @@ async def test_list_devices_scoped_to_caller(
     mine, _, _ = await create_device(repository, account_id=ACCOUNT.id)
     await create_device(repository, account_id=FOREIGN_ACCOUNT.id)
 
-    response = await client.get("/v1/devices")
+    response = await client.get("/api/v1/devices")
     assert response.status_code == 200
     body = response.json()
     assert [item["id"] for item in body["items"]] == [str(mine.id)]
@@ -99,7 +99,7 @@ async def test_get_device(
     device, _, _ = await create_device(
         repository, account_id=ACCOUNT.id, status=DeviceStatus.ACTIVE, trusted=True
     )
-    response = await client.get(f"/v1/devices/{device.id}")
+    response = await client.get(f"/api/v1/devices/{device.id}")
     assert response.status_code == 200
     body = response.json()
     assert body["id"] == str(device.id)
@@ -111,7 +111,7 @@ async def test_get_device(
 async def test_get_device_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown device id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/devices/{missing_id}")
+    response = await client.get(f"/api/v1/devices/{missing_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Device {missing_id} was not found"}
 
@@ -121,7 +121,7 @@ async def test_get_device_foreign_owner(
 ) -> None:
     """Observe HTTP 404 for a device owned by another account."""
     device, _, _ = await create_device(repository, account_id=FOREIGN_ACCOUNT.id)
-    response = await client.get(f"/v1/devices/{device.id}")
+    response = await client.get(f"/api/v1/devices/{device.id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Device {device.id} was not found"}
 
@@ -132,16 +132,16 @@ async def test_get_unclaimed_device_requires_user_code(
     """Observe an unapproved device only with its user code."""
     device, user_code, _ = await create_device(repository)
 
-    without_code = await client.get(f"/v1/devices/{device.id}")
+    without_code = await client.get(f"/api/v1/devices/{device.id}")
     assert without_code.status_code == 404
 
     wrong_code = await client.get(
-        f"/v1/devices/{device.id}", params={"user_code": "WRONG-CODE"}
+        f"/api/v1/devices/{device.id}", params={"user_code": "WRONG-CODE"}
     )
     assert wrong_code.status_code == 404
 
     with_code = await client.get(
-        f"/v1/devices/{device.id}", params={"user_code": user_code}
+        f"/api/v1/devices/{device.id}", params={"user_code": user_code}
     )
     assert with_code.status_code == 200
     assert with_code.json()["id"] == str(device.id)
@@ -153,7 +153,7 @@ async def test_verify_device(
     """Approve a pending device authorization on behalf of the caller."""
     device, user_code, _ = await create_device(repository)
     response = await client.post(
-        f"/v1/devices/{device.id}/verify",
+        f"/api/v1/devices/{device.id}/verify",
         json={"user_code": user_code, "trusted": True},
     )
     assert response.status_code == 200
@@ -168,7 +168,7 @@ async def test_verify_device_wrong_code(
     """Observe HTTP 422 for a wrong user code."""
     device, _, _ = await create_device(repository)
     response = await client.post(
-        f"/v1/devices/{device.id}/verify",
+        f"/api/v1/devices/{device.id}/verify",
         json={"user_code": "WRONG-CODE", "trusted": False},
     )
     assert response.status_code == 422
@@ -181,7 +181,7 @@ async def test_verify_device_locks_after_three_wrong_attempts(
     device, _, _ = await create_device(repository)
     for _ in range(3):
         response = await client.post(
-            f"/v1/devices/{device.id}/verify",
+            f"/api/v1/devices/{device.id}/verify",
             json={"user_code": "WRONG-CODE", "trusted": False},
         )
         assert response.status_code == 422
@@ -194,7 +194,7 @@ async def test_verify_device_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown device id."""
     missing_id = uuid.uuid4()
     response = await client.post(
-        f"/v1/devices/{missing_id}/verify",
+        f"/api/v1/devices/{missing_id}/verify",
         json={"user_code": "WHATEVER", "trusted": False},
     )
     assert response.status_code == 404
@@ -208,7 +208,7 @@ async def test_update_device(
     device, _, _ = await create_device(
         repository, account_id=ACCOUNT.id, status=DeviceStatus.ACTIVE
     )
-    response = await client.patch(f"/v1/devices/{device.id}", json={"locked": True})
+    response = await client.patch(f"/api/v1/devices/{device.id}", json={"locked": True})
     assert response.status_code == 200
     body = response.json()
     assert body["locked"] is True
@@ -216,7 +216,9 @@ async def test_update_device(
 
 async def test_update_device_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown device id."""
-    response = await client.patch(f"/v1/devices/{uuid.uuid4()}", json={"locked": True})
+    response = await client.patch(
+        f"/api/v1/devices/{uuid.uuid4()}", json={"locked": True}
+    )
     assert response.status_code == 404
 
 
@@ -227,7 +229,7 @@ async def test_update_device_foreign_owner(
     device, _, _ = await create_device(
         repository, account_id=FOREIGN_ACCOUNT.id, status=DeviceStatus.ACTIVE
     )
-    response = await client.patch(f"/v1/devices/{device.id}", json={"locked": True})
+    response = await client.patch(f"/api/v1/devices/{device.id}", json={"locked": True})
     assert response.status_code == 404
     loaded = await repository.get(device.id)
     assert loaded.locked is False
@@ -238,15 +240,15 @@ async def test_delete_device(
 ) -> None:
     """Delete a device of the caller and observe HTTP 204."""
     device, _, _ = await create_device(repository, account_id=ACCOUNT.id)
-    response = await client.delete(f"/v1/devices/{device.id}")
+    response = await client.delete(f"/api/v1/devices/{device.id}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/devices/{device.id}")
+    response = await client.get(f"/api/v1/devices/{device.id}")
     assert response.status_code == 404
 
 
 async def test_delete_device_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown device id."""
-    response = await client.delete(f"/v1/devices/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/devices/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -255,6 +257,6 @@ async def test_delete_device_foreign_owner(
 ) -> None:
     """Observe HTTP 404 for a device owned by another account."""
     device, _, _ = await create_device(repository, account_id=FOREIGN_ACCOUNT.id)
-    response = await client.delete(f"/v1/devices/{device.id}")
+    response = await client.delete(f"/api/v1/devices/{device.id}")
     assert response.status_code == 404
     assert await repository.get(device.id) == device

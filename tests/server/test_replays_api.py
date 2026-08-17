@@ -104,7 +104,7 @@ async def test_create_replay(
 ) -> None:
     """Create a replay and observe HTTP 201."""
     response = await client.post(
-        "/v1/replays",
+        "/api/v1/replays",
         json={
             "baseline_session_id": str(baseline_session_id),
             "evaluators": [{"evaluator": "accuracy"}],
@@ -124,7 +124,7 @@ async def test_create_replay_unknown_baseline_session(
 ) -> None:
     """Observe HTTP 404 for an unknown baseline session."""
     response = await client.post(
-        "/v1/replays",
+        "/api/v1/replays",
         json={
             "baseline_session_id": str(uuid.uuid4()),
             "evaluators": [{"evaluator": "accuracy"}],
@@ -139,21 +139,21 @@ async def test_get_replay(
     """Get a replay by id."""
     created = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": str(baseline_session_id),
                 "evaluators": [{"evaluator": "accuracy"}],
             },
         )
     ).json()
-    response = await client.get(f"/v1/replays/{created['id']}")
+    response = await client.get(f"/api/v1/replays/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_replay_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing replay."""
-    response = await client.get(f"/v1/replays/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/replays/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -162,7 +162,7 @@ async def test_list_replays_filters_by_baseline_session(
 ) -> None:
     """List replays filters by baseline session id."""
     await client.post(
-        "/v1/replays",
+        "/api/v1/replays",
         json={
             "baseline_session_id": str(baseline_session_id),
             "evaluators": [{"evaluator": "accuracy"}],
@@ -174,7 +174,7 @@ async def test_list_replays_filters_by_baseline_session(
         "value": str(baseline_session_id),
     }
     response = await client.get(
-        "/v1/replays", params={"filter": json.dumps(matching_filter)}
+        "/api/v1/replays", params={"filter": json.dumps(matching_filter)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -187,7 +187,7 @@ async def test_list_replays_filters_by_baseline_session(
         "value": str(uuid.uuid4()),
     }
     response = await client.get(
-        "/v1/replays", params={"filter": json.dumps(other_filter)}
+        "/api/v1/replays", params={"filter": json.dumps(other_filter)}
     )
     assert response.json()["items"] == []
 
@@ -198,7 +198,7 @@ async def test_tool_lookup_not_configured_for_history(
     """Observe HTTP 422 when a tool has no history config."""
     created = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": str(baseline_session_id),
                 "evaluators": [{"evaluator": "accuracy"}],
@@ -206,7 +206,7 @@ async def test_tool_lookup_not_configured_for_history(
         )
     ).json()
     response = await client.post(
-        f"/v1/replays/{created['id']}/tool-lookup",
+        f"/api/v1/replays/{created['id']}/tool-lookup",
         json={"tool_name": "search", "cache_key": "a" * 64},
     )
     assert response.status_code == 422
@@ -215,7 +215,7 @@ async def test_tool_lookup_not_configured_for_history(
 async def test_tool_lookup_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when looking up a tool on a missing replay."""
     response = await client.post(
-        f"/v1/replays/{uuid.uuid4()}/tool-lookup",
+        f"/api/v1/replays/{uuid.uuid4()}/tool-lookup",
         json={"tool_name": "search", "cache_key": "a" * 64},
     )
     assert response.status_code == 404
@@ -227,7 +227,7 @@ async def test_tool_lookup_invalid_cache_key_length(
     """Observe HTTP 422 for a cache key that is not 64 characters."""
     created = (
         await client.post(
-            "/v1/replays",
+            "/api/v1/replays",
             json={
                 "baseline_session_id": str(baseline_session_id),
                 "evaluators": [{"evaluator": "accuracy"}],
@@ -235,7 +235,7 @@ async def test_tool_lookup_invalid_cache_key_length(
         )
     ).json()
     response = await client.post(
-        f"/v1/replays/{created['id']}/tool-lookup",
+        f"/api/v1/replays/{created['id']}/tool-lookup",
         json={"tool_name": "search", "cache_key": "short"},
     )
     assert response.status_code == 422

@@ -157,20 +157,23 @@ describe("execution lifecycle resources", () => {
     await client.experiments.delete(ID);
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/experiments", "POST"],
-      [`https://api.example/v1/experiments/${ID}`, "GET"],
-      [`https://api.example/v1/experiments/${ID}`, "PATCH"],
-      ["https://api.example/v1/experiments?size=1", "GET"],
-      [`https://api.example/v1/experiments/${ID}/runs`, "POST"],
-      [`https://api.example/v1/experiment-runs/${RELATED_ID}`, "GET"],
-      ["https://api.example/v1/experiment-runs?sort=created%3Aasc", "GET"],
+      ["https://api.example/api/v1/experiments", "POST"],
+      [`https://api.example/api/v1/experiments/${ID}`, "GET"],
+      [`https://api.example/api/v1/experiments/${ID}`, "PATCH"],
+      ["https://api.example/api/v1/experiments?size=1", "GET"],
+      [`https://api.example/api/v1/experiments/${ID}/runs`, "POST"],
+      [`https://api.example/api/v1/experiment-runs/${RELATED_ID}`, "GET"],
+      ["https://api.example/api/v1/experiment-runs?sort=created%3Aasc", "GET"],
       [
-        `https://api.example/v1/experiment-runs/${RELATED_ID}/jobs?size=10`,
+        `https://api.example/api/v1/experiment-runs/${RELATED_ID}/jobs?size=10`,
         "GET",
       ],
-      [`https://api.example/v1/experiment-runs/${RELATED_ID}/cancel`, "POST"],
-      [`https://api.example/v1/experiment-runs/${RELATED_ID}`, "DELETE"],
-      [`https://api.example/v1/experiments/${ID}`, "DELETE"],
+      [
+        `https://api.example/api/v1/experiment-runs/${RELATED_ID}/cancel`,
+        "POST",
+      ],
+      [`https://api.example/api/v1/experiment-runs/${RELATED_ID}`, "DELETE"],
+      [`https://api.example/api/v1/experiments/${ID}`, "DELETE"],
     ]);
   });
 
@@ -219,21 +222,21 @@ describe("execution lifecycle resources", () => {
     await client.jobs.delete(ID);
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      [`https://api.example/v1/jobs/${ID}`, "GET"],
+      [`https://api.example/api/v1/jobs/${ID}`, "GET"],
       [
-        `https://api.example/v1/jobs?filter=${encodeURIComponent(JSON.stringify({ field: "kind", op: "eq", value: "replay" }))}`,
+        `https://api.example/api/v1/jobs?filter=${encodeURIComponent(JSON.stringify({ field: "kind", op: "eq", value: "replay" }))}`,
         "GET",
       ],
-      [`https://api.example/v1/jobs/${ID}/tasks`, "GET"],
-      [`https://api.example/v1/jobs/${ID}/cancel`, "POST"],
-      [`https://api.example/v1/tasks/${RELATED_ID}`, "GET"],
-      [`https://api.example/v1/tasks/${RELATED_ID}/spec`, "GET"],
-      ["https://api.example/v1/tasks?size=1", "GET"],
-      ["https://api.example/v1/replays", "POST"],
-      [`https://api.example/v1/replays/${ID}`, "GET"],
-      ["https://api.example/v1/replays?size=1", "GET"],
-      [`https://api.example/v1/replays/${ID}/tool-lookup`, "POST"],
-      [`https://api.example/v1/jobs/${ID}`, "DELETE"],
+      [`https://api.example/api/v1/jobs/${ID}/tasks`, "GET"],
+      [`https://api.example/api/v1/jobs/${ID}/cancel`, "POST"],
+      [`https://api.example/api/v1/tasks/${RELATED_ID}`, "GET"],
+      [`https://api.example/api/v1/tasks/${RELATED_ID}/spec`, "GET"],
+      ["https://api.example/api/v1/tasks?size=1", "GET"],
+      ["https://api.example/api/v1/replays", "POST"],
+      [`https://api.example/api/v1/replays/${ID}`, "GET"],
+      ["https://api.example/api/v1/replays?size=1", "GET"],
+      [`https://api.example/api/v1/replays/${ID}/tool-lookup`, "POST"],
+      [`https://api.example/api/v1/jobs/${ID}`, "DELETE"],
     ]);
     expect("claim" in client.tasks).toBe(false);
     expect("update" in client.tasks).toBe(false);

@@ -51,7 +51,7 @@ class ServiceAccountsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/service-accounts",
+            "/api/v1/service-accounts",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AccountResponse.model_validate(response.json())
@@ -75,7 +75,7 @@ class ServiceAccountsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/service-accounts/{account_id}",
+            f"/api/v1/service-accounts/{account_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AccountResponse.model_validate(response.json())

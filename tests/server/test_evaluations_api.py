@@ -127,21 +127,21 @@ async def test_list_evaluations(
     session_id = await _create_session(session_repository)
     other_session_id = await _create_session(session_repository)
     await client.post(
-        f"/v1/sessions/{session_id}/evaluations",
+        f"/api/v1/sessions/{session_id}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
     await client.post(
-        f"/v1/sessions/{other_session_id}/evaluations",
+        f"/api/v1/sessions/{other_session_id}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
     )
 
-    response = await client.get("/v1/evaluations")
+    response = await client.get("/api/v1/evaluations")
     assert response.status_code == 200
     assert len(response.json()["items"]) == 2
 
     filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
     response = await client.get(
-        "/v1/evaluations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/evaluations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -156,18 +156,18 @@ async def test_get_evaluation(
     session_id = await _create_session(session_repository)
     created = (
         await client.post(
-            f"/v1/sessions/{session_id}/evaluations",
+            f"/api/v1/sessions/{session_id}/evaluations",
             json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
         )
     ).json()[0]
-    response = await client.get(f"/v1/evaluations/{created['id']}")
+    response = await client.get(f"/api/v1/evaluations/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_evaluation_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing evaluation."""
-    response = await client.get(f"/v1/evaluations/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/evaluations/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -188,7 +188,7 @@ async def test_create_evaluations(
     )
 
     response = await client.post(
-        "/v1/evaluations",
+        "/api/v1/evaluations",
         json={
             "input_session_ids": [session_id],
             "evaluators": [{"evaluator": "scorer"}],
@@ -214,7 +214,7 @@ async def test_create_evaluations_rejects_an_unknown_session(
     )
 
     response = await client.post(
-        "/v1/evaluations",
+        "/api/v1/evaluations",
         json={
             "input_session_ids": [str(uuid.uuid4())],
             "evaluators": [{"evaluator": "scorer"}],
@@ -229,7 +229,7 @@ async def test_create_evaluations_not_found_for_unknown_evaluator(
     """Observe HTTP 404 for an unknown evaluator name."""
     session_id = await _create_session(session_repository)
     response = await client.post(
-        "/v1/evaluations",
+        "/api/v1/evaluations",
         json={
             "input_session_ids": [session_id],
             "evaluators": [{"evaluator": "does-not-exist"}],

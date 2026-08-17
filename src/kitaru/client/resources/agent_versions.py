@@ -50,7 +50,7 @@ class AgentVersionsResource:
             Stored agent version.
         """
         response = await self._client.request(
-            "GET", f"/v1/agent-versions/{agent_version_id}"
+            "GET", f"/api/v1/agent-versions/{agent_version_id}"
         )
         return AgentVersionResponse.model_validate(response.json())
 
@@ -73,7 +73,7 @@ class AgentVersionsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/agent-versions/{agent_version_id}",
+            f"/api/v1/agent-versions/{agent_version_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AgentVersionResponse.model_validate(response.json())
@@ -88,4 +88,6 @@ class AgentVersionsResource:
             APIError: The request failed, including 404 for a missing agent
                 version.
         """
-        await self._client.request("DELETE", f"/v1/agent-versions/{agent_version_id}")
+        await self._client.request(
+            "DELETE", f"/api/v1/agent-versions/{agent_version_id}"
+        )

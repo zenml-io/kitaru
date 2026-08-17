@@ -131,7 +131,7 @@ async def client(
 async def test_register_worker(client: httpx.AsyncClient, account: Account) -> None:
     """Register a worker and observe a worker record plus a bearer token."""
     response = await client.post(
-        "/v1/workers",
+        "/api/v1/workers",
         json={
             "name": "worker-1",
             "scope": {},
@@ -154,7 +154,7 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
     """Re-registering under the same name keeps the id and renews the state."""
     first = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={
                 "name": "worker-1",
                 "scope": {"kinds": ["agent"]},
@@ -165,7 +165,7 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
     ).json()
     second = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={
                 "name": "worker-1",
                 "scope": {"kinds": ["importer"]},
@@ -186,7 +186,7 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
 async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid worker name."""
     response = await client.post(
-        "/v1/workers",
+        "/api/v1/workers",
         json={"name": "in valid", "scope": {}, "runtime": RUNTIME, "metadata": {}},
     )
     assert response.status_code == 422
@@ -196,11 +196,11 @@ async def test_get_worker(client: httpx.AsyncClient) -> None:
     """Get a worker by id using the registering account's credential."""
     created = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
-    response = await client.get(f"/v1/workers/{created['worker']['id']}")
+    response = await client.get(f"/api/v1/workers/{created['worker']['id']}")
     assert response.status_code == 200
     assert response.json() == created["worker"]
 
@@ -211,14 +211,14 @@ async def test_get_worker_with_its_own_token(
     """Get a worker using its own worker token."""
     created = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     worker_id = uuid.UUID(created["worker"]["id"])
     token = mint_worker_token(auth_service, worker_id, account)
     response = await client.get(
-        f"/v1/workers/{worker_id}", headers={"Authorization": f"Bearer {token}"}
+        f"/api/v1/workers/{worker_id}", headers={"Authorization": f"Bearer {token}"}
     )
     assert response.status_code == 200
     assert response.json() == created["worker"]
@@ -230,19 +230,19 @@ async def test_get_worker_with_a_different_workers_token_is_forbidden(
     """Observe HTTP 403 when a worker token names a different worker."""
     first = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     second = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-2", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
     token = mint_worker_token(auth_service, uuid.UUID(first["worker"]["id"]), account)
     response = await client.get(
-        f"/v1/workers/{second['worker']['id']}",
+        f"/api/v1/workers/{second['worker']['id']}",
         headers={"Authorization": f"Bearer {token}"},
     )
     assert response.status_code == 403
@@ -251,7 +251,7 @@ async def test_get_worker_with_a_different_workers_token_is_forbidden(
 async def test_get_worker_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown worker id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/workers/{missing_id}")
+    response = await client.get(f"/api/v1/workers/{missing_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"Worker {missing_id} was not found"}
 
@@ -260,12 +260,12 @@ async def test_list_workers(client: httpx.AsyncClient) -> None:
     """List workers newest-first with filters."""
     for name in ["worker-1", "worker-2", "worker-3"]:
         response = await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": name, "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
         assert response.status_code == 200
 
-    response = await client.get("/v1/workers")
+    response = await client.get("/api/v1/workers")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -277,7 +277,7 @@ async def test_list_workers(client: httpx.AsyncClient) -> None:
 
     filter_expression = {"field": "name", "op": "eq", "value": "worker-2"}
     response = await client.get(
-        "/v1/workers", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/workers", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "worker-2"
@@ -287,19 +287,19 @@ async def test_delete_worker(client: httpx.AsyncClient) -> None:
     """Delete a worker and observe HTTP 204."""
     created = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
-    response = await client.delete(f"/v1/workers/{created['worker']['id']}")
+    response = await client.delete(f"/api/v1/workers/{created['worker']['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/workers/{created['worker']['id']}")
+    response = await client.get(f"/api/v1/workers/{created['worker']['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_worker_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown worker id."""
-    response = await client.delete(f"/v1/workers/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/workers/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -315,10 +315,10 @@ async def test_worker_live_derivation(
         last_seen_at=datetime.now(UTC) - timedelta(minutes=5),
     )
 
-    response = await client.get(f"/v1/workers/{live.id}")
+    response = await client.get(f"/api/v1/workers/{live.id}")
     assert response.json()["live"] is True
 
-    response = await client.get(f"/v1/workers/{stale.id}")
+    response = await client.get(f"/api/v1/workers/{stale.id}")
     assert response.json()["live"] is False
 
 
@@ -339,7 +339,7 @@ async def test_heartbeat_worker(
     token = mint_worker_token(auth_service, worker.id, account)
 
     response = await client.post(
-        f"/v1/workers/{worker.id}/heartbeat",
+        f"/api/v1/workers/{worker.id}/heartbeat",
         json={"task_ids": [str(task.id)]},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -358,7 +358,7 @@ async def test_heartbeat_worker_returns_reported_ids_the_worker_no_longer_owns(
     missing_id = uuid.uuid4()
     token = mint_worker_token(auth_service, worker.id, account)
     response = await client.post(
-        f"/v1/workers/{worker.id}/heartbeat",
+        f"/api/v1/workers/{worker.id}/heartbeat",
         json={"task_ids": [str(missing_id)]},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -373,7 +373,7 @@ async def test_heartbeat_worker_not_found(
     missing_id = uuid.uuid4()
     token = mint_worker_token(auth_service, missing_id, account)
     response = await client.post(
-        f"/v1/workers/{missing_id}/heartbeat",
+        f"/api/v1/workers/{missing_id}/heartbeat",
         json={"task_ids": []},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -391,7 +391,7 @@ async def test_heartbeat_worker_with_a_different_workers_token_is_forbidden(
     other = await create_worker(repository, account.id, name="other")
     token = mint_worker_token(auth_service, other.id, account)
     response = await client.post(
-        f"/v1/workers/{worker.id}/heartbeat",
+        f"/api/v1/workers/{worker.id}/heartbeat",
         json={"task_ids": []},
         headers={"Authorization": f"Bearer {token}"},
     )
@@ -404,6 +404,6 @@ async def test_heartbeat_worker_rejects_an_account_credential(
     """Observe HTTP 403 when the caller holds only an account credential."""
     worker = await create_worker(repository, account.id)
     response = await client.post(
-        f"/v1/workers/{worker.id}/heartbeat", json={"task_ids": []}
+        f"/api/v1/workers/{worker.id}/heartbeat", json={"task_ids": []}
     )
     assert response.status_code == 403

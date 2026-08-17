@@ -79,7 +79,7 @@ async def test_create_session_run(
     )
 
     response = await client.post(
-        "/v1/session-runs",
+        "/api/v1/session-runs",
         json={
             "agent_version_id": str(version.id),
             "inputs": {"q": "hi"},
@@ -101,7 +101,7 @@ async def test_create_session_run(
 async def test_create_session_run_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown agent version id."""
     response = await client.post(
-        "/v1/session-runs",
+        "/api/v1/session-runs",
         json={"agent_version_id": str(uuid.uuid4()), "inputs": None},
     )
     assert response.status_code == 404
@@ -116,7 +116,7 @@ async def test_create_session_run_rejects_a_version_without_a_run_spec(
         services.agent_versions, agent_id=agent.id, owner_id=ACCOUNT.id
     )
     response = await client.post(
-        "/v1/session-runs",
+        "/api/v1/session-runs",
         json={"agent_version_id": str(version.id), "inputs": None},
     )
     assert response.status_code == 422

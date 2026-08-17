@@ -32,16 +32,16 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_blobs_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
+        "/api/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
     )
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/blobs/{created['id']}")
+    response = await client.get(f"/api/v1/blobs/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get(f"/v1/blobs/{created['id']}/content")
+    response = await client.get(f"/api/v1/blobs/{created['id']}/content")
     assert response.status_code == 200
     assert response.content == b"hello"
 
@@ -49,11 +49,11 @@ async def test_blobs_persist_across_requests(client: httpx.AsyncClient) -> None:
 async def test_dedup_conflict_returns_stored_row(client: httpx.AsyncClient) -> None:
     """Return the stored blob with HTTP 200 on a dedup hit."""
     first = await client.post(
-        "/v1/blobs", files={"file": ("a.txt", b"same", "text/plain")}
+        "/api/v1/blobs", files={"file": ("a.txt", b"same", "text/plain")}
     )
     assert first.status_code == 201
     second = await client.post(
-        "/v1/blobs", files={"file": ("b.txt", b"same", "text/plain")}
+        "/api/v1/blobs", files={"file": ("b.txt", b"same", "text/plain")}
     )
     assert second.status_code == 200
     assert second.json()["id"] == first.json()["id"]
@@ -63,13 +63,13 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
     """Persist a deletion across requests."""
     created = (
         await client.post(
-            "/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
+            "/api/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
         )
     ).json()
-    response = await client.delete(f"/v1/blobs/{created['id']}")
+    response = await client.delete(f"/api/v1/blobs/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/blobs/{created['id']}")
+    response = await client.get(f"/api/v1/blobs/{created['id']}")
     assert response.status_code == 404
 
 
@@ -77,21 +77,21 @@ async def test_delete_in_use_conflict(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 when a script version references the blob."""
     blob = (
         await client.post(
-            "/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
+            "/api/v1/blobs", files={"file": ("a.txt", b"hello", "text/plain")}
         )
     ).json()
     response = await client.post(
-        "/v1/evaluators", json={"name": f"scorer-{uuid.uuid4().hex[:8]}"}
+        "/api/v1/evaluators", json={"name": f"scorer-{uuid.uuid4().hex[:8]}"}
     )
     assert response.status_code == 201
     evaluator_id = response.json()["id"]
     response = await client.post(
-        f"/v1/evaluators/{evaluator_id}/versions",
+        f"/api/v1/evaluators/{evaluator_id}/versions",
         json={
             "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
         },
     )
     assert response.status_code == 201
 
-    response = await client.delete(f"/v1/blobs/{blob['id']}")
+    response = await client.delete(f"/api/v1/blobs/{blob['id']}")
     assert response.status_code == 409

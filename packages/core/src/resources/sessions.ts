@@ -44,7 +44,7 @@ export class SessionsResource {
   ): Promise<SessionResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/sessions",
+      path: "/api/v1/sessions",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateSession,
@@ -57,7 +57,7 @@ export class SessionsResource {
   ): Promise<SessionResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/sessions/${encodeURIComponent(sessionId)}`,
+      path: `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       signal: options.signal,
       validate: validateSession,
     });
@@ -69,7 +69,7 @@ export class SessionsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/sessions/${encodeURIComponent(sessionId)}`,
+      path: `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -82,7 +82,7 @@ export class SessionsResource {
   ): Promise<SessionResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/sessions/${encodeURIComponent(sessionId)}`,
+      path: `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateSession,
@@ -95,7 +95,7 @@ export class SessionsResource {
   ): Promise<Page<SessionResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/sessions",
+      path: "/api/v1/sessions",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateSessionPage,
@@ -115,7 +115,7 @@ export class SessionsResource {
   ): Promise<SessionWithNodesResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/sessions/${encodeURIComponent(sessionId)}/full`,
+      path: `/api/v1/sessions/${encodeURIComponent(sessionId)}/full`,
       signal: options.signal,
       validate: validateSessionWithNodes,
     });
@@ -128,7 +128,7 @@ export class SessionsResource {
   ): Promise<Page<SessionNodeResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/sessions/${encodeURIComponent(sessionId)}/nodes`,
+      path: `/api/v1/sessions/${encodeURIComponent(sessionId)}/nodes`,
       query: encodeNodeListParams(params),
       signal: options.signal,
       validate: validateNodePage,
@@ -152,7 +152,7 @@ export class SessionsResource {
   ): Promise<SessionNodeResponse[]> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/sessions/${encodeURIComponent(sessionId)}/nodes`,
+      path: `/api/v1/sessions/${encodeURIComponent(sessionId)}/nodes`,
       body: jsonBody(request),
       retry: {
         attempts: 2,

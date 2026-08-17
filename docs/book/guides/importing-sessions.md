@@ -180,7 +180,7 @@ The REST request uses the same structure:
 }
 ```
 
-Send this object to `POST /v1/imports`. The server stores `params` on the import task, the worker includes them in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`.
+Send this object to `POST /api/v1/imports`. The server stores `params` on the import task, the worker includes them in `ImportTaskDetails`, and the task process calls the selected importer as `parse(payload, params)`.
 
 Existing integrations can continue to send `params.join_on` as a dotted path. The explicit CLI option accepts JSON Pointer syntax only. Langfuse also retains its older `join_path` plus `join_key` parameters for compatibility, but new integrations should use `join_on`.
 

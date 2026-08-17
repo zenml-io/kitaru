@@ -89,7 +89,7 @@ async def test_stored_api_key_authenticates_directly(tmp_path: Path) -> None:
     page = await client.devices.list()
 
     assert page.items == []
-    assert recorder.paths == ["/v1/devices"]
+    assert recorder.paths == ["/api/v1/devices"]
     assert store.get_token(BASE_URL) is None
 
 
@@ -109,7 +109,7 @@ async def test_device_code_is_exchanged_for_a_token(tmp_path: Path) -> None:
     page = await client.devices.list()
 
     assert len(page.items) == 1
-    assert recorder.paths.count("/v1/login") == 1
+    assert recorder.paths.count("/api/v1/login") == 1
     assert store.get_token(BASE_URL) is not None
 
 
@@ -134,7 +134,7 @@ async def test_stale_token_is_retried_once_with_renewed_token(
     page = await client.devices.list()
 
     assert len(page.items) == 1
-    assert recorder.paths.count("/v1/devices") == 2
+    assert recorder.paths.count("/api/v1/devices") == 2
     renewed = store.get_token(BASE_URL)
     assert renewed is not None
     assert renewed.access_token != "bogus-token"
@@ -161,4 +161,4 @@ async def test_no_infinite_loop_when_renewed_token_is_also_rejected(
     with pytest.raises(AuthenticationError):
         await client.devices.list()
 
-    assert recorder.paths.count("/v1/devices") == 2
+    assert recorder.paths.count("/api/v1/devices") == 2

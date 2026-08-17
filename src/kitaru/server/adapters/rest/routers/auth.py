@@ -189,7 +189,7 @@ async def device_authorization(
     """Start a device authorization and receive its codes.
 
     The caller shows the user code to a person, who confirms it at the
-    verification URI while signed in. The caller then polls ``/v1/login`` with
+    verification URI while signed in. The caller then polls ``/api/v1/login`` with
     the device grant type until the confirmation lands. Clients observe HTTP
     200 on success and 400 when this server does not authenticate requests.
     The codes are returned exactly once.

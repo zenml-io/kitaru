@@ -59,7 +59,7 @@ class ApiKeysResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/api-keys",
+            "/api/v1/api-keys",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ApiKeyIssuedResponse.model_validate(response.json())
@@ -76,7 +76,7 @@ class ApiKeysResource:
         Returns:
             Stored API key.
         """
-        response = await self._client.request("GET", f"/v1/api-keys/{api_key_id}")
+        response = await self._client.request("GET", f"/api/v1/api-keys/{api_key_id}")
         return ApiKeyResponse.model_validate(response.json())
 
     async def list(
@@ -97,7 +97,7 @@ class ApiKeysResource:
         params = params or ApiKeyListParams()
         response = await self._client.request(
             "GET",
-            "/v1/api-keys",
+            "/api/v1/api-keys",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[ApiKeyResponse].model_validate(response.json())
@@ -137,7 +137,7 @@ class ApiKeysResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/api-keys/{api_key_id}",
+            f"/api/v1/api-keys/{api_key_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ApiKeyResponse.model_validate(response.json())
@@ -162,7 +162,7 @@ class ApiKeysResource:
         request = request or ApiKeyRotateRequest()
         response = await self._client.request(
             "POST",
-            f"/v1/api-keys/{api_key_id}/rotate",
+            f"/api/v1/api-keys/{api_key_id}/rotate",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return ApiKeyIssuedResponse.model_validate(response.json())
@@ -176,4 +176,4 @@ class ApiKeysResource:
         Raises:
             APIError: The request failed, including 404 for a missing API key.
         """
-        await self._client.request("DELETE", f"/v1/api-keys/{api_key_id}")
+        await self._client.request("DELETE", f"/api/v1/api-keys/{api_key_id}")

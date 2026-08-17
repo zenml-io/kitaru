@@ -512,7 +512,7 @@ def test_transport_error_falls_back_to_secret_safe_request_origin() -> None:
     """A transport error without invocation state omits paths and query values."""
     request = httpx.Request(
         "GET",
-        "https://user:password@api.example.com/v1/workers?credential=secret#token",
+        "https://user:password@api.example.com/api/v1/workers?credential=secret#token",
     )
 
     error = app_module._convert_error(
@@ -566,7 +566,7 @@ def test_login_network_error_preserves_selected_server_path(
     server = "https://api.example.com/kitaru"
 
     async def fail_login(**options: Any) -> CommandResult:
-        request = httpx.Request("GET", f"{options['server']}/v1/info")
+        request = httpx.Request("GET", f"{options['server']}/api/v1/info")
         raise httpx.ConnectError("connection refused", request=request)
 
     monkeypatch.setattr(app_module.auth_commands, "login", fail_login)
@@ -588,7 +588,7 @@ def test_login_timeout_identifies_selected_server(
     server = "https://api.example.com/kitaru"
 
     async def fail_login(**options: Any) -> CommandResult:
-        request = httpx.Request("GET", f"{options['server']}/v1/info")
+        request = httpx.Request("GET", f"{options['server']}/api/v1/info")
         raise httpx.ReadTimeout("read timed out", request=request)
 
     monkeypatch.setattr(app_module.auth_commands, "login", fail_login)

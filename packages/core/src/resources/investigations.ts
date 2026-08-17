@@ -38,7 +38,7 @@ export class InvestigationsResource {
   ): Promise<InvestigationResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/investigations",
+      path: "/api/v1/investigations",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateInvestigation,
@@ -51,7 +51,7 @@ export class InvestigationsResource {
   ): Promise<InvestigationResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/investigations/${encodeURIComponent(investigationId)}`,
+      path: `/api/v1/investigations/${encodeURIComponent(investigationId)}`,
       signal: options.signal,
       validate: validateInvestigation,
     });
@@ -64,7 +64,7 @@ export class InvestigationsResource {
   ): Promise<InvestigationResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/investigations/${encodeURIComponent(investigationId)}`,
+      path: `/api/v1/investigations/${encodeURIComponent(investigationId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateInvestigation,
@@ -77,7 +77,7 @@ export class InvestigationsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/investigations/${encodeURIComponent(investigationId)}`,
+      path: `/api/v1/investigations/${encodeURIComponent(investigationId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -89,7 +89,7 @@ export class InvestigationsResource {
   ): Promise<Page<InvestigationResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/investigations",
+      path: "/api/v1/investigations",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateInvestigationPage,
@@ -110,7 +110,7 @@ export class InvestigationsResource {
   ): Promise<Page<InvestigationSessionResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/investigations/${encodeURIComponent(investigationId)}/sessions`,
+      path: `/api/v1/investigations/${encodeURIComponent(investigationId)}/sessions`,
       query: { cursor: params.cursor, size: params.size },
       signal: options.signal,
       validate: validateInvestigationSessionPage,
@@ -135,7 +135,7 @@ export class InvestigationsResource {
   ): Promise<InvestigationSessionResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/investigations/${encodeURIComponent(investigationId)}/sessions/${encodeURIComponent(sessionId)}`,
+      path: `/api/v1/investigations/${encodeURIComponent(investigationId)}/sessions/${encodeURIComponent(sessionId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateInvestigationSession,

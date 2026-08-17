@@ -11,7 +11,7 @@ You can use Kitaru without reading this page. Read it when you want to know what
 
 Kitaru is a **server** and your **workers**.
 
-The server is a single FastAPI service backed by Postgres. It stores every resource — agents, sessions and their nodes, cohorts, evaluators, experiments, replays, secrets, tags — and exposes them over a plain versioned REST API (`/v1/...`). It coordinates work but executes none of it: there is no code execution on the server, ever.
+The server is a single FastAPI service backed by Postgres. It stores every resource — agents, sessions and their nodes, cohorts, evaluators, experiments, replays, secrets, tags — and exposes them over a plain versioned REST API (`/api/v1/...`). It coordinates work but executes none of it: there is no code execution on the server, ever.
 
 [Workers](workers.md) run in your environment and pull work from the server. Everything that executes — a replayed agent, an evaluator, an importer parsing a trace export — runs as a subprocess of a worker, next to your credentials, packages, and network. The server never needs access to your model providers or your tools.
 
@@ -21,7 +21,7 @@ Writes are safe to retry: the client stamps every create request with an idempot
 
 ## How a replay actually works
 
-1. `POST /v1/replays` stores the replay — baseline session, agent version, override, tool policy, evaluators — and creates its job with one agent task.
+1. `POST /api/v1/replays` stores the replay — baseline session, agent version, override, tool policy, evaluators — and creates its job with one agent task.
 2. A worker claims the task and starts your agent from the agent version's run spec command, with the baseline's inputs (rewritten by the override, if any) and `KITARU_REPLAY_ID` in the environment.
 3. Your agent runs for real. The adapter sees `KITARU_REPLAY_ID`, fetches the override and tool policy, applies model swaps at the model-call boundary, and answers tool calls per policy — a `history` policy looks up the recorded result by a hash of the tool name and arguments.
 4. The re-run records a fresh session, node by node, `origin: replay`.

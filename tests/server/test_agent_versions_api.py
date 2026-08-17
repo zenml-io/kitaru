@@ -90,7 +90,7 @@ async def client(
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to version."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
@@ -98,18 +98,18 @@ async def test_list_agent_versions_filters_by_tag(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Filter agent versions linked to a tag through tag_link."""
-    tagged = (await client.post(f"/v1/agents/{agent_id}/versions", json={})).json()
-    await client.post(f"/v1/agents/{agent_id}/versions", json={})
+    tagged = (await client.post(f"/api/v1/agents/{agent_id}/versions", json={})).json()
+    await client.post(f"/api/v1/agents/{agent_id}/versions", json={})
 
-    tag = (await client.post("/v1/tags", json={"name": "smoke-test"})).json()
+    tag = (await client.post("/api/v1/tags", json={"name": "smoke-test"})).json()
     await client.post(
-        f"/v1/tags/{tag['id']}/links",
+        f"/api/v1/tags/{tag['id']}/links",
         json={"resource_type": "agent_version", "resource_id": tagged["id"]},
     )
 
     filter_expression = {"field": "tag", "op": "eq", "value": "smoke-test"}
     response = await client.get(
-        f"/v1/agents/{agent_id}/versions",
+        f"/api/v1/agents/{agent_id}/versions",
         params={"filter": json.dumps(filter_expression)},
     )
     assert response.status_code == 200
@@ -121,17 +121,17 @@ async def test_get_agent_version(client: httpx.AsyncClient, agent_id: str) -> No
     """Get an agent version by id."""
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions", json={"display_version": "v1"}
+            f"/api/v1/agents/{agent_id}/versions", json={"display_version": "v1"}
         )
     ).json()
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_agent_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing agent version."""
-    response = await client.get(f"/v1/agent-versions/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/agent-versions/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -139,12 +139,12 @@ async def test_update_agent_version(client: httpx.AsyncClient, agent_id: str) ->
     """Update the display version and description of an agent version."""
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json={"display_version": "v1", "description": "First cut"},
         )
     ).json()
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}",
+        f"/api/v1/agent-versions/{created['id']}",
         json={"display_version": "v1.1", "description": "Second cut"},
     )
     assert response.status_code == 200
@@ -159,11 +159,11 @@ async def test_update_agent_version_clears_display_version(
     """Clear the display version with an explicit null."""
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions", json={"display_version": "v1"}
+            f"/api/v1/agents/{agent_id}/versions", json={"display_version": "v1"}
         )
     ).json()
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}", json={"display_version": None}
+        f"/api/v1/agent-versions/{created['id']}", json={"display_version": None}
     )
     assert response.status_code == 200
     assert response.json()["display_version"] is None
@@ -176,13 +176,13 @@ async def test_update_agent_version_replaces_run_spec(
     old_secret_id = str(uuid.uuid4())
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json={"run_spec": {"command": "old.sh", "secret_ids": [old_secret_id]}},
         )
     ).json()
     new_secret_id = str(uuid.uuid4())
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}",
+        f"/api/v1/agent-versions/{created['id']}",
         json={"run_spec": {"command": "new.sh", "secret_ids": [new_secret_id]}},
     )
     assert response.status_code == 200
@@ -197,12 +197,12 @@ async def test_update_agent_version_clears_run_spec(
     """Clear the run spec with an explicit null."""
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json={"run_spec": {"command": "run.sh"}},
         )
     ).json()
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}", json={"run_spec": None}
+        f"/api/v1/agent-versions/{created['id']}", json={"run_spec": None}
     )
     assert response.status_code == 200
     assert response.json()["run_spec"] is None
@@ -214,12 +214,12 @@ async def test_update_agent_version_capabilities_null_clears_to_empty(
     """Clear capabilities to an empty value with an explicit null."""
     created = (
         await client.post(
-            f"/v1/agents/{agent_id}/versions",
+            f"/api/v1/agents/{agent_id}/versions",
             json={"capabilities": {"tools": ["search"]}},
         )
     ).json()
     response = await client.patch(
-        f"/v1/agent-versions/{created['id']}", json={"capabilities": None}
+        f"/api/v1/agent-versions/{created['id']}", json={"capabilities": None}
     )
     assert response.status_code == 200
     assert response.json()["capabilities"] == {
@@ -232,23 +232,23 @@ async def test_update_agent_version_capabilities_null_clears_to_empty(
 async def test_update_agent_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing agent version."""
     response = await client.patch(
-        f"/v1/agent-versions/{uuid.uuid4()}", json={"description": "x"}
+        f"/api/v1/agent-versions/{uuid.uuid4()}", json={"description": "x"}
     )
     assert response.status_code == 404
 
 
 async def test_delete_agent_version(client: httpx.AsyncClient, agent_id: str) -> None:
     """Delete an agent version."""
-    created = (await client.post(f"/v1/agents/{agent_id}/versions", json={})).json()
-    response = await client.delete(f"/v1/agent-versions/{created['id']}")
+    created = (await client.post(f"/api/v1/agents/{agent_id}/versions", json={})).json()
+    response = await client.delete(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/agent-versions/{created['id']}")
+    response = await client.get(f"/api/v1/agent-versions/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_agent_version_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing agent version."""
-    response = await client.delete(f"/v1/agent-versions/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/agent-versions/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -256,7 +256,7 @@ async def test_delete_agent_version_allows_agent_delete(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
     """Allow deleting the agent again once its only version is gone."""
-    created = (await client.post(f"/v1/agents/{agent_id}/versions", json={})).json()
-    await client.delete(f"/v1/agent-versions/{created['id']}")
-    response = await client.delete(f"/v1/agents/{agent_id}")
+    created = (await client.post(f"/api/v1/agents/{agent_id}/versions", json={})).json()
+    await client.delete(f"/api/v1/agent-versions/{created['id']}")
+    response = await client.delete(f"/api/v1/agents/{agent_id}")
     assert response.status_code == 204

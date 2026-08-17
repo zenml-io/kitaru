@@ -58,7 +58,7 @@ class TagsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/tags",
+            "/api/v1/tags",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return TagResponse.model_validate(response.json())
@@ -78,7 +78,7 @@ class TagsResource:
         params = params or TagListParams()
         response = await self._client.request(
             "GET",
-            "/v1/tags",
+            "/api/v1/tags",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[TagResponse].model_validate(response.json())
@@ -115,7 +115,7 @@ class TagsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/tags/{tag_id}",
+            f"/api/v1/tags/{tag_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return TagResponse.model_validate(response.json())
@@ -131,7 +131,7 @@ class TagsResource:
         Raises:
             APIError: The request failed, including 404 for a missing tag.
         """
-        await self._client.request("DELETE", f"/v1/tags/{tag_id}")
+        await self._client.request("DELETE", f"/api/v1/tags/{tag_id}")
 
     async def create_link(
         self, tag_id: uuid.UUID, request: TagLinkCreateRequest
@@ -151,7 +151,7 @@ class TagsResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/tags/{tag_id}/links",
+            f"/api/v1/tags/{tag_id}/links",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return TagLinkResponse.model_validate(response.json())
@@ -173,5 +173,5 @@ class TagsResource:
             APIError: The request failed, including 404 for a missing link.
         """
         await self._client.request(
-            "DELETE", f"/v1/tags/{tag_id}/links/{resource_type.value}/{resource_id}"
+            "DELETE", f"/api/v1/tags/{tag_id}/links/{resource_type.value}/{resource_id}"
         )

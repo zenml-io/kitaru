@@ -52,7 +52,7 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
       : undefined;
     calls.push({ body, method, path: url.pathname });
 
-    if (method === "POST" && url.pathname === "/v1/sessions") {
+    if (method === "POST" && url.pathname === "/api/v1/sessions") {
       const id = sessionId(sessionIds.length);
       sessionIds.push(id);
       return jsonResponse(
@@ -60,7 +60,7 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
         201,
       );
     }
-    if (method === "PATCH" && url.pathname.startsWith("/v1/sessions/")) {
+    if (method === "PATCH" && url.pathname.startsWith("/api/v1/sessions/")) {
       return jsonResponse({
         id: url.pathname.split("/").at(-1),
         origin: "recorded",
@@ -78,7 +78,7 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
         })),
       );
     }
-    if (method === "GET" && url.pathname === `/v1/replays/${REPLAY_ID}`) {
+    if (method === "GET" && url.pathname === `/api/v1/replays/${REPLAY_ID}`) {
       return jsonResponse({
         job_id: REPLAY_JOB_ID,
         ...(options.replaySpec ?? {

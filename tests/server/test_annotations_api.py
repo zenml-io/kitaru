@@ -174,7 +174,7 @@ async def test_create_manual_annotation(
 ) -> None:
     """Create a manual annotation and observe HTTP 201."""
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": session_id,
             "value": "note",
@@ -194,7 +194,7 @@ async def test_create_manual_annotation_missing_session(
 ) -> None:
     """Observe HTTP 404 when the session does not exist."""
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": str(uuid.uuid4()),
             "value": "note",
@@ -208,7 +208,7 @@ async def test_create_manual_annotation_invalid_selector_node(
 ) -> None:
     """Observe HTTP 422 when the selector names a node outside the session."""
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": session_id,
             "selector": {"node_id": str(uuid.uuid4())},
@@ -224,7 +224,7 @@ async def test_create_investigation_answer(
     """Answer an investigation's linked session and observe HTTP 201."""
     _, investigation_session_id = investigation_session_ids
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
             "question_key": QUESTION_KEY,
@@ -245,7 +245,7 @@ async def test_create_investigation_answer_never_conflicts(
     _, investigation_session_id = investigation_session_ids
     first = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
                 "question_key": QUESTION_KEY,
@@ -255,7 +255,7 @@ async def test_create_investigation_answer_never_conflicts(
     ).json()
     second = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
                 "question_key": QUESTION_KEY,
@@ -272,14 +272,16 @@ async def test_create_investigation_answer_moves_investigation_in_progress(
     """Move the investigation from pending to in_progress on the first answer."""
     investigation_id, investigation_session_id = investigation_session_ids
     await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
             "question_key": QUESTION_KEY,
             "value": "a retry loop",
         },
     )
-    investigation = (await client.get(f"/v1/investigations/{investigation_id}")).json()
+    investigation = (
+        await client.get(f"/api/v1/investigations/{investigation_id}")
+    ).json()
     assert investigation["status"] == "in_progress"
     assert investigation["started_at"] is not None
 
@@ -289,7 +291,7 @@ async def test_create_investigation_answer_missing_link(
 ) -> None:
     """Observe HTTP 404 when no investigation session has the given id."""
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "investigation_session_id": str(uuid.uuid4()),
             "question_key": QUESTION_KEY,
@@ -305,7 +307,7 @@ async def test_create_investigation_answer_unknown_question_key(
     """Observe HTTP 422 when the question key does not belong to the session."""
     _, investigation_session_id = investigation_session_ids
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "investigation_session_id": investigation_session_id,
             "question_key": "unknown",
@@ -320,7 +322,7 @@ async def test_create_annotation_malformed_body(
 ) -> None:
     """Observe HTTP 422 for a body mixing manual and investigation answer fields."""
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": session_id,
             "investigation_session_id": str(uuid.uuid4()),
@@ -335,21 +337,21 @@ async def test_get_annotation(client: httpx.AsyncClient, session_id: str) -> Non
     """Get an annotation by id."""
     created = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "session_id": session_id,
                 "value": "note",
             },
         )
     ).json()
-    response = await client.get(f"/v1/annotations/{created['id']}")
+    response = await client.get(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_annotation_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing annotation."""
-    response = await client.get(f"/v1/annotations/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/annotations/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -365,7 +367,7 @@ async def test_list_annotations_filters_by_session_id(
     )
     matching = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "session_id": session_id,
                 "value": "note",
@@ -373,7 +375,7 @@ async def test_list_annotations_filters_by_session_id(
         )
     ).json()
     await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": str(other_session.id),
             "value": "other",
@@ -382,7 +384,7 @@ async def test_list_annotations_filters_by_session_id(
 
     filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
     response = await client.get(
-        "/v1/annotations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/annotations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -396,7 +398,7 @@ async def test_list_annotations_filters_by_investigation_id(
     investigation_id, investigation_session_id = investigation_session_ids
     answer = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "investigation_session_id": investigation_session_id,
                 "question_key": QUESTION_KEY,
@@ -411,7 +413,7 @@ async def test_list_annotations_filters_by_investigation_id(
         "value": investigation_id,
     }
     response = await client.get(
-        "/v1/annotations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/annotations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -422,7 +424,7 @@ async def test_update_annotation(client: httpx.AsyncClient, session_id: str) -> 
     """Set a new value on an annotation."""
     created = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "session_id": session_id,
                 "value": "note",
@@ -430,7 +432,7 @@ async def test_update_annotation(client: httpx.AsyncClient, session_id: str) -> 
         )
     ).json()
     response = await client.patch(
-        f"/v1/annotations/{created['id']}",
+        f"/api/v1/annotations/{created['id']}",
         json={"value": True},
     )
     assert response.status_code == 200
@@ -440,7 +442,7 @@ async def test_update_annotation(client: httpx.AsyncClient, session_id: str) -> 
 async def test_update_annotation_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing annotation."""
     response = await client.patch(
-        f"/v1/annotations/{uuid.uuid4()}",
+        f"/api/v1/annotations/{uuid.uuid4()}",
         json={"value": "x"},
     )
     assert response.status_code == 404
@@ -450,20 +452,20 @@ async def test_delete_annotation(client: httpx.AsyncClient, session_id: str) -> 
     """Delete an annotation."""
     created = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "session_id": session_id,
                 "value": "note",
             },
         )
     ).json()
-    response = await client.delete(f"/v1/annotations/{created['id']}")
+    response = await client.delete(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/annotations/{created['id']}")
+    response = await client.get(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_annotation_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing annotation."""
-    response = await client.delete(f"/v1/annotations/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/annotations/{uuid.uuid4()}")
     assert response.status_code == 404

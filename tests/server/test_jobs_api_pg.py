@@ -36,10 +36,10 @@ async def _create_runnable_agent_version(client: httpx.AsyncClient) -> tuple[str
     Returns:
         Agent id and agent version id.
     """
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(
-            f"/v1/agents/{agent['id']}/versions",
+            f"/api/v1/agents/{agent['id']}/versions",
             json={"run_spec": {"command": "run.sh", "timeout_seconds": 60}},
         )
     ).json()
@@ -53,7 +53,7 @@ async def test_session_run_lifecycle_completes_the_job(
     agent_id, version_id = await _create_runnable_agent_version(client)
     job = (
         await client.post(
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json={"agent_version_id": version_id, "inputs": {"q": "hi"}},
         )
     ).json()
@@ -61,7 +61,7 @@ async def test_session_run_lifecycle_completes_the_job(
 
     registration = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
@@ -69,7 +69,7 @@ async def test_session_run_lifecycle_completes_the_job(
 
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     assert len(claimed["tasks"]) == 1
@@ -79,17 +79,17 @@ async def test_session_run_lifecycle_completes_the_job(
     assert task["status"] == "claimed"
     task_headers = {"Authorization": f"Bearer {entry['token']}"}
 
-    response = await client.get(f"/v1/jobs/{job['id']}")
+    response = await client.get(f"/api/v1/jobs/{job['id']}")
     assert response.json()["status"] == "running"
 
     response = await client.patch(
-        f"/v1/tasks/{task['id']}", json={"status": "running"}, headers=task_headers
+        f"/api/v1/tasks/{task['id']}", json={"status": "running"}, headers=task_headers
     )
     assert response.status_code == 200
 
     session = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": agent_id,
                 "origin": "recorded",
@@ -101,21 +101,23 @@ async def test_session_run_lifecycle_completes_the_job(
     ).json()
 
     response = await client.patch(
-        f"/v1/sessions/{session['id']}", json={"status": "completed", "outputs": {}}
+        f"/api/v1/sessions/{session['id']}", json={"status": "completed", "outputs": {}}
     )
     assert response.status_code == 200
 
     response = await client.patch(
-        f"/v1/tasks/{task['id']}", json={"status": "completed"}, headers=task_headers
+        f"/api/v1/tasks/{task['id']}",
+        json={"status": "completed"},
+        headers=task_headers,
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/jobs/{job['id']}")
+    response = await client.get(f"/api/v1/jobs/{job['id']}")
     body = response.json()
     assert body["status"] == "completed"
     assert body["ended_at"] is not None
 
-    response = await client.get(f"/v1/tasks/{task['id']}")
+    response = await client.get(f"/api/v1/tasks/{task['id']}")
     assert response.json()["result_session_id"] == session["id"]
 
 
@@ -124,19 +126,19 @@ async def test_cancel_job_persists_across_requests(client: httpx.AsyncClient) ->
     _, version_id = await _create_runnable_agent_version(client)
     job = (
         await client.post(
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json={"agent_version_id": version_id, "inputs": None},
         )
     ).json()
 
-    response = await client.post(f"/v1/jobs/{job['id']}/cancel")
+    response = await client.post(f"/api/v1/jobs/{job['id']}/cancel")
     assert response.status_code == 200
     assert response.json()["cancel_requested_at"] is not None
 
-    response = await client.get(f"/v1/jobs/{job['id']}")
+    response = await client.get(f"/api/v1/jobs/{job['id']}")
     assert response.json()["status"] == "canceled"
 
-    tasks = (await client.get(f"/v1/jobs/{job['id']}/tasks")).json()["items"]
+    tasks = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()["items"]
     assert tasks[0]["status"] == "canceled"
 
 
@@ -145,12 +147,12 @@ async def test_cancel_job_conflicts_once_settled(client: httpx.AsyncClient) -> N
     _, version_id = await _create_runnable_agent_version(client)
     job = (
         await client.post(
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json={"agent_version_id": version_id, "inputs": None},
         )
     ).json()
-    await client.post(f"/v1/jobs/{job['id']}/cancel")
-    response = await client.post(f"/v1/jobs/{job['id']}/cancel")
+    await client.post(f"/api/v1/jobs/{job['id']}/cancel")
+    response = await client.post(f"/api/v1/jobs/{job['id']}/cancel")
     assert response.status_code == 409
 
 
@@ -159,18 +161,18 @@ async def test_delete_job_cascades_its_tasks(client: httpx.AsyncClient) -> None:
     _, version_id = await _create_runnable_agent_version(client)
     job = (
         await client.post(
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json={"agent_version_id": version_id, "inputs": None},
         )
     ).json()
-    tasks = (await client.get(f"/v1/jobs/{job['id']}/tasks")).json()["items"]
+    tasks = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()["items"]
     task_id = tasks[0]["id"]
 
-    response = await client.delete(f"/v1/jobs/{job['id']}")
+    response = await client.delete(f"/api/v1/jobs/{job['id']}")
     assert response.status_code == 204
 
-    assert (await client.get(f"/v1/jobs/{job['id']}")).status_code == 404
-    assert (await client.get(f"/v1/tasks/{task_id}")).status_code == 404
+    assert (await client.get(f"/api/v1/jobs/{job['id']}")).status_code == 404
+    assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 404
 
 
 async def test_heartbeat_reports_cancel_requested_tasks(
@@ -180,13 +182,13 @@ async def test_heartbeat_reports_cancel_requested_tasks(
     _, version_id = await _create_runnable_agent_version(client)
     job = (
         await client.post(
-            "/v1/session-runs",
+            "/api/v1/session-runs",
             json={"agent_version_id": version_id, "inputs": None},
         )
     ).json()
     registration = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()
@@ -194,15 +196,15 @@ async def test_heartbeat_reports_cancel_requested_tasks(
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
     claimed = (
         await client.post(
-            "/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
+            "/api/v1/tasks/claim", json={"max_tasks": 10}, headers=worker_headers
         )
     ).json()
     task_id = claimed["tasks"][0]["task"]["id"]
 
-    await client.post(f"/v1/jobs/{job['id']}/cancel")
+    await client.post(f"/api/v1/jobs/{job['id']}/cancel")
 
     response = await client.post(
-        f"/v1/workers/{worker['id']}/heartbeat",
+        f"/api/v1/workers/{worker['id']}/heartbeat",
         json={"task_ids": [task_id]},
         headers=worker_headers,
     )

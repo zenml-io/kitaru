@@ -59,7 +59,7 @@ AGENT_ID = uuid.UUID("30000000-0000-0000-0000-000000000003")
 
 class _StubHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
-        if self.path != f"/v1/sessions/{SESSION_ID}":
+        if self.path != f"/api/v1/sessions/{SESSION_ID}":
             self.send_error(404)
             return
         now = datetime.now(UTC).isoformat()

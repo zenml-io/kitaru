@@ -1,10 +1,8 @@
 # Kitaru examples
 
-## Canonical returns example
+## Complete returns workflow
 
-[`pydantic_ai_ticket_resolver/`](pydantic_ai_ticket_resolver/) is the main product walkthrough. It imports real PydanticAI and Langfuse traces, runs deterministic diagnostics, records evidence-linked human annotations and verdicts, freezes reviewed sessions into an immutable cohort version, and compares a candidate through replay.
-
-Run every command from `examples/pydantic_ai_ticket_resolver` and follow its [README](pydantic_ai_ticket_resolver/README.md).
+Use the public [`zenml-io/kitaru-template`](https://github.com/zenml-io/kitaru-template) for the maintained product walkthrough. It provides a ready PydanticAI returns agent and checked-in Langfuse traces. Its root README owns setup and import; the [complete tutorial](../docs/book/tutorials/returns-agent/README.md) continues through deterministic diagnostics, evidence-linked human review, an immutable cohort version, and bounded replay.
 
 ## Standalone adapter examples
 

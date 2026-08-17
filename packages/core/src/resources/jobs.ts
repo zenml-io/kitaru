@@ -24,7 +24,7 @@ export class JobsResource {
   ): Promise<JobResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/jobs/${encodeURIComponent(jobId)}`,
+      path: `/api/v1/jobs/${encodeURIComponent(jobId)}`,
       signal: options.signal,
       validate: validateJob,
     });
@@ -36,7 +36,7 @@ export class JobsResource {
   ): Promise<Page<JobResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/jobs",
+      path: "/api/v1/jobs",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateJobPage,
@@ -57,7 +57,7 @@ export class JobsResource {
   ): Promise<Page<TaskResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/jobs/${encodeURIComponent(jobId)}/tasks`,
+      path: `/api/v1/jobs/${encodeURIComponent(jobId)}/tasks`,
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateTaskPage,
@@ -80,7 +80,7 @@ export class JobsResource {
   ): Promise<JobResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/jobs/${encodeURIComponent(jobId)}/cancel`,
+      path: `/api/v1/jobs/${encodeURIComponent(jobId)}/cancel`,
       signal: options.signal,
       validate: validateJob,
     });
@@ -92,7 +92,7 @@ export class JobsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/jobs/${encodeURIComponent(jobId)}`,
+      path: `/api/v1/jobs/${encodeURIComponent(jobId)}`,
       responseType: "empty",
       signal: options.signal,
     });

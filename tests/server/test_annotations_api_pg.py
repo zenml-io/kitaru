@@ -32,7 +32,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def agent_id(client: httpx.AsyncClient) -> str:
     """Provide the id of an agent to attach sessions to."""
-    created = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     return created["id"]
 
 
@@ -42,7 +42,7 @@ async def _create_session_with_node(
     """Store a session with one ingested node and return their ids."""
     session = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": agent_id,
                 "origin": "recorded",
@@ -54,7 +54,7 @@ async def _create_session_with_node(
     ).json()
     nodes = (
         await client.post(
-            f"/v1/sessions/{session['id']}/nodes",
+            f"/api/v1/sessions/{session['id']}/nodes",
             json={
                 "nodes": [
                     {
@@ -83,7 +83,7 @@ async def _create_investigation_with_link(
     """Create a one-session investigation and return it with its session link."""
     investigation = (
         await client.post(
-            "/v1/investigations",
+            "/api/v1/investigations",
             json={
                 "agent_id": agent_id,
                 "name": "payment-failures",
@@ -99,7 +99,7 @@ async def _create_investigation_with_link(
         )
     ).json()
     links = (
-        await client.get(f"/v1/investigations/{investigation['id']}/sessions")
+        await client.get(f"/api/v1/investigations/{investigation['id']}/sessions")
     ).json()["items"]
     return investigation, links[0]
 
@@ -110,7 +110,7 @@ async def test_manual_annotation_persists_across_requests(
     """Prove the per-request commit through separate requests."""
     session_id, node_id = await _create_session_with_node(client, agent_id)
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": session_id,
             "selector": {"node_id": node_id},
@@ -122,13 +122,13 @@ async def test_manual_annotation_persists_across_requests(
     assert created["session_id"] == session_id
     assert created["investigation_session_id"] is None
 
-    response = await client.get(f"/v1/annotations/{created['id']}")
+    response = await client.get(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
     filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
     response = await client.get(
-        "/v1/annotations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/annotations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -142,7 +142,7 @@ async def test_manual_annotation_invalid_node_rejected(
     """Reject a selector naming a node outside the annotated session."""
     session_id, _ = await _create_session_with_node(client, agent_id)
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": session_id,
             "selector": {"node_id": "00000000-0000-0000-0000-000000000000"},
@@ -159,7 +159,7 @@ async def test_update_and_delete_manual_annotation(
     session_id, _ = await _create_session_with_node(client, agent_id)
     created = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "session_id": session_id,
                 "value": "first note",
@@ -168,21 +168,21 @@ async def test_update_and_delete_manual_annotation(
     ).json()
 
     response = await client.patch(
-        f"/v1/annotations/{created['id']}",
+        f"/api/v1/annotations/{created['id']}",
         json={"value": {"confidence": 0.9, "flagged": True}},
     )
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/annotations/{created['id']}")
+    response = await client.get(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["value"] == {"confidence": 0.9, "flagged": True}
     assert body["updated"] > created["updated"]
 
-    response = await client.delete(f"/v1/annotations/{created['id']}")
+    response = await client.delete(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/annotations/{created['id']}")
+    response = await client.get(f"/api/v1/annotations/{created['id']}")
     assert response.status_code == 404
 
 
@@ -197,7 +197,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
     assert investigation["status"] == "pending"
 
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "investigation_session_id": link["id"],
             "question_key": QUESTION_KEY,
@@ -210,7 +210,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
     assert answer["investigation_session_id"] == link["id"]
     assert answer["question_key"] == QUESTION_KEY
 
-    response = await client.get(f"/v1/investigations/{investigation['id']}")
+    response = await client.get(f"/api/v1/investigations/{investigation['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["status"] == "in_progress"
@@ -218,7 +218,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
 
     # Answering again adds a second row instead of replacing the first.
     response = await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "investigation_session_id": link["id"],
             "question_key": QUESTION_KEY,
@@ -235,7 +235,7 @@ async def test_investigation_answer_starts_investigation_and_never_conflicts(
         "value": link["id"],
     }
     response = await client.get(
-        "/v1/annotations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/annotations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -251,7 +251,7 @@ async def test_list_annotations_filtered_by_investigation_id(
         client, agent_id, session_id
     )
     await client.post(
-        "/v1/annotations",
+        "/api/v1/annotations",
         json={
             "session_id": session_id,
             "value": "manual note",
@@ -259,7 +259,7 @@ async def test_list_annotations_filtered_by_investigation_id(
     )
     answer = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "investigation_session_id": link["id"],
                 "question_key": QUESTION_KEY,
@@ -274,7 +274,7 @@ async def test_list_annotations_filtered_by_investigation_id(
         "value": investigation["id"],
     }
     response = await client.get(
-        "/v1/annotations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/annotations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -291,7 +291,7 @@ async def test_delete_investigation_cascades_answers_but_keeps_manual(
     )
     manual = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "session_id": session_id,
                 "value": "manual note",
@@ -300,7 +300,7 @@ async def test_delete_investigation_cascades_answers_but_keeps_manual(
     ).json()
     answer = (
         await client.post(
-            "/v1/annotations",
+            "/api/v1/annotations",
             json={
                 "investigation_session_id": link["id"],
                 "question_key": QUESTION_KEY,
@@ -309,18 +309,18 @@ async def test_delete_investigation_cascades_answers_but_keeps_manual(
         )
     ).json()
 
-    response = await client.delete(f"/v1/investigations/{investigation['id']}")
+    response = await client.delete(f"/api/v1/investigations/{investigation['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/annotations/{answer['id']}")
+    response = await client.get(f"/api/v1/annotations/{answer['id']}")
     assert response.status_code == 404
 
-    response = await client.get(f"/v1/annotations/{manual['id']}")
+    response = await client.get(f"/api/v1/annotations/{manual['id']}")
     assert response.status_code == 200
 
     filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
     response = await client.get(
-        "/v1/annotations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/annotations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]

@@ -313,11 +313,15 @@ def test_get_python_run_argv_without_dependencies() -> None:
 
 
 def test_get_python_run_argv_with_dependencies() -> None:
-    """Dependencies route the invocation through uv run --with."""
+    """Dependencies run outside the worker's current project environment."""
     argv = get_python_run_argv("kitaru.task", ["import"], ["requests<3", "rich>=13"])
     assert argv == [
         "uv",
         "run",
+        "--no-project",
+        "--python",
+        sys.executable,
+        "--prerelease=allow",
         "--with",
         "requests<3",
         "--with",

@@ -189,7 +189,7 @@ def _session_body(**overrides: object) -> dict[str, object]:
 
 async def test_create_session(client: httpx.AsyncClient) -> None:
     """Create a session."""
-    response = await client.post("/v1/sessions", json=_session_body())
+    response = await client.post("/api/v1/sessions", json=_session_body())
     assert response.status_code == 201
     body = response.json()
     assert body["origin"] == "recorded"
@@ -202,13 +202,13 @@ async def test_create_session_duplicate_external_id(
 ) -> None:
     """Observe HTTP 409 for a duplicated imported_from and external id pair."""
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(
             origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
     response = await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(
             origin="imported", imported_from="langsmith", external_id="run-1"
         ),
@@ -218,15 +218,15 @@ async def test_create_session_duplicate_external_id(
 
 async def test_get_session(client: httpx.AsyncClient) -> None:
     """Get a session by id."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
-    response = await client.get(f"/v1/sessions/{created['id']}")
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_get_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
-    response = await client.get(f"/v1/sessions/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/sessions/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -234,15 +234,15 @@ async def test_list_sessions_filters_by_origin_and_status(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions by origin and status."""
-    await client.post("/v1/sessions", json=_session_body(origin="recorded"))
+    await client.post("/api/v1/sessions", json=_session_body(origin="recorded"))
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(origin="imported", status="completed"),
     )
 
     filter_expression = {"field": "origin", "op": "eq", "value": "imported"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -251,7 +251,7 @@ async def test_list_sessions_filters_by_origin_and_status(
 
     filter_expression = {"field": "status", "op": "eq", "value": "completed"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -264,13 +264,13 @@ async def test_list_sessions_filters_by_imported_from_and_external_id(
 ) -> None:
     """Filter sessions by imported_from and external id together."""
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(
             origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(
             origin="imported", imported_from="langsmith", external_id="run-2"
         ),
@@ -283,7 +283,7 @@ async def test_list_sessions_filters_by_imported_from_and_external_id(
         ]
     }
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -293,18 +293,18 @@ async def test_list_sessions_filters_by_imported_from_and_external_id(
 
 async def test_list_sessions_filters_by_tag(client: httpx.AsyncClient) -> None:
     """Filter sessions linked to a tag through tag_link."""
-    tagged = (await client.post("/v1/sessions", json=_session_body())).json()
-    await client.post("/v1/sessions", json=_session_body())
+    tagged = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    await client.post("/api/v1/sessions", json=_session_body())
 
-    tag = (await client.post("/v1/tags", json={"name": "smoke-test"})).json()
+    tag = (await client.post("/api/v1/tags", json={"name": "smoke-test"})).json()
     await client.post(
-        f"/v1/tags/{tag['id']}/links",
+        f"/api/v1/tags/{tag['id']}/links",
         json={"resource_type": "session", "resource_id": tagged["id"]},
     )
 
     filter_expression = {"field": "tag", "op": "eq", "value": "smoke-test"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -317,8 +317,8 @@ async def test_list_sessions_filters_by_cohort_version_id(
     cohort_version_repository: FakeCohortVersionRepository,
 ) -> None:
     """Filter sessions by cohort version membership."""
-    member = (await client.post("/v1/sessions", json=_session_body())).json()
-    await client.post("/v1/sessions", json=_session_body())
+    member = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    await client.post("/api/v1/sessions", json=_session_body())
 
     cohort = await create_cohort(cohort_repository, ACCOUNT.id, uuid.uuid4())
     version = await create_cohort_version(
@@ -326,7 +326,7 @@ async def test_list_sessions_filters_by_cohort_version_id(
     )
 
     response = await client.get(
-        "/v1/sessions",
+        "/api/v1/sessions",
         params={
             "filter": json.dumps(
                 {
@@ -347,11 +347,11 @@ async def test_list_sessions_filters_by_date_bounds(
 ) -> None:
     """Filter sessions by started_at ordered comparisons."""
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(started_at="2026-01-01T00:00:00Z"),
     )
     await client.post(
-        "/v1/sessions",
+        "/api/v1/sessions",
         json=_session_body(started_at="2026-06-01T00:00:00Z"),
     )
 
@@ -361,7 +361,7 @@ async def test_list_sessions_filters_by_date_bounds(
         "value": "2026-03-01T00:00:00Z",
     }
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -374,7 +374,7 @@ async def test_list_sessions_filters_by_date_bounds(
         "value": "2026-03-01T00:00:00Z",
     }
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -386,10 +386,10 @@ async def test_list_sessions_filters_by_cost_bounds(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions by cost ordered comparisons, applied after node rollups."""
-    cheap = (await client.post("/v1/sessions", json=_session_body())).json()
-    pricey = (await client.post("/v1/sessions", json=_session_body())).json()
+    cheap = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    pricey = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
-        f"/v1/sessions/{cheap['id']}/nodes",
+        f"/api/v1/sessions/{cheap['id']}/nodes",
         json={
             "nodes": [
                 {
@@ -406,7 +406,7 @@ async def test_list_sessions_filters_by_cost_bounds(
         },
     )
     await client.post(
-        f"/v1/sessions/{pricey['id']}/nodes",
+        f"/api/v1/sessions/{pricey['id']}/nodes",
         json={
             "nodes": [
                 {
@@ -425,7 +425,7 @@ async def test_list_sessions_filters_by_cost_bounds(
 
     filter_expression = {"field": "cost", "op": "ge", "value": "5.00"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -433,7 +433,7 @@ async def test_list_sessions_filters_by_cost_bounds(
 
     filter_expression = {"field": "cost", "op": "le", "value": "5.00"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -444,15 +444,15 @@ async def test_list_sessions_filters_by_has_evaluation(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions by whether they have a stored evaluation."""
-    scored = (await client.post("/v1/sessions", json=_session_body())).json()
-    unscored = (await client.post("/v1/sessions", json=_session_body())).json()
+    scored = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    unscored = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
-        f"/v1/sessions/{scored['id']}/evaluations",
+        f"/api/v1/sessions/{scored['id']}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
 
     response = await client.get(
-        "/v1/sessions",
+        "/api/v1/sessions",
         params={
             "filter": json.dumps({"field": "has_evaluation", "op": "eq", "value": True})
         },
@@ -461,7 +461,7 @@ async def test_list_sessions_filters_by_has_evaluation(
     assert [item["id"] for item in response.json()["items"]] == [scored["id"]]
 
     response = await client.get(
-        "/v1/sessions",
+        "/api/v1/sessions",
         params={
             "filter": json.dumps(
                 {"field": "has_evaluation", "op": "eq", "value": False}
@@ -474,9 +474,9 @@ async def test_list_sessions_filters_by_has_evaluation(
 
 async def test_merge_session_evaluations(client: httpx.AsyncClient) -> None:
     """Merge manual evaluations into a session."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.post(
-        f"/v1/sessions/{created['id']}/evaluations",
+        f"/api/v1/sessions/{created['id']}/evaluations",
         json={
             "evaluations": [
                 {"name": "accuracy", "score": 0.9},
@@ -497,9 +497,9 @@ async def test_merge_session_evaluations_carries_passed(
     client: httpx.AsyncClient,
 ) -> None:
     """Merge the optional pass flag, leaving it null when omitted."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.post(
-        f"/v1/sessions/{created['id']}/evaluations",
+        f"/api/v1/sessions/{created['id']}/evaluations",
         json={
             "evaluations": [
                 {"name": "accuracy", "score": 0.9, "passed": True},
@@ -516,16 +516,16 @@ async def test_merge_session_evaluations_overwrites_matching_name(
     client: httpx.AsyncClient,
 ) -> None:
     """Resending a name overwrites its score, value, and data type."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     first = (
         await client.post(
-            f"/v1/sessions/{created['id']}/evaluations",
+            f"/api/v1/sessions/{created['id']}/evaluations",
             json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
         )
     ).json()
     second = (
         await client.post(
-            f"/v1/sessions/{created['id']}/evaluations",
+            f"/api/v1/sessions/{created['id']}/evaluations",
             json={"evaluations": [{"name": "accuracy", "value": "high"}]},
         )
     ).json()
@@ -537,7 +537,7 @@ async def test_merge_session_evaluations_overwrites_matching_name(
 async def test_merge_session_evaluations_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(
-        f"/v1/sessions/{uuid.uuid4()}/evaluations",
+        f"/api/v1/sessions/{uuid.uuid4()}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
     assert response.status_code == 404
@@ -547,9 +547,9 @@ async def test_merge_session_evaluations_rejects_duplicate_name(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 422 when the request names the same evaluation twice."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.post(
-        f"/v1/sessions/{created['id']}/evaluations",
+        f"/api/v1/sessions/{created['id']}/evaluations",
         json={
             "evaluations": [
                 {"name": "accuracy", "score": 0.9},
@@ -565,10 +565,12 @@ async def test_update_session_clears_outputs_with_explicit_null(
 ) -> None:
     """Clear outputs with an explicit null passed alongside status."""
     created = (
-        await client.post("/v1/sessions", json=_session_body(outputs={"answer": 42}))
+        await client.post(
+            "/api/v1/sessions", json=_session_body(outputs={"answer": 42})
+        )
     ).json()
     response = await client.patch(
-        f"/v1/sessions/{created['id']}",
+        f"/api/v1/sessions/{created['id']}",
         json={"status": "completed", "outputs": None},
     )
     assert response.status_code == 200
@@ -582,10 +584,12 @@ async def test_update_session_omitted_outputs_unchanged(
 ) -> None:
     """Leave outputs unchanged when the update omits them."""
     created = (
-        await client.post("/v1/sessions", json=_session_body(outputs={"answer": 42}))
+        await client.post(
+            "/api/v1/sessions", json=_session_body(outputs={"answer": 42})
+        )
     ).json()
     response = await client.patch(
-        f"/v1/sessions/{created['id']}", json={"name": "renamed"}
+        f"/api/v1/sessions/{created['id']}", json={"name": "renamed"}
     )
     assert response.status_code == 200
     body = response.json()
@@ -597,9 +601,9 @@ async def test_update_session_rejects_system_prompt(
     client: httpx.AsyncClient,
 ) -> None:
     """Reject system prompts on the session update API."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.patch(
-        f"/v1/sessions/{created['id']}",
+        f"/api/v1/sessions/{created['id']}",
         json={"system_prompt": "Replacement policy."},
     )
 
@@ -610,9 +614,9 @@ async def test_update_session_status_cannot_be_cleared(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 422 when the update clears the status with an explicit null."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.patch(
-        f"/v1/sessions/{created['id']}", json={"status": None}
+        f"/api/v1/sessions/{created['id']}", json={"status": None}
     )
     assert response.status_code == 422
 
@@ -622,32 +626,34 @@ async def test_update_session_rejects_terminal_back_to_in_progress(
 ) -> None:
     """Observe HTTP 409 when the update moves a terminal session back to
     in_progress."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
-    await client.patch(f"/v1/sessions/{created['id']}", json={"status": "failed"})
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    await client.patch(f"/api/v1/sessions/{created['id']}", json={"status": "failed"})
     response = await client.patch(
-        f"/v1/sessions/{created['id']}", json={"status": "in_progress"}
+        f"/api/v1/sessions/{created['id']}", json={"status": "in_progress"}
     )
     assert response.status_code == 409
 
 
 async def test_update_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
-    response = await client.patch(f"/v1/sessions/{uuid.uuid4()}", json={"name": "x"})
+    response = await client.patch(
+        f"/api/v1/sessions/{uuid.uuid4()}", json={"name": "x"}
+    )
     assert response.status_code == 404
 
 
 async def test_delete_session(client: httpx.AsyncClient) -> None:
     """Delete a session."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
-    response = await client.delete(f"/v1/sessions/{created['id']}")
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    response = await client.delete(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/sessions/{created['id']}")
+    response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
-    response = await client.delete(f"/v1/sessions/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/sessions/{uuid.uuid4()}")
     assert response.status_code == 404
 
 
@@ -671,7 +677,7 @@ async def test_create_session_conflicts_when_task_not_running(
     async with client:
         token = _task_token(auth_service, account, task_id=task.id)
         response = await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json=_session_body(),
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -710,7 +716,7 @@ async def test_create_session_links_the_agent_task_result_session(
     async with client:
         token = _task_token(auth_service, account, task_id=task.id)
         response = await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json=_session_body(agent_id=None),
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -727,9 +733,9 @@ async def test_list_sessions_filters_by_filter_query_param(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions with a nested and/or filter expression."""
-    by_cost = (await client.post("/v1/sessions", json=_session_body())).json()
+    by_cost = (await client.post("/api/v1/sessions", json=_session_body())).json()
     ingest = await client.post(
-        f"/v1/sessions/{by_cost['id']}/nodes",
+        f"/api/v1/sessions/{by_cost['id']}/nodes",
         json={
             "nodes": [
                 {
@@ -746,21 +752,27 @@ async def test_list_sessions_filters_by_filter_query_param(
         },
     )
     assert ingest.status_code == 200
-    await client.patch(f"/v1/sessions/{by_cost['id']}", json={"status": "completed"})
+    await client.patch(
+        f"/api/v1/sessions/{by_cost['id']}", json={"status": "completed"}
+    )
 
     by_name = (
-        await client.post("/v1/sessions", json=_session_body(name="web-two"))
+        await client.post("/api/v1/sessions", json=_session_body(name="web-two"))
     ).json()
-    await client.patch(f"/v1/sessions/{by_name['id']}", json={"status": "completed"})
+    await client.patch(
+        f"/api/v1/sessions/{by_name['id']}", json={"status": "completed"}
+    )
 
     non_match = (
-        await client.post("/v1/sessions", json=_session_body(name="other"))
+        await client.post("/api/v1/sessions", json=_session_body(name="other"))
     ).json()
-    await client.patch(f"/v1/sessions/{non_match['id']}", json={"status": "completed"})
+    await client.patch(
+        f"/api/v1/sessions/{non_match['id']}", json={"status": "completed"}
+    )
 
     # Matches the or branch by name, but excluded because status is not
     # completed, proving the outer and short-circuits the match.
-    await client.post("/v1/sessions", json=_session_body(name="web-three"))
+    await client.post("/api/v1/sessions", json=_session_body(name="web-three"))
 
     filter_expression = {
         "and": [
@@ -774,7 +786,7 @@ async def test_list_sessions_filters_by_filter_query_param(
         ]
     }
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     ids = {item["id"] for item in response.json()["items"]}
@@ -783,7 +795,7 @@ async def test_list_sessions_filters_by_filter_query_param(
 
 async def test_list_sessions_malformed_filter_json(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for a filter query param that fails to parse as JSON."""
-    response = await client.get("/v1/sessions", params={"filter": "{not-json"})
+    response = await client.get("/api/v1/sessions", params={"filter": "{not-json"})
     assert response.status_code == 422
 
 
@@ -791,7 +803,7 @@ async def test_list_sessions_filter_unknown_field(client: httpx.AsyncClient) -> 
     """Observe HTTP 422 for a filter naming a field outside the allowlist."""
     filter_expression = {"field": "bogus", "op": "eq", "value": "x"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 422
 
@@ -802,7 +814,7 @@ async def test_list_sessions_filter_unsupported_operator(
     """Observe HTTP 422 for an operator not allowed on the field."""
     filter_expression = {"field": "status", "op": "startswith", "value": "completed"}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 422
 
@@ -813,7 +825,7 @@ async def test_list_sessions_filter_eq_with_null_value(
     """Observe HTTP 422 for eq with a null value."""
     filter_expression = {"field": "name", "op": "eq", "value": None}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 422
 
@@ -828,7 +840,7 @@ async def test_list_sessions_filter_nested_too_deep(client: httpx.AsyncClient) -
     for _ in range(5):
         filter_expression = {"and": [filter_expression]}
     response = await client.get(
-        "/v1/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 422
 
@@ -853,7 +865,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
             worker_id=uuid.uuid4(), account_id=account.id
         ).token
         response = await client.get(
-            "/v1/sessions", headers={"Authorization": f"Bearer {worker_token}"}
+            "/api/v1/sessions", headers={"Authorization": f"Bearer {worker_token}"}
         )
         assert response.status_code == 403
 
@@ -868,7 +880,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
             timeout_seconds=3600,
         ).token
         response = await client.get(
-            "/v1/sessions", headers={"Authorization": f"Bearer {task_token}"}
+            "/api/v1/sessions", headers={"Authorization": f"Bearer {task_token}"}
         )
         assert response.status_code == 403
 
@@ -963,7 +975,8 @@ async def test_get_session_denies_a_task_token_for_another_tasks_session(
     async with client:
         token = _task_token(auth_service, account)
         response = await client.get(
-            f"/v1/sessions/{session.id}", headers={"Authorization": f"Bearer {token}"}
+            f"/api/v1/sessions/{session.id}",
+            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 403
 
@@ -991,7 +1004,7 @@ async def test_update_session_denies_a_task_token_for_another_tasks_session(
     async with client:
         token = _task_token(auth_service, account)
         response = await client.patch(
-            f"/v1/sessions/{session.id}",
+            f"/api/v1/sessions/{session.id}",
             json={"name": "renamed"},
             headers={"Authorization": f"Bearer {token}"},
         )
@@ -1025,7 +1038,7 @@ async def test_ingest_session_nodes_denies_a_task_token_for_another_tasks_sessio
     async with client:
         token = _task_token(auth_service, account)
         response = await client.post(
-            f"/v1/sessions/{session.id}/nodes",
+            f"/api/v1/sessions/{session.id}/nodes",
             json={
                 "nodes": [
                     {
@@ -1067,7 +1080,8 @@ async def test_get_session_allows_a_task_token_carrying_its_input_session_id(
     async with client:
         token = _task_token(auth_service, account, granted_session_id=session.id)
         response = await client.get(
-            f"/v1/sessions/{session.id}", headers={"Authorization": f"Bearer {token}"}
+            f"/api/v1/sessions/{session.id}",
+            headers={"Authorization": f"Bearer {token}"},
         )
         assert response.status_code == 200
         assert response.json()["id"] == str(session.id)

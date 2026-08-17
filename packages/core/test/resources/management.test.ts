@@ -173,23 +173,26 @@ describe("management resources", () => {
 
     expect(sessions).toEqual([investigationSession]);
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/investigations", "POST"],
-      [`https://api.example/v1/investigations/${ID}`, "GET"],
-      [`https://api.example/v1/investigations/${ID}`, "PATCH"],
+      ["https://api.example/api/v1/investigations", "POST"],
+      [`https://api.example/api/v1/investigations/${ID}`, "GET"],
+      [`https://api.example/api/v1/investigations/${ID}`, "PATCH"],
       [
-        `https://api.example/v1/investigations?filter=${encodeURIComponent(JSON.stringify({ field: "status", op: "eq", value: "pending" }))}`,
-        "GET",
-      ],
-      [`https://api.example/v1/investigations/${ID}/sessions?size=1`, "GET"],
-      [
-        `https://api.example/v1/investigations/${ID}/sessions?cursor=next&size=1`,
+        `https://api.example/api/v1/investigations?filter=${encodeURIComponent(JSON.stringify({ field: "status", op: "eq", value: "pending" }))}`,
         "GET",
       ],
       [
-        `https://api.example/v1/investigations/${ID}/sessions/${OWNER_ID}`,
+        `https://api.example/api/v1/investigations/${ID}/sessions?size=1`,
+        "GET",
+      ],
+      [
+        `https://api.example/api/v1/investigations/${ID}/sessions?cursor=next&size=1`,
+        "GET",
+      ],
+      [
+        `https://api.example/api/v1/investigations/${ID}/sessions/${OWNER_ID}`,
         "PATCH",
       ],
-      [`https://api.example/v1/investigations/${ID}`, "DELETE"],
+      [`https://api.example/api/v1/investigations/${ID}`, "DELETE"],
     ]);
     expect(fetch.mock.calls[0]?.[1]?.signal).toBeDefined();
     expect(fetch.mock.calls[0]?.[1]?.signal?.aborted).toBe(false);
@@ -222,15 +225,15 @@ describe("management resources", () => {
     await expect(client.annotations.delete(ID)).resolves.toBeUndefined();
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/annotations", "POST"],
-      [`https://api.example/v1/annotations/${ID}`, "GET"],
-      [`https://api.example/v1/annotations/${ID}`, "PATCH"],
-      ["https://api.example/v1/annotations?size=1", "GET"],
+      ["https://api.example/api/v1/annotations", "POST"],
+      [`https://api.example/api/v1/annotations/${ID}`, "GET"],
+      [`https://api.example/api/v1/annotations/${ID}`, "PATCH"],
+      ["https://api.example/api/v1/annotations?size=1", "GET"],
       [
-        "https://api.example/v1/annotations?cursor=opaque%2B%2F%3D&size=1",
+        "https://api.example/api/v1/annotations?cursor=opaque%2B%2F%3D&size=1",
         "GET",
       ],
-      [`https://api.example/v1/annotations/${ID}`, "DELETE"],
+      [`https://api.example/api/v1/annotations/${ID}`, "DELETE"],
     ]);
   });
 
@@ -273,18 +276,18 @@ describe("management resources", () => {
     await expect(client.evaluators.delete(ID)).resolves.toBeUndefined();
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/evaluators", "POST"],
-      [`https://api.example/v1/evaluators/${ID}`, "GET"],
-      [`https://api.example/v1/evaluators/${ID}`, "PATCH"],
-      ["https://api.example/v1/evaluators?sort=name%3Aasc", "GET"],
-      [`https://api.example/v1/evaluators/${ID}/versions`, "POST"],
-      [`https://api.example/v1/evaluators/${ID}/versions/1`, "GET"],
-      [`https://api.example/v1/evaluators/${ID}/versions/1`, "PATCH"],
+      ["https://api.example/api/v1/evaluators", "POST"],
+      [`https://api.example/api/v1/evaluators/${ID}`, "GET"],
+      [`https://api.example/api/v1/evaluators/${ID}`, "PATCH"],
+      ["https://api.example/api/v1/evaluators?sort=name%3Aasc", "GET"],
+      [`https://api.example/api/v1/evaluators/${ID}/versions`, "POST"],
+      [`https://api.example/api/v1/evaluators/${ID}/versions/1`, "GET"],
+      [`https://api.example/api/v1/evaluators/${ID}/versions/1`, "PATCH"],
       [
-        `https://api.example/v1/evaluators/${ID}/versions?size=10&sort=version%3Adesc`,
+        `https://api.example/api/v1/evaluators/${ID}/versions?size=10&sort=version%3Adesc`,
         "GET",
       ],
-      [`https://api.example/v1/evaluators/${ID}`, "DELETE"],
+      [`https://api.example/api/v1/evaluators/${ID}`, "DELETE"],
     ]);
   });
 
@@ -311,9 +314,9 @@ describe("management resources", () => {
 
     expect(results).toEqual([evaluation]);
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/evaluations", "POST"],
-      [`https://api.example/v1/evaluations/${ID}`, "GET"],
-      ["https://api.example/v1/evaluations?size=1", "GET"],
+      ["https://api.example/api/v1/evaluations", "POST"],
+      [`https://api.example/api/v1/evaluations/${ID}`, "GET"],
+      ["https://api.example/api/v1/evaluations?size=1", "GET"],
     ]);
   });
 
@@ -358,16 +361,16 @@ describe("management resources", () => {
     await expect(client.cohorts.delete(ID)).resolves.toBeUndefined();
 
     expect(fetch.mock.calls.map(([url, init]) => [url, init?.method])).toEqual([
-      ["https://api.example/v1/cohorts", "POST"],
-      [`https://api.example/v1/cohorts/${ID}`, "GET"],
-      [`https://api.example/v1/cohorts/${ID}`, "PATCH"],
-      ["https://api.example/v1/cohorts", "GET"],
-      [`https://api.example/v1/cohorts/${ID}/versions`, "POST"],
-      [`https://api.example/v1/cohorts/${ID}/versions`, "GET"],
-      [`https://api.example/v1/cohort-versions/${RELATED_ID}`, "GET"],
-      [`https://api.example/v1/cohort-versions/${RELATED_ID}`, "PATCH"],
-      [`https://api.example/v1/cohort-versions/${RELATED_ID}`, "DELETE"],
-      [`https://api.example/v1/cohorts/${ID}`, "DELETE"],
+      ["https://api.example/api/v1/cohorts", "POST"],
+      [`https://api.example/api/v1/cohorts/${ID}`, "GET"],
+      [`https://api.example/api/v1/cohorts/${ID}`, "PATCH"],
+      ["https://api.example/api/v1/cohorts", "GET"],
+      [`https://api.example/api/v1/cohorts/${ID}/versions`, "POST"],
+      [`https://api.example/api/v1/cohorts/${ID}/versions`, "GET"],
+      [`https://api.example/api/v1/cohort-versions/${RELATED_ID}`, "GET"],
+      [`https://api.example/api/v1/cohort-versions/${RELATED_ID}`, "PATCH"],
+      [`https://api.example/api/v1/cohort-versions/${RELATED_ID}`, "DELETE"],
+      [`https://api.example/api/v1/cohorts/${ID}`, "DELETE"],
     ]);
   });
 

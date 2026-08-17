@@ -92,6 +92,7 @@ jobs:
             exit 1
           fi
       - run: pnpm install --frozen-lockfile
+      - run: pnpm run generate:check
       - run: pnpm run lint
       - run: pnpm run typecheck
       - run: pnpm run test:built

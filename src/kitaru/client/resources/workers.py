@@ -57,7 +57,7 @@ class WorkersResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/workers",
+            "/api/v1/workers",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return WorkerRegistrationResponse.model_validate(response.json())
@@ -79,7 +79,7 @@ class WorkersResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/workers/{worker_id}/heartbeat",
+            f"/api/v1/workers/{worker_id}/heartbeat",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return WorkerHeartbeatResponse.model_validate(response.json())
@@ -96,7 +96,7 @@ class WorkersResource:
         Returns:
             Stored worker.
         """
-        response = await self._client.request("GET", f"/v1/workers/{worker_id}")
+        response = await self._client.request("GET", f"/api/v1/workers/{worker_id}")
         return WorkerResponse.model_validate(response.json())
 
     async def list(
@@ -116,7 +116,7 @@ class WorkersResource:
         params = params or WorkerListParams()
         response = await self._client.request(
             "GET",
-            "/v1/workers",
+            "/api/v1/workers",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[WorkerResponse].model_validate(response.json())
@@ -147,4 +147,4 @@ class WorkersResource:
         Raises:
             APIError: The request failed, including 404 for a missing worker.
         """
-        await self._client.request("DELETE", f"/v1/workers/{worker_id}")
+        await self._client.request("DELETE", f"/api/v1/workers/{worker_id}")

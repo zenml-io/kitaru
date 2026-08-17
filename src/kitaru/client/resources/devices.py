@@ -58,7 +58,7 @@ class DevicesResource:
         """
         params = {} if user_code is None else {"user_code": user_code}
         response = await self._client.request(
-            "GET", f"/v1/devices/{device_id}", params=params
+            "GET", f"/api/v1/devices/{device_id}", params=params
         )
         return DeviceResponse.model_validate(response.json())
 
@@ -80,7 +80,7 @@ class DevicesResource:
         params = params or DeviceListParams()
         response = await self._client.request(
             "GET",
-            "/v1/devices",
+            "/api/v1/devices",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[DeviceResponse].model_validate(response.json())
@@ -121,7 +121,7 @@ class DevicesResource:
         """
         response = await self._client.request(
             "POST",
-            f"/v1/devices/{device_id}/verify",
+            f"/api/v1/devices/{device_id}/verify",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return DeviceResponse.model_validate(response.json())
@@ -143,7 +143,7 @@ class DevicesResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/devices/{device_id}",
+            f"/api/v1/devices/{device_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return DeviceResponse.model_validate(response.json())
@@ -157,4 +157,4 @@ class DevicesResource:
         Raises:
             APIError: The request failed, including 404 for a missing device.
         """
-        await self._client.request("DELETE", f"/v1/devices/{device_id}")
+        await self._client.request("DELETE", f"/api/v1/devices/{device_id}")

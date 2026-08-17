@@ -34,7 +34,7 @@ export class ExperimentsResource {
   ): Promise<ExperimentResponse> {
     return this.#transport.request({
       method: "POST",
-      path: "/v1/experiments",
+      path: "/api/v1/experiments",
       body: jsonBody(request),
       signal: options.signal,
       validate: validateExperiment,
@@ -47,7 +47,7 @@ export class ExperimentsResource {
   ): Promise<ExperimentResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/experiments/${encodeURIComponent(experimentId)}`,
+      path: `/api/v1/experiments/${encodeURIComponent(experimentId)}`,
       signal: options.signal,
       validate: validateExperiment,
     });
@@ -59,7 +59,7 @@ export class ExperimentsResource {
   ): Promise<Page<ExperimentResponse>> {
     return this.#transport.request({
       method: "GET",
-      path: "/v1/experiments",
+      path: "/api/v1/experiments",
       query: encodeListParams(params),
       signal: options.signal,
       validate: validateExperimentPage,
@@ -80,7 +80,7 @@ export class ExperimentsResource {
   ): Promise<ExperimentResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/experiments/${encodeURIComponent(experimentId)}`,
+      path: `/api/v1/experiments/${encodeURIComponent(experimentId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateExperiment,
@@ -93,7 +93,7 @@ export class ExperimentsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/experiments/${encodeURIComponent(experimentId)}`,
+      path: `/api/v1/experiments/${encodeURIComponent(experimentId)}`,
       responseType: "empty",
       signal: options.signal,
     });
@@ -106,7 +106,7 @@ export class ExperimentsResource {
   ): Promise<ExperimentRunResponse> {
     return this.#transport.request({
       method: "POST",
-      path: `/v1/experiments/${encodeURIComponent(experimentId)}/runs`,
+      path: `/api/v1/experiments/${encodeURIComponent(experimentId)}/runs`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateExperimentRun,

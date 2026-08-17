@@ -73,7 +73,7 @@ describe("stored CLI login", () => {
     });
 
     expect(fetch.mock.calls[0]?.[0]).toBe(
-      "https://example.com/v1/replays/missing",
+      "https://example.com/api/v1/replays/missing",
     );
     expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
       Authorization: "Bearer KITKEY_stored",
@@ -136,7 +136,7 @@ describe("stored CLI login", () => {
       status: 404,
     });
     expect(fetch.mock.calls[0]?.[0]).toBe(
-      "https://explicit.example/v1/replays/missing",
+      "https://explicit.example/api/v1/replays/missing",
     );
     expect(fetch.mock.calls[0]?.[1]?.headers).toMatchObject({
       Authorization: "Bearer explicit",
@@ -234,7 +234,7 @@ describe("stored CLI login", () => {
     const before = await readFile(join(deviceRoot, "credentials.json"));
     const deviceFetch = vi.fn(
       async (input: URL | RequestInfo, init?: RequestInit) => {
-        if (String(input).endsWith("/v1/login")) {
+        if (String(input).endsWith("/api/v1/login")) {
           expect(init?.redirect).toBe("manual");
           expect(String(init?.body)).toContain("device_code=device-secret");
           return new Response(
@@ -372,7 +372,7 @@ describe("stored CLI login", () => {
           JSON.stringify({ access_token: "cp-fresh", expires_in: 3600 }),
         );
       }
-      if (url === `${serverUrl}/v1/login`) {
+      if (url === `${serverUrl}/api/v1/login`) {
         serverLogins += 1;
         expect(authorization).toBe("Bearer cp-fresh");
         return new Response(
@@ -409,7 +409,7 @@ describe("stored CLI login", () => {
     });
     const path = join(root, "credentials.json");
     const fetch = vi.fn<typeof globalThis.fetch>(async (input) => {
-      if (!String(input).endsWith("/v1/login")) {
+      if (!String(input).endsWith("/api/v1/login")) {
         const payload = JSON.parse(await readFile(path, "utf8")) as Record<
           string,
           Record<string, unknown>

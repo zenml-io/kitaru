@@ -19,7 +19,7 @@ export class CohortVersionsResource {
   ): Promise<CohortVersionResponse> {
     return this.#transport.request({
       method: "GET",
-      path: `/v1/cohort-versions/${encodeURIComponent(cohortVersionId)}`,
+      path: `/api/v1/cohort-versions/${encodeURIComponent(cohortVersionId)}`,
       signal: options.signal,
       validate: validateCohortVersion,
     });
@@ -32,7 +32,7 @@ export class CohortVersionsResource {
   ): Promise<CohortVersionResponse> {
     return this.#transport.request({
       method: "PATCH",
-      path: `/v1/cohort-versions/${encodeURIComponent(cohortVersionId)}`,
+      path: `/api/v1/cohort-versions/${encodeURIComponent(cohortVersionId)}`,
       body: jsonBody(request),
       signal: options.signal,
       validate: validateCohortVersion,
@@ -45,7 +45,7 @@ export class CohortVersionsResource {
   ): Promise<void> {
     return this.#transport.request({
       method: "DELETE",
-      path: `/v1/cohort-versions/${encodeURIComponent(cohortVersionId)}`,
+      path: `/api/v1/cohort-versions/${encodeURIComponent(cohortVersionId)}`,
       responseType: "empty",
       signal: options.signal,
     });
