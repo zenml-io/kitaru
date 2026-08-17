@@ -9,7 +9,7 @@ Kitaru has two SDKs, and both talk to the same server over the same REST API: th
 
 ## The Python SDK
 
-The plain `kitaru` package is the SDK alone: the async client and the API models, which is all a production service needs to record sessions. The [CLI, worker, and server extras](../getting-started/installation.md#install-the-python-sdk-and-cli) layer on top of it.
+The plain `kitaru` package is the SDK alone: the async client and the API models, which is all a production service needs to record sessions. The [CLI, worker, and server extras](../getting-started/installation.md) layer on top of it.
 
 ```python
 from kitaru.client import KitaruAPIClient
@@ -28,7 +28,7 @@ The client reaches everything, including single-session replay creation and blob
 `@zenml-io/kitaru` creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The [Mastra](../adapters/mastra.md) and [Vercel AI SDK](../adapters/vercel-ai.md) adapters build on it.
 
 {% hint style="info" %}
-The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together. Install with `pnpm add @zenml-io/kitaru`; see [Installation](../getting-started/installation.md#install-the-typescript-sdk-and-adapters).
+The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together. Install with `pnpm add @zenml-io/kitaru`; see [Installation](../getting-started/installation.md).
 {% endhint %}
 
 ### Reuse a developer login

@@ -42,7 +42,7 @@ def parse(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedSession | Im
         )
 ```
 
-Yield lazily; the import consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on; only a crash of the parser itself fails the task (with partial stats preserved). The full field reference for `ParsedSession` and `ParsedNode` is the [portable session contract](importing-sessions.md#the-portable-session-contract).
+Yield lazily; the import consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on; only a crash of the parser itself fails the task (with partial stats preserved). The full field reference for `ParsedSession` and `ParsedNode` is the [portable session contract](importing-sessions.md).
 
 Set a stable `external_id` from your source system: together with the importer's provider name it is the dedup key, so re-importing an overlapping export skips what is already stored instead of duplicating it.
 

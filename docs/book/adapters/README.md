@@ -21,7 +21,7 @@ Each adapter ships as its own distribution, installed alongside Kitaru in the ag
 | [LangGraph](langgraph.md) | `kitaru-langgraph` | `kitaru_langgraph.KitaruGraphRunner` | Yes | Depends on construction |
 | [OpenAI Agents SDK](openai-agents.md) | `kitaru-openai-agents` | `kitaru_openai_agents.KitaruRunner` | Yes | Yes |
 
-LangChain agents and Deep Agents use the LangGraph adapter, since their public factories return LangGraph runnables. What the LangGraph adapter can replay depends on how the graph was constructed; its [capability matrix](langgraph.md#capability-matrix) is the reference.
+LangChain agents and Deep Agents use the LangGraph adapter, since their public factories return LangGraph runnables. What the LangGraph adapter can replay depends on how the graph was constructed; its [capability matrix](langgraph.md) is the reference.
 
 ### TypeScript
 
@@ -36,7 +36,7 @@ If your framework isn't covered, see [No adapter for your framework](custom.md) 
 
 - **Import.** Your framework already emits traces to Langfuse, LangSmith, or Braintrust? [Import them](../getting-started/import-your-traces.md); sessions from imports can be replayed and evaluated like any other. Convert any other format to [Kitaru JSONL](../guides/importing-sessions.md).
 - **Record directly.** Create a session and ingest its nodes with the Python or TypeScript client. The `kitaru-adapter-builder` [agent skill](../agent-native/setup.md) will write that integration with you.
-- **Hand the run back to your own system.** Register the agent version as a function instead of a command, and Kitaru calls you to run it. See [Let Kitaru call your agent](custom.md#let-kitaru-call-your-agent).
+- **Hand the run back to your own system.** Register the agent version as a function instead of a command, and Kitaru calls you to run it. See [Let Kitaru call your agent](custom.md).
 
 ## Why the wrapper is enough
 

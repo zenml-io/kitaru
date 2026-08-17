@@ -147,7 +147,7 @@ export KITARU_API_KEY="KITKEY_..."
 
 See [Authentication & API keys](../deploy/authentication.md) for how keys are issued and managed.
 
-Node applications can also reuse a developer's selected CLI login without exporting its token; see the [TypeScript SDK](../deploy/sdks.md#reuse-a-developer-login). Use dedicated API keys or worker task tokens for CI and production rather than copying a developer credential store.
+Node applications can also reuse a developer's selected CLI login without exporting its token; see the [TypeScript SDK](../deploy/sdks.md). Use dedicated API keys or worker task tokens for CI and production rather than copying a developer credential store.
 
 ## Verify
 

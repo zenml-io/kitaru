@@ -58,7 +58,7 @@ Two rules worth keeping whichever way you build it:
   replay. Splitting them is how baselines stop reproducing.
 
 Read the [PydanticAI adapter](pydantic-ai.md) as the reference
-implementation, and the [LangGraph capability matrix](langgraph.md#capability-matrix)
+implementation, and the [LangGraph capability matrix](langgraph.md)
 for how to express partial support honestly.
 
 ## Let Kitaru call your agent

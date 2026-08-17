@@ -24,7 +24,7 @@ Two design choices keep the interview honest. Open observations come before prop
 
 Annotations are labels with addresses, and everything that gates a change is calibrated against them:
 
-- **Evaluators** are checked against them: run the evaluator over the reviewed sessions and [compare its evaluations with the human answers](../guides/write-an-evaluator.md#calibrate-against-human-judgment) before the evaluator judges anything on its own.
+- **Evaluators** are checked against them: run the evaluator over the reviewed sessions and [compare its evaluations with the human answers](../guides/write-an-evaluator.md) before the evaluator judges anything on its own.
 - **Cohorts** are justified by them: the sessions confirmed `problematic` become the [cohort](cohorts.md) a regression experiment replays, and the annotation trail is the auditable reason that cohort exists.
 - **The next review** builds on them: verdicts and answers stay queryable, so a later investigation starts from what is already known instead of re-litigating it.
 
