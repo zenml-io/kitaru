@@ -14,7 +14,7 @@ The division of labor: **Kitaru observes your production agents; your coding ass
 Kitaru ships an MCP server, so assistants that speak MCP — Claude Code, Cursor, and friends — get typed, bounded tools instead of shelling out:
 
 ```bash
-pip install "kitaru[mcp]"
+uv add "kitaru[mcp]"
 ```
 
 Then register it with your assistant (`.mcp.json` for Claude Code):
@@ -23,12 +23,14 @@ Then register it with your assistant (`.mcp.json` for Claude Code):
 {
   "mcpServers": {
     "kitaru": {
-      "command": "kitaru-mcp",
-      "args": []
+      "command": "uv",
+      "args": ["run", "kitaru-mcp", "--server", "http://localhost:8000", "--mode", "standard"]
     }
   }
 }
 ```
+
+Three details in that snippet matter. The command is `uv run kitaru-mcp` rather than a bare `kitaru-mcp` because installing with uv puts the `kitaru-mcp` executable inside your project's virtual environment, and your assistant starts the server as a plain subprocess without activating that environment — a bare `kitaru-mcp` is not on `PATH` there, so the process never starts. `http://localhost:8000` is the server `kitaru login --local` provisions; point it at your team's server URL instead when you have one. And `--mode standard` is shown because tools above the current mode are never registered: on the default `read-only` an assistant driving the investigation loop sees no write tools at all and quietly falls back to the CLI. Starting `read-only` is still a reasonable posture — just expect a read-only assistant to be able to look and not touch.
 
 The server needs an explicit target — `--server URL`, `KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails if none selects a server. Credentials come from `KITARU_API_KEY` or the stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is deliberately ignored). The target and credential source are selected at startup. A stored credential may be refreshed or updated while the process runs; restart `kitaru-mcp` after changing the target or an environment-provided API key.
 
