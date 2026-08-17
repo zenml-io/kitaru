@@ -180,7 +180,10 @@ describe("management resources", () => {
         `https://api.example/api/v1/investigations?filter=${encodeURIComponent(JSON.stringify({ field: "status", op: "eq", value: "pending" }))}`,
         "GET",
       ],
-      [`https://api.example/api/v1/investigations/${ID}/sessions?size=1`, "GET"],
+      [
+        `https://api.example/api/v1/investigations/${ID}/sessions?size=1`,
+        "GET",
+      ],
       [
         `https://api.example/api/v1/investigations/${ID}/sessions?cursor=next&size=1`,
         "GET",
