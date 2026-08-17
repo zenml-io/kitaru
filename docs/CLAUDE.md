@@ -113,7 +113,7 @@ pnpm run lint       # Biome lint
 pnpm run format     # Biome format
 ```
 
-**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
+**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
 
 ## File Responsibilities
 

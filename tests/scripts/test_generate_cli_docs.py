@@ -210,6 +210,8 @@ V1_COMMAND_NAMES = {"flow", "executions", "stack", "model", "secrets", "log-stor
 @pytest.fixture(scope="module")
 def generated(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Generate the full docs tree from the real CLI once for all e2e tests."""
+    # The base CI matrix installs no cli extra; the cli matrix runs these.
+    pytest.importorskip("cyclopts")
     top_descriptions, commands = fetch_command_docs()
     tree = build_tree(top_descriptions, commands)
     output = tmp_path_factory.mktemp("cli-docs")
@@ -221,6 +223,7 @@ class TestRealCliSchema:
     """End-to-end tests against the installed CLI's schema output."""
 
     def test_schema_error_on_unknown_path(self) -> None:
+        pytest.importorskip("cyclopts")
         with pytest.raises(SchemaError):
             run_schema_command(["definitely-not-a-command"])
 
