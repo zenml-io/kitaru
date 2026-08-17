@@ -7,11 +7,11 @@ icon: magnifying-glass-chart
 
 Every eval system runs into the same wall: where do the criteria come from? You never wrote them down. The people who actually judge the agent, your support leads and domain experts, do it every day, in Slack threads and ticket comments, and every one of those corrections is a label nobody keeps.
 
-Investigations are how Kitaru captures them. An **investigation** organizes a review of recorded sessions: which sessions, in what order, what question each one raises, and what the reviewer concluded. An **annotation** is one answer, stored as JSON and pinned to the exact evidence that supports it: a session, a node inside it, a path inside a payload, even a character range. Together they are the ground truth everything downstream is calibrated against. Replay can tell you what a change did; only your recorded judgment can say whether it got better.
+Investigations are how Kitaru captures them, and they are deliberately not a form you fill in. An **investigation** organizes a review of recorded sessions (which sessions, in what order, what question each one raises, and what the reviewer concluded), and by design it is **authored by a coding agent, not by you**. The LLM's job is to generate a good baseline investigation: pick the sessions worth your time, phrase the questions, and point at the evidence. Your job is the part no model can do: answering. An **annotation** is one answer, stored as JSON and pinned to the exact evidence that supports it: a session, a node inside it, a path inside a payload, even a character range. Together they are the ground truth everything downstream is calibrated against. Replay can tell you what a change did; only your recorded judgment can say whether it got better.
 
 ## The interview
 
-You rarely build an investigation by hand. [Set up your coding agent](../agent-native/setup.md) and the `kitaru-investigation` skill runs the review as an interview:
+[Set up your coding agent](../agent-native/setup.md) and the `kitaru-investigation` skill runs the review as an interview. You never write questions or pick sessions; the assistant does, because a well-chosen worklist and well-phrased questions are exactly what LLMs are good at, and answering them is exactly what they are not:
 
 1. **It maps the world first.** From one surprising failure, the assistant reads the session fully and builds a small worklist of related sessions plus at least one counterexample. From a vague "something is off," it samples a diverse population, normally 15 to 30 sessions, random picks alongside coverage-based ones.
 2. **It creates the investigation**, with a question for each session and highlights that point you at the evidence: the policy lookup that returned nothing, the refund that was accepted anyway.
@@ -31,6 +31,8 @@ Annotations are labels with addresses, and everything that gates a change is cal
 An evaluator that gates a deploy should be able to show the human judgments it was calibrated against. Annotations are those judgments.
 
 ## What an investigation contains
+
+Everything below is what the assistant creates on your behalf during the interview. The CLI is the escape hatch and the audit surface: use it to inspect what was built, script a review, or construct an investigation by hand when you want full control.
 
 An investigation belongs to one agent. It contains linked sessions, each with a `position` that determines the review order.
 
