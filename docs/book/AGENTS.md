@@ -20,7 +20,8 @@ Do **not** put hand-written docs in `docs/content/docs/` — that is the referen
 
 ## Links
 
-- **Within this space:** relative `.md` paths — `../concepts/checkpoints.md`, `flows.md#runtime-options`. Section index → `../concepts/README.md`.
+- **Within this space:** relative `.md` paths — `../concepts/checkpoints.md`. Section index → `../concepts/README.md`.
+- **Never add an anchor to a cross-file link** (`other-page.md#section`). GitBook's Git Sync rewrites those with one `../` too many, producing broken URLs on the published site (verified Aug 2026). Link the page without the anchor; same-file anchors (`#section`) are fine.
 - **SDK / CLI reference:** `https://sdkdocs.kitaru.ai` — the separate reference site, not part of this GitBook space.
 - **Other ZenML docs:** absolute `https://docs.zenml.io/...`.
 - **Changelog:** `https://docs.zenml.io/changelog` (owned by the changelog repo).

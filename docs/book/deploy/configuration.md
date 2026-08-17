@@ -1,5 +1,5 @@
 ---
-description: Client-side configuration — servers, environment variables, and the precedence between them.
+description: "Client-side configuration: servers, environment variables, and the precedence between them."
 icon: gear
 ---
 
@@ -12,7 +12,7 @@ export KITARU_API_URL="https://kitaru.internal.example.com"
 export KITARU_API_KEY="KITKEY_..."
 ```
 
-`KitaruAPIClient()` resolves both on its own: the server URL from `KITARU_API_URL`, falling back to the URL stored by `kitaru login` (no URL anywhere is an error); the credential from the task token a worker injects (`KITARU_API_TOKEN`), then `KITARU_API_KEY`, then the stored `kitaru login` credential — and no credential means unauthenticated, fine when the server runs `AUTH_SCHEME=none`. Workers and task subprocesses are handed the pair explicitly.
+`KitaruAPIClient()` resolves both on its own: the server URL from `KITARU_API_URL`, falling back to the URL stored by `kitaru login` (no URL anywhere is an error); the credential from the task token a worker injects (`KITARU_API_TOKEN`), then `KITARU_API_KEY`, then the stored `kitaru login` credential. No credential means unauthenticated, which is fine when the server runs `AUTH_SCHEME=none`. Workers and task subprocesses are handed the pair explicitly.
 
 ## Selecting a server with the CLI
 
@@ -38,12 +38,12 @@ Useful global flags and their environment twins:
 
 | Flag | Env | Meaning |
 | --- | --- | --- |
-| `--output/-o json` or `jsonl` | — | Machine-readable output for scripts and assistants; `jsonl` streams progress line by line |
+| `--output/-o json` or `jsonl` | none | Machine-readable output for scripts and assistants; `jsonl` streams progress line by line |
 | `--non-interactive` | `KITARU_NON_INTERACTIVE` | Never prompt; fail instead |
 | `--machine` | `KITARU_MACHINE_MODE` | Stable, parseable output defaults |
-| `--request-timeout` | — | Per-request timeout (default 30s) |
-| `--no-browser` | — | Print login URLs instead of opening them |
+| `--request-timeout` | none | Per-request timeout (default 30s) |
+| `--no-browser` | none | Print login URLs instead of opening them |
 
 ## Server and worker configuration
 
-The server is configured through `KITARU_SERVER_*` variables ([Docker](docker.md) lists them) and workers through `KITARU_WORKER_*` ([Workers in production](workers.md)). Neither reads the CLI's config file — deployment configuration stays in the deployment's environment, which is what lets a worker container run with nothing but env vars.
+The server is configured through `KITARU_SERVER_*` variables ([Docker](docker.md) lists them) and workers through `KITARU_WORKER_*` ([Workers in production](workers.md)). Neither reads the CLI's config file; deployment configuration stays in the deployment's environment, which is what lets a worker container run with nothing but env vars.

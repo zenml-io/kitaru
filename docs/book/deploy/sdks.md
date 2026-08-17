@@ -1,23 +1,37 @@
 ---
-description: Use the TypeScript SDK for Kitaru resources while keeping login and worker operations in the existing CLI.
+description: "One server, two SDKs: the typed async Python client and the framework-neutral TypeScript client, and how each connects and authenticates."
 icon: code
 ---
 
-# TypeScript SDK
+# How to use the SDK
 
-`@zenml-io/kitaru` is the framework-neutral TypeScript SDK. It creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The existing Python `kitaru` command remains the CLI for login and worker operations. There is no separate TypeScript CLI.
+Kitaru has two SDKs, and both talk to the same server over the same REST API: the typed async **Python client** that ships in the `kitaru` package, and the framework-neutral **TypeScript client** `@zenml-io/kitaru`. Everything the CLI and the UI do is available from either. The `kitaru` command itself ships with the Python package; there is no separate TypeScript CLI.
 
-{% hint style="info" %}
-The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together.
-{% endhint %}
+## The Python SDK
 
-## Install
+The plain `kitaru` package is the SDK alone: the async client and the API models, which is all a production service needs to record sessions. The [CLI, worker, and server extras](../getting-started/installation.md) layer on top of it.
 
-```bash
-pnpm add @zenml-io/kitaru
+```python
+from kitaru.client import KitaruAPIClient
+
+async with KitaruAPIClient() as client:
+    session = await client.sessions.get(session_id)
+    print(session.status, session.cost)
 ```
 
-## Reuse a developer login
+`KitaruAPIClient()` resolves its connection on its own: the server URL from `KITARU_API_URL`, falling back to the URL stored by `kitaru login` (no URL anywhere is an error); the credential from the task token a worker injects (`KITARU_API_TOKEN`), then `KITARU_API_KEY`, then the stored `kitaru login` credential. [Configuration](configuration.md) covers the full resolution order, and [Authentication & API keys](authentication.md) covers how keys are issued.
+
+The client reaches everything, including single-session replay creation and blob upload, which the MCP server deliberately leaves out. The concept pages show it in context: [replay a session](../concepts/replay.md), [build a cohort](../concepts/cohorts.md), [start an experiment run](../concepts/experiments.md).
+
+## The TypeScript SDK
+
+`@zenml-io/kitaru` creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The [Mastra](../adapters/mastra.md) and [Vercel AI SDK](../adapters/vercel-ai.md) adapters build on it.
+
+{% hint style="info" %}
+The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together. Install with `pnpm add @zenml-io/kitaru`; see [Installation](../getting-started/installation.md).
+{% endhint %}
+
+### Reuse a developer login
 
 First select a server with the CLI:
 
@@ -41,7 +55,7 @@ The Node entry accepts HTTPS servers and cleartext HTTP only on loopback address
 
 Importing `@zenml-io/kitaru` or `@zenml-io/kitaru/client` never reads CLI files. Use those runtime-neutral entries in browsers, edge runtimes, and processes that receive credentials explicitly.
 
-## Use explicit process credentials
+### Use explicit process credentials
 
 CI, deployed applications, and long-running workers should use a dedicated API key or the task token injected by a Kitaru worker:
 
@@ -56,7 +70,7 @@ const client = new KitaruClient({
 
 Do not copy a developer's stored login into a container or CI secret. Create a separate process credential so it can be rotated and revoked independently.
 
-## Resource namespaces
+### Resource namespaces
 
 | Namespace | Operations |
 | --- | --- |
@@ -75,13 +89,13 @@ Do not copy a developer's stored login into a container or CI secret. Create a s
 
 List methods accept cursor pagination and JSON filters. Matching `iter()` methods, including specialized methods such as `iterVersions()` and `iterNodes()`, follow opaque cursors without mutating the caller's parameters.
 
-## Wait and cancellation behavior
+### Wait and cancellation behavior
 
 `jobs.wait(id)`, `experimentRuns.wait(id)`, and `replays.wait(id)` poll only the supplied ID. They return completed, failed, and canceled terminal responses instead of converting remote failure states into transport errors. A local timeout or `AbortSignal` stops polling only; the remote job continues.
 
 Cancellation is a separate explicit call. `jobs.cancel(id)` and `experimentRuns.cancel(id)` send one request and do not blindly retry after response loss. A durable workflow should record the exact ID before cancellation, then read that ID to reconcile a timeout, conflict, or interrupted response. Replays have no cancel endpoint; cancel their `job_id` through `jobs`.
 
-## Hand work to the existing CLI worker
+### Hand work to the existing CLI worker
 
 Persist a submitted job ID before starting a worker, then scope the worker to that exact job:
 

@@ -5,7 +5,7 @@ icon: scale-balanced
 
 # 2. Judge the selected behavior
 
-**Observe → Judge → Define → Replay → Compare**
+Observe → **Judge** → Define → Replay → Compare
 
 The traces prove what happened, but they do not contain the conclusion that a decision was acceptable or problematic. This phase stores human judgments separately from the raw evidence.
 

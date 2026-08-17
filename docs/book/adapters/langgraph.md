@@ -120,7 +120,7 @@ Worker-managed interrupt scheduling and resume are not supported. If a worker in
 
 The v2 adapter is non-streaming. `stream()`, `astream()`, `astream_events()`, `astream_log()`, `batch()`, `abatch()`, `batch_as_completed()`, and `abatch_as_completed()` raise `UnsupportedInvocationError` before session creation or graph execution. Use `invoke()` or `ainvoke()`.
 
-## Capture safety and limits
+## Recording safety and limits
 
 `CapturePolicy` transforms copies sent to Kitaru. It never changes values passed to or returned by LangGraph. The built-in recursive key redactor matches common credential fields case-insensitively, including authorization headers, API keys, passwords, secrets, access and refresh tokens, and cookies. You can supply a final custom `redactor` for application fields.
 
@@ -133,14 +133,14 @@ The default per-invocation bounds are:
 | Child nodes          |  10,000 |
 | One UTF-8 JSON field | 256 KiB |
 | Buffered node data   |  16 MiB |
-| Capture depth        |      20 |
+| Recording depth        |      20 |
 | Items per collection |   1,000 |
 
-Limit hits or serialization failures mark capture as lossy, truncate or drop only the stored copy, and preserve the graph outcome. Lossy tool arguments or results are not eligible for history substitution.
+Limit hits or serialization failures mark the recording as lossy, truncate or drop only the stored copy, and preserve the graph outcome. Lossy tool arguments or results are not eligible for history substitution.
 
 ## Recording failures
 
-Session and root-node setup must succeed before the graph starts. After graph delegation begins, adapter-owned recording failures are contained in that invocation. The direct runner preserves the graph result or exception and attempts one private, structured local warning with the failed stage and exception class, without captured payloads or exception text. A worker task can still fail if its linked result session cannot be completed.
+Session and root-node setup must succeed before the graph starts. After graph delegation begins, adapter-owned recording failures are contained in that invocation. The direct runner preserves the graph result or exception and attempts one private, structured local warning with the failed stage and exception class, without recorded payloads or exception text. A worker task can still fail if its linked result session cannot be completed.
 
 ## Migrate from the v1 adapter
 
