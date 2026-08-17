@@ -36,7 +36,7 @@ from kitaru.server.database.service import DatabaseService
 
 # Probe routes standing in for a real read-only endpoint. No production route
 # is marked read_only yet, so these exercise the auth path the same way a
-# real one would, under the reserved "v1" prefix so bundled UI serving never
+# real one would, under the reserved "api" prefix so bundled UI serving never
 # shadows them.
 _probe_router = APIRouter(route_class=KitaruAPIRoute)
 
@@ -53,7 +53,7 @@ async def _probe_response(actor: AuthContext) -> dict[str, str]:
     return {"status": "ok"}
 
 
-@_probe_router.get("/v1/__test__/normal")
+@_probe_router.get("/api/v1/__test__/normal")
 async def _normal_probe(
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> dict[str, str]:
@@ -68,7 +68,7 @@ async def _normal_probe(
     return await _probe_response(actor)
 
 
-@_probe_router.get("/v1/__test__/read-only")
+@_probe_router.get("/api/v1/__test__/read-only")
 @read_only
 async def _read_only_probe(
     actor: Annotated[AuthContext, Depends(authorize)],
@@ -140,13 +140,13 @@ async def _login(client: httpx.AsyncClient) -> dict[str, str]:
         Authorization header for the default account.
     """
     response = await client.post(
-        "/v1/login", data={"username": "default", "password": "secret"}
+        "/api/v1/login", data={"username": "default", "password": "secret"}
     )
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-@pytest.mark.parametrize("path", ["/v1/__test__/read-only", "/v1/__test__/normal"])
+@pytest.mark.parametrize("path", ["/api/v1/__test__/read-only", "/api/v1/__test__/normal"])
 async def test_probe_route_persists_the_throttled_api_key_last_used(
     client: httpx.AsyncClient, path: str
 ) -> None:
@@ -158,12 +158,12 @@ async def test_probe_route_persists_the_throttled_api_key_last_used(
     """
     user_headers = await _login(client)
     created = (
-        await client.post("/v1/api-keys", json={"name": "probe"}, headers=user_headers)
+        await client.post("/api/v1/api-keys", json={"name": "probe"}, headers=user_headers)
     ).json()
     key_headers = {"Authorization": f"Bearer {created['key']}"}
 
     response = await client.get(path, headers=key_headers)
     assert response.status_code == 200
 
-    response = await client.get(f"/v1/api-keys/{created['id']}", headers=user_headers)
+    response = await client.get(f"/api/v1/api-keys/{created['id']}", headers=user_headers)
     assert response.json()["last_used"] is not None
