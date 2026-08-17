@@ -18,7 +18,7 @@ export KITARU_API_URL="https://kitaru.internal.example.com"
 export KITARU_API_KEY="KITKEY_..."          # a service API key
 
 export KITARU_WORKER_CONCURRENCY=4
-export KITARU_WORKER_SCOPE__KINDS='["evaluator","importer"]'   # JSON
+export KITARU_WORKER_SCOPE__CLAIMS='[{"kind":"evaluator"},{"kind":"importer"}]'   # JSON
 kitaru worker start
 ```
 
@@ -26,7 +26,7 @@ kitaru worker start
 | --- | --- | --- |
 | `KITARU_WORKER_NAME` | hostname-pid | Stable name; restarts reuse the worker registration. In Kubernetes the pod name works out of the box. |
 | `KITARU_WORKER_CONCURRENCY` | 1 | Tasks run in parallel |
-| `KITARU_WORKER_SCOPE__KINDS` | all | JSON list of task kinds to claim — `agent`, `evaluator`, `importer` (task kinds, not job kinds) |
+| `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
 | `KITARU_WORKER_SCOPE__SELECTORS` | — | JSON label selectors (e.g. limit to one agent version's environment) |
 | `KITARU_WORKER_SCOPE__JOB_ID` | — | Claim one job's tasks, drain, exit |
 | `KITARU_WORKER_TIMEOUT` | — | Wall-clock lifetime; unset runs until stopped |
@@ -44,13 +44,13 @@ The worker retains the API key for registration and worker-token renewal. Each t
 
 ```bash
 # in the agent's environment
-kitaru worker start --kinds agent --selector agent_version=7
+kitaru worker start --claim agent=<AGENT_VERSION_ID>
 
 # anywhere cheap
-kitaru worker start --kinds evaluator --kinds importer --concurrency 8
+kitaru worker start --claim evaluator --claim importer --concurrency 8
 ```
 
-The `agent_version` selector matches the label the server stamps on agent tasks, so a worker only claims replays its environment can actually run.
+The versioned `agent` claim matches the agent version attached to each agent task, so a worker only claims replays its environment can actually run.
 
 **One-shot workers in CI.** Pin a worker to the job you just created and it drains the job — appended evaluator tasks included — then exits:
 
