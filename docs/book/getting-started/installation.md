@@ -91,7 +91,7 @@ The core package provides the TypeScript client and adapter primitives. It does 
 
 The Node agent still needs a reachable Kitaru server. Install the Python CLI and worker separately when you want to run the full loop locally, or connect the agent to your team's deployed server and workers.
 
-No adapter for your framework? You are not blocked: [import your traces instead, build a project-local adapter, or have Kitaru call your agent](../adapters/custom.md).
+No adapter for your framework? You are not blocked: [import your traces instead, or build a project-local adapter with the adapter-builder skill](../adapters/custom.md).
 
 ## Install the agent skills
 
