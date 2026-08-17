@@ -53,6 +53,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
     RunSpec,
 )
+from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.secret import Secret
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import FilterCondition
@@ -199,6 +200,26 @@ async def test_create_with_run_spec_and_secret_order(setup: Setup) -> None:
     loaded = await repository.get(version.id)
     assert loaded.run_spec is not None
     assert loaded.run_spec.secret_ids == secret_ids
+
+
+async def test_create_with_unknown_secret_id_rejected() -> None:
+    """Reject a run spec that references a secret that does not exist."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name=f"agent-{uuid.uuid4().hex[:8]}")
+        )
+        repository = SQLAgentVersionRepository(session)
+        with pytest.raises(ValidationError):
+            await repository.create(
+                AgentVersion(
+                    owner_id=owner.id,
+                    agent_id=agent.id,
+                    run_spec=RunSpec(command="run.sh", secret_ids=[uuid.uuid4()]),
+                )
+            )
 
 
 async def test_get(setup: Setup) -> None:

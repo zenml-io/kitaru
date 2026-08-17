@@ -21,6 +21,7 @@ import pytest
 from conftest import pg_session, postgres_available
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.events import AnalyticsEvent
+from kitaru.analytics.source import AnalyticsAttribution, current_attribution
 from kitaru.server.adapters.db.analytics import register_analytics_listeners
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
@@ -250,6 +251,29 @@ async def test_track_merges_the_current_actor() -> None:
     _, traits = client.identified[0]
     assert "service_account" not in traits
     assert "control_plane_user_id" not in traits
+
+
+async def test_track_merges_the_current_skill() -> None:
+    """The active skill lands in tracked properties but not identify traits."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    user_id = uuid.uuid4()
+    token = current_attribution.set(AnalyticsAttribution(skill="data-analysis"))
+    try:
+        async with pg_session() as session:
+            analytics = ServerAnalytics(client=client, session=session)
+            analytics.track(user_id, AnalyticsEvent.SESSION_COMPLETED)
+            analytics.identify(user_id)
+            await session.commit()
+    finally:
+        current_attribution.reset(token)
+
+    _, _, properties = client.tracked[0]
+    assert properties["skill"] == "data-analysis"
+    _, traits = client.identified[0]
+    assert "skill" not in traits
 
 
 async def test_track_omits_control_plane_user_id_without_external_id() -> None:

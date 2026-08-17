@@ -308,17 +308,19 @@ async def test_control_plane_api_key_reuses_login_helper(tmp_path, monkeypatch) 
         api_key=None,
         open_browser=True,
         prompt=None,
-    ) -> ApiToken:
+        refresh=False,
+    ) -> tuple[ApiToken, str]:
         captured.update(
             api_client=api_client,
             base_url=base_url,
             api_key=api_key,
             open_browser=open_browser,
             prompt=prompt,
+            refresh=refresh,
         )
         token = ApiToken.issued("server-session", 3600)
         store.set_token(base_url, token)
-        return token
+        return token, "api_key" if api_key is not None else "device"
 
     monkeypatch.setattr(auth, "control_plane_login", fake_control_plane_login)
     result = await auth.login(

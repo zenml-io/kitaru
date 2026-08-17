@@ -216,16 +216,3 @@ def test_typescript_ci_validates_the_standalone_ticket_resolver() -> None:
         "pnpm test:e2e",
     ):
         assert command in job
-
-
-def test_canonical_example_ci_installs_candidate_python_artifacts() -> None:
-    workflow_source = CI_WORKFLOW_PATH.read_text()
-    job = workflow_source.split("\n  canonical-example:\n", maxsplit=1)[1].split(
-        "\n  links:\n", maxsplit=1
-    )[0]
-
-    assert "Install candidate artifacts in standalone example" in job
-    assert "../../plugins/candidate-wheels/kitaru-*.whl" in job
-    assert "../../plugins/candidate-wheels/kitaru_pydantic_ai-*.whl" in job
-    assert "../../plugins/candidate-wheels/kitaru_langfuse_importer-*.whl" in job
-    assert job.count("uv run --no-sync --with pytest") == 2

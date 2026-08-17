@@ -75,6 +75,26 @@ describe("KitaruClient", () => {
       Authorization: "Bearer explicit-secret",
       "X-Kitaru-Client": "kitaru-typescript",
     });
+    expect(init?.headers).not.toHaveProperty("X-Kitaru-Skill");
+  });
+
+  it("sends the active skill named in the environment", async () => {
+    vi.stubEnv("KITARU_ACTIVE_SKILL", "data-analysis");
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse(sessionResponse, 201),
+    );
+    const client = new KitaruClient({
+      apiUrl: "https://api.example",
+      apiKey: "secret",
+      fetch,
+    });
+
+    await client.createSession(createRequest);
+
+    const [, init] = fetch.mock.calls[0] ?? [];
+    expect(init?.headers).toMatchObject({
+      "X-Kitaru-Skill": "data-analysis",
+    });
   });
 
   it("surfaces FastAPI detail without exposing validation input", async () => {

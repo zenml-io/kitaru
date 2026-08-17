@@ -41,6 +41,7 @@ known-first-party = [
     "kitaru_jsonl_importer",
     "kitaru_langfuse_importer",
     "kitaru_langgraph",
+    "kitaru_logfire_importer",
     "kitaru_langsmith_importer",
     "kitaru_openai_agents",
     "kitaru_pydantic_ai",

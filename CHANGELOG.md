@@ -9,7 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
-- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, the stable `0.1.0` Python plugin distributions, and the stable `0.1.0` TypeScript packages.
+- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, nine stable `0.1.0` Python plugin distributions, and the stable `0.1.0` TypeScript packages.
+
+## [0.22.0rc9]
+
+### Added
+
+- Added the Logfire records-query importer as a default plugin at `0.1.0rc0`.
+
+### Changed
+
+- Prepared the ninth Kitaru 0.22 release candidate with `kitaru-ui-v0.2.0-rc.5` and the Langfuse importer at `0.1.0rc2`.
+
+## [0.22.0rc8]
+
+### Changed
+
+- Prepared the eighth Kitaru 0.22 release candidate with `kitaru-ui-v0.2.0-rc.4`.
+- Evaluation aggregates now report `mean`, `min`, and `max` scores instead of `average`.
+- Completed-session analytics now include the framework, adapter version, LLM call count, and tool call count.
+- Local server image conflicts now show the current and expected image tags and clarify that `kitaru login --local --upgrade` preserves the local database.
 
 ## [0.22.0rc7]
 
@@ -70,6 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - All API routes moved from the `/v1` prefix to `/api/v1`.
+- The public `zenml-io/kitaru-template` repository is now the sole canonical returns walkthrough; the duplicate in-tree example was removed.
 - Replaced the worker scope `kinds` field with explicit claims that can pin agent task claims to a specific agent version, so agent-specific workers on one server no longer claim each other's tasks. The `--kinds` worker CLI flag is replaced by the repeatable `--claim` flag.
 - Added public installation, adapter, replay-boundary, and runnable-example documentation for the TypeScript SDK, Mastra adapter, and Vercel AI SDK adapter.
 
@@ -81,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - TypeScript cloud examples now reuse CLI logins without exporting a token, verify dedicated-worker access before creating remote resources, isolate exact-job recovery state, and stop when a mutation or cancellation cannot be journaled safely.
 
 ### Added
-- `kitaru investigation create` returns the dashboard review page as a `review` link, resolved from the server-stated dashboard URL or, for servers hosting the bundled UI, from the URL the client logged into.
+- CLI and MCP investigation creation return the dashboard review page as a `review` link, resolved from the server-stated dashboard URL or, for servers hosting the bundled UI, from the URL the client logged into. If link resolution fails after creation, both preserve the created investigation and return a warning.
 - Standalone replay CLI create, list, and get commands; cohort baseline selection in the CLI and MCP; and native MCP reads for tags and workers plus capability-gated tag lifecycle operations.
 - Vercel AI SDK 7 `ToolLoopAgent` support for typed, non-streaming agent generation with Kitaru recording and safe replay boundaries.
 - The server now serves the bundled Kitaru UI at its root URL with SPA fallback. Setting `KITARU_SERVER_EXTERNAL_UI=true` makes it redirect to the configured dashboard URL instead of serving files, and `GET /api/v1/info` reports the served UI version.

@@ -14,10 +14,12 @@
 """Analytics source tracking."""
 
 from contextvars import ContextVar
+from dataclasses import dataclass
 from enum import StrEnum
 from importlib.metadata import version
 
 CLIENT_HEADER = "X-Kitaru-Client"
+SKILL_HEADER = "X-Kitaru-Skill"
 
 
 class AnalyticsSource(StrEnum):
@@ -31,8 +33,18 @@ class AnalyticsSource(StrEnum):
     UI = "kitaru-ui"
 
 
-current_source: ContextVar[AnalyticsSource] = ContextVar(
-    "kitaru_analytics_source", default=AnalyticsSource.PYTHON
+@dataclass(frozen=True)
+class AnalyticsAttribution:
+    """Analytics attribution."""
+
+    source: AnalyticsSource = AnalyticsSource.PYTHON
+    skill: str | None = None
+
+
+_DEFAULT_ATTRIBUTION = AnalyticsAttribution()
+
+current_attribution: ContextVar[AnalyticsAttribution] = ContextVar(
+    "kitaru_analytics_attribution", default=_DEFAULT_ATTRIBUTION
 )
 
 

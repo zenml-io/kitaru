@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager
 from mcp.server import MCPServer
 from pydantic import ValidationError
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.mcp.connection import MCPConnection
 from kitaru.mcp.connection import resolve_connection as resolve_fixed_connection
@@ -88,6 +89,7 @@ def _build_client(settings: MCPSettings, connection: MCPConnection) -> KitaruAPI
         timeout=settings.timeout,
         retries=0,
         pool_size=settings.pool_size,
+        analytics_source=AnalyticsSource.MCP,
     )
 
 

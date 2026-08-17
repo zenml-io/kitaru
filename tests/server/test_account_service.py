@@ -732,6 +732,13 @@ async def test_ensure_account_identifies_the_account() -> None:
     user_id, traits = analytics.identified[0]
     assert user_id == account.id
     assert traits == {"is_service_account": False, "account_origin": "bootstrap"}
+    assert analytics.tracked == [
+        (
+            account.id,
+            AnalyticsEvent.ACCOUNT_CREATED,
+            {"account_origin": "bootstrap", "is_service_account": False},
+        )
+    ]
 
 
 async def test_ensure_account_identifies_an_existing_account() -> None:
@@ -752,6 +759,7 @@ async def test_ensure_account_identifies_an_existing_account() -> None:
     user_id, traits = analytics.identified[0]
     assert user_id == account.id
     assert traits["account_origin"] == "bootstrap"
+    assert analytics.tracked == []
 
 
 async def test_create_user_identifies_the_account() -> None:
@@ -780,6 +788,13 @@ async def test_create_user_identifies_the_account() -> None:
         "account_origin": "api",
         "email": "alice@example.com",
     }
+    assert analytics.tracked == [
+        (
+            account.id,
+            AnalyticsEvent.ACCOUNT_CREATED,
+            {"account_origin": "api", "is_service_account": False},
+        )
+    ]
 
 
 async def test_create_user_without_email_omits_the_trait() -> None:
@@ -846,10 +861,12 @@ async def test_update_user_tracks_the_finished_survey() -> None:
         actor=AuthContext(account=created),
     )
 
-    assert len(analytics.tracked) == 1
-    user_id, event, properties = analytics.tracked[0]
+    enriched = [
+        entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.USER_ENRICHED
+    ]
+    assert len(enriched) == 1
+    user_id, _, properties = enriched[0]
     assert user_id == created.id
-    assert event == AnalyticsEvent.USER_ENRICHED
     assert properties == {
         FINISHED_ONBOARDING_SURVEY_KEY: True,
         "usage_reason": "work",
@@ -885,7 +902,10 @@ async def test_update_user_tracks_the_finished_survey_once() -> None:
             actor=AuthContext(account=created),
         )
 
-    assert len(analytics.tracked) == 1
+    enriched = [
+        entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.USER_ENRICHED
+    ]
+    assert len(enriched) == 1
 
 
 async def test_update_user_without_finished_survey_skips_the_event() -> None:
@@ -914,4 +934,7 @@ async def test_update_user_without_finished_survey_skips_the_event() -> None:
         actor=AuthContext(account=created),
     )
 
-    assert analytics.tracked == []
+    enriched = [
+        entry for entry in analytics.tracked if entry[1] == AnalyticsEvent.USER_ENRICHED
+    ]
+    assert enriched == []

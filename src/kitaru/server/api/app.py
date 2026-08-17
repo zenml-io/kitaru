@@ -26,13 +26,15 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
     CLIENT_HEADER,
+    SKILL_HEADER,
+    AnalyticsAttribution,
     AnalyticsSource,
-    current_source,
+    current_attribution,
     parse_client_header,
 )
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
-from kitaru.server.adapters.db.errors import is_deadlock
+from kitaru.server.adapters.db.errors import is_connection_unavailable, is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -150,22 +152,29 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
-def _register_deadlock_exception_handler(app: FastAPI) -> None:
-    """Register the JSON error response for a deadlock-canceled transaction.
+def _register_database_exception_handler(app: FastAPI) -> None:
+    """Register the JSON error response for a retryable database error.
 
-    Clients receive HTTP 503 with the usual ``detail`` message. Any other
-    database error propagates unchanged.
+    A deadlock-canceled transaction and a lost or unavailable connection both
+    yield HTTP 503 with a ``detail`` message. Any other database error
+    propagates unchanged.
 
     Args:
         app: FastAPI application that will serve the v1 API.
     """
 
     @app.exception_handler(DBAPIError)
-    async def deadlock(request: Request, exc: DBAPIError) -> JSONResponse:
+    async def database_error(request: Request, exc: DBAPIError) -> JSONResponse:
         _ = request
-        if not is_deadlock(exc):
-            raise exc
-        return JSONResponse(status_code=503, content={"detail": "Deadlock detected"})
+        if is_deadlock(exc):
+            return JSONResponse(
+                status_code=503, content={"detail": "Deadlock detected"}
+            )
+        if is_connection_unavailable(exc):
+            return JSONResponse(
+                status_code=503, content={"detail": "Database connection unavailable"}
+            )
+        raise exc
 
 
 def _register_pool_timeout_exception_handler(app: FastAPI) -> None:
@@ -206,10 +215,10 @@ def _register_token_grant_exception_handler(app: FastAPI) -> None:
         )
 
 
-async def _set_analytics_source(
+async def _set_analytics_attribution(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Set the analytics source for the request from the client header.
+    """Set the analytics attribution for the request from the client headers.
 
     Args:
         request: Incoming request.
@@ -219,11 +228,16 @@ async def _set_analytics_source(
         HTTP response.
     """
     source = parse_client_header(request.headers.get(CLIENT_HEADER, ""))
-    token = current_source.set(source or AnalyticsSource.API)
+    token = current_attribution.set(
+        AnalyticsAttribution(
+            source=source or AnalyticsSource.API,
+            skill=request.headers.get(SKILL_HEADER) or None,
+        )
+    )
     try:
         return await call_next(request)
     finally:
-        current_source.reset(token)
+        current_attribution.reset(token)
 
 
 def create_app(settings: APISettings) -> FastAPI:
@@ -311,10 +325,10 @@ def create_app(settings: APISettings) -> FastAPI:
     # Replaced with the persisted server id at startup.
     app.state.server_id = None
     _register_domain_exception_handlers(app)
-    _register_deadlock_exception_handler(app)
+    _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)
     _register_token_grant_exception_handler(app)
-    app.middleware("http")(_set_analytics_source)
+    app.middleware("http")(_set_analytics_attribution)
     # FastAPIInstrumentor registers its middleware last, which makes the
     # OTel span the outermost layer, so this call must come after every
     # other middleware registration.

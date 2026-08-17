@@ -8,7 +8,7 @@ common = [
     "typos",
     "typecheck",
     "audit",
-    "Canonical example end to end",
+    "Public template against current Kitaru",
     "docker-smoke",
     "plugin-tests",
     "test (py311-base)",
@@ -87,6 +87,16 @@ version-source = "plugins/packages/langgraph/pyproject.toml"
 default-catalog = false
 tag-prefix = "python/kitaru-langgraph/v"
 checks = ["plugin package (langgraph)"]
+
+[[units]]
+slug = "logfire-importer"
+path = "plugins/packages/logfire-importer"
+distribution = "kitaru-logfire-importer"
+registry = "pypi"
+version-source = "plugins/packages/logfire-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-logfire-importer/v"
+checks = ["plugin package (logfire-importer)"]
 
 [[units]]
 slug = "langsmith-importer"

@@ -5276,11 +5276,13 @@
           "properties": {
             "end": {
               "description": "End offset of the character range.",
+              "minimum": 0,
               "title": "End",
               "type": "integer"
             },
             "start": {
               "description": "Start offset of the character range.",
+              "minimum": 0,
               "title": "Start",
               "type": "integer"
             }
@@ -7703,11 +7705,13 @@
           "properties": {
             "end": {
               "description": "End offset of the character range.",
+              "minimum": 0,
               "title": "End",
               "type": "integer"
             },
             "start": {
               "description": "Start offset of the character range.",
+              "minimum": 0,
               "title": "Start",
               "type": "integer"
             }
@@ -8366,11 +8370,13 @@
           "properties": {
             "end": {
               "description": "End offset of the character range.",
+              "minimum": 0,
               "title": "End",
               "type": "integer"
             },
             "start": {
               "description": "Start offset of the character range.",
+              "minimum": 0,
               "title": "Start",
               "type": "integer"
             }
@@ -8831,6 +8837,16 @@
             }
           ],
           "default": null
+        },
+        "links": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "propertyNames": {
+            "const": "review"
+          },
+          "title": "Links",
+          "type": "object"
         },
         "ok": {
           "title": "Ok",

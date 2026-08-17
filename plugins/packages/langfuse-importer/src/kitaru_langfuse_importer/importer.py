@@ -837,8 +837,129 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     )
 
 
+def _tool_call_ids(value: Any) -> set[str]:
+    """Return tool-call ids emitted by one model output."""
+    result: set[str] = set()
+
+    def walk(item: Any, *, tool_call: bool = False) -> None:
+        item = _decode_json(item)
+        if isinstance(item, list):
+            for child in item:
+                walk(child, tool_call=tool_call)
+            return
+        if not isinstance(item, dict):
+            return
+
+        item_type = str(item.get("type") or "").lower()
+        is_tool_call = tool_call or item_type in {
+            "function_call",
+            "tool_call",
+            "tool_use",
+        }
+        if is_tool_call:
+            call_id = _first(item, "id", "toolCallId", "tool_call_id")
+            if call_id not in (None, ""):
+                result.add(str(call_id))
+
+        for key, child in item.items():
+            walk(child, tool_call=key in {"toolCalls", "tool_calls"})
+
+    walk(value)
+    return result
+
+
+def _tool_call_id(record: dict[str, Any]) -> str | None:
+    """Return the causal tool-call id recorded on one tool observation."""
+    value = _first(record, "toolCallId", "tool_call_id") or _metadata_value(
+        record,
+        "gen_ai.tool.call.id",
+        "tool_call_id",
+        "toolCallId",
+    )
+    return str(value) if value not in (None, "") else None
+
+
+def _infer_tool_call_secondary_parents(
+    nodes_with_parents: list[tuple[str, str | None, dict[str, Any]]],
+) -> dict[str, list[str]]:
+    """Match tool observations to the model outputs that requested them."""
+    primary_parents = {
+        external_id: parent
+        for external_id, parent, _ in nodes_with_parents
+        if parent is not None
+    }
+    requesting_nodes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for external_id, _, record in nodes_with_parents:
+        node_type, _ = _node_type(record)
+        if node_type is not NodeType.LLM_CALL:
+            continue
+        trace_id = str(_first(record, "traceId", "trace_id") or "")
+        for call_id in _tool_call_ids(record.get("output")):
+            requesting_nodes[(trace_id, call_id)].add(external_id)
+
+    inferred: dict[str, list[str]] = {}
+    for external_id, primary_parent, record in nodes_with_parents:
+        node_type, _ = _node_type(record)
+        if node_type is not NodeType.TOOL_CALL:
+            continue
+        call_id = _tool_call_id(record)
+        if call_id is None:
+            continue
+        trace_id = str(_first(record, "traceId", "trace_id") or "")
+        candidates = requesting_nodes.get((trace_id, call_id), set())
+        if len(candidates) != 1:
+            continue
+        requesting_node = next(iter(candidates))
+        ancestors: set[str] = set()
+        current = primary_parent
+        while current is not None and current not in ancestors:
+            ancestors.add(current)
+            current = primary_parents.get(current)
+        if requesting_node not in ancestors:
+            inferred[external_id] = [requesting_node]
+    return inferred
+
+
+def _flatten_node_tree(roots: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten an imported node tree in ingestion order."""
+    flattened: list[ImportedNode] = []
+
+    def walk(node: ImportedNode) -> None:
+        flattened.append(node)
+        for child in node.children:
+            walk(child)
+
+    for root in roots:
+        walk(root)
+    return flattened
+
+
+def _apply_secondary_parent_indexes(
+    roots: list[ImportedNode], secondary_parents: dict[str, list[str]]
+) -> None:
+    """Resolve secondary external ids to depth-first ingestion indexes."""
+    flattened = _flatten_node_tree(roots)
+
+    index_by_external_id = {
+        node.external_id: index
+        for index, node in enumerate(flattened)
+        if node.external_id is not None
+    }
+    for index, node in enumerate(flattened):
+        inferred_indexes = {
+            parent_index
+            for external_id in secondary_parents.get(node.external_id or "", [])
+            if (parent_index := index_by_external_id.get(external_id)) is not None
+            and parent_index < index
+        }
+        node.secondary_parent_indexes = sorted(
+            {*node.secondary_parent_indexes, *inferred_indexes}
+        )
+
+
 def _build_node_tree(
     nodes_with_parents: list[tuple[ImportedNode, str | None]],
+    secondary_parents: dict[str, list[str]] | None = None,
 ) -> list[ImportedNode]:
     """Build and validate the parsed-node tree."""
     external_ids = [node.external_id for node, _ in nodes_with_parents]
@@ -874,6 +995,8 @@ def _build_node_tree(
             roots.append(node)
     if nodes_with_parents and not roots:
         raise InvalidImport("The imported node graph contains no root node")
+    if secondary_parents:
+        _apply_secondary_parent_indexes(roots, secondary_parents)
     return roots
 
 
@@ -892,6 +1015,9 @@ class LangfuseJSONLImporter:
         Returns:
             Imported sessions and isolated import failures.
         """
+        infer_tool_call_links = params.get("infer_tool_call_links", True)
+        if not isinstance(infer_tool_call_links, bool):
+            raise InvalidImport("infer_tool_call_links must be a boolean")
         records = _parse_records(content)
         shape = _detect_shape(records[0])
         if shape == _EVENT_SHAPE:
@@ -946,6 +1072,7 @@ class LangfuseJSONLImporter:
                         join_paths=join_paths[source_id],
                         trace_fallback=source_id in fallback_sessions,
                         file_framework=file_framework,
+                        infer_tool_call_links=infer_tool_call_links,
                     )
                 )
             except InvalidImport as exc:
@@ -967,6 +1094,7 @@ class LangfuseJSONLImporter:
         join_paths: set[str],
         trace_fallback: bool,
         file_framework: str | None,
+        infer_tool_call_links: bool,
     ) -> ImportedSession:
         """Parse one grouped Langfuse session."""
         project_ids = {
@@ -1087,6 +1215,11 @@ class LangfuseJSONLImporter:
                 item[0],
             )
         )
+        secondary_parents = (
+            _infer_tool_call_secondary_parents(raw_nodes)
+            if infer_tool_call_links
+            else {}
+        )
         nodes_with_parents: list[tuple[ImportedNode, str | None]] = []
         for source_node_id, parent_source_id, record in raw_nodes:
             node_type, tool_name = _node_type(record)
@@ -1156,6 +1289,7 @@ class LangfuseJSONLImporter:
 
         nodes = [node for node, _ in nodes_with_parents]
         _populate_node_fields(nodes)
+        node_tree = _build_node_tree(nodes_with_parents, secondary_parents)
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         latest_root_status = _node_status(latest_root)
@@ -1230,6 +1364,11 @@ class LangfuseJSONLImporter:
             "source_completeness": "unknown",
             "normalization_warnings": warnings,
         }
+        if infer_tool_call_links:
+            metadata["langfuse.inferred_tool_call_link_count"] = sum(
+                len(node.secondary_parent_indexes)
+                for node in _flatten_node_tree(node_tree)
+            )
         framework = (
             _detect_framework(params.get("framework"))
             or _detect_framework(
@@ -1259,7 +1398,7 @@ class LangfuseJSONLImporter:
             ended_at=ended_at,
             metadata=metadata,
             framework=framework,
-            nodes=_build_node_tree(nodes_with_parents),
+            nodes=node_tree,
         )
 
 

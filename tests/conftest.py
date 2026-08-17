@@ -44,6 +44,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
@@ -561,6 +562,7 @@ def asgi_api_client(
     app: FastAPI,
     credential_store: CredentialStore | None = None,
     api_key: str | None = None,
+    analytics_source: AnalyticsSource = AnalyticsSource.PYTHON,
 ) -> KitaruAPIClient:
     """Build an SDK client routed to the app instead of the network.
 
@@ -569,6 +571,7 @@ def asgi_api_client(
         credential_store: Store holding the credentials the client
             authenticates with.
         api_key: Bearer token sent with every request.
+        analytics_source: Client sending the requests.
 
     Returns:
         Client wired to an ASGI transport.
@@ -577,6 +580,7 @@ def asgi_api_client(
         base_url="http://test",
         credential_store=credential_store,
         api_key=api_key,
+        analytics_source=analytics_source,
     )
     client._http = httpx.AsyncClient(
         transport=RetryTransport(httpx.ASGITransport(app=app)),

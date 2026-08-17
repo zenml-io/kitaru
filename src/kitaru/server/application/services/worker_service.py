@@ -16,23 +16,34 @@
 import uuid
 from datetime import UTC, datetime
 
+from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
 from kitaru.server.application.models.auth import AuthContext, WorkerPrincipal
 from kitaru.server.application.models.worker import WorkerFilter
+from kitaru.server.application.services.analytics_events import (
+    build_worker_registered_properties,
+)
+from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.worker import Worker, WorkerAccessDenied
 
 
 class WorkerService:
     """Worker use cases."""
 
-    def __init__(self, repository: WorkerRepository) -> None:
+    def __init__(
+        self,
+        repository: WorkerRepository,
+        analytics: ServerAnalytics | None = None,
+    ) -> None:
         """Initialize the service.
 
         Args:
             repository: Worker repository.
+            analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
+        self._analytics = analytics
 
     async def register_worker(
         self,
@@ -62,7 +73,16 @@ class WorkerService:
             metadata=metadata,
             last_seen_at=datetime.now(UTC),
         )
-        return await self._repository.register(worker)
+        stored = await self._repository.register(worker)
+        # A refresh keeps the existing row's id, so a returned row carrying
+        # the requested id is a new registration.
+        if self._analytics is not None and stored.id == worker.id:
+            self._analytics.track(
+                actor.account.id,
+                AnalyticsEvent.WORKER_REGISTERED,
+                build_worker_registered_properties(stored),
+            )
+        return stored
 
     async def get_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> Worker:
         """Get a worker by id.

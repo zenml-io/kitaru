@@ -21,7 +21,11 @@ import pytest
 
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
-from kitaru.client.exceptions import NotFoundError, ServerError
+from kitaru.client.exceptions import (
+    InvalidServerResponseError,
+    NotFoundError,
+    ServerError,
+)
 from kitaru.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
 
 
@@ -94,6 +98,22 @@ async def test_no_retry_on_client_error() -> None:
     with pytest.raises(NotFoundError):
         await client.request("GET", "/api/v1/accounts")
     assert len(requests) == 1
+
+
+async def test_html_success_response_raises_a_typed_error() -> None:
+    """Surface a success response carrying an HTML page as a typed error."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Type": "text/html; charset=utf-8"},
+            text="<!doctype html><html></html>",
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(InvalidServerResponseError) as exc_info:
+        await client.request("GET", "/api/v1/info")
+    assert "GET /api/v1/info" in str(exc_info.value)
 
 
 async def test_raises_after_retries_exhausted() -> None:

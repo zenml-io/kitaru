@@ -25,6 +25,7 @@ EXPECTED_UNITS = {
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
     "langgraph": "kitaru-langgraph",
+    "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
     "pydantic-ai": "kitaru-pydantic-ai",
@@ -35,6 +36,7 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
+    "kitaru-logfire-importer",
     "kitaru-langsmith-importer",
 }
 
@@ -61,7 +63,7 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_nine_python_distributions() -> None:
+def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -384,9 +386,33 @@ def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
     assert "          - braintrust-importer\n" not in workflow
 
 
+def test_ci_public_template_job_enforces_the_canonical_walkthrough() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "\n  canonical-example:\n" not in workflow
+    lint_job = workflow.split("\n  lint:\n", maxsplit=1)[1].split(
+        "\n  typescript:\n", maxsplit=1
+    )[0]
+    template_job = workflow.split("\n  public-template-contract:\n", maxsplit=1)[
+        1
+    ].split("\n  links:\n", maxsplit=1)[0]
+
+    assert "scripts/audit-example-coverage.py" in lint_job
+    assert "name: Public template against current Kitaru" in template_job
+    assert "repository: zenml-io/kitaru-template" in template_job
+    assert "Install current Kitaru artifacts into template" in template_job
+    assert "plugins/candidate-wheels/kitaru-*.whl" in template_job
+    assert "plugins/candidate-wheels/kitaru_pydantic_ai-*.whl" in template_job
+    assert "plugins/candidate-wheels/kitaru_langfuse_importer-*.whl" in template_job
+    assert "tests/test_contract.py" in template_job
+    assert "tests/test_repository_contract.py" in template_job
+    assert "uv run --no-sync python scripts/run_ci_e2e.py" in template_job
+
+
 def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
     inventory = load_inventory()
 
+    assert "Public template against current Kitaru" in inventory.common_checks
+    assert "Canonical example end to end" not in inventory.common_checks
     for unit in inventory.units:
         assert inventory.common_checks <= unit.required_checks
         if unit.slug == "kitaru":
@@ -411,7 +437,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 9 release units."),
+        (["validate"], "Validated 10 release units."),
     ],
 )
 def test_cli_text_commands_succeed(

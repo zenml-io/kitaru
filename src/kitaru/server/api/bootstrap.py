@@ -121,6 +121,15 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
+        name=f"{RESERVED_NAMESPACE}/logfire",
+        description="Import Logfire records-query JSON and NDJSON exports.",
+        provider="logfire",
+        entrypoint="kitaru_logfire_importer.importer:parse",
+        requirement="kitaru-logfire-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
         name=f"{RESERVED_NAMESPACE}/langsmith",
         description="Import LangSmith run-query and bulk-export records.",
         provider="langsmith",
