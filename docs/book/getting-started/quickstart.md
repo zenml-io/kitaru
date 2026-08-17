@@ -70,9 +70,9 @@ The assistant selects sessions, walks the review, drafts the evaluator, and runs
 {% step %}
 ### Observe a recorded behavior
 
-> Show me the most recent failed `support-agent` session, node by node, and point at where the behavior went wrong.
+> Run the deterministic evaluators over `support-agent`'s recent sessions, show me which ones look worst and why, and walk me through the worst one node by node.
 
-One recorded session contains this path:
+Observation starts wide, not with one lucky trace. Kitaru ships ten [deterministic evaluators](../guides/deterministic-evaluations.md), covering session diagnostics, tool health, trajectory signals, timing, and LLM-call signals, that read stored sessions without running the agent or calling a model. Sweeping your whole history with them is cheap and repeatable, and the failures, retries, and tool errors they surface are how the sessions worth a human look get found. One of the surfaced sessions contains this path:
 
 | Session node | Result |
 | --- | --- |
