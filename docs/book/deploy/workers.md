@@ -50,7 +50,7 @@ kitaru worker start --claim agent=<AGENT_VERSION_ID>
 kitaru worker start --claim evaluator --claim importer --concurrency 8
 ```
 
-The `agent_version` selector matches the label the server stamps on agent tasks, so a worker only claims replays its environment can actually run.
+The versioned `agent` claim matches the agent version attached to each agent task, so a worker only claims replays its environment can actually run.
 
 **One-shot workers in CI.** Pin a worker to the job you just created and it drains the job — appended evaluator tasks included — then exits:
 
