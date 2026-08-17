@@ -42,7 +42,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_list_params_to_filter,
     session_to_response,
 )
-from kitaru.server.adapters.rest.route import KitaruAPIRoute
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
@@ -152,6 +152,7 @@ def _evaluation_value(evaluation: Evaluation | None) -> EvaluationValue | None:
 
 
 @router.get("/sessions")
+@read_only
 async def list_sessions_with_evaluations(
     session_service: Annotated[SessionService, Depends(get_session_service)],
     evaluation_service: Annotated[EvaluationService, Depends(get_evaluation_service)],
@@ -194,6 +195,7 @@ async def list_sessions_with_evaluations(
 
 
 @router.get("/sessions/{session_id}")
+@read_only
 async def get_session_with_evaluations(
     session_id: uuid.UUID,
     session_service: Annotated[SessionService, Depends(get_session_service)],
@@ -225,6 +227,7 @@ async def get_session_with_evaluations(
 
 
 @router.get("/experiment-runs/{experiment_run_id}/evaluation-aggregates")
+@read_only
 async def list_experiment_run_evaluation_aggregates(
     experiment_run_id: uuid.UUID,
     run_service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
