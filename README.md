@@ -72,7 +72,9 @@ Already have an agent in production? [Import its traces](https://docs.zenml.io/k
 
 **4. Drive results.** Open the repo (the template or your own agent) in Claude Code, Codex, or Cursor and ask:
 
-> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Show me the recorded evidence before asking for a judgment, and ask before creating resources or starting paid replay.
+```
+Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Show me the recorded evidence before asking for a judgment, and ask before creating resources or starting paid replay.
+```
 
 The assistant sweeps the sessions with the built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it does the legwork. The [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) walks the same loop on the template, step by step.
 

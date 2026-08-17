@@ -21,7 +21,9 @@ Nothing else works until your agent's runs land in Kitaru as [sessions](../conce
 
 {% tabs %}
 {% tab title="Import the traces you already have" %}
-> Here is an export of our agent's traces from Langfuse: `langfuse-export.jsonl`. Register the agent in Kitaru as `support-agent`, import the export, tag the sessions `imported-baseline`, and tell me what landed and what was skipped.
+```
+Here is an export of our agent's traces from Langfuse: langfuse-export.jsonl. Register the agent in Kitaru as support-agent, import the export, tag the sessions imported-baseline, and tell me what landed and what was skipped.
+```
 
 Prefer to do it by hand? It is two commands:
 
@@ -36,7 +38,9 @@ See [Import your traces](import-your-traces.md) for the full walkthrough, and th
 {% endtab %}
 
 {% tab title="Record with an adapter" %}
-> Add the Kitaru adapter to our PydanticAI agent so every run is recorded as a session. Register the agent as `support-agent` first and wire its agent id into the wrapper. Don't change any agent behavior.
+```
+Add the Kitaru adapter to our PydanticAI agent so every run is recorded as a session. Register the agent as support-agent first and wire its agent id into the wrapper. Don't change any agent behavior.
+```
 
 The wrapper it adds is one line around the agent you already have:
 
@@ -62,7 +66,9 @@ Which one? Both, eventually:
 
 The whole method fits in one ask. `kitaru-investigation` is the skill that runs it with you:
 
-> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
+```
+Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
+```
 
 The assistant selects sessions, walks the review, drafts the evaluator, and runs the experiment. You supply the domain judgments and approve consequential actions. These five steps are the record → replay → improve loop in working form: recording already got you the sessions above, observing, judging, and defining are where improvement gets its criteria, and replaying and comparing close the loop. What follows is what the assistant is doing at each step, with a worked example from a support agent that refunds, replaces, or escalates return requests, and the prompt you would use to drive that step alone.
 
@@ -70,7 +76,9 @@ The assistant selects sessions, walks the review, drafts the evaluator, and runs
 {% step %}
 ### Observe a recorded behavior
 
-> Run the deterministic evaluators over `support-agent`'s recent sessions, show me which ones look worst and why, and walk me through the worst one node by node.
+```
+Run the deterministic evaluators over support-agent's recent sessions, show me which ones look worst and why, and walk me through the worst one node by node.
+```
 
 Observation starts wide: sweep the whole history before you stare at any single trace. Kitaru ships ten [deterministic evaluators](../guides/deterministic-evaluations.md), covering session diagnostics, tool health, trajectory signals, timing, and LLM-call signals, that read stored sessions without running the agent or calling a model. The sweep is cheap and repeatable, and the failures, retries, and tool errors it surfaces tell you which sessions deserve a human look. One of the surfaced sessions contains this path:
 
@@ -88,7 +96,9 @@ Each model call, tool call, and result is a **session node**. The `issue_refund`
 {% step %}
 ### Judge what should have happened
 
-> Open an investigation on this session. I will give the verdicts; record each one as an annotation pinned to the exact nodes that support it.
+```
+Open an investigation on this session. I will give the verdicts; record each one as an annotation pinned to the exact nodes that support it.
+```
 
 This is the interview, and it is the crucial step of the whole game. Your assistant has already mapped your sessions and built a worklist (related failures plus at least one counterexample); now it creates an [**investigation**](../concepts/investigations.md) and asks you, against the evidence on screen, the questions Kitaru needs clarity on. Not "write down your eval criteria," but "given this policy lookup that returned nothing and this refund that was accepted anyway, was escalation required?"
 
@@ -102,7 +112,9 @@ Each answer is stored as an **annotation** pinned to the exact nodes that suppor
 {% step %}
 ### Define the behavior to test
 
-> Turn my accepted judgment into a deterministic evaluator, and freeze the reviewed cases, including at least one counterexample, into a cohort.
+```
+Turn my accepted judgment into a deterministic evaluator, and freeze the reviewed cases, including at least one counterexample, into a cohort.
+```
 
 The accepted judgment becomes a reusable [**evaluator**](../concepts/evaluators.md). One bad case is not enough, so the review also keeps a counterexample:
 
@@ -117,7 +129,9 @@ Both are frozen into a [**cohort**](../concepts/cohorts.md) version. The target 
 {% step %}
 ### Replay the changed agent
 
-> Register my working tree as a new version of `support-agent` and replay the cohort against it. Answer every tool call from the recorded history and fail on any missing result.
+```
+Register my working tree as a new version of support-agent and replay the cohort against it. Answer every tool call from the recorded history and fail on any missing result.
+```
 
 Kitaru [**replays**](../concepts/replay.md) the frozen cohort against the candidate inside an [**experiment**](../concepts/experiments.md): each replay starts from the recorded input and produces a new session.
 
@@ -129,7 +143,9 @@ Re-running an agent can re-run its tools, so every tool call needs a policy: **r
 {% step %}
 ### Compare the evidence
 
-> Compare evaluations between the baseline and the candidate across the cohort, and tell me what improved, what regressed, and what is inconclusive.
+```
+Compare evaluations between the baseline and the candidate across the cohort, and tell me what improved, what regressed, and what is inconclusive.
+```
 
 The same evaluator version checks the original and replayed sessions:
 

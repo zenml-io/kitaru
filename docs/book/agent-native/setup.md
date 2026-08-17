@@ -148,14 +148,24 @@ export KITARU_API_KEY="KITKEY_..."
 
 The loop compresses well into assistant tasks. Some starting points, ready to paste:
 
-> Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
+```
+Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
+```
 
-> The last run of support-agent failed. Fetch the most recent failed session and its nodes with the Kitaru client, and tell me which tool call went wrong.
+```
+The last run of support-agent failed. Fetch the most recent failed session and its nodes with the Kitaru client, and tell me which tool call went wrong.
+```
 
-> Replay session `<id>` unchanged with the refund-check evaluator and a baseline history tool policy. When it completes, compare evaluations and cost against the baseline and summarize.
+```
+Replay session <id> unchanged with the refund-check evaluator and a baseline history tool policy. When it completes, compare evaluations and cost against the baseline and summarize.
+```
 
-> Here are five things our support lead says a good refund reply does: `<criteria>`. Write a Kitaru evaluator that checks them, test it offline with `kitaru evaluator test`, and register it as refund-quality.
+```
+Here are five things our support lead says a good refund reply does: <criteria>. Write a Kitaru evaluator that checks them, test it offline with kitaru evaluator test, and register it as refund-quality.
+```
 
-> Take every session where refund-quality failed, freeze them into a cohort called refund-hard-cases, and start an experiment that replays them with the system prompt in `prompts/support_v2.txt`.
+```
+Take every session where refund-quality failed, freeze them into a cohort called refund-hard-cases, and start an experiment that replays them with the system prompt in prompts/support_v2.txt.
+```
 
 Each is a bounded task with a verifiable artifact at the end (a session, an evaluator version, an experiment run), which is exactly the shape coding assistants are good at.
