@@ -239,3 +239,23 @@ async def test_tool_lookup_invalid_cache_key_length(
         json={"tool_name": "search", "cache_key": "short"},
     )
     assert response.status_code == 422
+
+
+async def test_tool_lookup_negative_occurrence(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """Observe HTTP 422 for a negative occurrence."""
+    created = (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": str(baseline_session_id),
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    response = await client.post(
+        f"/api/v1/replays/{created['id']}/tool-lookup",
+        json={"tool_name": "search", "cache_key": "a" * 64, "occurrence": -1},
+    )
+    assert response.status_code == 422
