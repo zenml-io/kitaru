@@ -31,6 +31,7 @@ import pytest
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
     LabelSelector,
+    WorkerClaim,
     WorkerListParams,
     WorkerResponse,
     WorkerRuntime,
@@ -97,7 +98,7 @@ def _response(name: str, *, live: bool) -> WorkerResponse:
         created=now,
         updated=now,
         name=name,
-        scope={},
+        scope={"claims": [{"kind": "agent"}]},
         runtime=WorkerRuntime(platform="bare"),
         last_seen_at=datetime.now(UTC),
         live=live,
@@ -120,9 +121,9 @@ def _output_context(stdout: io.StringIO, stderr: io.StringIO) -> OutputContext:
 def test_config_merge_overrides_only_explicit_scope_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """CLI kinds refine env scope while preserving selectors and job id."""
+    """CLI claims refine env scope while preserving selectors and job id."""
     job_id = uuid.uuid4()
-    monkeypatch.setenv("KITARU_WORKER_SCOPE__KINDS", '["importer"]')
+    monkeypatch.setenv("KITARU_WORKER_SCOPE__CLAIMS", '[{"kind": "importer"}]')
     monkeypatch.setenv(
         "KITARU_WORKER_SCOPE__SELECTORS",
         '[{"key":"pool","values":["cpu"],"required":true}]',
@@ -132,12 +133,15 @@ def test_config_merge_overrides_only_explicit_scope_fields(
     monkeypatch.setenv("KITARU_WORKER_METADATA", '{"source":"env"}')
 
     config = workers.build_worker_config(
-        kinds=[TaskKind.AGENT, TaskKind.EVALUATOR],
+        claims=["agent", "evaluator"],
         concurrency=4,
         metadata=["source=cli", "pool=local"],
     )
 
-    assert config.scope.kinds == [TaskKind.AGENT, TaskKind.EVALUATOR]
+    assert config.scope.claims == [
+        WorkerClaim(kind=TaskKind.AGENT),
+        WorkerClaim(kind=TaskKind.EVALUATOR),
+    ]
     assert config.scope.selectors == [
         LabelSelector(key="pool", values=["cpu"], required=True)
     ]
@@ -145,6 +149,22 @@ def test_config_merge_overrides_only_explicit_scope_fields(
     assert config.concurrency == 4
     assert config.metadata == {"source": "cli", "pool": "local"}
     assert "request_timeout" not in type(config).model_fields
+
+
+def test_config_merge_parses_a_versioned_agent_claim() -> None:
+    """A --claim value of agent=UUID parses to a versioned agent claim."""
+    agent_version_id = uuid.uuid4()
+    config = workers.build_worker_config(claims=[f"agent={agent_version_id}"])
+    assert config.scope.claims == [
+        WorkerClaim(kind=TaskKind.AGENT, agent_version_id=agent_version_id)
+    ]
+
+
+def test_config_merge_rejects_an_invalid_claim_value() -> None:
+    """An unrecognized --claim value raises a CLI error."""
+    with pytest.raises(CLIError) as error:
+        workers.build_worker_config(claims=["bogus"])
+    assert error.value.kind == "invalid_arguments"
 
 
 def test_drain_timeout_merges_explicit_over_environment(
@@ -532,10 +552,10 @@ def test_missing_worker_extra_has_actionable_hint(
     assert error.value.hint == "Install kitaru[cli,worker]."
 
 
-def test_cli_start_passes_kind_scope_and_emits_stream_result(
+def test_cli_start_passes_claim_scope_and_emits_stream_result(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """The app maps CLI kinds into the generic worker without provider state."""
+    """The app maps CLI claims into the generic worker without provider state."""
     calls: list[tuple[ResolvedTarget, dict[str, Any]]] = []
 
     async def fake_start(target: ResolvedTarget, **options: Any) -> CommandResult:
@@ -552,9 +572,9 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
                 "--server",
                 "https://api.example.com",
                 "--machine",
-                "--kinds",
+                "--claim",
                 "agent",
-                "--kinds",
+                "--claim",
                 "importer",
                 "--job-id",
                 str(job_id := uuid.uuid4()),
@@ -575,7 +595,7 @@ def test_cli_start_passes_kind_scope_and_emits_stream_result(
     assert payload["event"] == "stopped"
     target, options = calls[0]
     assert target.server_url == "https://api.example.com"
-    assert options["kinds"] == [TaskKind.AGENT, TaskKind.IMPORTER]
+    assert options["claims"] == ["agent", "importer"]
     assert options["job_id"] == job_id
     assert options["concurrency"] == 3
     assert options["drain_timeout"] == 15.0

@@ -22,6 +22,7 @@ import pytest
 from conftest import db_settings, lifespan_client
 
 RUNTIME = {"platform": "bare"}
+SCOPE = {"claims": [{"kind": "agent"}]}
 
 
 async def _wait_until(
@@ -86,7 +87,12 @@ async def test_background_sweep_abandons_a_stale_task_and_settles_the_job(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}
@@ -170,7 +176,12 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
     registration = (
         await client.post(
             "/api/v1/workers",
-            json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
         )
     ).json()
     worker_headers = {"Authorization": f"Bearer {registration['token']}"}

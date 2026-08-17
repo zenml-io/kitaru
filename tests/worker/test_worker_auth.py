@@ -16,6 +16,7 @@
 from fastapi import FastAPI
 
 from conftest import (
+    UNSCOPED_WORKER_SCOPE,
     FakeAccountRepository,
     FakeApiKeyRepository,
     FakePasswordHasher,
@@ -23,7 +24,7 @@ from conftest import (
     asgi_api_client,
     local_settings,
 )
-from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
@@ -88,7 +89,7 @@ def _registration_request(name: str = "worker-1") -> WorkerCreateRequest:
         Worker create request.
     """
     return WorkerCreateRequest(
-        name=name, scope=WorkerScope(), runtime=RUNTIME, metadata={}
+        name=name, scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
     )
 
 

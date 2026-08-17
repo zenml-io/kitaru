@@ -19,7 +19,13 @@ from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
 from kitaru.api_models.v1.session import SessionResponse
 from kitaru.api_models.v1.tag import TagResponse
-from kitaru.api_models.v1.worker import WorkerResponse, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import (
+    WorkerClaim,
+    WorkerResponse,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityListRequest
 from kitaru.mcp.models.common import PageData
@@ -253,7 +259,7 @@ def _get_worker() -> WorkerResponse:
         id=uuid.uuid4(),
         owner_id=uuid.uuid4(),
         name="worker-a",
-        scope=WorkerScope(kinds=["agent"]),
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
         runtime=WorkerRuntime(platform="docker", hostname="worker-a.local"),
         last_seen_at=now,
         live=True,
@@ -342,7 +348,7 @@ async def test_registry_worker_get_preserves_observation_fields() -> None:
     assert client.calls == [("get_worker", worker_id)]
     assert isinstance(worker, WorkerResponse)
     assert worker.id == worker_id
-    assert worker.scope.kinds == ["agent"]
+    assert worker.scope.claims == [WorkerClaim(kind=TaskKind.AGENT)]
     assert worker.runtime.platform == "docker"
     assert worker.metadata == {"region": "eu"}
     assert worker.last_seen_at == client.worker.last_seen_at
@@ -453,7 +459,7 @@ async def test_public_worker_get_has_canonical_structured_text_parity() -> None:
     assert json.loads(result.content[0].text) == result.structured_content
     data = result.structured_content["data"]
     assert data["id"] == str(worker_id)
-    assert data["scope"]["kinds"] == ["agent"]
+    assert data["scope"]["claims"] == [{"kind": "agent", "agent_version_id": None}]
     assert data["runtime"]["platform"] == "docker"
     assert data["metadata"] == {"region": "eu"}
     assert datetime.fromisoformat(data["last_seen_at"]) == client.worker.last_seen_at

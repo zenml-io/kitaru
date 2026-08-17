@@ -19,9 +19,20 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from conftest import FakeWorkerRepository, pg_session, postgres_available
+from conftest import (
+    UNSCOPED_WORKER_SCOPE,
+    FakeWorkerRepository,
+    pg_session,
+    postgres_available,
+)
 from kitaru.api_models.v1.filter import FilterOp
-from kitaru.api_models.v1.worker import LabelSelector, WorkerRuntime, WorkerScope
+from kitaru.api_models.v1.task import TaskKind
+from kitaru.api_models.v1.worker import (
+    LabelSelector,
+    WorkerClaim,
+    WorkerRuntime,
+    WorkerScope,
+)
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -76,7 +87,7 @@ def _worker(
     return Worker(
         owner_id=owner_id,
         name=name,
-        scope=scope if scope is not None else WorkerScope(),
+        scope=scope if scope is not None else UNSCOPED_WORKER_SCOPE,
         runtime=runtime if runtime is not None else WorkerRuntime(platform="bare"),
         metadata=metadata if metadata is not None else {},
         last_seen_at=last_seen_at if last_seen_at is not None else datetime.now(UTC),
@@ -97,14 +108,16 @@ async def test_register_upsert_keeps_id_and_created(setup: Setup) -> None:
     """Re-registering under the same name keeps the id and created time."""
     repository, owner_id = setup
     first = await repository.register(
-        _worker(owner_id, scope=WorkerScope(kinds=["agent"]))
+        _worker(owner_id, scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]))
     )
     second = await repository.register(
-        _worker(owner_id, scope=WorkerScope(kinds=["importer"]))
+        _worker(
+            owner_id, scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
+        )
     )
     assert second.id == first.id
     assert second.created == first.created
-    assert second.scope == WorkerScope(kinds=["importer"])
+    assert second.scope == WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
 
 
 async def test_register_upsert_renews_updated_and_last_seen_at(setup: Setup) -> None:
@@ -128,7 +141,7 @@ async def test_register_upsert_refreshes_scope_runtime_and_metadata(
     await repository.register(
         _worker(
             owner_id,
-            scope=WorkerScope(kinds=["agent"]),
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
             runtime=WorkerRuntime(platform="bare"),
             metadata={"region": "eu"},
         )
@@ -136,12 +149,12 @@ async def test_register_upsert_refreshes_scope_runtime_and_metadata(
     second = await repository.register(
         _worker(
             owner_id,
-            scope=WorkerScope(kinds=["importer"]),
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
             runtime=WorkerRuntime(platform="docker", hostname="worker-a"),
             metadata={"region": "us"},
         )
     )
-    assert second.scope == WorkerScope(kinds=["importer"])
+    assert second.scope == WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
     assert second.runtime == WorkerRuntime(platform="docker", hostname="worker-a")
     assert second.metadata == {"region": "us"}
 
@@ -264,11 +277,14 @@ async def test_delete_not_found(setup: Setup) -> None:
 
 
 async def test_scope_round_trip_selectors_and_job_pin(setup: Setup) -> None:
-    """Round-trip a scope carrying selectors, kinds, and a job pin through JSONB."""
+    """Round-trip a scope carrying claims, selectors, and a job pin through JSONB."""
     repository, owner_id = setup
     job_id = uuid.uuid4()
     scope = WorkerScope(
-        kinds=["agent", "evaluator"],
+        claims=[
+            WorkerClaim(kind=TaskKind.AGENT, agent_version_id=uuid.uuid4()),
+            WorkerClaim(kind=TaskKind.EVALUATOR),
+        ],
         selectors=[
             LabelSelector(key="agent_version", values=["v1", "v2"]),
             LabelSelector(key="team", values=["core"], required=True),
