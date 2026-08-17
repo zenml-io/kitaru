@@ -20,7 +20,7 @@
   <a href="https://docs.zenml.io/kitaru">Docs</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="https://www.zenml.io/roadmap">Roadmap</a> &middot;
-  <a href="https://www.zenml.io/slack">Community</a>
+  <a href="https://kitaru.ai/slack">Community</a>
 </p>
 
 ---
@@ -123,7 +123,7 @@ run = await client.experiments.start_run(experiment_id, ExperimentRunCreateReque
 ))
 ```
 
-The [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) explains the five-step method. Start from the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) for a ready PydanticAI agent and checked-in Langfuse traces, then use the [complete returns-agent tutorial](https://docs.zenml.io/kitaru/tutorials/returns-agent) for the review, cohort, and replay workflow.
+The [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) explains the five-step method. Start from the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) for a ready PydanticAI agent and checked-in Langfuse traces, then use the [complete returns-agent tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) for the review, cohort, and replay workflow.
 
 ### Works with your agent SDK
 
@@ -185,7 +185,7 @@ leave your systems. Apache 2.0, no mandatory SaaS control plane.
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
 | [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | Understand the Observe, Judge, Define, Replay, Compare method |
 | [Kitaru template](https://github.com/zenml-io/kitaru-template) | Try the method with a ready PydanticAI agent and checked-in Langfuse traces |
-| [Complete tutorial](https://docs.zenml.io/kitaru/tutorials/returns-agent) | Run the full method with a synthetic returns agent |
+| [Complete tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) | Run the full method with a synthetic returns agent |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Start from the history you already have |
 | [No adapter for your framework](https://docs.zenml.io/kitaru/adapters/custom) | Import, build an adapter, or let Kitaru call your agent |
 | [Agent skills](https://docs.zenml.io/kitaru/agent-native/skills) | Teach your coding assistant the loop |
@@ -200,9 +200,13 @@ branch is `develop`; all PRs should target it.
 
 ## 💬 Community and support
 
-- [Community](https://www.zenml.io/slack): ask questions, share ideas
-- [Issues](https://github.com/zenml-io/kitaru/issues): report bugs, request features
+- [Slack community](https://kitaru.ai/slack): ask questions, share ideas
+- [Report a bug](https://kitaru.ai/help): goes straight to GitHub issues
+- [support@kitaru.ai](mailto:support@kitaru.ai): when email is easier
 - [Roadmap](https://www.zenml.io/roadmap): see what's coming next
+
+Hit something broken? Any of the three channels above reaches a human;
+an issue with a trace or session ID attached gets fixed fastest.
 
 ## 📄 License
 

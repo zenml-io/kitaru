@@ -37,4 +37,10 @@ A replay, import, or evaluation that sits in `pending` almost always means **no 
 
 The server's health endpoint is `GET /health`; Docker Compose users can check `docker compose ps` and `docker compose logs server`. The interactive API reference lives at `/docs` on your server.
 
-Still stuck? Ask in the [community](https://www.zenml.io/slack) or [open an issue](https://github.com/zenml-io/kitaru/issues).
+## Get help
+
+Still stuck? All three of these reach a human:
+
+- [Slack community](https://kitaru.ai/slack) for questions and quick pointers.
+- [kitaru.ai/help](https://kitaru.ai/help) to report a bug; it goes straight to GitHub issues. Attach the session or job ID and the failing command's output, and it gets fixed fastest.
+- [support@kitaru.ai](mailto:support@kitaru.ai) when email is easier.

@@ -77,3 +77,4 @@ redirects:
   getting-started/returns-agent/compare: tutorials/returns-agent/compare.md
   guides/import-langfuse-traces: guides/import-langfuse-traces.md
   guides/importing-sessions: guides/importing-sessions.md
+  tutorials/returns-agent: tutorials/returns-agent/README.md
