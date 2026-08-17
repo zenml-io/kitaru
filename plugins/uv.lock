@@ -923,7 +923,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc8"
+version = "0.22.0rc9"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -1026,7 +1026,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
