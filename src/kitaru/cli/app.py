@@ -657,6 +657,13 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
                 False,
                 "Read API key from stdin.",
             ),
+            ParameterSpec(
+                "--refresh",
+                "boolean",
+                "option",
+                False,
+                "Skip stored credentials and force a new device login.",
+            ),
         ),
         read_only=False,
         side_effects=(
@@ -685,6 +692,7 @@ async def login(
     username: str | None = None,
     password_stdin: bool = False,
     api_key_stdin: bool = False,
+    refresh: bool = False,
 ) -> CommandResult:
     """Authenticate with a server and store its credential when required."""
     invocation = _invocation()
@@ -695,6 +703,7 @@ async def login(
         server=chosen_server,
         local=local,
         upgrade=upgrade,
+        refresh=refresh,
         username=username,
         password_stdin=password_stdin,
         api_key_stdin=api_key_stdin,

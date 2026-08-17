@@ -48,6 +48,7 @@ async def login(
     no_browser: bool,
     stdin: TextIO,
     upgrade: bool = False,
+    refresh: bool = False,
     password_prompt: Callable[[str], str] = getpass.getpass,
     package_version: str = "",
 ) -> CommandResult:
@@ -57,6 +58,8 @@ async def login(
         server: Full managed or self-hosted server URL.
         local: Provision and target the local server.
         upgrade: Replace an existing local server with the requested image.
+        refresh: Skip stored control plane credentials and force a new device
+            login flow.
         username: Local account name for password authentication.
         password_stdin: Read a local password from standard input.
         api_key_stdin: Read an API key from standard input.
@@ -185,16 +188,16 @@ async def login(
                     "Control-plane device login requires interaction.",
                     hint="Use --api-key-stdin or run interactively.",
                 )
-            await control_plane_login(
+            _, credential_kind = await control_plane_login(
                 client,
                 server_url,
                 credential_store,
                 api_key=api_key,
                 open_browser=not no_browser and not non_interactive,
                 prompt=_show_device_prompt,
+                refresh=refresh,
             )
             authentication = "authenticated"
-            credential_kind = "api_key" if api_key is not None else "device"
             credential_stored = True
         set_server_url(server_url)
     except OSError as error:
