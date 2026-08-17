@@ -15,7 +15,8 @@ Kitaru documentation is split across three surfaces:
   (`docs/worker/redirect.mjs` + `wrangler.redirect.toml`, worker `kitaru-site`).
 
 So **this app is reference-only** — its content is the generated
-`content/docs/reference/python/` plus a landing `index.mdx`.
+`content/docs/reference/python/` and `content/docs/cli/` plus a landing
+`index.mdx`.
 Do not add hand-written pages here; those belong in `docs/book/` (GitBook).
 
 ## Architecture
@@ -64,7 +65,7 @@ changes when redirect rules in `docs/worker/redirect.mjs` change.
 - **Never add Node.js tooling to the repo root.** No root `package.json`,
   no root `node_modules`, no workspace config.
 - **Never hand-edit generated files:** `content/docs/changelog.mdx` and `content/docs/reference/` are generated and gitignored. The public changelog is hosted at `docs.zenml.io/changelog`; the local `changelog.mdx` is only for local/reference builds. The reference pipeline is `scripts/generate_sdk_docs.py` (Python, griffe extraction filtered to the `PUBLIC_API` allowlist) followed by `docs/scripts/convert-sdk-docs.mjs` (Node, JSON to MDX); run it via `just generate-docs`.
-- **CLI contracts remain offline:** command metadata lives under `src/kitaru/cli/` and is exposed through `kitaru schema`; user-facing CLI reference publishing is deferred.
+- **CLI reference is schema-driven:** command metadata lives under `src/kitaru/cli/` and is exposed through `kitaru schema`; `scripts/generate_cli_docs.py` consumes that schema to generate `content/docs/cli/` (run via `just generate-docs`). The generator hardcodes no command names — CLI changes flow through automatically.
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
@@ -81,6 +82,7 @@ content/docs/
   index.mdx              # Reference-site landing page
   changelog.mdx          # AUTO-GENERATED, gitignored local/reference changelog page
   reference/python/      # AUTO-GENERATED, gitignored SDK reference via fumadocs-python
+  cli/                   # AUTO-GENERATED, gitignored CLI reference from `kitaru schema`
 ```
 
 ## Available MDX Components

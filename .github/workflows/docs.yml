@@ -51,6 +51,8 @@ jobs:
           package-manager-cache: false
       - run: pnpm install --frozen-lockfile
         working-directory: docs
+      - name: Generate CLI reference pages
+        run: uv run python scripts/generate_cli_docs.py
       - name: Check SDK reference generator availability
         id: sdk_generator
         run: |
