@@ -1,6 +1,6 @@
 {
   "name": "@zenml-io/kitaru-vercel-ai",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Kitaru tracing and replay adapter for the Vercel AI SDK",
   "license": "Apache-2.0",
   "repository": {
@@ -38,7 +38,7 @@
     "vercel-ai-sdk"
   ],
   "dependencies": {
-    "@zenml-io/kitaru": "workspace:0.1.0"
+    "@zenml-io/kitaru": "workspace:0.1.1"
   },
   "peerDependencies": {
     "ai": ">=7.0.60 <8.0.0"
