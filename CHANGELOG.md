@@ -64,6 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - All API routes moved from the `/v1` prefix to `/api/v1`.
+- Replaced the worker scope `kinds` field with explicit claims that can pin agent task claims to a specific agent version, so agent-specific workers on one server no longer claim each other's tasks. The `--kinds` worker CLI flag is replaced by the repeatable `--claim` flag.
 - Added public installation, adapter, replay-boundary, and runnable-example documentation for the TypeScript SDK, Mastra adapter, and Vercel AI SDK adapter.
 
 ### Fixed

@@ -50,6 +50,7 @@ from kitaru.api_models.v1.task import (
 )
 from kitaru.api_models.v1.worker import (
     LabelSelector,
+    WorkerClaim,
     WorkerScope,
 )
 from kitaru.server.application.events import EventDispatcher
@@ -197,7 +198,9 @@ async def test_claim_scope_kind_filter(services: JobAndTaskServices) -> None:
     await _claimable_agent_task(services, job_id)
     import_task = await _claimable_import_task(services, job_id)
     worker = await create_worker(
-        services.workers, ACTOR.account.id, scope=WorkerScope(kinds=[TaskKind.IMPORTER])
+        services.workers,
+        ACTOR.account.id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
     )
 
     claimed = await services.task_service.claim_tasks(
@@ -215,7 +218,9 @@ async def test_claim_scope_job_pin(services: JobAndTaskServices) -> None:
     pinned = await _claimable_agent_task(services, job_id)
     await _claimable_agent_task(services, other_job_id)
     worker = await create_worker(
-        services.workers, ACTOR.account.id, scope=WorkerScope(job_id=job_id)
+        services.workers,
+        ACTOR.account.id,
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
     )
 
     claimed = await services.task_service.claim_tasks(
@@ -234,7 +239,8 @@ async def test_claim_scope_required_selector(services: JobAndTaskServices) -> No
         services.workers,
         ACTOR.account.id,
         scope=WorkerScope(
-            selectors=[LabelSelector(key="env", values=["prod"], required=True)]
+            claims=[WorkerClaim(kind=TaskKind.AGENT)],
+            selectors=[LabelSelector(key="env", values=["prod"], required=True)],
         ),
     )
 
@@ -256,7 +262,8 @@ async def test_claim_scope_non_required_selector_matches_unlabeled(
         services.workers,
         ACTOR.account.id,
         scope=WorkerScope(
-            selectors=[LabelSelector(key="env", values=["prod"], required=False)]
+            claims=[WorkerClaim(kind=TaskKind.AGENT)],
+            selectors=[LabelSelector(key="env", values=["prod"], required=False)],
         ),
     )
 

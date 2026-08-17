@@ -39,6 +39,7 @@ from kitaru.api_models.v1.task import (
     TaskStatus,
 )
 from kitaru.api_models.v1.worker import (
+    WorkerClaim,
     WorkerScope,
 )
 from kitaru.client.exceptions import APIError, NotFoundError
@@ -169,7 +170,11 @@ async def test_should_stop_false_without_stop_deadline_or_job(
 async def test_should_stop_true_when_pinned_job_settles(tmp_path: Path) -> None:
     """A job-pinned scope stops once the job reaches a terminal status."""
     job_id = uuid.uuid4()
-    worker = Worker(WorkerConfig(scope=WorkerScope(job_id=job_id)))
+    worker = Worker(
+        WorkerConfig(
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id)
+        )
+    )
     client = FakeKitaruAPIClient()
     client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
     ctx = _ctx(tmp_path, client)
@@ -183,7 +188,11 @@ async def test_should_stop_false_when_pinned_job_still_running(
 ) -> None:
     """A job-pinned scope keeps polling while the job is not settled."""
     job_id = uuid.uuid4()
-    worker = Worker(WorkerConfig(scope=WorkerScope(job_id=job_id)))
+    worker = Worker(
+        WorkerConfig(
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id)
+        )
+    )
     client = FakeKitaruAPIClient()
     client.jobs.get_responses.append(make_job_response(status=JobStatus.RUNNING))
     ctx = _ctx(tmp_path, client)
@@ -196,7 +205,11 @@ async def test_should_stop_false_when_the_pinned_job_read_fails(
 ) -> None:
     """A failed pinned-job read is logged and does not stop the loop."""
     job_id = uuid.uuid4()
-    worker = Worker(WorkerConfig(scope=WorkerScope(job_id=job_id)))
+    worker = Worker(
+        WorkerConfig(
+            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id)
+        )
+    )
     client = FakeKitaruAPIClient()
     client.jobs.get_responses.append(NotFoundError(404, "job not found"))
     client.jobs.get_responses.append(httpx.ConnectError("down"))
@@ -244,7 +257,9 @@ async def test_claim_loop_full_claim_loops_again_without_sleeping(
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
     config = WorkerConfig(
-        scope=WorkerScope(job_id=job_id), concurrency=3, claim_batch_size=1
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=3,
+        claim_batch_size=1,
     )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
@@ -322,7 +337,10 @@ async def test_claim_loop_respects_the_concurrency_bound(tmp_path: Path) -> None
     """The claim request never asks for more than the free concurrency slots."""
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(scope=WorkerScope(job_id=job_id), concurrency=1)
+    config = WorkerConfig(
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=1,
+    )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
     client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
@@ -336,7 +354,10 @@ async def test_claim_size_is_clamped_to_endpoint_limit(tmp_path: Path) -> None:
     """The claim request never exceeds the endpoint's max batch size."""
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
-    config = WorkerConfig(scope=WorkerScope(job_id=job_id), concurrency=150)
+    config = WorkerConfig(
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=150,
+    )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
     client.jobs.get_responses.append(make_job_response(status=JobStatus.COMPLETED))
@@ -353,7 +374,9 @@ async def test_claim_loop_short_claim_checks_stop_before_sleeping(
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
     config = WorkerConfig(
-        scope=WorkerScope(job_id=job_id), concurrency=5, poll_interval=5.0
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=5,
+        poll_interval=5.0,
     )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
@@ -375,7 +398,9 @@ async def test_claim_loop_backoff_doubles_and_resets_on_success(
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
     config = WorkerConfig(
-        scope=WorkerScope(job_id=job_id), concurrency=1, poll_interval=1.0
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=1,
+        poll_interval=1.0,
     )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
@@ -401,7 +426,9 @@ async def test_claim_loop_backoff_caps_at_the_maximum(
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
     config = WorkerConfig(
-        scope=WorkerScope(job_id=job_id), concurrency=1, poll_interval=50.0
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=1,
+        poll_interval=50.0,
     )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
@@ -427,7 +454,9 @@ async def test_claim_loop_backs_off_on_a_transport_error(
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
     config = WorkerConfig(
-        scope=WorkerScope(job_id=job_id), concurrency=1, poll_interval=1.0
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=1,
+        poll_interval=1.0,
     )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
@@ -554,7 +583,9 @@ async def test_job_pinned_loop_claims_tasks_appended_after_empty_poll(
     job_id = uuid.uuid4()
     client = FakeKitaruAPIClient()
     config = WorkerConfig(
-        scope=WorkerScope(job_id=job_id), concurrency=2, poll_interval=0.01
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)], job_id=job_id),
+        concurrency=2,
+        poll_interval=0.01,
     )
     worker = Worker(config)
     ctx = _ctx(tmp_path, client)
@@ -615,7 +646,7 @@ async def test_run_registers_and_drains_a_claimed_task(
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(completed_task)
 
-    scope = WorkerScope(kinds=[TaskKind.AGENT])
+    scope = WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)])
     config = WorkerConfig(
         name="worker-under-test",
         scope=scope,
@@ -662,7 +693,7 @@ async def test_run_pins_the_api_url_to_the_registration_server(
 
     config = WorkerConfig(
         name="worker-under-test",
-        scope=WorkerScope(kinds=[TaskKind.AGENT]),
+        scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
         poll_interval=0.01,
         blob_cache_root=tmp_path / "blobs",
         payload_cache_root=tmp_path / "payloads",
