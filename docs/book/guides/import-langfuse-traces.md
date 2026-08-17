@@ -1,5 +1,5 @@
 ---
-description: "The importer contract in full: Langfuse JSONL imports, custom importers, dedup semantics, and how imports execute on your worker."
+description: "Langfuse JSONL imports end to end: the accepted export, dedup semantics, and how imports execute on your worker."
 icon: bolt
 ---
 
@@ -60,56 +60,9 @@ Every imported session records its source identity: `imported_from` (`langfuse`)
 
 Node identity works the same way inside a session: nodes upsert by index, so a re-parse states each node's full content and replaces it whole.
 
-## Writing your own importer
+## No importer for your format?
 
-An importer is one callable:
-
-```python
-from collections.abc import Iterator
-from typing import Any
-
-from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
-
-
-def parse(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedSession | ImportFailure]:
-    for line_number, line in enumerate(payload.splitlines(), start=1):
-        try:
-            record = decode_my_format(line)
-        except ValueError as error:
-            yield ImportFailure(line=line_number, error=str(error))
-            continue
-        yield ParsedSession(
-            status="completed",
-            name=record.title,
-            inputs=record.question,
-            outputs=record.answer,
-            error=None,
-            started_at=record.started_at,
-            ended_at=record.ended_at,
-            external_id=record.trace_id,
-            metadata={},
-            nodes=[
-                ParsedNode(node_type="llm_call", name="model", status="completed",
-                           inputs=record.prompt, outputs=record.completion),
-            ],
-        )
-```
-
-Yield lazily; the flow consumes one item at a time, so payload size is bounded by disk, not memory. Yield an `ImportFailure` for a bad record and the import counts it and moves on; only a crash of the parser itself fails the task (with partial stats preserved).
-
-Scaffold, exercise offline, and register:
-
-```bash
-kitaru importer scaffold my-format          # writes my_format_importer.py
-kitaru importer test my_format_importer.py \
-  --entrypoint parse --payload sample-export.jsonl
-kitaru importer register my-format \
-  --script my_format_importer.py --entrypoint parse --provider my-format
-```
-
-A script importer may declare dependencies as PEP 723 inline metadata (`# /// script` block); the worker builds it an isolated environment. An importer that outgrows one file ships as a package instead: `--package "my-importer==1.0.0"` with `--entrypoint "my_importer:parse"`. Importers are versioned like evaluators and agents; imports name the importer and pin to its latest version unless you pass one.
-
-{% hint style="warning" %} Imported payloads contain whatever your traces contain: prompts, customer data, tool results. They are stored on your self-hosted server and parsed on your workers, but access and retention are yours to govern. {% endhint %}
+The importer contract is deliberately small, about a page of Python, and the shipped Langfuse importer is a reference implementation of it. See [No importer for your format](custom-importer.md) to scaffold, test, and register your own.
 
 ## After the import
 

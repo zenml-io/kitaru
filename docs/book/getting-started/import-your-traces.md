@@ -13,7 +13,7 @@ Imports execute on a [worker](../concepts/workers.md) in your environment. The e
 
 ## 1. Register the agent the traces belong to
 
-Importers for **Langfuse, LangSmith, Braintrust, and a native JSONL format** are built in, registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. Anything else comes in through a [custom importer](../guides/import-langfuse-traces.md#writing-your-own-importer).
+Importers for **Langfuse, LangSmith, Braintrust, and a native JSONL format** are built in, registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. Anything else comes in through a [custom importer](../guides/custom-importer.md).
 
 Register the agent these traces belong to, if you haven't:
 
@@ -59,7 +59,7 @@ Everything recorded sessions can:
 - **Group** them into [cohorts](../concepts/cohorts.md) and run [experiments](../concepts/experiments.md) against them.
 - **Replay** them, with one honest caveat. Replay re-runs _your agent's real code_, which the trace itself doesn't contain. Register the agent version whose code produced the traces (its run command), and replay works exactly as for recorded sessions: recorded tool calls answered from the imported history, everything else per your [tool policy](../guides/tool-policies.md).
 
-Other formats: an importer is ~a page of Python: a callable that parses your export bytes into sessions. `kitaru importer scaffold my-format` gives you the skeleton; the contract is in [Import Langfuse traces](../guides/import-langfuse-traces.md).
+Other formats: an importer is about a page of Python, a callable that parses your export bytes into sessions, and the `kitaru-importer-builder` agent skill will draft it for you. See [No importer for your format](../guides/custom-importer.md).
 
 ## Next
 
