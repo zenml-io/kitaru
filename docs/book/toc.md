@@ -43,7 +43,7 @@
 - [Langfuse](guides/import-langfuse-traces.md)
 - [LangSmith](guides/import-langsmith-traces.md)
 - [Braintrust](guides/import-braintrust-traces.md)
-- [Import any trace format](guides/importing-sessions.md)
+- [Kitaru JSONL](guides/importing-sessions.md)
 - [No importer for your format](guides/custom-importer.md)
 
 ## Adapters
