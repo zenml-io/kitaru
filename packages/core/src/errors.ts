@@ -78,7 +78,7 @@ export class KitaruWaitError<T> extends KitaruApiError {
     const action = options.kind === "canceled" ? "Canceled" : "Timed out";
     super(
       "GET",
-      `/v1/${resource}/${encodeURIComponent(resourceId)}`,
+      `/api/v1/${resource}/${encodeURIComponent(resourceId)}`,
       null,
       `${action} waiting for ${resource} ${resourceId}; remote work continues`,
       { cause: options.cause, kind: options.kind },

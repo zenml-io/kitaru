@@ -52,7 +52,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 
 async def test_create_api_key(client: httpx.AsyncClient) -> None:
     """Create an API key and observe HTTP 201 with the plaintext key."""
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 201
     body = response.json()
     assert body["name"] == "ci"
@@ -68,7 +68,7 @@ async def test_create_api_key(client: httpx.AsyncClient) -> None:
 
 async def test_create_api_key_response_has_no_hash(client: httpx.AsyncClient) -> None:
     """Never expose the key hash in the response."""
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 201
     assert set(response.json()) == {
         "id",
@@ -85,26 +85,26 @@ async def test_create_api_key_response_has_no_hash(client: httpx.AsyncClient) ->
 
 async def test_create_api_key_duplicate_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 409 for a duplicate API key name."""
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 201
-    response = await client.post("/v1/api-keys", json={"name": "ci"})
+    response = await client.post("/api/v1/api-keys", json={"name": "ci"})
     assert response.status_code == 409
     assert response.json() == {"detail": "API key name 'ci' is already registered"}
 
 
 async def test_create_api_key_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid API key name."""
-    response = await client.post("/v1/api-keys", json={"name": "in valid"})
+    response = await client.post("/api/v1/api-keys", json={"name": "in valid"})
     assert response.status_code == 422
 
 
 async def test_list_api_keys(client: httpx.AsyncClient) -> None:
     """List API keys newest-first with filters."""
     for name in ["ci", "deploy", "local"]:
-        response = await client.post("/v1/api-keys", json={"name": name})
+        response = await client.post("/api/v1/api-keys", json={"name": name})
         assert response.status_code == 201
 
-    response = await client.get("/v1/api-keys")
+    response = await client.get("/api/v1/api-keys")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -113,7 +113,7 @@ async def test_list_api_keys(client: httpx.AsyncClient) -> None:
 
     filter_expression = {"field": "name", "op": "eq", "value": "deploy"}
     response = await client.get(
-        "/v1/api-keys", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/api-keys", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -126,13 +126,13 @@ async def test_list_api_keys_walks_pages_with_cursor(
 ) -> None:
     """Walk every page of API keys via next_cursor."""
     for name in ["ci", "deploy", "local"]:
-        response = await client.post("/v1/api-keys", json={"name": name})
+        response = await client.post("/api/v1/api-keys", json={"name": name})
         assert response.status_code == 201
 
     collected: list[str] = []
     params: dict[str, str] = {"size": "2"}
     while True:
-        response = await client.get("/v1/api-keys", params=params)
+        response = await client.get("/api/v1/api-keys", params=params)
         assert response.status_code == 200
         body = response.json()
         collected.extend(item["name"] for item in body["items"])
@@ -145,28 +145,28 @@ async def test_list_api_keys_walks_pages_with_cursor(
 
 async def test_list_api_keys_invalid_pagination(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for out-of-bounds pagination parameters."""
-    response = await client.get("/v1/api-keys", params={"size": 0})
+    response = await client.get("/api/v1/api-keys", params={"size": 0})
     assert response.status_code == 422
-    response = await client.get("/v1/api-keys", params={"size": 1001})
+    response = await client.get("/api/v1/api-keys", params={"size": 1001})
     assert response.status_code == 422
 
 
 async def test_list_api_keys_invalid_cursor(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for a cursor string that fails to decode."""
-    response = await client.get("/v1/api-keys", params={"cursor": "not-a-cursor"})
+    response = await client.get("/api/v1/api-keys", params={"cursor": "not-a-cursor"})
     assert response.status_code == 422
 
 
 async def test_list_api_keys_unknown_query_param(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an unknown query parameter."""
-    response = await client.get("/v1/api-keys", params={"bogus": "x"})
+    response = await client.get("/api/v1/api-keys", params={"bogus": "x"})
     assert response.status_code == 422
 
 
 async def test_get_api_key(client: httpx.AsyncClient) -> None:
     """Get an API key by id without the plaintext key."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
-    response = await client.get(f"/v1/api-keys/{created['id']}")
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.get(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 200
     expected = {field: value for field, value in created.items() if field != "key"}
     assert response.json() == expected
@@ -175,16 +175,16 @@ async def test_get_api_key(client: httpx.AsyncClient) -> None:
 async def test_get_api_key_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown API key id."""
     missing_id = uuid.uuid4()
-    response = await client.get(f"/v1/api-keys/{missing_id}")
+    response = await client.get(f"/api/v1/api-keys/{missing_id}")
     assert response.status_code == 404
     assert response.json() == {"detail": f"API key {missing_id} was not found"}
 
 
 async def test_update_api_key(client: httpx.AsyncClient) -> None:
     """Update an API key."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
     response = await client.patch(
-        f"/v1/api-keys/{created['id']}", json={"active": False}
+        f"/api/v1/api-keys/{created['id']}", json={"active": False}
     )
     assert response.status_code == 200
     body = response.json()
@@ -196,16 +196,16 @@ async def test_update_api_key(client: httpx.AsyncClient) -> None:
 async def test_update_api_key_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown API key id."""
     response = await client.patch(
-        f"/v1/api-keys/{uuid.uuid4()}", json={"active": False}
+        f"/api/v1/api-keys/{uuid.uuid4()}", json={"active": False}
     )
     assert response.status_code == 404
 
 
 async def test_rotate_api_key(client: httpx.AsyncClient) -> None:
     """Rotate an API key and observe the issued response shape."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
     response = await client.post(
-        f"/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": 5}
+        f"/api/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": 5}
     )
     assert response.status_code == 200
     body = response.json()
@@ -228,38 +228,38 @@ async def test_rotate_api_key(client: httpx.AsyncClient) -> None:
 
 async def test_rotate_api_key_default_retain_period(client: httpx.AsyncClient) -> None:
     """Default retain_period_minutes to zero for an empty rotate body."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
-    response = await client.post(f"/v1/api-keys/{created['id']}/rotate", json={})
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.post(f"/api/v1/api-keys/{created['id']}/rotate", json={})
     assert response.status_code == 200
 
 
 async def test_rotate_api_key_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown API key id."""
     response = await client.post(
-        f"/v1/api-keys/{uuid.uuid4()}/rotate", json={"retain_period_minutes": 5}
+        f"/api/v1/api-keys/{uuid.uuid4()}/rotate", json={"retain_period_minutes": 5}
     )
     assert response.status_code == 404
 
 
 async def test_rotate_api_key_negative_retain_period(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for a negative retain_period_minutes."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
     response = await client.post(
-        f"/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": -1}
+        f"/api/v1/api-keys/{created['id']}/rotate", json={"retain_period_minutes": -1}
     )
     assert response.status_code == 422
 
 
 async def test_delete_api_key(client: httpx.AsyncClient) -> None:
     """Delete an API key and observe HTTP 204."""
-    created = (await client.post("/v1/api-keys", json={"name": "ci"})).json()
-    response = await client.delete(f"/v1/api-keys/{created['id']}")
+    created = (await client.post("/api/v1/api-keys", json={"name": "ci"})).json()
+    response = await client.delete(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 204
-    response = await client.get(f"/v1/api-keys/{created['id']}")
+    response = await client.get(f"/api/v1/api-keys/{created['id']}")
     assert response.status_code == 404
 
 
 async def test_delete_api_key_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for an unknown API key id."""
-    response = await client.delete(f"/v1/api-keys/{uuid.uuid4()}")
+    response = await client.delete(f"/api/v1/api-keys/{uuid.uuid4()}")
     assert response.status_code == 404

@@ -33,7 +33,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_workers_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/workers",
+        "/api/v1/workers",
         json={
             "name": "worker-1",
             "scope": {"kinds": ["agent"]},
@@ -44,11 +44,11 @@ async def test_workers_persist_across_requests(client: httpx.AsyncClient) -> Non
     assert response.status_code == 200
     created = response.json()["worker"]
 
-    response = await client.get(f"/v1/workers/{created['id']}")
+    response = await client.get(f"/api/v1/workers/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
-    response = await client.get("/v1/workers")
+    response = await client.get("/api/v1/workers")
     assert response.status_code == 200
     body = response.json()
     assert body["next_cursor"] is None
@@ -59,7 +59,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
     """Persist a re-registration across requests, keeping id and created."""
     first = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={
                 "name": "worker-1",
                 "scope": {"kinds": ["agent"]},
@@ -71,7 +71,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
 
     second = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={
                 "name": "worker-1",
                 "scope": {"kinds": ["importer"]},
@@ -85,7 +85,7 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
     assert second["created"] == first["created"]
     assert second["updated"] > first["updated"]
 
-    response = await client.get(f"/v1/workers/{first['id']}")
+    response = await client.get(f"/api/v1/workers/{first['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["scope"]["kinds"] == ["importer"]
@@ -97,12 +97,12 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
     """Persist a deletion across requests."""
     created = (
         await client.post(
-            "/v1/workers",
+            "/api/v1/workers",
             json={"name": "worker-1", "scope": {}, "runtime": RUNTIME, "metadata": {}},
         )
     ).json()["worker"]
-    response = await client.delete(f"/v1/workers/{created['id']}")
+    response = await client.delete(f"/api/v1/workers/{created['id']}")
     assert response.status_code == 204
 
-    response = await client.get(f"/v1/workers/{created['id']}")
+    response = await client.get(f"/api/v1/workers/{created['id']}")
     assert response.status_code == 404

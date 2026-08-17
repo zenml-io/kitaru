@@ -56,7 +56,7 @@ class SecretsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/secrets",
+            "/api/v1/secrets",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return SecretResponse.model_validate(response.json())
@@ -89,7 +89,7 @@ class SecretsResource:
         """
         response = await self._client.request(
             "GET",
-            f"/v1/secrets/{secret_id}",
+            f"/api/v1/secrets/{secret_id}",
             params={"include_values": include_values},
         )
         if include_values:
@@ -114,7 +114,7 @@ class SecretsResource:
         params = params or SecretListParams()
         response = await self._client.request(
             "GET",
-            "/v1/secrets",
+            "/api/v1/secrets",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[SecretResponse].model_validate(response.json())
@@ -155,7 +155,7 @@ class SecretsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/secrets/{secret_id}",
+            f"/api/v1/secrets/{secret_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return SecretResponse.model_validate(response.json())
@@ -170,4 +170,4 @@ class SecretsResource:
             APIError: The request failed, including 404 for a missing
                 secret.
         """
-        await self._client.request("DELETE", f"/v1/secrets/{secret_id}")
+        await self._client.request("DELETE", f"/api/v1/secrets/{secret_id}")

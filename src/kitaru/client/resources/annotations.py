@@ -56,7 +56,7 @@ class AnnotationsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/annotations",
+            "/api/v1/annotations",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AnnotationResponse.model_validate(response.json())
@@ -74,7 +74,9 @@ class AnnotationsResource:
         Returns:
             Stored annotation.
         """
-        response = await self._client.request("GET", f"/v1/annotations/{annotation_id}")
+        response = await self._client.request(
+            "GET", f"/api/v1/annotations/{annotation_id}"
+        )
         return AnnotationResponse.model_validate(response.json())
 
     async def list(
@@ -95,7 +97,7 @@ class AnnotationsResource:
         params = params or AnnotationListParams()
         response = await self._client.request(
             "GET",
-            "/v1/annotations",
+            "/api/v1/annotations",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[AnnotationResponse].model_validate(response.json())
@@ -136,7 +138,7 @@ class AnnotationsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/annotations/{annotation_id}",
+            f"/api/v1/annotations/{annotation_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return AnnotationResponse.model_validate(response.json())
@@ -151,4 +153,4 @@ class AnnotationsResource:
             APIError: The request failed, including 404 for a missing
                 annotation.
         """
-        await self._client.request("DELETE", f"/v1/annotations/{annotation_id}")
+        await self._client.request("DELETE", f"/api/v1/annotations/{annotation_id}")

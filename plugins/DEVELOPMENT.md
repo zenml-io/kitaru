@@ -107,7 +107,7 @@ unset KITARU_API_KEY KITARU_API_TOKEN KITARU_TASK_TOKEN
 docker compose -f plugins/docker-compose.candidate.yml up -d --wait
 docker compose -f plugins/docker-compose.candidate.yml ps
 curl -fsS "$KITARU_API_URL/health/live"
-curl -fsS "$KITARU_API_URL/v1/info"
+curl -fsS "$KITARU_API_URL/api/v1/info"
 uv run --no-sync kitaru login "$KITARU_API_URL"
 ```
 

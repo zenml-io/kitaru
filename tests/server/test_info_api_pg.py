@@ -21,7 +21,7 @@ from conftest import db_settings, lifespan_client
 async def test_info_reports_the_generated_server_id() -> None:
     """Report the id the startup bootstrap generated and stored."""
     async with lifespan_client(db_settings()) as client:
-        payload = (await client.get("/v1/info")).json()
+        payload = (await client.get("/api/v1/info")).json()
 
     assert payload["id"] is not None
 
@@ -31,6 +31,6 @@ async def test_info_reports_the_configured_server_id() -> None:
     server_id = uuid.uuid4()
 
     async with lifespan_client(db_settings(SERVER_ID=server_id)) as client:
-        payload = (await client.get("/v1/info")).json()
+        payload = (await client.get("/api/v1/info")).json()
 
     assert payload["id"] == str(server_id)

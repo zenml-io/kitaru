@@ -127,7 +127,7 @@ describe("runOwnedJob", () => {
     const cancel = vi
       .fn()
       .mockRejectedValue(
-        new KitaruApiError("POST", `/v1/jobs/${JOB_ID}/cancel`, 409, "race"),
+        new KitaruApiError("POST", `/api/v1/jobs/${JOB_ID}/cancel`, 409, "race"),
       );
     const get = vi
       .fn()

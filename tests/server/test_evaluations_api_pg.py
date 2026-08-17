@@ -32,10 +32,10 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 @pytest.fixture
 async def session_id(client: httpx.AsyncClient) -> str:
     """Provide the id of a session to merge evaluations into."""
-    agent = (await client.post("/v1/agents", json={"name": "assistant"})).json()
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     session = (
         await client.post(
-            "/v1/sessions",
+            "/api/v1/sessions",
             json={
                 "agent_id": agent["id"],
                 "origin": "recorded",
@@ -53,19 +53,19 @@ async def test_merge_and_list_persist_across_requests(
 ) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        f"/v1/sessions/{session_id}/evaluations",
+        f"/api/v1/sessions/{session_id}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
     assert response.status_code == 200
     created = response.json()[0]
 
-    response = await client.get(f"/v1/evaluations/{created['id']}")
+    response = await client.get(f"/api/v1/evaluations/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
     filter_expression = {"field": "session_id", "op": "eq", "value": session_id}
     response = await client.get(
-        "/v1/evaluations", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/evaluations", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     body = response.json()
@@ -79,19 +79,19 @@ async def test_merge_overwrite_persists_across_requests(
     """Persist an overwrite of a resent evaluation name across requests."""
     first = (
         await client.post(
-            f"/v1/sessions/{session_id}/evaluations",
+            f"/api/v1/sessions/{session_id}/evaluations",
             json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
         )
     ).json()[0]
     second = (
         await client.post(
-            f"/v1/sessions/{session_id}/evaluations",
+            f"/api/v1/sessions/{session_id}/evaluations",
             json={"evaluations": [{"name": "accuracy", "value": "high"}]},
         )
     ).json()[0]
     assert second["id"] == first["id"]
 
-    response = await client.get(f"/v1/evaluations/{first['id']}")
+    response = await client.get(f"/api/v1/evaluations/{first['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["value"] == "high"
@@ -105,20 +105,20 @@ async def test_merge_passed_persists_across_requests(
     """Persist the pass flag and clear it when a resent name omits it."""
     created = (
         await client.post(
-            f"/v1/sessions/{session_id}/evaluations",
+            f"/api/v1/sessions/{session_id}/evaluations",
             json={"evaluations": [{"name": "accuracy", "score": 0.9, "passed": True}]},
         )
     ).json()[0]
 
-    response = await client.get(f"/v1/evaluations/{created['id']}")
+    response = await client.get(f"/api/v1/evaluations/{created['id']}")
     assert response.status_code == 200
     assert response.json()["passed"] is True
 
     await client.post(
-        f"/v1/sessions/{session_id}/evaluations",
+        f"/api/v1/sessions/{session_id}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
-    response = await client.get(f"/v1/evaluations/{created['id']}")
+    response = await client.get(f"/api/v1/evaluations/{created['id']}")
     assert response.status_code == 200
     assert response.json()["passed"] is None
 
@@ -126,7 +126,7 @@ async def test_merge_passed_persists_across_requests(
 async def test_merge_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(
-        "/v1/sessions/019632fa-0000-7000-8000-000000000000/evaluations",
+        "/api/v1/sessions/019632fa-0000-7000-8000-000000000000/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
     assert response.status_code == 404
@@ -137,7 +137,7 @@ async def test_merge_rejects_duplicate_name_in_batch(
 ) -> None:
     """Observe HTTP 422 when the request names the same evaluation twice."""
     response = await client.post(
-        f"/v1/sessions/{session_id}/evaluations",
+        f"/api/v1/sessions/{session_id}/evaluations",
         json={
             "evaluations": [
                 {"name": "accuracy", "score": 0.9},

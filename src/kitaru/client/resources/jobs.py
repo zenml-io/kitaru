@@ -49,7 +49,7 @@ class JobsResource:
         Returns:
             Stored job.
         """
-        response = await self._client.request("GET", f"/v1/jobs/{job_id}")
+        response = await self._client.request("GET", f"/api/v1/jobs/{job_id}")
         return JobResponse.model_validate(response.json())
 
     async def list(self, params: JobListParams | None = None) -> Page[JobResponse]:
@@ -66,7 +66,9 @@ class JobsResource:
         """
         params = params or JobListParams()
         response = await self._client.request(
-            "GET", "/v1/jobs", params=params.model_dump(mode="json", exclude_unset=True)
+            "GET",
+            "/api/v1/jobs",
+            params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[JobResponse].model_validate(response.json())
 
@@ -105,7 +107,7 @@ class JobsResource:
         params = params or JobTasksListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/jobs/{job_id}/tasks",
+            f"/api/v1/jobs/{job_id}/tasks",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[TaskResponse].model_validate(response.json())
@@ -143,7 +145,7 @@ class JobsResource:
         Returns:
             Job carrying the cancel request.
         """
-        response = await self._client.request("POST", f"/v1/jobs/{job_id}/cancel")
+        response = await self._client.request("POST", f"/api/v1/jobs/{job_id}/cancel")
         return JobResponse.model_validate(response.json())
 
     async def delete(self, job_id: uuid.UUID) -> None:
@@ -155,4 +157,4 @@ class JobsResource:
         Raises:
             APIError: The request failed, including 404 for a missing job.
         """
-        await self._client.request("DELETE", f"/v1/jobs/{job_id}")
+        await self._client.request("DELETE", f"/api/v1/jobs/{job_id}")

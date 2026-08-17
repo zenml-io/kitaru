@@ -48,7 +48,7 @@ class ImportsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/imports",
+            "/api/v1/imports",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return JobResponse.model_validate(response.json())

@@ -61,7 +61,7 @@ class InvestigationsResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/investigations",
+            "/api/v1/investigations",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return InvestigationResponse.model_validate(response.json())
@@ -80,7 +80,7 @@ class InvestigationsResource:
             Stored investigation.
         """
         response = await self._client.request(
-            "GET", f"/v1/investigations/{investigation_id}"
+            "GET", f"/api/v1/investigations/{investigation_id}"
         )
         return InvestigationResponse.model_validate(response.json())
 
@@ -102,7 +102,7 @@ class InvestigationsResource:
         params = params or InvestigationListParams()
         response = await self._client.request(
             "GET",
-            "/v1/investigations",
+            "/api/v1/investigations",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[InvestigationResponse].model_validate(response.json())
@@ -144,7 +144,7 @@ class InvestigationsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/investigations/{investigation_id}",
+            f"/api/v1/investigations/{investigation_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return InvestigationResponse.model_validate(response.json())
@@ -159,7 +159,9 @@ class InvestigationsResource:
             APIError: The request failed, including 404 for a missing
                 investigation.
         """
-        await self._client.request("DELETE", f"/v1/investigations/{investigation_id}")
+        await self._client.request(
+            "DELETE", f"/api/v1/investigations/{investigation_id}"
+        )
 
     async def list_sessions(
         self,
@@ -182,7 +184,7 @@ class InvestigationsResource:
         params = params or InvestigationSessionsListParams()
         response = await self._client.request(
             "GET",
-            f"/v1/investigations/{investigation_id}/sessions",
+            f"/api/v1/investigations/{investigation_id}/sessions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
         return Page[InvestigationSessionResponse].model_validate(response.json())
@@ -234,7 +236,7 @@ class InvestigationsResource:
         """
         response = await self._client.request(
             "PATCH",
-            f"/v1/investigations/{investigation_id}/sessions/{session_id}",
+            f"/api/v1/investigations/{investigation_id}/sessions/{session_id}",
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return InvestigationSessionResponse.model_validate(response.json())

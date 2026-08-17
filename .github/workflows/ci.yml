@@ -353,7 +353,7 @@ jobs:
       - name: Smoke test server info API
         run: |
           set -euo pipefail
-          http_status=$(curl -sS -o /tmp/server-info.json -w '%{http_code}' 'http://127.0.0.1:18080/v1/info')
+          http_status=$(curl -sS -o /tmp/server-info.json -w '%{http_code}' 'http://127.0.0.1:18080/api/v1/info')
           test "$http_status" = "200"
           python -m json.tool /tmp/server-info.json
       - name: Dump container logs on failure

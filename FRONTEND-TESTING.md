@@ -103,7 +103,7 @@ Open `http://localhost:8000` to see the served UI. If you download a different
 bundle with `just ui-bundle` or `just ui-bundle-prerelease`, restart `ui-serve`
 to pick it up.
 
-To confirm which bundle is live, check `GET /v1/info`. Its `ui_version` field
+To confirm which bundle is live, check `GET /api/v1/info`. Its `ui_version` field
 reports the tag from the served bundle's `bundle_manifest.json`.
 
 ## External dashboard redirect

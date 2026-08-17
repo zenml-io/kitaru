@@ -42,18 +42,20 @@ async def _create_verified_device(
     Returns:
         Device authorization body and the bearer token of the approving account.
     """
-    response = await client.post("/v1/device_authorization", data={"hostname": "ci"})
+    response = await client.post(
+        "/api/v1/device_authorization", data={"hostname": "ci"}
+    )
     assert response.status_code == 200
     authorization = response.json()
 
     response = await client.post(
-        "/v1/login", data={"username": "default", "password": "secret"}
+        "/api/v1/login", data={"username": "default", "password": "secret"}
     )
     assert response.status_code == 200
     account_token = response.json()["access_token"]
 
     response = await client.post(
-        f"/v1/devices/{authorization['device_id']}/verify",
+        f"/api/v1/devices/{authorization['device_id']}/verify",
         json={"user_code": authorization["user_code"], "trusted": False},
         headers={"Authorization": f"Bearer {account_token}"},
     )
@@ -70,13 +72,13 @@ async def test_device_authorization_persists_across_requests(
     headers = {"Authorization": f"Bearer {account_token}"}
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=headers
     )
     assert response.status_code == 200
     assert response.json()["status"] == "verified"
 
     response = await client.post(
-        "/v1/login",
+        "/api/v1/login",
         data={
             "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
             "device_id": authorization["device_id"],
@@ -86,7 +88,7 @@ async def test_device_authorization_persists_across_requests(
     assert response.status_code == 200
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=headers
     )
     assert response.status_code == 200
     assert response.json()["status"] == "active"
@@ -98,14 +100,14 @@ async def test_update_persists_across_requests(client: httpx.AsyncClient) -> Non
     headers = {"Authorization": f"Bearer {account_token}"}
 
     response = await client.patch(
-        f"/v1/devices/{authorization['device_id']}",
+        f"/api/v1/devices/{authorization['device_id']}",
         json={"locked": True},
         headers=headers,
     )
     assert response.status_code == 200
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=headers
     )
     assert response.status_code == 200
     assert response.json()["locked"] is True
@@ -117,12 +119,12 @@ async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> Non
     headers = {"Authorization": f"Bearer {account_token}"}
 
     response = await client.delete(
-        f"/v1/devices/{authorization['device_id']}", headers=headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=headers
     )
     assert response.status_code == 204
 
     response = await client.get(
-        f"/v1/devices/{authorization['device_id']}", headers=headers
+        f"/api/v1/devices/{authorization['device_id']}", headers=headers
     )
     assert response.status_code == 404
 
@@ -136,26 +138,28 @@ async def test_wrong_user_code_lock_survives_the_rolled_back_request(
     transaction. The attempt counter has to survive that rollback or the
     device would never lock no matter how many codes are guessed.
     """
-    response = await client.post("/v1/device_authorization", data={"hostname": "ci"})
+    response = await client.post(
+        "/api/v1/device_authorization", data={"hostname": "ci"}
+    )
     assert response.status_code == 200
     authorization = response.json()
 
     response = await client.post(
-        "/v1/login", data={"username": "default", "password": "secret"}
+        "/api/v1/login", data={"username": "default", "password": "secret"}
     )
     assert response.status_code == 200
     headers = {"Authorization": f"Bearer {response.json()['access_token']}"}
 
     for _ in range(3):
         response = await client.post(
-            f"/v1/devices/{authorization['device_id']}/verify",
+            f"/api/v1/devices/{authorization['device_id']}/verify",
             json={"user_code": "WRONG-CODE", "trusted": False},
             headers=headers,
         )
         assert response.status_code == 422
 
     response = await client.post(
-        f"/v1/devices/{authorization['device_id']}/verify",
+        f"/api/v1/devices/{authorization['device_id']}/verify",
         json={"user_code": authorization["user_code"], "trusted": False},
         headers=headers,
     )

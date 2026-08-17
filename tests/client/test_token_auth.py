@@ -89,7 +89,7 @@ async def test_static_token_is_attached_and_never_renewed() -> None:
     auth = StaticTokenAuth("fixed-token")
     client, seen = _client_accepting({"other-token"}, auth)
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
 
     assert response.status_code == 401
     assert seen == ["fixed-token"]
@@ -100,7 +100,7 @@ async def test_cached_token_is_used_without_fetching() -> None:
     source = FakeTokenSource(cached="cached-token")
     client, seen = _client_accepting({"cached-token"}, RenewingTokenAuth(source))
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
 
     assert response.status_code == 200
     assert seen == ["cached-token"]
@@ -112,7 +112,7 @@ async def test_missing_token_is_fetched_before_the_first_request() -> None:
     source = FakeTokenSource(tokens=["fresh-token"])
     client, seen = _client_accepting({"fresh-token"}, RenewingTokenAuth(source))
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
 
     assert response.status_code == 200
     assert seen == ["fresh-token"]
@@ -124,7 +124,7 @@ async def test_rejected_token_is_renewed_and_retried_once() -> None:
     source = FakeTokenSource(cached="stale-token", tokens=["fresh-token"])
     client, seen = _client_accepting({"fresh-token"}, RenewingTokenAuth(source))
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
 
     assert response.status_code == 200
     assert seen == ["stale-token", "fresh-token"]
@@ -136,7 +136,7 @@ async def test_no_infinite_loop_when_renewed_token_is_also_rejected() -> None:
     source = FakeTokenSource(cached="stale-token", tokens=["also-stale"])
     client, seen = _client_accepting({"fresh-token"}, RenewingTokenAuth(source))
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
 
     assert response.status_code == 401
     assert seen == ["stale-token", "also-stale"]
@@ -147,7 +147,9 @@ async def test_concurrent_renewals_dedup_to_one_fetch() -> None:
     source = FakeTokenSource(cached="stale-token", tokens=["fresh-token"])
     client, _ = _client_accepting({"fresh-token"}, RenewingTokenAuth(source))
 
-    responses = await asyncio.gather(*(client.get("/v1/accounts") for _ in range(5)))
+    responses = await asyncio.gather(
+        *(client.get("/api/v1/accounts") for _ in range(5))
+    )
 
     assert {response.status_code for response in responses} == {200}
     assert source.fetch_calls == 1
@@ -158,7 +160,7 @@ async def test_request_without_a_producible_token_is_sent_unauthenticated() -> N
     source = FakeTokenSource()
     client, seen = _client_accepting({"fresh-token"}, RenewingTokenAuth(source))
 
-    response = await client.get("/v1/accounts")
+    response = await client.get("/api/v1/accounts")
 
     assert response.status_code == 401
     assert seen == [None]

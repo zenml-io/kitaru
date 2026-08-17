@@ -38,7 +38,7 @@ async def test_default_plugins_are_registered_at_startup(
     monkeypatch.setattr(bootstrap, "DEFAULT_PLUGIN_DEFINITIONS", (definition,))
 
     async with lifespan_client(db_settings()) as client:
-        evaluators = (await client.get("/v1/evaluators")).json()["items"]
+        evaluators = (await client.get("/api/v1/evaluators")).json()["items"]
 
     matches = [item for item in evaluators if item["name"] == definition.name]
     assert len(matches) == 1

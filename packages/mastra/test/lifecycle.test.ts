@@ -207,7 +207,7 @@ describe("session lifecycle", () => {
       "fetch",
       vi.fn<typeof globalThis.fetch>(async (input, init) => {
         const url = new URL(String(input));
-        if (url.pathname === "/v1/sessions") {
+        if (url.pathname === "/api/v1/sessions") {
           created = true;
           return originalFetch(input, init);
         }

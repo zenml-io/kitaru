@@ -31,29 +31,29 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_importers_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post(
-        "/v1/importers", json={"name": "langfuse-import", "provider": "langfuse"}
+        "/api/v1/importers", json={"name": "langfuse-import", "provider": "langfuse"}
     )
     assert response.status_code == 201
     created = response.json()
 
-    response = await client.get(f"/v1/importers/{created['id']}")
+    response = await client.get(f"/api/v1/importers/{created['id']}")
     assert response.status_code == 200
     assert response.json() == created
 
 
 async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     """Translate the database constraint into HTTP 409."""
-    response = await client.post("/v1/importers", json={"name": "langfuse-import"})
+    response = await client.post("/api/v1/importers", json={"name": "langfuse-import"})
     assert response.status_code == 201
-    response = await client.post("/v1/importers", json={"name": "langfuse-import"})
+    response = await client.post("/api/v1/importers", json={"name": "langfuse-import"})
     assert response.status_code == 409
 
 
 async def test_evaluator_and_importer_share_a_name(client: httpx.AsyncClient) -> None:
     """Let an evaluator and an importer register the same name."""
-    response = await client.post("/v1/importers", json={"name": "shared"})
+    response = await client.post("/api/v1/importers", json={"name": "shared"})
     assert response.status_code == 201
-    response = await client.post("/v1/evaluators", json={"name": "shared"})
+    response = await client.post("/api/v1/evaluators", json={"name": "shared"})
     assert response.status_code == 201
 
 
@@ -62,7 +62,7 @@ async def test_version_numbering_persists_across_requests(
 ) -> None:
     """Bump the version number in a real UPDATE ... RETURNING transaction."""
     created = (
-        await client.post("/v1/importers", json={"name": "langfuse-import"})
+        await client.post("/api/v1/importers", json={"name": "langfuse-import"})
     ).json()
     body = {
         "source": {
@@ -71,7 +71,7 @@ async def test_version_numbering_persists_across_requests(
             "entrypoint": "pkg:run",
         }
     }
-    first = await client.post(f"/v1/importers/{created['id']}/versions", json=body)
-    second = await client.post(f"/v1/importers/{created['id']}/versions", json=body)
+    first = await client.post(f"/api/v1/importers/{created['id']}/versions", json=body)
+    second = await client.post(f"/api/v1/importers/{created['id']}/versions", json=body)
     assert first.json()["version"] == 1
     assert second.json()["version"] == 2

@@ -53,7 +53,7 @@ class AuthResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/login",
+            "/api/v1/login",
             data={
                 "grant_type": GrantType.PASSWORD.value,
                 "username": username,
@@ -93,7 +93,7 @@ class AuthResource:
         }
         response = await self._client.request(
             "POST",
-            "/v1/device_authorization",
+            "/api/v1/device_authorization",
             data={key: value for key, value in data.items() if value is not None},
             authenticate=False,
         )
@@ -119,7 +119,7 @@ class AuthResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/login",
+            "/api/v1/login",
             data={
                 "grant_type": GrantType.DEVICE_CODE.value,
                 "device_id": str(device_id),
@@ -178,7 +178,7 @@ class AuthResource:
         """
         response = await self._client.request(
             "POST",
-            "/v1/login",
+            "/api/v1/login",
             data={"grant_type": grant_type.value},
             headers={"Authorization": f"Bearer {credential}"},
             authenticate=False,
@@ -191,4 +191,4 @@ class AuthResource:
         Raises:
             APIError: The request failed.
         """
-        await self._client.request("POST", "/v1/logout", authenticate=False)
+        await self._client.request("POST", "/api/v1/logout", authenticate=False)

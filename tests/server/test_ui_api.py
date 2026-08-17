@@ -178,14 +178,14 @@ def _session_body(**overrides: object) -> dict[str, object]:
 
 async def test_list_sessions_with_evaluations(client: httpx.AsyncClient) -> None:
     """List sessions with each session's evaluations attached."""
-    scored = (await client.post("/v1/sessions", json=_session_body())).json()
-    unscored = (await client.post("/v1/sessions", json=_session_body())).json()
+    scored = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    unscored = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
-        f"/v1/sessions/{scored['id']}/evaluations",
+        f"/api/v1/sessions/{scored['id']}/evaluations",
         json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
     )
 
-    response = await client.get("/v1/ui/sessions")
+    response = await client.get("/api/v1/ui/sessions")
     assert response.status_code == 200
     items = response.json()["items"]
 
@@ -203,13 +203,13 @@ async def test_list_sessions_with_evaluations_walks_pages(
 ) -> None:
     """Walk every page of sessions with evaluations without duplicates or gaps."""
     sessions = [
-        (await client.post("/v1/sessions", json=_session_body())).json()
+        (await client.post("/api/v1/sessions", json=_session_body())).json()
         for _ in range(3)
     ]
     names = ["accuracy", "relevance", "coherence"]
     for session, name in zip(sessions, names, strict=True):
         await client.post(
-            f"/v1/sessions/{session['id']}/evaluations",
+            f"/api/v1/sessions/{session['id']}/evaluations",
             json={"evaluations": [{"name": name, "score": 0.5}]},
         )
 
@@ -219,7 +219,7 @@ async def test_list_sessions_with_evaluations_walks_pages(
         params: dict[str, Any] = {"size": 2}
         if cursor is not None:
             params["cursor"] = cursor
-        response = await client.get("/v1/ui/sessions", params=params)
+        response = await client.get("/api/v1/ui/sessions", params=params)
         assert response.status_code == 200
         page = response.json()
         for item in page["items"]:
@@ -239,14 +239,14 @@ async def test_list_sessions_with_evaluations_applies_filter(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions with evaluations down to the matching session."""
-    await client.post("/v1/sessions", json=_session_body(origin="recorded"))
+    await client.post("/api/v1/sessions", json=_session_body(origin="recorded"))
     matching = (
-        await client.post("/v1/sessions", json=_session_body(origin="imported"))
+        await client.post("/api/v1/sessions", json=_session_body(origin="imported"))
     ).json()
 
     filter_expression = {"field": "origin", "op": "eq", "value": "imported"}
     response = await client.get(
-        "/v1/ui/sessions", params={"filter": json.dumps(filter_expression)}
+        "/api/v1/ui/sessions", params={"filter": json.dumps(filter_expression)}
     )
     assert response.status_code == 200
     items = response.json()["items"]
@@ -256,9 +256,9 @@ async def test_list_sessions_with_evaluations_applies_filter(
 
 async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
     """Get a session with its evaluations attached."""
-    created = (await client.post("/v1/sessions", json=_session_body())).json()
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
-        f"/v1/sessions/{created['id']}/evaluations",
+        f"/api/v1/sessions/{created['id']}/evaluations",
         json={
             "evaluations": [
                 {"name": "accuracy", "score": 0.9},
@@ -267,7 +267,7 @@ async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
         },
     )
 
-    response = await client.get(f"/v1/ui/sessions/{created['id']}")
+    response = await client.get(f"/api/v1/ui/sessions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
     assert body["session"] == created
@@ -281,5 +281,5 @@ async def test_get_session_with_evaluations_not_found(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 404 for a missing session."""
-    response = await client.get(f"/v1/ui/sessions/{uuid.uuid4()}")
+    response = await client.get(f"/api/v1/ui/sessions/{uuid.uuid4()}")
     assert response.status_code == 404
