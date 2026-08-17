@@ -48,6 +48,7 @@
 ## Adapters
 
 - [Overview](adapters/README.md)
+- [Record in production](adapters/record-in-production.md)
 - [Pydantic AI](adapters/pydantic-ai.md)
 - [LangGraph](adapters/langgraph.md)
 - [OpenAI Agents SDK](adapters/openai-agents.md)
