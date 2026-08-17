@@ -1,13 +1,21 @@
 ---
-description: Install the Kitaru SDK and CLI, start a local server, and log in.
+description: Install the Kitaru SDKs and CLI, start a local server, and log in, for Python and TypeScript.
 icon: download
 ---
 
 # Installation
 
-Kitaru is three installable pieces: the **SDK + CLI** in your project, a **server** your team shares (self-hosted, one per team), and **workers** that execute replays and evaluations in your environment. For a first session on one machine, all three run locally.
+Kitaru is three installable pieces:
+
+- the **SDK + CLI** in your project
+- a **server** your team shares (self-hosted, one per team)
+- **workers** that execute replays and evaluations in your environment
+
+For a first session on one machine, all three run locally.
 
 The Kitaru CLI, server, and workers require **Python 3.11 or newer**. TypeScript agents use Node **22.22 or newer in the Node 22 release line** and connect to the same server.
+
+The server stores everything in **PostgreSQL**, its only stateful dependency. You do not install it by hand for local use: `kitaru login --local` provisions the server and Postgres together in Docker. A [self-hosted deployment](../deploy/README.md) brings its own Postgres. Workers are plain processes (`kitaru worker start`) that run wherever your agent's environment lives; for containerized fleets, the published `zenmldocker/kitaru-worker` image works out of the box (see [Workers in production](../deploy/workers.md)).
 
 ## Install the Python SDK and CLI
 
@@ -29,15 +37,15 @@ pip install "kitaru[cli,worker]" kitaru-pydantic-ai
 
 | Extra | What it adds |
 | --- | --- |
-| `cli` | The `kitaru` command — the full loop: import, evaluate, cohorts, experiments, workers, jobs |
+| `cli` | The `kitaru` command, the full loop: import, evaluate, cohorts, experiments, workers, jobs |
 | `worker` | Run a worker in this environment (`kitaru worker start`) |
 | `server` | Run the Kitaru server itself from this package |
-| `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/mcp-server.md) |
+| `mcp` | The `kitaru-mcp` server for [coding assistants](../agent-native/setup.md) |
 | `otel` | OpenTelemetry export from the server |
 
-The plain `kitaru` package is the SDK alone — the async client and the API models — which is all a production service needs to record sessions.
+The plain `kitaru` package is the SDK alone (the async client and the API models), which is all a production service needs to record sessions.
 
-Adapters are **not** extras — each ships as its own distribution, so you install the one your framework needs alongside Kitaru:
+Adapters are **not** extras. Each ships as its own distribution, so you install the one your framework needs alongside Kitaru:
 
 | Framework | Install |
 | --- | --- |
@@ -45,7 +53,13 @@ Adapters are **not** extras — each ships as its own distribution, so you insta
 | [LangGraph](../adapters/langgraph.md) (also LangChain agents, Deep Agents) | `kitaru-langgraph` |
 | [OpenAI Agents SDK](../adapters/openai-agents.md) | `kitaru-openai-agents` |
 
-## Install a TypeScript adapter
+## Install the TypeScript SDK and adapters
+
+`@zenml-io/kitaru` is the framework-neutral TypeScript SDK: it creates and inspects Kitaru resources, records sessions, submits evaluations and experiments, and waits for exact jobs. The Python `kitaru` command remains the CLI for login and worker operations; there is no separate TypeScript CLI.
+
+{% hint style="info" %}
+The TypeScript packages require Node `>=22.22.0 <23` and are versioned and released together.
+{% endhint %}
 
 Install the adapter in the Node project that runs your agent:
 
@@ -77,11 +91,11 @@ The core package provides the TypeScript client and adapter primitives. It does 
 
 The Node agent still needs a reachable Kitaru server. Install the Python CLI and worker separately when you want to run the full loop locally, or connect the agent to your team's deployed server and workers.
 
-No adapter for your framework? You are not blocked — [import your traces instead, build a project-local adapter, or have Kitaru call your agent](../adapters/custom.md).
+No adapter for your framework? You are not blocked: [import your traces instead, or build a project-local adapter with the adapter-builder skill](../adapters/custom.md).
 
 ## Install the agent skills
 
-Do this now rather than later. Kitaru is a loop with real judgment calls in it — which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result actually supports shipping — and the [agent skills](../agent-native/skills.md) teach your coding assistant how to make them with you:
+Do this now rather than later. Kitaru is a loop with real judgment calls in it: which sessions to review, when a behavior is worth freezing into a cohort, whether a replay result supports shipping. The [agent skills](../agent-native/setup.md) teach your coding assistant how to make them with you:
 
 {% tabs %}
 {% tab title="Any skill-aware host" %}
@@ -100,11 +114,11 @@ npx skills add zenml-io/kitaru-skills
 
 `kitaru-investigation` is the front door: point your assistant at it and it will walk you from the traces you have to a reviewed cohort, choosing the review batch and stopping at checkpoints you can resume from. The others cover [replay experiments](../adapters/README.md), [building an adapter](../adapters/custom.md), and building an importer.
 
-Pair them with the [MCP server](../agent-native/mcp-server.md) (`kitaru[mcp]`) so the assistant has bounded operations to go with the method. `kitaru` with no arguments tells you whether the skills are installed.
+Pair them with the [MCP server](../agent-native/setup.md) (`kitaru[mcp]`) so the assistant has bounded operations to go with the method. `kitaru` with no arguments tells you whether the skills are installed.
 
 ## Start a local server
 
-The server is FastAPI + Postgres, and the CLI can run both for you — all it needs is Docker with the Compose v2 plugin:
+The server is FastAPI + Postgres, and the CLI can run both for you. All it needs is [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/):
 
 ```bash
 kitaru login --local
@@ -115,16 +129,16 @@ This provisions a server and PostgreSQL pinned to your installed Kitaru version,
 ```bash
 kitaru local logs            # inspect (add --service server --follow)
 kitaru logout                # stop the containers; the database persists
-kitaru logout --volumes      # stop and delete the database — a clean reset
+kitaru logout --volumes      # stop and delete the database (a clean reset)
 ```
 
-After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade` — a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
+After upgrading the `kitaru` package, upgrade the local server to match with `kitaru login --local --upgrade`; a plain login deliberately never replaces the server image. Prefer to manage Docker yourself, or need a shared deployment with your own Postgres, real auth, and TLS? See [Docker](../deploy/docker.md) and [Deploy Kitaru](../deploy/README.md).
 
 ## Connect
 
-`kitaru login --local` already connected you — `kitaru status` confirms it.
+`kitaru login --local` already connected you; `kitaru status` confirms it.
 
-Against a shared server, log in — `kitaru login <url>` — or, for non-interactive use (CI, production services), create an API key and set two environment variables that the SDK, the CLI, and workers all read:
+Against a shared server, log in with `kitaru login <url>`. For non-interactive use (CI, production services), create an API key and set two environment variables that the SDK, the CLI, and workers all read:
 
 ```bash
 export KITARU_API_URL="https://kitaru.your-team.example"
@@ -133,7 +147,7 @@ export KITARU_API_KEY="KITKEY_..."
 
 See [Authentication & API keys](../deploy/authentication.md) for how keys are issued and managed.
 
-Node applications can also reuse a developer's selected CLI login without exporting its token. See the [TypeScript SDK](../typescript-sdk.md). Use dedicated API keys or worker task tokens for CI and production rather than copying a developer credential store.
+Node applications can also reuse a developer's selected CLI login without exporting its token; see the [TypeScript SDK](../deploy/sdks.md). Use dedicated API keys or worker task tokens for CI and production rather than copying a developer credential store.
 
 ## Verify
 

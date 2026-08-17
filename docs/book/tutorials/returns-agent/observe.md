@@ -5,7 +5,7 @@ icon: eye
 
 # 1. Observe the recorded behavior
 
-**Observe → Judge → Define → Replay → Compare**
+**Observe** → Judge → Define → Replay → Compare
 
 The first task is factual: confirm what the template preserved and inspect the population before deciding what was right or wrong. By the end of this page, you will have descriptive measurements and a bounded, varied worklist for human review.
 
@@ -70,13 +70,13 @@ Record the session UUIDs and any node UUIDs that contain useful evidence. A node
 
 For each session, write down:
 
-| Field | What to capture |
+| Field | What to note |
 | --- | --- |
 | Selection reason | Why this trace belongs in a varied review worklist. |
 | Open question | One concrete point that requires human judgment. |
 | Evidence | Exact nodes or fields that help answer the question without stating the answer. |
 
-Keep each question neutral and specific to its trace. “Was this handled correctly?” is too generic. “Given the policy result and accepted action shown here, was escalation required?” identifies the decision without supplying its verdict.
+Keep each question neutral and specific to its trace. "Was this handled correctly?" is too generic. "Given the policy result and accepted action shown here, was escalation required?" identifies the decision without supplying its verdict.
 
 ## Checkpoint
 

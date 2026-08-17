@@ -29,12 +29,18 @@ A replay, import, or evaluation that sits in `pending` almost always means **no 
 
 `kitaru job get <job-id>` carries the failing task's error and a tail of the subprocess's stderr. The usual suspects:
 
-- **The agent version has no run command** — register it with `--command`; that command is what the worker executes.
-- **Missing dependencies or keys** — the subprocess runs in the worker's environment. Start the worker in the same virtualenv as your agent, with the provider keys exported.
-- **A tool call missed under `on_miss="fail"`** — the fork took a path the recording doesn't answer. See [Tool policies](../guides/tool-policies.md) for the options.
+- **The agent version has no run command:** register it with `--command`; that command is what the worker executes.
+- **Missing dependencies or keys:** the subprocess runs in the worker's environment. Start the worker in the same virtualenv as your agent, with the provider keys exported.
+- **A tool call missed under `on_miss="fail"`:** the fork took a path the recording doesn't answer. See [Tool policies](../guides/tool-policies.md) for the options.
 
 ## The server
 
 The server's health endpoint is `GET /health`; Docker Compose users can check `docker compose ps` and `docker compose logs server`. The interactive API reference lives at `/docs` on your server.
 
-Still stuck? Ask in the [community](https://www.zenml.io/slack) or [open an issue](https://github.com/zenml-io/kitaru/issues).
+## Get help
+
+Still stuck? All three of these reach a human:
+
+- [Slack community](https://kitaru.ai/slack) for questions and quick pointers.
+- [kitaru.ai/help](https://kitaru.ai/help) to report a bug; it goes straight to GitHub issues. Attach the session or job ID and the failing command's output, and it gets fixed fastest.
+- [support@kitaru.ai](mailto:support@kitaru.ai) when email is easier.

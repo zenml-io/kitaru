@@ -1,16 +1,16 @@
 ---
-description: The agent is the identity, the session is the recording — every model call, tool call, and decision a run left behind.
+description: The agent is the identity, the session is the recording of every model call, tool call, and decision a run left behind.
 icon: film
 ---
 
 # Agents & Sessions
 
-Most traces are transcripts: you read them. A Kitaru **session** is a recording you can run. It holds everything one agent run did — every model call, tool call, and decision, in order, with inputs and outputs — and that is exactly what [replay](replay.md) needs to re-execute the run against your real code.
+Most traces are transcripts: you read them. A Kitaru **session** is a recording you can run. It holds everything one agent run did (every model call, tool call, and decision, in order, with inputs and outputs), and that is exactly what [replay](replay.md) needs to re-execute the run against your real code.
 
 Two nouns carry the whole data model:
 
 - An **agent** is the stable identity your runs attach to. You register it once, and every session, cohort, and experiment references it.
-- A **session** is one recorded run of that agent. Sessions arrive three ways — recorded live by an adapter, [imported](../getting-started/import-your-traces.md) from your existing traces, or produced by a replay — and all three are the same object with a different `origin` (`recorded`, `imported`, `replay`).
+- A **session** is one recorded run of that agent. Sessions arrive three ways: recorded live by an adapter, [imported](../getting-started/import-your-traces.md) from your existing traces, or produced by a replay. All three are the same object with a different `origin` (`recorded`, `imported`, `replay`).
 
 ## Agents and agent versions
 
@@ -24,7 +24,7 @@ kitaru agent register support-agent \
 
 This creates the agent and its first **agent version** in one step. A version pins what "the agent" meant at a point in time: a run spec (the command that starts your agent, its working directory, environment, secrets, and timeout) plus optional capability metadata (tools, MCP servers, skills). The run spec is what a [worker](workers.md) executes when a replay or experiment re-runs the agent in your environment.
 
-Versions are server-numbered (1, 2, 3, …); `--display-version` attaches your own label — a semver, a git SHA, a branch name:
+Versions are server-numbered (1, 2, 3, …); `--display-version` attaches your own label, such as a semver, a git SHA, or a branch name:
 
 ```bash
 kitaru agent version register support-agent \
@@ -38,12 +38,12 @@ Register a new version when the code changes; an [experiment](experiments.md) is
 
 A session carries its top-level `inputs`, `outputs`, `status` (`in_progress` / `completed` / `failed`), timing, and rolled-up totals: `cost`, `tokens` (input / output / cached / reasoning), `llm_call_count`, and `tool_call_count`.
 
-The step-by-step recording lives in the session's **nodes** — an ordered tree with one node per event:
+The step-by-step recording lives in the session's **nodes**: an ordered tree with one node per event.
 
 | Node type | What it records |
 | --- | --- |
 | `llm_call` | Requested and resolved model, inputs and outputs, token usage, cost, model params |
-| `tool_call` | Tool name, arguments, result — plus the cache key replay uses to answer the same call from the recording |
+| `tool_call` | Tool name, arguments, result, plus the cache key replay uses to answer the same call from the recording |
 | `subagent_call` | A delegated run by a sub-agent |
 | `span` | Any other grouping the adapter or importer wants to preserve |
 
@@ -53,7 +53,7 @@ Adapters record nodes automatically. The [PydanticAI adapter](../adapters/pydant
 
 This is the single most important thing to get right when you bring your own traces, and the easiest to get wrong.
 
-A session is **the whole run, from the request that started it to the answer that ended it** — every model call, tool call and sub-agent hop in between. It is not one model call, and it is not one span. Replay re-executes a session from the top, so a session that holds half a run can only ever reproduce half a run, and a cohort of them measures nothing you care about.
+A session is **the whole run, from the request that started it to the answer that ended it**, including every model call, tool call and sub-agent hop in between. It is not one model call, and it is not one span. Replay re-executes a session from the top, so a session that holds half a run can only ever reproduce half a run, and a cohort of them measures nothing you care about.
 
 Adapters get this for free: the wrapper opens the session when your agent is invoked and closes it when the call returns. Importing is where it needs a decision from you, because observability tools do not agree on what a trace is:
 
@@ -61,9 +61,9 @@ Adapters get this for free: the wrapper opens the session when your agent is inv
 - Many emit **one trace per conversation turn**, so a five-turn support conversation arrives as five traces. If that is one run in your product, those five traces are one session.
 - Some emit **one trace per model call**, which almost never matches a session on its own.
 
-You do not have to reshape the export yourself. Importers group related traces into one session using the provider's own conversation or session identifier, and `--join-on` names the field to group on when the identity lives somewhere else — see [Join provider traces into sessions](../guides/importing-sessions.md). When no identifier is present, each trace becomes its own session, which is the safe default but rarely the one you want for multi-turn agents.
+You do not have to reshape the export yourself. Importers group related traces into one session using the provider's own conversation or session identifier, and `--join-on` names the field to group on when the identity lives somewhere else. See [Join provider traces into sessions](../guides/importing-sessions.md). When no identifier is present, each trace becomes its own session, which is the safe default but rarely the one you want for multi-turn agents.
 
-So the question to answer before importing is not "what does my tool call a trace" but **"what does my product call one run"** — and then make the import produce that. If the answer is "it depends on how we configured tracing", it is worth resolving that upstream: consistent session identity in your traces is what makes everything downstream — cohorts, experiments, regression suites — mean the same thing every time.
+So the question to answer before importing is not "what does my tool call a trace" but **"what does my product call one run"**, and then make the import produce that. If the answer is "it depends on how we configured tracing", it is worth resolving that upstream: consistent session identity in your traces is what makes everything downstream (cohorts, experiments, regression suites) mean the same thing every time.
 
 If you are joining a format no importer understands, do the joining in your [custom importer](../guides/importing-sessions.md) rather than after the fact. Sessions are not merged once they land.
 
@@ -106,5 +106,5 @@ The native MCP server can list and filter tags, use existing filtered reads to r
 ## Where sessions come from
 
 - **Recorded:** wrap your agent with an adapter and run it as usual. See the [adapter overview](../adapters/README.md).
-- **Imported** — bring the traces you already collect. Langfuse stays your system of record; Kitaru gets a runnable copy. See [Import your traces](../getting-started/import-your-traces.md).
-- **Replay** — every replay produces a new session with `origin: replay`, evaluated by the same evaluators as any other session. See [Replay](replay.md).
+- **Imported:** bring the traces you already collect. Langfuse stays your system of record; Kitaru gets a runnable copy. See [Import your traces](../getting-started/import-your-traces.md).
+- **Replay:** every replay produces a new session with `origin: replay`, evaluated by the same evaluators as any other session. See [Replay](replay.md).

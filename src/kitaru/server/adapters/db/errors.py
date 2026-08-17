@@ -17,12 +17,15 @@ import asyncpg
 from sqlalchemy.exc import DBAPIError, IntegrityError
 
 
-def _has_driver_cause(exc: DBAPIError, driver_error: type[BaseException]) -> bool:
+def _has_driver_cause(
+    exc: DBAPIError,
+    driver_error: type[BaseException] | tuple[type[BaseException], ...],
+) -> bool:
     """Report whether a driver error of a class underlies a database error.
 
     Args:
         exc: Database error to inspect.
-        driver_error: Driver error class to look for.
+        driver_error: Driver error class, or tuple of classes, to look for.
 
     Returns:
         Whether the class appears in the error's cause chain.
@@ -57,6 +60,27 @@ def is_lock_not_available(exc: DBAPIError) -> bool:
         Whether the driver reports the lock as unavailable.
     """
     return _has_driver_cause(exc, asyncpg.exceptions.LockNotAvailableError)
+
+
+def is_connection_unavailable(exc: DBAPIError) -> bool:
+    """Report whether a database error is a lost or unavailable connection.
+
+    Args:
+        exc: Database error to inspect.
+
+    Returns:
+        Whether the connection was dropped, or the database refused it because
+        it is starting up, recovering, or shutting down.
+    """
+    if exc.connection_invalidated:
+        return True
+    return _has_driver_cause(
+        exc,
+        (
+            asyncpg.exceptions.PostgresConnectionError,
+            asyncpg.exceptions.OperatorInterventionError,
+        ),
+    )
 
 
 def violated_constraint(exc: IntegrityError) -> str | None:

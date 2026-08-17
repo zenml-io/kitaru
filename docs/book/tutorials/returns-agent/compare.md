@@ -5,7 +5,7 @@ icon: code-compare
 
 # 5. Compare the paired evidence
 
-**Observe → Judge → Define → Replay → Compare**
+Observe → Judge → Define → Replay → **Compare**
 
 A conclusive improvement or regression claim requires every expected original-and-replay comparison under the same evaluator versions. An incomplete run is still useful evidence for diagnosing an inconclusive result. In this final phase, you will inspect run health, read the available pairs, preserve failures and missing results, and state the narrow conclusion supported by your reviewed cohort.
 
@@ -121,4 +121,4 @@ The durable result is not a predetermined passing demo. It is an auditable claim
 
 ## Where to go next
 
-<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Use kitaru-investigation</strong></td><td>Apply this method to the agent in your own repository.</td><td><a href="../../agent-native/skills.md#the-investigation-skill">../../agent-native/skills.md#the-investigation-skill</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed evidence into a reusable comparison.</td><td><a href="../../guides/regression-suite.md">../../guides/regression-suite.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, tools, history, and replay safety.</td><td><a href="../../guides/replay-and-overrides.md">../../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Design and calibrate a domain-specific evaluator.</td><td><a href="../../guides/write-an-evaluator.md">../../guides/write-an-evaluator.md</a></td></tr></tbody></table>
+<table data-view="cards"><thead><tr><th></th><th></th><th data-hidden data-card-target data-type="content-ref"></th></tr></thead><tbody><tr><td><strong>Use kitaru-investigation</strong></td><td>Apply this method to the agent in your own repository.</td><td><a href="../../agent-native/setup.md">../../agent-native/setup.md</a></td></tr><tr><td><strong>Build a regression suite</strong></td><td>Grow reviewed evidence into a reusable comparison.</td><td><a href="../../guides/regression-suite.md">../../guides/regression-suite.md</a></td></tr><tr><td><strong>Replay and overrides</strong></td><td>Control models, tools, history, and replay safety.</td><td><a href="../../guides/replay-and-overrides.md">../../guides/replay-and-overrides.md</a></td></tr><tr><td><strong>Write an evaluator</strong></td><td>Design and calibrate a domain-specific evaluator.</td><td><a href="../../guides/write-an-evaluator.md">../../guides/write-an-evaluator.md</a></td></tr></tbody></table>

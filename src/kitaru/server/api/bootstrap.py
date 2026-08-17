@@ -116,8 +116,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:parse",
-        requirement="kitaru-langfuse-importer==0.1.0rc2",
-        display_version="0.1.0rc2",
+        requirement="kitaru-langfuse-importer==0.1.0rc3",
+        display_version="0.1.0rc3",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
