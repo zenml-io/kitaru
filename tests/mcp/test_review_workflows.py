@@ -82,9 +82,12 @@ def _get_state(client: object, **settings: Any) -> MCPServerState:
 
 
 def _get_context(
-    client: object, mode: CapabilityMode
+    client: object,
+    mode: CapabilityMode,
+    *,
+    handler_timeout: float = 120.0,
 ) -> tuple[MCPServer[MCPServerState], Context[MCPServerState, Any]]:
-    settings = MCPSettings(mode=mode)
+    settings = MCPSettings(mode=mode, handler_timeout=handler_timeout)
     state = MCPServerState(settings, cast(Any, client))
     server = create_server(settings)
     request_context = ServerRequestContext(
@@ -455,6 +458,8 @@ def _investigation() -> InvestigationResponse:
 async def _create_investigation(
     investigation: InvestigationResponse,
     get_info: Callable[[], Awaitable[ServerInfoResponse]],
+    *,
+    handler_timeout: float = 120.0,
 ) -> CallToolResult:
     async def create(_request: object) -> InvestigationResponse:
         return investigation
@@ -464,7 +469,11 @@ async def _create_investigation(
         investigations=SimpleNamespace(create=create),
         info=SimpleNamespace(get=get_info),
     )
-    server, context = _get_context(client, CapabilityMode.STANDARD)
+    server, context = _get_context(
+        client,
+        CapabilityMode.STANDARD,
+        handler_timeout=handler_timeout,
+    )
     result = await server.call_tool(
         "kitaru_review_manage",
         {
@@ -538,6 +547,25 @@ async def test_investigation_create_preserves_result_when_info_fails(
     assert result.structured_content["links"] == {}
     assert len(result.structured_content["warnings"]) == 1
     assert "review link" in result.structured_content["warnings"][0]
+
+
+async def test_investigation_create_bounds_info_lookup_before_mutation() -> None:
+    investigation = _investigation()
+
+    async def get_info() -> ServerInfoResponse:
+        await asyncio.sleep(1)
+        raise AssertionError("info lookup exceeded its deadline")
+
+    result = await _create_investigation(
+        investigation,
+        get_info,
+        handler_timeout=0.1,
+    )
+
+    assert result.structured_content is not None
+    assert result.structured_content["data"]["id"] == str(investigation.id)
+    assert result.structured_content["links"] == {}
+    assert len(result.structured_content["warnings"]) == 1
 
 
 async def test_investigation_create_omits_link_for_api_only_server() -> None:

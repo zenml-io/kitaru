@@ -3,6 +3,8 @@
 #  Licensed under the Apache License, Version 2.0 (the "License");
 """Bounded investigation and annotation handlers."""
 
+import asyncio
+
 import httpx
 
 from kitaru.api_models.v1.annotation import (
@@ -44,6 +46,9 @@ from kitaru.mcp.models.review import (
 )
 from kitaru.mcp.tools.registry import build_page_data
 
+_INFO_LOOKUP_MAX_SECONDS = 5.0
+_INFO_LOOKUP_HANDLER_FRACTION = 0.25
+
 
 async def handle_review_read(
     state: MCPServerState, request: ReviewReadRequest
@@ -84,11 +89,16 @@ async def handle_review_manage(
         info = None
         warnings: list[str] = []
         try:
-            info = await state.client.info.get()
+            timeout = min(
+                _INFO_LOOKUP_MAX_SECONDS,
+                state.settings.handler_timeout * _INFO_LOOKUP_HANDLER_FRACTION,
+            )
+            async with asyncio.timeout(timeout):
+                info = await state.client.info.get()
         # ValueError covers malformed info payloads: JSON decoding and Pydantic
-        # validation errors both derive from it. Resolve info before the mutation
-        # so a handler timeout cannot report a successful create as retryable.
-        except (APIError, httpx.HTTPError, ValueError):
+        # validation errors both derive from it. The short deadline reserves most
+        # of the handler budget for the mutation and its response.
+        except (APIError, httpx.HTTPError, TimeoutError, ValueError):
             warnings.append(
                 "Could not resolve a dashboard review link because the server "
                 "info request failed. The investigation was created."
