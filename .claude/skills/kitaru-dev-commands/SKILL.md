@@ -77,7 +77,7 @@ just docs-build                          # Static export
 just docs-validate                       # Validate export under /docs
 ```
 
-`scripts/generate_sdk_docs.py` is absent from v2, so `just generate-docs` and the SDK-reference generation step in docs CI are blocked. Do not restore the deleted v1 generator without reviewing the v2 public SDK. CLI reference publishing is deferred; `kitaru schema` is the current offline CLI contract.
+`scripts/generate_sdk_docs.py` is the v2 SDK-reference generator: griffe extraction filtered to a `PUBLIC_API` allowlist (`kitaru.client`, `kitaru.task` and its evaluator/importer modules). It needs the fumapy bridge (`uv pip install ./docs/node_modules/fumadocs-python`, after `pnpm install` in `docs/`); `just generate-docs` runs generation plus MDX conversion. Edit the allowlist and `tests/scripts/test_generate_sdk_docs.py` together — a drift test compares the allowlist to each published module's `__all__`. `scripts/generate_cli_docs.py` generates the CLI reference from the `kitaru schema` JSON contract (run in-process, needs the `cli` extra); it hardcodes no command names, so CLI changes flow through on regeneration.
 
 ## UI and Docker
 
@@ -100,7 +100,7 @@ The v2 Dockerfiles are `docker/dev-client.Dockerfile`, `docker/dev-server.Docker
 | Workflow | Current v2 role |
 |---|---|
 | `ci.yml` | Pushes to `develop` and pull requests. Base, CLI, and MCP test matrices cover Python 3.11-3.14; separate jobs validate CLI artifacts, installed MCP wheels, migrations, Docker server startup, and UI wheel packaging. |
-| `docs.yml` | Intended SDK reference build/deploy workflow. It is currently blocked because the v2 Python SDK generator is absent; deployment conditions remain `main` push or manual dispatch. |
+| `docs.yml` | SDK reference build/deploy workflow: generates the reference via `scripts/generate_sdk_docs.py`, converts to MDX, builds the static export. PRs build only; deployment runs on `main` push or manual dispatch. |
 | `release.yml` | Validates source and built artifacts, then performs versioning, PyPI, GitHub Release, Docker/ECR, Helm, release-branch, and `main` updates. Normal dispatch releases `develop`, not the current feature branch. |
 | `spellcheck.yml` | Separate typo/spell checking. |
 | `image-optimiser.yml` | Compresses changed images on eligible pull requests. |
