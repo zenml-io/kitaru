@@ -110,7 +110,7 @@ Pair them with the [MCP server](../agent-native/mcp-server.md) (`kitaru[mcp]`) s
 
 ## Start a local server
 
-The server is FastAPI + Postgres, and the CLI can run both for you — all it needs is Docker with the Compose v2 plugin:
+The server is FastAPI + Postgres, and the CLI can run both for you — all it needs is [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/):
 
 ```bash
 kitaru login --local
