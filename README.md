@@ -80,7 +80,15 @@ The assistant sweeps the sessions with the built-in deterministic evaluators, in
 
 ## 🔌 Languages and frameworks
 
-Python and TypeScript SDKs, one server. Adapters: **PydanticAI** (`kitaru-pydantic-ai`), **LangGraph** (`kitaru-langgraph`, also LangChain agents and Deep Agents), **OpenAI Agents SDK** (`kitaru-openai-agents`), **Mastra** (`@zenml-io/kitaru-mastra`), **Vercel AI SDK** (`@zenml-io/kitaru-vercel-ai`).
+Python and TypeScript SDKs, one server. Adapters:
+
+| Framework | Language | Package |
+|---|---|---|
+| PydanticAI | Python | `kitaru-pydantic-ai` |
+| LangGraph (also LangChain agents, Deep Agents) | Python | `kitaru-langgraph` |
+| OpenAI Agents SDK | Python | `kitaru-openai-agents` |
+| Mastra | TypeScript | `@zenml-io/kitaru-mastra` |
+| Vercel AI SDK | TypeScript | `@zenml-io/kitaru-vercel-ai` |
 
 Anything else still works: [import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces), [write a one-page custom importer](https://docs.zenml.io/kitaru/import-your-traces/custom-importer) (an agent skill drafts it), or [build a small adapter](https://docs.zenml.io/kitaru/adapters/custom).
 
