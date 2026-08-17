@@ -22,6 +22,7 @@ from typing import Any
 
 import pytest
 
+from kitaru.api_models.v1.info import AuthScheme, ServerInfoResponse
 from kitaru.api_models.v1.investigation import (
     InvestigationCreateRequest,
     InvestigationListParams,
@@ -35,6 +36,7 @@ from kitaru.cli import app as app_module
 from kitaru.cli import investigations
 from kitaru.cli.output import CLIError
 from kitaru.cli.schema import describe_schema
+from kitaru.client.exceptions import APIError
 
 
 @dataclass
@@ -100,8 +102,25 @@ class StubInvestigationClient:
         self.session_update_calls: list[
             tuple[uuid.UUID, uuid.UUID, InvestigationSessionUpdateRequest]
         ] = []
+        self.base_url = "https://api.kitaru.example.com/"
+        self.server_info = ServerInfoResponse(
+            version="0.0.0",
+            auth_scheme=AuthScheme.LOCAL,
+            ui_version="1.2.3",
+        )
+        self.info_error: Exception | None = None
         self.agents = self._Agents(self)
         self.investigations = self._Investigations(self)
+        self.info = self._Info(self)
+
+    class _Info:
+        def __init__(self, owner: "StubInvestigationClient") -> None:
+            self.owner = owner
+
+        async def get(self) -> ServerInfoResponse:
+            if self.owner.info_error is not None:
+                raise self.owner.info_error
+            return self.owner.server_info
 
     class _Agents:
         def __init__(self, owner: "StubInvestigationClient") -> None:
@@ -224,6 +243,68 @@ async def test_create_maps_sessions_questions_and_highlights_to_sdk() -> None:
         ],
     }
     assert result.item["id"] == str(client.investigation.id)
+
+
+async def _create_minimal(client: StubInvestigationClient) -> Any:
+    return await investigations.create_investigation(
+        client,
+        "triage",
+        agent="assistant",
+        description=None,
+        session_ids=client.session_ids,
+        session_questions=[
+            f"{session_id}:root-cause=What caused it?"
+            for session_id in client.session_ids
+        ],
+        session_highlights=[],
+    )
+
+
+async def test_create_links_review_url_from_dashboard_url() -> None:
+    """Create links the review page under a server-stated dashboard URL."""
+    client = StubInvestigationClient()
+    client.server_info = ServerInfoResponse(
+        version="0.0.0",
+        auth_scheme=AuthScheme.CONTROL_PLANE,
+        dashboard_url="https://cloud.example.com/kitaru-workspaces/ws-1/",
+    )
+
+    result = await _create_minimal(client)
+
+    assert result.links == {
+        "review": (
+            "https://cloud.example.com/kitaru-workspaces/ws-1"
+            f"/agents/{client.agent.id}"
+            f"/investigations/{client.investigation.id}/review"
+        )
+    }
+    assert result.warnings == []
+
+
+async def test_create_omits_review_link_for_api_only_server() -> None:
+    """A server without a dashboard or UI yields no review link."""
+    client = StubInvestigationClient()
+    client.server_info = ServerInfoResponse(
+        version="0.0.0", auth_scheme=AuthScheme.LOCAL
+    )
+
+    result = await _create_minimal(client)
+
+    assert result.links == {}
+    assert result.warnings == []
+
+
+async def test_create_warns_when_server_info_is_unavailable() -> None:
+    """A failed info request keeps the created investigation and warns."""
+    client = StubInvestigationClient()
+    client.info_error = APIError(503, "unavailable")
+
+    result = await _create_minimal(client)
+
+    assert result.item["id"] == str(client.investigation.id)
+    assert result.links == {}
+    assert len(result.warnings) == 1
+    assert "review link" in result.warnings[0]
 
 
 @pytest.mark.parametrize(

@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- `kitaru investigation create` returns the dashboard review page as a `review` link, resolved from the server-stated dashboard URL or, for servers hosting the bundled UI, from the URL the client logged into.
+
 ## [0.22.0rc7]
 
 ### Changed
