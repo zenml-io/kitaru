@@ -64,7 +64,7 @@ The whole method fits in one ask. `kitaru-investigation` is the skill that runs 
 
 > Use `kitaru-investigation` to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
 
-The assistant selects sessions, walks the review, drafts the evaluator, and runs the experiment. You supply the domain judgments and approve consequential actions. What follows is what it is doing at each step, with a worked example from a support agent that refunds, replaces, or escalates return requests, and the prompt you would use to drive that step alone.
+The assistant selects sessions, walks the review, drafts the evaluator, and runs the experiment. You supply the domain judgments and approve consequential actions. These five steps are the record → replay → improve loop in working form: recording already got you the sessions above, observing, judging, and defining are where improvement gets its criteria, and replaying and comparing close the loop. What follows is what the assistant is doing at each step, with a worked example from a support agent that refunds, replaces, or escalates return requests, and the prompt you would use to drive that step alone.
 
 {% stepper %}
 {% step %}
