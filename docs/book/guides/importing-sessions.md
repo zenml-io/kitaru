@@ -7,7 +7,7 @@ icon: file-import
 
 Kitaru importers convert exported trace data into one session graph. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
 
-Use a provider importer for Langfuse, LangSmith, or Braintrust data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
+Use a provider importer for Langfuse, LangSmith, Braintrust, or Logfire data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
 
 ## The portable session contract
 

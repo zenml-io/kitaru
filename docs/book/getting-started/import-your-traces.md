@@ -13,7 +13,7 @@ Imports execute on a [worker](../concepts/workers.md) in your environment. The e
 
 ## 1. Register the agent the traces belong to
 
-Importers for **Langfuse, LangSmith, Braintrust, and a native JSONL format** are built in, registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. Anything else comes in through a [custom importer](../guides/custom-importer.md).
+Importers for **Langfuse, LangSmith, Braintrust, Logfire, and a native JSONL format** are built in, registered at server startup under the `kitaru/` namespace, so there is no importer code to write for those. Anything else comes in through a [custom importer](../guides/custom-importer.md).
 
 {% hint style="info" %}
 **Traces in OpenTelemetry format?** There is no OTel ingestion endpoint yet. Export the spans and convert them to [Kitaru JSONL](../guides/importing-sessions.md), or wrap that conversion in a [custom importer](../guides/custom-importer.md) so your exports import directly; the `kitaru-importer-builder` skill drafts one from a sample export.

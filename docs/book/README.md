@@ -11,7 +11,7 @@ Your agent has already been tested thousands of times, in production. Each of th
 **Who it's for:** Teams with an agent in front of real users, where regression testing today means re-running a few samples and eyeballing the output. Kitaru replaces that with [evaluators](concepts/evaluators.md), [cohorts](concepts/cohorts.md), and [experiments](concepts/experiments.md) over your actual traffic. If you're prototyping and haven't shipped, it will feel like more machinery than you need.
 {% endhint %}
 
-**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, and plain JSONL importers are built in), [write a custom importer](guides/custom-importer.md) (about a page of Python, and an agent skill drafts it), or [build a small adapter](adapters/custom.md) (the recording API is two client calls).
+**Frameworks:** adapters ship for [PydanticAI](adapters/pydantic-ai.md), [LangGraph](adapters/langgraph.md), and the [OpenAI Agents SDK](adapters/openai-agents.md) in Python, and for [Mastra](adapters/mastra.md) and the [Vercel AI SDK](adapters/vercel-ai.md) in TypeScript. Any other framework still works: [import your traces](getting-started/import-your-traces.md) (Langfuse, LangSmith, Braintrust, Logfire, and plain JSONL importers are built in), [write a custom importer](guides/custom-importer.md) (about a page of Python, and an agent skill drafts it), or [build a small adapter](adapters/custom.md) (the recording API is two client calls).
 
 {% hint style="info" %}
 Kitaru has both a Python and a TypeScript SDK, and both talk to the same server. The CLI ships with the Python package.
@@ -68,7 +68,7 @@ Replays, imports, and evaluations all execute offline, on [workers](concepts/wor
 ## Built to sit in your stack
 
 - **Self-hosted.** One FastAPI + Postgres server on your infrastructure. Your traces and credentials don't leave your systems.
-- **Beside your observability, not instead of it.** Langfuse, LangSmith, and Braintrust remain where you watch production. Kitaru is where you re-run it.
+- **Beside your observability, not instead of it.** Langfuse, LangSmith, Braintrust, and Logfire remain where you watch production. Kitaru is where you re-run it.
 - **Choose how you drive it:** the `kitaru` CLI, Python SDK, TypeScript SDK, and your [coding agent](agent-native/setup.md). Kitaru observes your production agents; your coding assistant is how you talk to Kitaru.
 
 **Questions, bugs, feedback?** Join the [Slack community](https://kitaru.ai/slack), report bugs at [kitaru.ai/help](https://kitaru.ai/help) (it goes straight to GitHub issues), or email [support@kitaru.ai](mailto:support@kitaru.ai). All three reach a human.

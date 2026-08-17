@@ -43,6 +43,7 @@
 - [Langfuse](guides/import-langfuse-traces.md)
 - [LangSmith](guides/import-langsmith-traces.md)
 - [Braintrust](guides/import-braintrust-traces.md)
+- [Logfire](guides/import-logfire-traces.md)
 - [Kitaru JSONL](guides/importing-sessions.md)
 - [No importer for your format](guides/custom-importer.md)
 
