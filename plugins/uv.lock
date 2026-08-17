@@ -923,7 +923,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc9"
+version = "0.22.0rc10"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -981,6 +981,8 @@ provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
+    { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
     { name = "import-linter", specifier = ">=2.0" },
     { name = "pip-audit", specifier = ">=2.10,<3" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.14.1,<2.23" },
