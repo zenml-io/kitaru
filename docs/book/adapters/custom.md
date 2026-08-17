@@ -13,18 +13,18 @@ have over the agent's code.
 | Your situation | Do this |
 |---|---|
 | You can wrap the agent, and want native recording | [Build a project-local adapter](#build-a-project-local-adapter) |
-| You already emit traces somewhere | [Import instead](../guides/importing-sessions.md) — no adapter needed |
+| You already emit traces somewhere | [Import instead](../guides/importing-sessions.md); no adapter needed |
 | You cannot or will not change the agent's code | [Let Kitaru call your agent](#let-kitaru-call-your-agent) |
 
 Importing is the cheapest of the three and the one to reach for first. An
 imported session replays and evaluates exactly like a recorded one, so
-"no adapter" costs you nothing except live recording — see
+"no adapter" costs you nothing except live recording. See
 [Import any trace format](../guides/importing-sessions.md).
 
 ## Build a project-local adapter
 
 An adapter is not a privileged plugin. It is ordinary code that calls the
-recording API, and it can live in your repository forever — there is no
+recording API, and it can live in your repository forever. There is no
 requirement to contribute it upstream.
 
 The job of an adapter is narrow: observe the seams your framework already
@@ -44,13 +44,13 @@ Point your coding assistant at it and it will build the smallest adapter
 that works inside your project, in Python or TypeScript, and tell you
 what it observed and what it could not. It deliberately preserves your
 framework's public entrypoint rather than replacing it, and it finishes
-locally — nothing is registered until you approve it.
+locally: nothing is registered until you approve it.
 
 Two rules worth keeping whichever way you build it:
 
 * **Wrap the public entrypoint, change nothing else.** The shipped
   adapters do not recompile graphs, replace checkpointers, or alter
-  results. Yours should not either — a recording that changes behavior
+  results. Yours should not either: a recording that changes behavior
   is not a recording.
 * **Recording and replaying are one wrapper, not two.** The same code
   that records must apply the override at the model boundary and answer
@@ -91,7 +91,7 @@ FunctionRunSpec(
 The flow is inverted, and that is the point:
 
 1. Kitaru calls your function instead of running your agent itself.
-2. Your function runs the agent however your system already runs it —
+2. Your function runs the agent however your system already runs it:
    your process, your language, your infrastructure.
 3. It returns the **external id** of the session that run produced.
 4. Kitaru creates a placeholder session in `pending_import` status
@@ -101,7 +101,7 @@ The flow is inverted, and that is the point:
    replay and experiment settle as normal.
 
 `import_deadline_seconds` bounds step 5. If no import arrives in time the
-replay fails rather than hanging forever — the default is 24 hours, which
+replay fails rather than hanging forever. The default is 24 hours, which
 is generous because the import is usually a batch job on your side.
 
 The trade-off is honest: you get replay and experiments with no adapter
@@ -111,7 +111,7 @@ tool result it was never shown.
 
 ## Which to choose
 
-If you can wrap the agent, wrap it — native recording sees the most and
+If you can wrap the agent, wrap it: native recording sees the most and
 needs the least from you. If you cannot, import; it is a first-class path
 and most of Kitaru works identically on imported sessions. Reach for
 function runs when the agent is genuinely out of reach and you still want

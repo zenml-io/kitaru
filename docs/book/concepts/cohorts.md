@@ -1,11 +1,11 @@
 ---
-description: Named, versioned sets of sessions — the population an experiment replays, frozen so results stay comparable.
+description: Named, versioned sets of sessions; the population an experiment replays, frozen so results stay comparable.
 icon: layer-group
 ---
 
 # Cohorts
 
-One session answers "what happened on this run." A **cohort** answers questions about a population: last week's production traffic, every run that touched refunds, the twelve sessions where the agent got it wrong. A cohort is a named set of sessions belonging to one agent — and it is the unit an [experiment](experiments.md) replays.
+One session answers "what happened on this run." A **cohort** answers questions about a population: last week's production traffic, every run that touched refunds, the twelve sessions where the agent got it wrong. A cohort is a named set of sessions belonging to one agent, and it is the unit an [experiment](experiments.md) replays.
 
 ## Versions are immutable
 
@@ -35,7 +35,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-On the CLI, `cohort create` can snapshot a selection into version 1 in the same breath — by explicit IDs, a tag, a filter, or another cohort version:
+On the CLI, `cohort create` can snapshot a selection into version 1 in the same breath, by explicit IDs, a tag, a filter, or another cohort version:
 
 ```bash
 kitaru cohort create refund-regression --agent support-agent \
@@ -65,8 +65,8 @@ Immutability is the point. When an experiment run reports "12 of 14 sessions imp
 
 The pattern that pays off:
 
-1. **Triage** — a bad run surfaces (a complaint, an alert, an eyeball). You [replay it](replay.md), understand it, fix it.
-2. **Collect the population** — collect the runs like it into a cohort version. `client.sessions.list(...)` with filters, or tags you've been applying along the way, gives you the ids.
-3. **Gate on it** — the [experiment](experiments.md) that verified your fix against that cohort becomes the regression suite that keeps the failure fixed. The cohort that caught the bug is the gate that keeps it caught.
+1. **Triage:** a bad run surfaces (a complaint, an alert, an eyeball). You [replay it](replay.md), understand it, fix it.
+2. **Collect the population:** collect the runs like it into a cohort version. `client.sessions.list(...)` with filters, or tags you've been applying along the way, gives you the ids.
+3. **Gate on it:** the [experiment](experiments.md) that verified your fix against that cohort becomes the regression suite that keeps the failure fixed. The cohort that caught the bug is the gate that keeps it caught.
 
 The full workflow, including CI wiring, is in [Build a regression suite from production](../guides/regression-suite.md).

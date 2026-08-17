@@ -20,7 +20,7 @@ Use only the persisted annotations and confirmed verdicts from your investigatio
 5. What result should the evaluator return when evidence is missing?
 6. Which reviewed counterexamples limit the definition?
 
-For example, “the agent should handle refunds correctly” is too broad. A usable definition names the required recorded conditions and distinguishes an accepted action from a claim in the final response.
+For example, "the agent should handle refunds correctly" is too broad. A usable definition names the required recorded conditions and distinguishes an accepted action from a claim in the final response.
 
 Keep agent behavior separate from a tool or provider failure. If a trace lacks the external evidence required to judge an outcome, record that uncertainty instead of turning absence into a pass.
 

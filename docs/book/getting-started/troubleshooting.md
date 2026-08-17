@@ -29,9 +29,9 @@ A replay, import, or evaluation that sits in `pending` almost always means **no 
 
 `kitaru job get <job-id>` carries the failing task's error and a tail of the subprocess's stderr. The usual suspects:
 
-- **The agent version has no run command** — register it with `--command`; that command is what the worker executes.
-- **Missing dependencies or keys** — the subprocess runs in the worker's environment. Start the worker in the same virtualenv as your agent, with the provider keys exported.
-- **A tool call missed under `on_miss="fail"`** — the fork took a path the recording doesn't answer. See [Tool policies](../guides/tool-policies.md) for the options.
+- **The agent version has no run command:** register it with `--command`; that command is what the worker executes.
+- **Missing dependencies or keys:** the subprocess runs in the worker's environment. Start the worker in the same virtualenv as your agent, with the provider keys exported.
+- **A tool call missed under `on_miss="fail"`:** the fork took a path the recording doesn't answer. See [Tool policies](../guides/tool-policies.md) for the options.
 
 ## The server
 

@@ -1,11 +1,11 @@
 ---
-description: One wrapper, no rewrite — adapters record your existing agent's runs as replayable sessions.
+description: One wrapper, no rewrite. Adapters record your existing agent's runs as replayable sessions.
 icon: puzzle-piece
 ---
 
 # Adapters
 
-Adapters are the first of two ways into Kitaru: wrap the agent you already have, and every run is recorded natively. (The second — [importing the traces you already collect](../getting-started/import-your-traces.md) — needs no adapter at all.)
+Adapters are the first of two ways into Kitaru: wrap the agent you already have, and every run is recorded natively. (The second, [importing the traces you already collect](../getting-started/import-your-traces.md), needs no adapter at all.)
 
 An adapter leaves your framework in charge of the agent loop while recording the model and tool activity that the integration exposes. The same adapter makes [replay](../concepts/replay.md) work: it applies supported overrides at the model boundary and answers tool calls per the [tool policy](../guides/tool-policies.md). Capabilities differ by integration. The current TypeScript adapters record non-streaming calls only; the Vercel adapter also preserves Agent `stream()` outside replay as a native, recording-free passthrough. Each adapter page states its exact boundary.
 
@@ -21,7 +21,7 @@ Each adapter ships as its own distribution, installed alongside Kitaru in the ag
 | [LangGraph](langgraph.md) | `kitaru-langgraph` | `kitaru_langgraph.KitaruGraphRunner` | Yes | Depends on construction |
 | [OpenAI Agents SDK](openai-agents.md) | `kitaru-openai-agents` | `kitaru_openai_agents.KitaruRunner` | Yes | Yes |
 
-LangChain agents and Deep Agents use the LangGraph adapter — their public factories return LangGraph runnables. What the LangGraph adapter can replay depends on how the graph was constructed; its [capability matrix](langgraph.md#capability-matrix) is the reference.
+LangChain agents and Deep Agents use the LangGraph adapter, since their public factories return LangGraph runnables. What the LangGraph adapter can replay depends on how the graph was constructed; its [capability matrix](langgraph.md#capability-matrix) is the reference.
 
 ### TypeScript
 
@@ -34,9 +34,9 @@ Both build on [`@zenml-io/kitaru`](typescript-sdk.md), the framework-neutral Typ
 
 If your framework isn't covered, see [No adapter for your framework](custom.md) for three options available today:
 
-- **Import** — your framework already emits traces to Langfuse, LangSmith, or Braintrust? [Import them](../getting-started/import-your-traces.md); sessions from imports can be replayed and evaluated like any other. Convert any other format to [Kitaru JSONL](../guides/importing-sessions.md).
-- **Record directly** — create a session and ingest its nodes with the Python or TypeScript client. The `kitaru-adapter-builder` [agent skill](../agent-native/skills.md) will write that integration with you.
-- **Hand the run back to your own system** — register the agent version as a function instead of a command, and Kitaru calls you to run it. See [Let Kitaru call your agent](custom.md#let-kitaru-call-your-agent).
+- **Import.** Your framework already emits traces to Langfuse, LangSmith, or Braintrust? [Import them](../getting-started/import-your-traces.md); sessions from imports can be replayed and evaluated like any other. Convert any other format to [Kitaru JSONL](../guides/importing-sessions.md).
+- **Record directly.** Create a session and ingest its nodes with the Python or TypeScript client. The `kitaru-adapter-builder` [agent skill](../agent-native/skills.md) will write that integration with you.
+- **Hand the run back to your own system.** Register the agent version as a function instead of a command, and Kitaru calls you to run it. See [Let Kitaru call your agent](custom.md#let-kitaru-call-your-agent).
 
 ## Why the wrapper is enough
 

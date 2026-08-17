@@ -1,5 +1,5 @@
 ---
-description: Run the Kitaru server with Docker — Compose for one host, or the server container against your own Postgres.
+description: Run the Kitaru server with Docker, using Compose for one host or the server container against your own Postgres.
 icon: docker
 ---
 
@@ -15,7 +15,7 @@ For one local deployment per user, let the CLI own the lifecycle:
 kitaru login --local
 ```
 
-Requires [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/). The CLI runs the version-matched `zenmldocker/kitaru-server` image with PostgreSQL kept private to the Compose network, stores generated runtime secrets in the Kitaru configuration directory, and opens `http://localhost:8000` once healthy. Existing images are reused without an automatic pull — `kitaru login --local --upgrade` is the explicit upgrade path, and `KITARU_LOCAL_IMAGE` points source builds at a locally built image. `kitaru local logs` inspects it; `kitaru logout` stops it (add `--volumes` to delete the database).
+Requires [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/). The CLI runs the version-matched `zenmldocker/kitaru-server` image with PostgreSQL kept private to the Compose network, stores generated runtime secrets in the Kitaru configuration directory, and opens `http://localhost:8000` once healthy. Existing images are reused without an automatic pull; `kitaru login --local --upgrade` is the explicit upgrade path, and `KITARU_LOCAL_IMAGE` points source builds at a locally built image. `kitaru local logs` inspects it; `kitaru logout` stops it (add `--volumes` to delete the database).
 
 The rest of this page covers manually managed deployments, which are separate from the CLI-owned one.
 
@@ -30,7 +30,7 @@ docker compose up -d
 curl http://localhost:8000/health
 ```
 
-The shipped Compose file runs with `KITARU_SERVER_AUTH_SCHEME: none` — fine on your laptop, not for a shared server. For a team deployment, set the auth scheme to `local` and provide real keys (see below and [Authentication](authentication.md)).
+The shipped Compose file runs with `KITARU_SERVER_AUTH_SCHEME: none`, which is fine on your laptop but not for a shared server. For a team deployment, set the auth scheme to `local` and provide real keys (see below and [Authentication](authentication.md)).
 
 ## Configuration
 
@@ -38,14 +38,14 @@ The server is configured entirely through `KITARU_SERVER_*` environment variable
 
 | Variable | Meaning |
 | --- | --- |
-| `KITARU_SERVER_DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PWD` / `DB_NAME` | Postgres connection — or one `KITARU_SERVER_DATABASE_URL` instead |
+| `KITARU_SERVER_DB_HOST` / `DB_PORT` / `DB_USER` / `DB_PWD` / `DB_NAME` | Postgres connection, or one `KITARU_SERVER_DATABASE_URL` instead |
 | `KITARU_SERVER_AUTH_SCHEME` | `none` (open, dev only) or `local` (accounts + API keys) |
-| `KITARU_SERVER_JWT_SIGNING_KEY` | Secret for login tokens — set a long random value |
+| `KITARU_SERVER_JWT_SIGNING_KEY` | Secret for login tokens; set a long random value |
 | `KITARU_SERVER_SECRET_ENCRYPTION_KEY` | Key encrypting stored [secrets](secrets.md) at rest |
 | `KITARU_SERVER_DEFAULT_ACCOUNT_PASSWORD` | Bootstrap password for the `default` account |
 | `KITARU_SERVER_SERVER_URL` | The externally reachable URL clients use |
 
-Operational knobs with sensible defaults — raise or lower deliberately:
+Operational knobs with sensible defaults; raise or lower them deliberately:
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -73,9 +73,9 @@ docker run -d -p 8000:8000 \
   zenmldocker/kitaru-server:latest
 ```
 
-Any container runtime works — the server listens on port 8000, runs as a non-root user, and all state lives in Postgres. Put TLS in front with your usual ingress or reverse proxy, and scale horizontally if needed — the server is stateless between requests. On Kubernetes, use the [Helm chart](helm.md), which wraps this same image with migrations, ingress, and secrets handled.
+Any container runtime works: the server listens on port 8000, runs as a non-root user, and all state lives in Postgres. Put TLS in front with your usual ingress or reverse proxy, and scale horizontally if needed, since the server is stateless between requests. On Kubernetes, use the [Helm chart](helm.md), which wraps this same image with migrations, ingress, and secrets handled.
 
-Workers are deployed separately, in the environments your agents live in — see [Workers in production](workers.md).
+Workers are deployed separately, in the environments your agents live in. See [Workers in production](workers.md).
 
 ## First login
 

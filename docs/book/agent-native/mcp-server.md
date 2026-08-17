@@ -1,5 +1,5 @@
 ---
-description: Kitaru observes your production agents; your coding assistant is how you talk to Kitaru — the loop, driven from Claude Code, Codex, or Cursor.
+description: Kitaru observes your production agents; your coding assistant is how you talk to Kitaru. The loop, driven from Claude Code, Codex, or Cursor.
 icon: plug
 ---
 
@@ -11,7 +11,7 @@ The division of labor: **Kitaru observes your production agents; your coding ass
 
 ## The MCP server
 
-Kitaru ships an MCP server, so assistants that speak MCP — Claude Code, Cursor, and friends — get typed, bounded tools instead of shelling out:
+Kitaru ships an MCP server, so assistants that speak MCP (Claude Code, Cursor, and friends) get typed, bounded tools instead of shelling out:
 
 ```bash
 uv add "kitaru[mcp]"
@@ -36,9 +36,9 @@ Replace the `--server` URL with your own. It has to be the server you are logged
 
 `--mode standard` appears here because the default is `read-only`, which leaves an assistant working through an investigation with nothing it can write, so it falls back to the CLI instead. Read-only is still a sensible place to start, as long as you expect that. The capability modes are described below.
 
-The server needs an explicit target — `--server URL`, `KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order; startup fails if none selects a server. Credentials come from `KITARU_API_KEY` or the stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is deliberately ignored). The target and credential source are selected at startup. A stored credential may be refreshed or updated while the process runs; restart `kitaru-mcp` after changing the target or an environment-provided API key.
+The server needs an explicit target: `--server URL`, `KITARU_MCP_SERVER`, or `KITARU_API_URL`, in that order. Startup fails if none selects a server. Credentials come from `KITARU_API_KEY` or the stored credential for that URL (a task-scoped `KITARU_API_TOKEN` is deliberately ignored). The target and credential source are selected at startup. A stored credential may be refreshed or updated while the process runs; restart `kitaru-mcp` after changing the target or an environment-provided API key.
 
-Tools are gated by a **capability mode** — `read-only` (the default), `standard`, or `destructive` — set with `--mode` or `KITARU_MCP_MODE`. Tools above the current mode aren't just blocked; they're never registered, so the assistant doesn't even see them:
+Tools are gated by a **capability mode**, either `read-only` (the default), `standard`, or `destructive`, set with `--mode` or `KITARU_MCP_MODE`. Tools above the current mode aren't just blocked; they're never registered, so the assistant doesn't even see them:
 
 | Tool | Mode | What it does |
 | --- | --- | --- |
@@ -71,9 +71,9 @@ export KITARU_API_URL="http://localhost:8000"
 export KITARU_API_KEY="KITKEY_..."
 ```
 
-- **CLI** — the full journey has commands: `kitaru session import`, `kitaru replay create`, `kitaru session evaluate`, `kitaru cohort create`, `kitaru experiment run start`, plus registration, workers, and jobs. Commands take `--output json`, so assistant-driven invocations parse cleanly.
-- **Python client** — `KitaruAPIClient()` reaches everything, including single-session replays. Your assistant writes the same snippets these docs show.
-- **REST** — the server's OpenAPI schema at `/docs` on your server, when the assistant wants the raw contract.
+- **CLI:** the full journey has commands: `kitaru session import`, `kitaru replay create`, `kitaru session evaluate`, `kitaru cohort create`, `kitaru experiment run start`, plus registration, workers, and jobs. Commands take `--output json`, so assistant-driven invocations parse cleanly.
+- **Python client:** `KitaruAPIClient()` reaches everything, including single-session replays. Your assistant writes the same snippets these docs show.
+- **REST:** the server's OpenAPI schema at `/docs` on your server, when the assistant wants the raw contract.
 
 ## Prompts that work
 
@@ -87,22 +87,22 @@ The loop compresses well into assistant tasks. Some starting points, ready to pa
 
 > Take every session where refund-quality failed, freeze them into a cohort called refund-hard-cases, and start an experiment that replays them with the system prompt in `prompts/support_v2.txt`.
 
-Each is a bounded task with a verifiable artifact at the end — a session, an evaluator version, an experiment run — which is exactly the shape coding assistants are good at.
+Each is a bounded task with a verifiable artifact at the end (a session, an evaluator version, an experiment run), which is exactly the shape coding assistants are good at.
 
 ## Guardrails worth setting
 
-- Give the assistant a **read-mostly posture**: creating evaluators and starting evaluations is cheap and reversible; deleting cohorts or experiments is not. Over MCP that's the capability mode; review deletes yourself.
-- Keep a worker running under _your_ control. The assistant creating a replay doesn't execute anything — your worker does, in the environment you configured. That separation is the safety property; preserve it.
+- Give the assistant a **read-mostly posture**: creating evaluators and starting evaluations is cheap and reversible, and deleting cohorts or experiments is not. Over MCP that's the capability mode; review deletes yourself.
+- Keep a worker running under _your_ control. The assistant creating a replay doesn't execute anything; your worker does, in the environment you configured. That separation is the safety property; preserve it.
 - Watch tool policies in assistant-written replays: insist on `history` + `on_miss="fail"` defaults for anything with side effects, same as you would in review. See [Tool policies](../guides/tool-policies.md).
 
 ## Agent skills
 
-MCP gives an assistant the _interface_; [agent skills](skills.md) give it the _judgment_ — which sessions are worth reviewing, when a behavior is real enough to freeze into a cohort, and what a replay result does and does not prove. They ship separately, as Markdown procedures in [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills):
+MCP gives an assistant the _interface_; [agent skills](skills.md) give it the _judgment_: which sessions are worth reviewing, when a behavior is real enough to freeze into a cohort, and what a replay result does and does not prove. They ship separately, as Markdown procedures in [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills):
 
 ```bash
 npx skills add zenml-io/kitaru-skills
 ```
 
-The CLI knows whether they are present. `kitaru` with no arguments discovers installed Kitaru skills — in project and user locations, and those installed through the Claude marketplace — and, when it finds none, offers the install command as a next action. The machine-readable output reports the same under a `skills` key, so an assistant can check its own footing before it starts.
+The CLI knows whether they are present. `kitaru` with no arguments discovers installed Kitaru skills (in project and user locations, and those installed through the Claude marketplace) and, when it finds none, offers the install command as a next action. The machine-readable output reports the same under a `skills` key, so an assistant can check its own footing before it starts.
 
 Skills and MCP are complementary, not alternatives: the skills say how to work, the server bounds what can be touched. Start with `kitaru-investigation`, the front door. See [Agent skills](skills.md) for what each one is for.
