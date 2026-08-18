@@ -77,10 +77,10 @@ jobs:
       - name: Validate release source
         run: |
           set -euo pipefail
-          git fetch origin develop
+          git fetch origin main
           release_sha=$(git rev-parse HEAD)
-          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
-            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
+          if ! git merge-base --is-ancestor "$release_sha" origin/main; then
+            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on main."
             exit 1
           fi
       - name: Resolve exact frontend artifact
