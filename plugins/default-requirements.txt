@@ -1,5 +1,6 @@
-kitaru-braintrust-importer==0.1.0rc0
-kitaru-evaluator==0.1.0rc0
-kitaru-jsonl-importer==0.1.0rc0
-kitaru-langfuse-importer==0.1.0rc0
-kitaru-langsmith-importer==0.1.0rc0
+kitaru-braintrust-importer==0.1.0
+kitaru-evaluator==0.1.0
+kitaru-jsonl-importer==0.1.0
+kitaru-langfuse-importer==0.1.0
+kitaru-logfire-importer==0.1.0
+kitaru-langsmith-importer==0.1.0

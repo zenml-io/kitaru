@@ -5,11 +5,11 @@ icon: gauge-high
 
 # Deterministic Evaluations
 
-The Kitaru repository includes ten deterministic evaluator plugins for recorded and imported sessions. They read stored session evidence and return repeatable diagnostics or policy results. They do not run the agent, call a model provider, replay a session, invoke a live tool, or read an external service.
+Kitaru includes ten deterministic evaluator plugins for recorded and imported sessions. They read stored session evidence and return repeatable diagnostics or policy results. They do not run the agent, call a model provider, replay a session, invoke a live tool, or read an external service.
 
 The default Kitaru server installation includes the `kitaru-evaluator` package. At startup, Kitaru registers its three basic evaluators and the ten deterministic evaluators below. A fresh workspace creates version 1 for each evaluator.
 
-You also start each evaluation explicitly. Importing, recording, or seeding a session does not start an evaluation Job automatically.
+You start each evaluation explicitly. Importing, recording, or seeding a session does not start an evaluation Job automatically.
 
 ## Start with the descriptive bundles
 
@@ -140,7 +140,7 @@ Start `kitaru-mcp` in `standard` mode. Discover each evaluator parent and exact 
 }
 ```
 
-The tool returns the submitted Job immediately. Read the Job with `kitaru_activity_read`, then use `list_children` with `kind: "job_tasks"` to inspect evaluator task results. See [MCP Server](../agent-native/mcp-server.md) for capability modes and request envelopes.
+The tool returns the submitted Job immediately. Read the Job with `kitaru_activity_read`, then use `list_children` with `kind: "job_tasks"` to inspect evaluator task results. See [MCP Server](../agent-native/setup.md) for capability modes and request envelopes.
 
 ## Respect the batch limit
 

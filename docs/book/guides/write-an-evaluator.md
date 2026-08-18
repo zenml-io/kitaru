@@ -1,15 +1,15 @@
 ---
-description: Turn your domain expert's criteria into a versioned evaluator — code checks, LLM judges, human calibration, and backfilling your history.
+description: "Turn your domain expert's criteria into a versioned evaluator: code checks, LLM judges, human calibration, and backfilling your history."
 icon: chart-line
 ---
 
 # Write an evaluator
 
-Your domain expert already knows what a good run looks like. An [evaluator](../concepts/evaluators.md) is that knowledge as code: a small Python callable that reads one recorded session and writes named, typed verdicts. This guide takes you from criteria to a registered, calibrated evaluator you can trust to gate a release.
+Your domain expert already knows what a good run looks like. An [evaluator](../concepts/evaluators.md) is that knowledge as code: a small Python callable that reads one recorded session and writes named, typed verdicts. This guide takes you from criteria to a registered, calibrated evaluator you can trust in a release gate.
 
 ## From criteria to code
 
-Start from what the expert actually says. "A good refund resolution issues exactly one refund, quotes the amount, and doesn't promise anything we don't do" is three checks:
+Start from what the expert says. "A good refund resolution issues exactly one refund, quotes the amount, and does not promise anything we do not do" is three checks:
 
 ```bash
 kitaru evaluator scaffold refund-quality
@@ -42,11 +42,11 @@ def evaluate(session: SessionView, **params) -> list[EvaluationResult]:
     ]
 ```
 
-`SessionView` is the whole recording: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups; `session.nodes` is every model call and tool call with payloads. Return one result or a list — each becomes one stored evaluation. Pick the type by how you'll read a thousand of them: **numbers average, booleans count, labels diff as transitions, free text gets read.** Use `passed` for the verdict and `explanation` for the sentence you'll want when a gate goes red.
+`SessionView` is the whole recording: `session.session` is the [session](../concepts/agents-and-sessions.md) with its inputs, outputs, and rollups; `session.nodes` is every model call and tool call with payloads. Return one result or a list; each becomes one stored evaluation. Pick the type by how you will read a thousand of them: **numbers average, booleans count, labels diff as transitions, free text gets read.** Use `passed` for the verdict and `explanation` for the sentence you will want when a gate goes red.
 
-## An LLM judge is just an evaluator
+## An LLM judge is an evaluator
 
-For criteria that need judgment — tone, helpfulness, "did it actually answer the question" — call a model inside `evaluate`. Declare the dependency inline (PEP 723) and the worker builds the environment:
+For criteria that need judgment, such as tone, helpfulness, or whether the reply answered the question, call a model inside `evaluate`. Declare the dependency inline (PEP 723) and the worker builds the environment:
 
 ```python
 # /// script
@@ -67,7 +67,7 @@ def evaluate(session: SessionView, **params) -> EvaluationResult:
     return EvaluationResult(name="tone", score=ok, passed=ok, explanation=verdict)
 ```
 
-The judge runs on your [worker](../concepts/workers.md), so its API key is worker environment configuration — the same place your agent's keys live. `params` (here `judge_model`) are set per replay or experiment via `EvaluatorConfig(evaluator="tone-judge", params={...})`, so one evaluator serves cheap-per-PR and thorough-nightly configurations.
+The judge runs on your [worker](../concepts/workers.md), so its API key is worker environment configuration, the same place your agent's keys live. `params` (here `judge_model`) are set per replay or experiment via `EvaluatorConfig(evaluator="tone-judge", params={...})`, so one evaluator serves cheap-per-PR and thorough-nightly configurations.
 
 ## Test offline, then register
 
@@ -77,11 +77,11 @@ kitaru evaluator register refund-quality \
   --script refund_quality_evaluator.py --entrypoint evaluate
 ```
 
-Evaluators are versioned: re-registering with `kitaru evaluator version register refund-quality --script ...` creates version 2, and every evaluation row records exactly which version wrote it. Tightening a criterion never rewrites history — old rows keep their provenance, and you can re-score any population with the new version.
+Evaluators are versioned: re-registering with `kitaru evaluator version register refund-quality --script ...` creates version 2, and every evaluation row records exactly which version wrote it. Tightening a criterion never rewrites history: old rows keep their provenance, and you can evaluate any population again with the new version.
 
 ## Calibrate against human judgment
 
-Before an evaluator gates anything, check that it agrees with the human it's standing in for. The structured way to collect the human side is an [investigation](../concepts/investigations.md): pose the criteria as questions over a slice of sessions and the answers land as annotations, one per session per question. Labels can also be written directly as evaluations:
+Before an evaluator gates anything, check that it agrees with the human it stands in for. The structured way to collect the human side is an [investigation](../concepts/investigations.md), and by design your coding assistant authors it for you: it picks the slice of sessions, poses the criteria as questions, and interviews you against the evidence. The answers land as annotations, one per session per question. Labels can also be written directly as evaluations:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationResult
@@ -95,11 +95,11 @@ await client.sessions.merge_evaluations(
 )
 ```
 
-Run the evaluator over the same slice, then compare the `tone` column against `human_tone` per session. Where they disagree, the explanation field tells you which side is confused — fix the evaluator (new version) or the criteria, and repeat until the agreement rate earns your trust. The labeled slice is worth keeping as a [cohort](../concepts/cohorts.md): it's your calibration set for every future evaluator version.
+Run the evaluator over the same slice, then compare the `tone` column against `human_tone` per session. Where they disagree, the explanation field tells you which side is confused. Fix the evaluator (new version) or the criteria, and repeat until the agreement rate earns your trust. The labeled slice is worth keeping as a [cohort](../concepts/cohorts.md): it is your calibration set for every future evaluator version.
 
 ## Backfill your history
 
-Evaluators run against stored sessions, so day one of a new evaluator can cover months of history — recorded and [imported](import-langfuse-traces.md) alike. From the CLI, select by tag or take everything:
+Evaluators run against stored sessions, so day one of a new evaluator can cover months of history, recorded and [imported](import-langfuse-traces.md) alike. From the CLI, select by tag or take everything:
 
 ```bash
 kitaru session evaluate --tag imported-baseline \
@@ -120,4 +120,4 @@ job = await client.evaluations.create(
 )
 ```
 
-Each (session, evaluator) pair is its own task; one failure never stops the rest. When the backfill lands, the sessions where `passed=False` are your first triage queue — and the ones worth freezing into the cohort your next [experiment](regression-suite.md) runs against.
+Each (session, evaluator) pair is its own task; one failure never stops the rest. When the backfill lands, the sessions where `passed=False` are your first triage queue, and the ones worth freezing into the cohort your next [experiment](regression-suite.md) runs against.

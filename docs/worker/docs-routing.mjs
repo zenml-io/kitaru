@@ -33,6 +33,9 @@ export const LEGACY_MARKETING_REDIRECTS = [
   ["/book-a-demo", `${ZENML_BASE_URL}/book-your-demo`],
   ["/newsletter", `${ZENML_BASE_URL}/newsletter-signup`],
   ["/get-started", `${ZENML_BASE_URL}/book-your-demo`],
+  // Support entry points, announced for the v2 launch.
+  ["/help", "https://github.com/zenml-io/kitaru/issues"],
+  ["/slack", `${ZENML_BASE_URL}/slack`],
 ];
 
 export const LEGACY_MARKETING_PREFIX_REDIRECTS = ["/blog", "/compare"];

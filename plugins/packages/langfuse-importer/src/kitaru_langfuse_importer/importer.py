@@ -67,6 +67,23 @@ _TRACE_CONTEXT_FIELDS = {
     "traceVersion": "version",
 }
 
+_TOOL_CALL_KINDS = {
+    "function-call",
+    "tool-call",
+    "tool-use",
+}
+_TOOL_ARGUMENT_TEXT_KEYS = (
+    "customer_reply",
+    "final_answer",
+    "answer",
+    "result",
+    "response",
+    "output",
+    "text",
+    "content",
+    "message",
+)
+
 
 _FRAMEWORK_PATTERNS = (
     (re.compile(r"pydantic[._ -]?ai", re.IGNORECASE), "pydantic-ai"),
@@ -128,6 +145,18 @@ def _role(value: dict[str, Any]) -> str | None:
     return None
 
 
+def _kind(value: dict[str, Any]) -> str | None:
+    """Return a normalized provider payload kind."""
+    return next(
+        (
+            candidate.lower().replace("_", "-")
+            for key in ("type", "part_kind", "kind", "event.name")
+            if isinstance((candidate := value.get(key)), str)
+        ),
+        None,
+    )
+
+
 def _content_match(
     value: Any,
     selector: str = "",
@@ -159,21 +188,12 @@ def _content_match(
     if not isinstance(value, dict):
         return None
     if visible_output_only:
-        kind = next(
-            (
-                candidate.lower().replace("_", "-")
-                for key in ("type", "part_kind", "kind", "event.name")
-                if isinstance((candidate := value.get(key)), str)
-            ),
-            None,
-        )
+        kind = _kind(value)
         if value.get("thought") is True or kind in {
             "reasoning",
             "redacted-thinking",
             "thinking",
-            "tool-call",
-            "tool-use",
-            "function-call",
+            *_TOOL_CALL_KINDS,
         }:
             return None
     for key in ("text", "content", "parts", "kwargs", "data"):
@@ -239,6 +259,70 @@ def _message_matches(
     return matches
 
 
+def _normalize_tool_call_arguments(value: Any, depth: int = 0) -> Any:
+    """Decode JSON arguments on recognized tool-call parts."""
+    if depth > 12:
+        return value
+    if isinstance(value, list):
+        return [_normalize_tool_call_arguments(item, depth + 1) for item in value]
+    if not isinstance(value, dict):
+        return value
+    normalized = {
+        key: _normalize_tool_call_arguments(child, depth + 1)
+        for key, child in value.items()
+    }
+    if _kind(value) in _TOOL_CALL_KINDS and "arguments" in value:
+        normalized["arguments"] = _decode_json(value["arguments"])
+    return normalized
+
+
+def _tool_argument_text_matches(
+    value: Any,
+    selector: str = "",
+    depth: int = 0,
+) -> list[_TextMatch]:
+    """Return human-readable text inside structured tool arguments."""
+    if depth > 12:
+        return []
+    if isinstance(value, list):
+        return [
+            match
+            for index, item in enumerate(value)
+            for match in _tool_argument_text_matches(
+                item,
+                _child_selector(selector, index),
+                depth + 1,
+            )
+        ]
+    if not isinstance(value, dict):
+        return []
+    if _kind(value) in _TOOL_CALL_KINDS:
+        arguments = value.get("arguments")
+        arguments_selector = _child_selector(selector, "arguments")
+        if isinstance(arguments, str):
+            text = arguments.strip()
+            return [_TextMatch(arguments_selector, text)] if text else []
+        if isinstance(arguments, dict):
+            for key in _TOOL_ARGUMENT_TEXT_KEYS:
+                if key in arguments and (
+                    match := _content_match(
+                        arguments[key],
+                        _child_selector(arguments_selector, key),
+                    )
+                ):
+                    return [match]
+        return []
+    return [
+        match
+        for key, child in value.items()
+        for match in _tool_argument_text_matches(
+            child,
+            _child_selector(selector, key),
+            depth + 1,
+        )
+    ]
+
+
 def _input_text_selector(value: Any) -> str | None:
     """Return the primary user input selector."""
     messages = _message_matches(value, "user")
@@ -272,6 +356,9 @@ def _output_text_selector(value: Any) -> str | None:
                 )
             ):
                 return match.selector
+    tool_argument_matches = _tool_argument_text_matches(value)
+    if len(tool_argument_matches) == 1:
+        return tool_argument_matches[0].selector
     return None
 
 
@@ -366,6 +453,7 @@ def _detect_framework(value: Any) -> str | None:
 def _populate_node_fields(nodes: list[ImportedNode]) -> None:
     """Populate normalized node fields."""
     for node in nodes:
+        node.outputs = _normalize_tool_call_arguments(node.outputs)
         node.input_text_selector = _input_text_selector(node.inputs)
         node.output_text_selector = _output_text_selector(node.outputs)
         if node.node_type is NodeType.LLM_CALL:
@@ -837,8 +925,131 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     )
 
 
+def _tool_call_ids(value: Any) -> set[str]:
+    """Return tool-call ids emitted by one model output."""
+    result: set[str] = set()
+
+    def walk(item: Any, *, tool_call: bool = False) -> None:
+        item = _decode_json(item)
+        if isinstance(item, list):
+            for child in item:
+                walk(child, tool_call=tool_call)
+            return
+        if not isinstance(item, dict):
+            return
+
+        item_type = str(item.get("type") or "").lower()
+        is_tool_call = tool_call or item_type in {
+            "function_call",
+            "tool_call",
+            "tool_use",
+        }
+        if is_tool_call:
+            call_id = _first(item, "id", "toolCallId", "tool_call_id")
+            if call_id not in (None, ""):
+                result.add(str(call_id))
+
+        for key, child in item.items():
+            walk(child, tool_call=key in {"toolCalls", "tool_calls"})
+
+    walk(value)
+    return result
+
+
+def _tool_call_id(record: dict[str, Any]) -> str | None:
+    """Return the causal tool-call id recorded on one tool observation."""
+    value = _first(record, "toolCallId", "tool_call_id") or _metadata_value(
+        record,
+        "gen_ai.tool.call.id",
+        "tool_call_id",
+        "toolCallId",
+    )
+    return str(value) if value not in (None, "") else None
+
+
+def _infer_tool_call_parents(
+    nodes_with_parents: list[tuple[str, str | None, dict[str, Any]]],
+) -> dict[str, str]:
+    """Match tool observations to the model outputs that requested them."""
+    primary_parents = {
+        external_id: parent
+        for external_id, parent, _ in nodes_with_parents
+        if parent is not None
+    }
+    requesting_nodes: dict[tuple[str, str], set[str]] = defaultdict(set)
+    for external_id, _, record in nodes_with_parents:
+        node_type, _ = _node_type(record)
+        if node_type is not NodeType.LLM_CALL:
+            continue
+        trace_id = str(_first(record, "traceId", "trace_id") or "")
+        for call_id in _tool_call_ids(record.get("output")):
+            requesting_nodes[(trace_id, call_id)].add(external_id)
+
+    inferred: dict[str, str] = {}
+    for external_id, primary_parent, record in nodes_with_parents:
+        node_type, _ = _node_type(record)
+        if node_type is not NodeType.TOOL_CALL:
+            continue
+        call_id = _tool_call_id(record)
+        if call_id is None:
+            continue
+        trace_id = str(_first(record, "traceId", "trace_id") or "")
+        candidates = requesting_nodes.get((trace_id, call_id), set())
+        if len(candidates) != 1:
+            continue
+        requesting_node = next(iter(candidates))
+        if requesting_node == primary_parent:
+            continue
+        requesting_ancestors: set[str] = set()
+        current: str | None = requesting_node
+        while current is not None and current not in requesting_ancestors:
+            requesting_ancestors.add(current)
+            current = primary_parents.get(current)
+        if external_id not in requesting_ancestors:
+            inferred[external_id] = requesting_node
+    return inferred
+
+
+def _flatten_node_tree(roots: list[ImportedNode]) -> list[ImportedNode]:
+    """Flatten an imported node tree in ingestion order."""
+    flattened: list[ImportedNode] = []
+
+    def walk(node: ImportedNode) -> None:
+        flattened.append(node)
+        for child in node.children:
+            walk(child)
+
+    for root in roots:
+        walk(root)
+    return flattened
+
+
+def _apply_secondary_parent_indexes(
+    roots: list[ImportedNode], secondary_parents: dict[str, list[str]]
+) -> None:
+    """Resolve secondary external ids to depth-first ingestion indexes."""
+    flattened = _flatten_node_tree(roots)
+
+    index_by_external_id = {
+        node.external_id: index
+        for index, node in enumerate(flattened)
+        if node.external_id is not None
+    }
+    for index, node in enumerate(flattened):
+        inferred_indexes = {
+            parent_index
+            for external_id in secondary_parents.get(node.external_id or "", [])
+            if (parent_index := index_by_external_id.get(external_id)) is not None
+            and parent_index < index
+        }
+        node.secondary_parent_indexes = sorted(
+            {*node.secondary_parent_indexes, *inferred_indexes}
+        )
+
+
 def _build_node_tree(
     nodes_with_parents: list[tuple[ImportedNode, str | None]],
+    secondary_parents: dict[str, list[str]] | None = None,
 ) -> list[ImportedNode]:
     """Build and validate the parsed-node tree."""
     external_ids = [node.external_id for node, _ in nodes_with_parents]
@@ -874,6 +1085,8 @@ def _build_node_tree(
             roots.append(node)
     if nodes_with_parents and not roots:
         raise InvalidImport("The imported node graph contains no root node")
+    if secondary_parents:
+        _apply_secondary_parent_indexes(roots, secondary_parents)
     return roots
 
 
@@ -892,6 +1105,9 @@ class LangfuseJSONLImporter:
         Returns:
             Imported sessions and isolated import failures.
         """
+        infer_tool_call_links = params.get("infer_tool_call_links", True)
+        if not isinstance(infer_tool_call_links, bool):
+            raise InvalidImport("infer_tool_call_links must be a boolean")
         records = _parse_records(content)
         shape = _detect_shape(records[0])
         if shape == _EVENT_SHAPE:
@@ -946,6 +1162,7 @@ class LangfuseJSONLImporter:
                         join_paths=join_paths[source_id],
                         trace_fallback=source_id in fallback_sessions,
                         file_framework=file_framework,
+                        infer_tool_call_links=infer_tool_call_links,
                     )
                 )
             except InvalidImport as exc:
@@ -967,6 +1184,7 @@ class LangfuseJSONLImporter:
         join_paths: set[str],
         trace_fallback: bool,
         file_framework: str | None,
+        infer_tool_call_links: bool,
     ) -> ImportedSession:
         """Parse one grouped Langfuse session."""
         project_ids = {
@@ -1087,6 +1305,16 @@ class LangfuseJSONLImporter:
                 item[0],
             )
         )
+        inferred_parents = (
+            _infer_tool_call_parents(raw_nodes) if infer_tool_call_links else {}
+        )
+        secondary_parents = {
+            source_node_id: [parent_source_id]
+            for source_node_id, parent_source_id, _ in raw_nodes
+            if source_node_id in inferred_parents
+            and parent_source_id is not None
+            and parent_source_id != inferred_parents[source_node_id]
+        }
         nodes_with_parents: list[tuple[ImportedNode, str | None]] = []
         for source_node_id, parent_source_id, record in raw_nodes:
             node_type, tool_name = _node_type(record)
@@ -1150,12 +1378,13 @@ class LangfuseJSONLImporter:
                         metadata=_source_metadata(record),
                         children=[],
                     ),
-                    parent_source_id,
+                    inferred_parents.get(source_node_id, parent_source_id),
                 )
             )
 
         nodes = [node for node, _ in nodes_with_parents]
         _populate_node_fields(nodes)
+        node_tree = _build_node_tree(nodes_with_parents, secondary_parents)
         latest_turn = turns[-1]
         latest_root = root_by_trace[latest_turn.trace_id]
         latest_root_status = _node_status(latest_root)
@@ -1230,6 +1459,8 @@ class LangfuseJSONLImporter:
             "source_completeness": "unknown",
             "normalization_warnings": warnings,
         }
+        if infer_tool_call_links:
+            metadata["langfuse.inferred_tool_call_link_count"] = len(inferred_parents)
         framework = (
             _detect_framework(params.get("framework"))
             or _detect_framework(
@@ -1259,7 +1490,7 @@ class LangfuseJSONLImporter:
             ended_at=ended_at,
             metadata=metadata,
             framework=framework,
-            nodes=_build_node_tree(nodes_with_parents),
+            nodes=node_tree,
         )
 
 

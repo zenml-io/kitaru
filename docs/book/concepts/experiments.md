@@ -1,11 +1,11 @@
 ---
-description: A named change, replayed across a cohort and evaluated — what improved, what regressed, before you ship.
+description: A named change, replayed across a cohort and evaluated. What improved, what regressed, before you ship.
 icon: vials
 ---
 
 # Experiments
 
-A [replay](replay.md) is one counterfactual. An **experiment** is that counterfactual at population scale: take a [cohort](cohorts.md) of real runs, apply one change to all of them, score every re-run with the same [evaluators](evaluators.md), and read what improved and what regressed.
+A [replay](replay.md) is one counterfactual. An **experiment** is that counterfactual at population scale: take a [cohort](cohorts.md) of real runs, apply one change to all of them, evaluate every re-run with the same [evaluators](evaluators.md), and read what improved and what regressed.
 
 The split of responsibilities is deliberate:
 
@@ -57,7 +57,7 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-The same two steps from the CLI — the change as JSON on the experiment, the population and code on the run:
+The same two steps from the CLI (the change as JSON on the experiment, the population and code on the run):
 
 ```bash
 kitaru experiment create cheaper-model \
@@ -72,13 +72,13 @@ kitaru experiment run start cheaper-model \
   --evaluate-baselines --wait
 ```
 
-Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `evaluate_baselines=True` scores the original sessions too, so every replay has its baseline numbers to sit next to.
+Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `evaluate_baselines=True` evaluates the original sessions too, so every replay has its baseline numbers to sit next to.
 
-With a `history` tool policy scoped to `cohort_version`, replayed tool calls can be answered from any recording in the cohort — useful when runs share tool traffic — and `on_miss="fail"` keeps anything unrecorded from reaching a live system.
+With a `history` tool policy scoped to `cohort_version`, replayed tool calls can be answered from any recording in the cohort (useful when runs share tool traffic), and `on_miss="fail"` keeps anything unrecorded from reaching a live system.
 
 ## Reading a run
 
-A run's output is deliberately raw: its replays, each with a result session, and the evaluation rows on both sides. Compare them by reading the evaluations:
+A run's output is intentionally plain: its replays, each with a result session, and the evaluation rows on both sides. Compare them by reading the evaluations:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationListParams
@@ -92,6 +92,6 @@ async for evaluation in client.evaluations.iter(
     print(evaluation.name, evaluation.score, evaluation.passed)
 ```
 
-Numbers average, booleans count into pass rates, categorical labels diff as transitions, and free text gets read. Cost and token totals ([tracked per model call](../guides/llm-calls.md)) ride on each result session, so "the cheaper model held on 18 of 20 tickets and cut cost 41%" is two loops over stored rows. The end-to-end workflow — including gating CI on a frozen cohort version — is in [Build a regression suite from production](../guides/regression-suite.md).
+Numbers average, booleans count into pass rates, categorical labels diff as transitions, and free text gets read. Cost and token totals ([tracked per model call](../guides/llm-calls.md)) ride on each result session, so "the cheaper model held on 18 of 20 tickets and cut cost 41%" is two loops over stored rows. The end-to-end workflow, including gating CI on a frozen cohort version, is in [Build a regression suite from production](../guides/regression-suite.md).
 
 A failed replay fails the run: the comparison the experiment exists for cannot be produced for that session, and the numbers never silently shrink their denominator. Watch a run with `kitaru experiment run watch <run>`, inspect its jobs with `kitaru experiment run jobs <run>`, and cancel with `kitaru experiment run cancel <run>`; already finished replays keep their results.

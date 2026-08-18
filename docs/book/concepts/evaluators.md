@@ -1,20 +1,20 @@
 ---
-description: Evaluators turn sessions into evaluations — the rows they write. Numbers average, words count, free text gets read.
+description: "Evaluators turn sessions into evaluations: the rows they write. Numbers average, words count, free text gets read."
 icon: chart-line
 ---
 
 # Evaluators & Evaluations
 
-Replay tells you what a change _did_; evaluators tell you whether it _helped_. An **evaluator** is a small piece of your code that reads one [session](agents-and-sessions.md) — the recording, node by node — and writes one or more **evaluations**: named, typed verdicts that Kitaru stores against the session.
+Replay tells you what a change _did_; evaluators tell you whether it _helped_. An **evaluator** is a small piece of your code that reads one [session](agents-and-sessions.md), node by node, and writes one or more **evaluations**: named, typed verdicts that Kitaru stores against the session.
 
 Because evaluators run against recorded sessions, they evaluate baselines, replays, and imported traces identically. The same evaluator you run over today's production traffic runs over the fork you're thinking about shipping.
 
 ## The evaluator contract
 
-An evaluator is a callable — a single Python file or an installable package — that receives the full session and returns results:
+An evaluator is a callable (a single Python file or an installable package) that receives the full session and returns results:
 
 ```python
-"""refund_check.py — did the agent actually issue the refund?"""
+"""refund_check.py: did the agent issue the refund?"""
 
 from kitaru.task.evaluator import EvaluationResult, SessionView
 
@@ -32,7 +32,7 @@ def evaluate(session: SessionView, **params) -> EvaluationResult:
     )
 ```
 
-`SessionView` gives you the session and all its nodes with payloads. Return one `EvaluationResult` or a list — each becomes one stored evaluation row. `params` are per-run knobs you pass when you attach the evaluator to a replay or experiment.
+`SessionView` gives you the session and all its nodes with payloads. Return one `EvaluationResult` or a list; each becomes one stored evaluation row. `params` are per-run knobs you pass when you attach the evaluator to a replay or experiment.
 
 Scaffold, exercise, and register it with the CLI:
 
@@ -43,9 +43,9 @@ kitaru evaluator register refund-check \
   --script refund_check_evaluator.py --entrypoint evaluate
 ```
 
-Evaluators are versioned like agents: registering again with `kitaru evaluator version register` creates version 2, and every stored evaluation remembers exactly which evaluator version wrote it. An LLM judge is just an evaluator that calls a model inside `evaluate` — same contract, same rows. The walkthrough is in [Write an evaluator](../guides/write-an-evaluator.md).
+Evaluators are versioned like agents: registering again with `kitaru evaluator version register` creates version 2, and every stored evaluation remembers exactly which evaluator version wrote it. An LLM judge follows the same contract by calling a model inside `evaluate`. The walkthrough is in [Write an evaluator](../guides/write-an-evaluator.md).
 
-A suite of evaluators comes **built in**, registered at server startup under the `kitaru/` namespace: three cheap signals — `kitaru/cost`, `kitaru/latency`, `kitaru/tool-call-patterns` — plus ten deterministic checks over the recording itself, from `kitaru/output-contract` and `kitaru/tool-health` to `kitaru/timing-profile` and `kitaru/workflow-conformance`. None of them make model calls; they're the triage layer, available as `kitaru/cost@latest` before you've written anything.
+A suite of evaluators comes **built in**, registered at server startup under the `kitaru/` namespace: three cheap signals (`kitaru/cost`, `kitaru/latency`, `kitaru/tool-call-patterns`) plus ten deterministic checks over the recording itself, from `kitaru/output-contract` and `kitaru/tool-health` to `kitaru/timing-profile` and `kitaru/workflow-conformance`. None of them make model calls; they are the triage layer, available as `kitaru/cost@latest` before you have written anything.
 
 ## The evaluation row
 
@@ -58,7 +58,7 @@ One evaluation is one named result for one session. The data type is derived fro
 | `value="escalated"`         | `str`         | free text gets read            |
 | `score=0.9, value="polite"` | `categorical` | labels count, transitions diff |
 
-`passed` is an independent optional verdict — a threshold you decided in the evaluator, not something derived from `score` — and `explanation` says why, which is what you'll actually read when a regression gate goes red.
+`passed` is an independent optional verdict, based on a threshold you decided in the evaluator rather than something derived from `score`. `explanation` says why, which is the part you read when a regression gate goes red.
 
 ## Human labels are evaluations too
 
@@ -79,11 +79,11 @@ await client.sessions.merge_evaluations(
 )
 ```
 
-Manual evaluations upsert by name — re-sending `human_quality` overwrites the earlier verdict. Rows written by evaluator runs carry their evaluator version and task; manual rows carry neither, which is how you tell them apart. Comparing your evaluator's column against the human column on the same sessions is how you calibrate the evaluator before you let it gate anything.
+Manual evaluations upsert by name: re-sending `human_quality` overwrites the earlier verdict. Rows written by evaluator runs carry their evaluator version and task; manual rows carry neither, which is how you tell them apart. Comparing your evaluator's column against the human column on the same sessions is how you calibrate the evaluator before you let it gate anything. The human column usually comes out of [the interview](investigations.md): your coding assistant authors the investigation, and your answers land as annotations to calibrate against.
 
 ## Running evaluators in batch
 
-Evaluate existing sessions without replaying anything. From the CLI, select by IDs, by tag, by agent, by cohort version, by filter — or everything:
+Evaluate existing sessions without replaying anything. From the CLI, select by IDs, by tag, by agent, by cohort version, by filter, or everything:
 
 ```bash
 kitaru session evaluate --tag imported-baseline \
@@ -91,7 +91,7 @@ kitaru session evaluate --tag imported-baseline \
   --wait
 ```
 
-Exactly one selection is required — explicit session IDs (arguments or `--sessions-file`), `--tag`, `--agent`, `--cohort`, `--filter`, or `--all` — and an empty match is an error, not a silent no-op. The client form:
+Exactly one selection is required: explicit session IDs (arguments or `--sessions-file`), `--tag`, `--agent`, `--cohort`, `--filter`, or `--all`. An empty match is an error, not a silent no-op. The client form:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationBatchCreateRequest
@@ -105,6 +105,6 @@ job = await client.evaluations.create(
 )
 ```
 
-Each (session, evaluator) pair runs as its own task on a [worker](workers.md) — in your environment, next to your credentials — and one failed pair never cancels the rest. Read results back with `client.evaluations.list(...)`, filtered by session.
+Each (session, evaluator) pair runs as its own task on a [worker](workers.md) (in your environment, next to your credentials), and one failed pair never cancels the rest. Read results back with `client.evaluations.list(...)`, filtered by session.
 
-Evaluators are also how [replays](replay.md) and [experiments](experiments.md) get their numbers: both require at least one evaluator, so a re-run is never just "it finished" — it's evaluated the moment it lands.
+Evaluators are also how [replays](replay.md) and [experiments](experiments.md) get their numbers: both require at least one evaluator, so a re-run is evaluated the moment it lands.

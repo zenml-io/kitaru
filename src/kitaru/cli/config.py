@@ -20,6 +20,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from pydantic import ValidationError
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.cli.output import CLIError
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.config import (
@@ -170,6 +171,7 @@ def build_api_client(
             timeout=timeout,
             retries=retries,
             pool_size=pool_size,
+            analytics_source=AnalyticsSource.CLI,
         )
     if credential.source == "stored":
         return KitaruAPIClient(
@@ -178,12 +180,14 @@ def build_api_client(
             timeout=timeout,
             retries=retries,
             pool_size=pool_size,
+            analytics_source=AnalyticsSource.CLI,
         )
     return KitaruAPIClient(
         base_url=server_url,
         timeout=timeout,
         retries=retries,
         pool_size=pool_size,
+        analytics_source=AnalyticsSource.CLI,
     )
 
 

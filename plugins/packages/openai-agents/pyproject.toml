@@ -1,12 +1,12 @@
 [project]
 name = "kitaru-openai-agents"
-version = "0.1.0rc0"
+version = "0.1.0"
 description = "OpenAI Agents SDK recording adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = [
-    "kitaru>=0.22.0rc0,<0.23",
+    "kitaru>=0.22.0",
     "openai-agents>=0.19.3,<0.20",
 ]
 

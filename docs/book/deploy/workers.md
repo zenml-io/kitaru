@@ -1,11 +1,11 @@
 ---
-description: Deploying workers — long-running pools, scoped fleets, and one-shot CI workers, all configured through environment variables.
+description: Deploying workers as long-running pools, scoped fleets, and one-shot CI workers, all configured through environment variables.
 icon: gears
 ---
 
 # Workers in production
 
-[Workers](../concepts/workers.md) are where everything executes. In production you run them as ordinary long-lived processes — a systemd unit, a container (the published `zenmldocker/kitaru-worker` image works out of the box), a Kubernetes Deployment — one per environment your agents' code needs.
+[Workers](../concepts/workers.md) are where everything executes. In production you run them as ordinary long-lived processes (a systemd unit, a container where the published `zenmldocker/kitaru-worker` image works out of the box, or a Kubernetes Deployment), one per environment your agents' code needs.
 
 The rule of thumb: **a worker must be able to run what it claims.** An agent replay needs your agent's virtualenv and provider keys; an evaluator or importer brings its own dependencies and needs only Python, `uv`, and network access to the server.
 
@@ -25,11 +25,11 @@ kitaru worker start
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `KITARU_WORKER_NAME` | hostname-pid | Stable name; restarts reuse the worker registration. In Kubernetes the pod name works out of the box. |
-| `KITARU_WORKER_CONCURRENCY` | 1 | Tasks run in parallel |
+| `KITARU_WORKER_CONCURRENCY` | 10 | Tasks run in parallel |
 | `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
-| `KITARU_WORKER_SCOPE__SELECTORS` | — | JSON label selectors (e.g. limit to one agent version's environment) |
-| `KITARU_WORKER_SCOPE__JOB_ID` | — | Claim one job's tasks, drain, exit |
-| `KITARU_WORKER_TIMEOUT` | — | Wall-clock lifetime; unset runs until stopped |
+| `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment) |
+| `KITARU_WORKER_SCOPE__JOB_ID` | none | Claim one job's tasks, drain, exit |
+| `KITARU_WORKER_TIMEOUT` | none | Wall-clock lifetime; unset runs until stopped |
 | `KITARU_WORKER_POLL_INTERVAL` | 2s | Sleep after an empty claim |
 | `KITARU_WORKER_HEARTBEAT_INTERVAL` | 10s | Liveness reporting cadence |
 | `KITARU_WORKER_BLOB_CACHE_ROOT` / `PAYLOAD_CACHE_ROOT` | `~/.cache/kitaru/...` | Plugin-code and payload caches, keyed by content hash |
@@ -52,7 +52,7 @@ kitaru worker start --claim evaluator --claim importer --concurrency 8
 
 The versioned `agent` claim matches the agent version attached to each agent task, so a worker only claims replays its environment can actually run.
 
-**One-shot workers in CI.** Pin a worker to the job you just created and it drains the job — appended evaluator tasks included — then exits:
+**One-shot workers in CI.** Pin a worker to the job you just created and it drains the job (appended evaluator tasks included), then exits:
 
 ```bash
 kitaru worker start --job-id "$JOB_ID" --timeout 1800

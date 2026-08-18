@@ -597,7 +597,7 @@ def _replay_service_with_analytics(
 
 
 async def test_create_replay_tracks_replay_created(services: ReplayServices) -> None:
-    """Fire REPLAY_CREATED with booleans naming the set override kinds."""
+    """Fire REPLAY_CREATED with the override, tool policy and evaluator info."""
     agent_version = await _agent_version(services)
     await _evaluator(services)
     baseline = await _session(services, agent_version)
@@ -622,6 +622,10 @@ async def test_create_replay_tracks_replay_created(services: ReplayServices) -> 
         "system_prompt_override": False,
         "prompt_override": True,
         "model_params_override": False,
+        "tool_policy_default": "passthrough",
+        "tool_override_count": 0,
+        "tool_override_types": [],
+        "evaluator_count": 1,
     }
 
 

@@ -22,7 +22,14 @@ import pytest
 import kitaru_langfuse_importer.importer as langfuse_module
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
-from kitaru.task.importer import ImportedNode, ImportedSession, ImportFailure
+from kitaru.task.importer import (
+    ImportedNode,
+    ImportedSession,
+    ImportFailure,
+)
+from kitaru.task.importer import (
+    flatten_nodes as flatten_imported_nodes,
+)
 from kitaru_langfuse_importer.importer import (
     InvalidImport,
     LangfuseJSONLImporter,
@@ -134,6 +141,274 @@ def test_unified_parse_preserves_node_trace_id() -> None:
 
     assert isinstance(parsed[0], ImportedSession)
     assert parsed[0].nodes[0].trace_id == "trace-1"
+
+
+def test_selects_text_inside_json_tool_call_arguments() -> None:
+    """Expose structured model answers without nested JSON expansion."""
+    output = [
+        {
+            "role": "assistant",
+            "parts": [
+                {"type": "thinking", "content": ""},
+                {"type": "redacted_thinking", "data": "encrypted"},
+                {
+                    "type": "tool_call",
+                    "name": "final_result",
+                    "arguments": json.dumps(
+                        {
+                            "action": "refund",
+                            "customer_reply": "Your refund has been issued.",
+                        }
+                    ),
+                },
+            ],
+        }
+    ]
+
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                output=output,
+            )
+        )
+    )[0]
+    node = session.nodes[0]
+
+    assert node.outputs[0]["parts"][2]["arguments"] == {
+        "action": "refund",
+        "customer_reply": "Your refund has been issued.",
+    }
+    assert node.output_text_selector == "/0/parts/2/arguments/customer_reply"
+
+
+def test_keeps_visible_assistant_text_ahead_of_tool_arguments() -> None:
+    """Prefer ordinary model text when a response also requests a tool."""
+    output = [
+        {
+            "role": "assistant",
+            "parts": [
+                {"type": "text", "content": "I will check that now."},
+                {
+                    "type": "tool_call",
+                    "name": "lookup_order",
+                    "arguments": json.dumps({"message": "Lookup order 42"}),
+                },
+            ],
+        }
+    ]
+
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                output=output,
+            )
+        )
+    )[0]
+
+    assert session.nodes[0].output_text_selector == "/0/parts/0/content"
+
+
+def test_does_not_guess_between_structured_tool_outputs() -> None:
+    """Leave the selector empty when multiple tool outputs contain text."""
+    output = [
+        {
+            "role": "assistant",
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "name": "first_result",
+                    "arguments": json.dumps({"answer": "First"}),
+                },
+                {
+                    "type": "tool_call",
+                    "name": "second_result",
+                    "arguments": json.dumps({"answer": "Second"}),
+                },
+            ],
+        }
+    ]
+
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                output=output,
+            )
+        )
+    )[0]
+
+    assert session.nodes[0].output_text_selector is None
+
+
+def test_preserves_plain_tool_call_arguments() -> None:
+    """Keep non-JSON arguments usable as a direct model output."""
+    output = [
+        {
+            "role": "assistant",
+            "parts": [
+                {
+                    "type": "tool_call",
+                    "name": "final_result",
+                    "arguments": "The refund has been issued.",
+                }
+            ],
+        }
+    ]
+
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                output=output,
+            )
+        )
+    )[0]
+    node = session.nodes[0]
+
+    assert node.outputs[0]["parts"][0]["arguments"] == ("The refund has been issued.")
+    assert node.output_text_selector == "/0/parts/0/arguments"
+
+
+def test_nests_tool_call_under_requesting_model_by_default() -> None:
+    """Nest a tool under its requesting model while retaining source parentage."""
+    content = jsonl(
+        observation("root", "trace-1", input_={"message": "Weather?"}),
+        observation(
+            "generation",
+            "trace-1",
+            parent_id="root",
+            observation_type="GENERATION",
+            output=[
+                {
+                    "role": "assistant",
+                    "parts": [
+                        {
+                            "type": "tool_call",
+                            "id": "call-weather",
+                            "name": "get_weather",
+                        }
+                    ],
+                }
+            ],
+            start_time="2026-07-24T10:00:00.100000Z",
+        ),
+        observation(
+            "tool",
+            "trace-1",
+            parent_id="root",
+            observation_type="TOOL",
+            input_={"city": "Delft"},
+            output={"temperature": 18},
+            start_time="2026-07-24T10:00:00.200000Z",
+            metadata={
+                "attributes": {
+                    "gen_ai.tool.call.id": "call-weather",
+                    "gen_ai.tool.name": "get_weather",
+                }
+            },
+        ),
+    )
+
+    [session] = sessions(content)
+    nodes = flatten_imported_nodes(session.nodes)
+    tool = next(node for node in nodes if node.external_id == "trace-1:tool")
+
+    assert tool.parent_index == 1
+    assert tool.secondary_parent_indexes == [0]
+    assert session.metadata["langfuse.inferred_tool_call_link_count"] == 1
+
+
+def test_tool_call_link_inference_can_be_disabled() -> None:
+    """Keep provider parentage unchanged when inference is disabled."""
+    content = jsonl(
+        observation("root", "trace-1"),
+        observation(
+            "generation",
+            "trace-1",
+            parent_id="root",
+            observation_type="GENERATION",
+            output={"tool_calls": [{"id": "call-weather"}]},
+        ),
+        observation(
+            "tool",
+            "trace-1",
+            parent_id="root",
+            observation_type="TOOL",
+            metadata={"attributes": {"gen_ai.tool.call.id": "call-weather"}},
+        ),
+    )
+
+    [session] = sessions(content, {"infer_tool_call_links": False})
+    tool = next(
+        node
+        for node in flatten_imported_nodes(session.nodes)
+        if node.external_id == "trace-1:tool"
+    )
+
+    assert tool.parent_index == 0
+    assert tool.secondary_parent_indexes == []
+    assert "langfuse.inferred_tool_call_link_count" not in session.metadata
+
+
+def test_tool_call_link_inference_skips_ambiguous_ids() -> None:
+    """Leave a tool unchanged when several model outputs reuse its call id."""
+    content = jsonl(
+        observation("root", "trace-1"),
+        observation(
+            "generation-1",
+            "trace-1",
+            parent_id="root",
+            observation_type="GENERATION",
+            output={"tool_calls": [{"id": "reused-call"}]},
+            start_time="2026-07-24T10:00:00.100000Z",
+        ),
+        observation(
+            "generation-2",
+            "trace-1",
+            parent_id="root",
+            observation_type="GENERATION",
+            output={"tool_calls": [{"id": "reused-call"}]},
+            start_time="2026-07-24T10:00:00.200000Z",
+        ),
+        observation(
+            "tool",
+            "trace-1",
+            parent_id="root",
+            observation_type="TOOL",
+            start_time="2026-07-24T10:00:00.300000Z",
+            metadata={"attributes": {"gen_ai.tool.call.id": "reused-call"}},
+        ),
+    )
+
+    [session] = sessions(content, {"infer_tool_call_links": True})
+    tool = next(
+        node
+        for node in flatten_imported_nodes(session.nodes)
+        if node.external_id == "trace-1:tool"
+    )
+
+    assert tool.parent_index == 0
+    assert tool.secondary_parent_indexes == []
+    assert session.metadata["langfuse.inferred_tool_call_link_count"] == 0
+
+
+def test_rejects_non_boolean_tool_call_link_option() -> None:
+    """Reject string values that could enable inference by accident."""
+    with pytest.raises(InvalidImport, match="infer_tool_call_links must be a boolean"):
+        LangfuseJSONLImporter().parse(
+            jsonl(observation("root", "trace-1")),
+            {"infer_tool_call_links": "true"},
+        )
 
 
 def test_redacted_session_ids_fall_back_to_trace_ids() -> None:

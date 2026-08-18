@@ -1,21 +1,44 @@
 ---
-description: Organize a session review, record answers as annotations, and use those labels to calibrate evaluators.
+description: "Where your judgment enters the system: your coding assistant maps the evidence, interviews you in context, and pins your answers to exact trace evidence as annotations."
 icon: magnifying-glass-chart
 ---
 
 # Investigations and annotations
 
-An **investigation** organizes a review of recorded sessions. It keeps the sessions in review order, the questions asked about each session, and the reviewer's answers and verdicts. Reviewers can attach their answers to the exact part of a session that supports them.
+Every evaluation system hits the same wall: where do the criteria come from? You probably never wrote them down. The people who judge the agent, your support leads and domain experts, do it every day in Slack threads and ticket comments, and most of those corrections disappear.
+
+Investigations are how Kitaru keeps them. An **investigation** organizes a review of recorded sessions: which sessions to inspect, in what order, what question each one raises, and what the reviewer concluded. By design, **a coding agent authors it, not you**. The LLM's job is to draft a useful investigation: pick the sessions worth your time, phrase the questions, and point at the evidence. Your job is the part no model can do: answer. An **annotation** is one answer, stored as JSON and pinned to the exact evidence that supports it: a session, a node inside it, a path inside a payload, even a character range. Together they are the ground truth everything downstream is calibrated against. Replay can tell you what a change did; only your recorded judgment can say whether it got better.
+
+## The interview
+
+[Set up your coding agent](../agent-native/setup.md), then use the `kitaru-investigation` skill to run the review as an interview. You do not have to write questions or pick sessions; the assistant does that work because a well-chosen worklist and clear questions are a good use of an LLM. Answering those questions is not.
+
+1. **It maps the world first.** From one surprising failure, the assistant reads the session fully and builds a small worklist of related sessions plus at least one counterexample. From a vague "something is off," it samples a diverse population, normally 15 to 30 sessions, random picks alongside coverage-based ones.
+2. **It creates the investigation**, with a question for each session and highlights that point you at the evidence: the policy lookup that returned nothing, the refund that was accepted anyway.
+3. **It asks you, in context.** Not "write down your evaluation criteria" in the abstract, but "given this recorded policy result and this accepted refund, was escalation required?" Questions are asked against the trace, where you can answer them. This gives Kitaru the missing judgment one concrete case at a time.
+4. **Your answers become annotations; your conclusions become verdicts.** Each reviewed session ends `acceptable`, `problematic`, or `uncertain`. The assistant selects, summarizes, and organizes the evidence; the judgment it records is yours, never its own suggestion.
+
+Two design choices keep the interview honest. Open observations come before proposed failure categories, so an early taxonomy does not bias what you look at. Observed behavior also stays separate from expected behavior: the procedure distinguishes the agent's actions, dependency behavior, and product requirements instead of labeling every surprise an agent failure.
+
+## What the answers are for
+
+Annotations are labels with addresses. Everything that gates a change is calibrated against them:
+
+- **Evaluators** are checked against them: run the evaluator over the reviewed sessions and [compare its evaluations with the human answers](../guides/write-an-evaluator.md) before the evaluator judges anything on its own.
+- **Cohorts** are justified by them: the sessions confirmed `problematic` become the [cohort](cohorts.md) a regression experiment replays, and the annotation trail explains why that cohort exists.
+- **The next review** builds on them: verdicts and answers stay queryable, so a later investigation starts from what is already known instead of re-litigating it.
+
+An evaluator that gates a deploy should be able to show the human judgments it was calibrated against. Annotations are those judgments.
 
 ## What an investigation contains
 
+Everything below is what the assistant creates on your behalf during the interview. The CLI is the escape hatch and the audit surface: use it to inspect what was built, script a review, or construct an investigation by hand when you want full control.
+
 An investigation belongs to one agent. It contains linked sessions, each with a `position` that determines the review order.
 
-Questions belong to individual linked sessions rather than to the investigation as a whole. This allows the review to ask different questions about different runs. Each question has a `key`, unique within its session, and display text such as `refund_justified="Was the refund justified?"`.
+Questions belong to individual linked sessions rather than to the investigation as a whole, so the review can ask different questions about different runs. Each question has a `key`, unique within its session, and display text such as `refund_justified="Was the refund justified?"`. A question can include highlights; each highlight has a selector and a description that point the reviewer at relevant evidence.
 
-A question can also include highlights. Each highlight has a selector and a description that point the reviewer to relevant evidence in the session.
-
-The reviewer can give each linked session a verdict of `acceptable`, `problematic`, or `uncertain`. A session remains incomplete until it has a verdict. The investigation reports this through `completed_sessions` and `total_sessions`. Its overall `status` is tracked separately as `pending`, `in_progress`, or `completed`.
+The reviewer gives each linked session a verdict of `acceptable`, `problematic`, or `uncertain`. A session remains incomplete until it has a verdict; the investigation reports progress through `completed_sessions` and `total_sessions`, and tracks its own `status` as `pending`, `in_progress`, or `completed`.
 
 ```bash
 kitaru investigation create refund-complaints --agent support-agent \
@@ -27,7 +50,7 @@ kitaru investigation session list <investigation-id>
 kitaru investigation session verdict <investigation-id> <session-id> problematic
 ```
 
-Questions and highlights use the form `SESSION:KEY`. The session must also be present in a `--session` argument. Highlights accept a JSON array so you can provide the selector directly:
+Questions and highlights use the form `SESSION:KEY`, and the session must also appear in a `--session` argument. Highlights accept a JSON array with the selector inline:
 
 ```bash
 kitaru investigation create refund-complaints --agent support-agent \
@@ -38,11 +61,9 @@ kitaru investigation create refund-complaints --agent support-agent \
 
 ## Annotations: answers with an address
 
-Every answer is an **annotation**, which stores a JSON value against a session. A **selector** can attach the annotation to more specific evidence: a node (`node_id`), an RFC 6901 JSON pointer into the node or session response (`path`), or a character range within the resolved string (`span`, which requires a `path`). Investigation highlights use the same selector format.
+Every answer is an **annotation**, which stores a JSON value against a session. A **selector** attaches it to more specific evidence: a node (`node_id`), an RFC 6901 JSON pointer into the node or session response (`path`), or a character range within the resolved string (`span`, which requires a `path`). Investigation highlights use the same selector format.
 
-An answer to an investigation question uses `investigation_session_id` and `question_key`. Kitaru stores both fields on the resulting annotation. A manual annotation uses only `session_id` and can be added to any session, whether or not it belongs to an investigation.
-
-Both operations create an `AnnotationResponse` with `session_id`, `selector`, and `value`. Only answers to investigation questions populate `investigation_session_id` and `question_key`, so queries can distinguish them from manual annotations.
+An answer to an investigation question uses `investigation_session_id` and `question_key`, and Kitaru stores both on the resulting annotation. A manual annotation uses only `session_id` and can be added to any session, inside an investigation or not. Queries can tell the two apart because only question answers populate `investigation_session_id` and `question_key`.
 
 ```bash
 # an answer to a question
@@ -55,7 +76,7 @@ kitaru annotation create --session <id> \
   --value '{"issue": "tone", "severity": "high"}'
 ```
 
-`value` can contain any JSON, such as a boolean answer, a rating, or a rubric object. Kitaru does not impose a schema. Use a consistent shape if you plan to compare annotations or use them to calibrate an evaluator. Annotations can be listed, fetched, updated (`--value` only), and deleted.
+`value` can contain any JSON: a boolean answer, a rating, a rubric object. Kitaru does not impose a schema; use a consistent shape if you plan to compare annotations or calibrate an evaluator against them. Annotations can be listed, fetched, updated (`--value` only), and deleted.
 
 ## Working through a review
 
@@ -68,14 +89,6 @@ kitaru annotation create --investigation-session <id> \
 kitaru investigation session verdict <investigation-id> <session-id> problematic
 ```
 
-Answers and verdicts are separate. Answers record a value for each question. The verdict records the reviewer's conclusion about the session as a whole, and `completed_sessions` counts sessions with a verdict. A session can therefore have answers but remain incomplete until the reviewer sets its verdict.
+Answers and verdicts are separate: answers record a value per question, the verdict records the conclusion about the session as a whole, and `completed_sessions` counts only sessions with a verdict. A session can have answers and still be incomplete.
 
-## Using investigation results
-
-Investigation answers can serve as human labels for [evaluator calibration](../guides/write-an-evaluator.md#calibrate-against-human-judgment). Run the evaluator over the same sessions, then compare its evaluations with the annotations for each question.
-
-Sessions confirmed as failures can also be collected in a [cohort](cohorts.md) and included in later regression experiments.
-
-Over [MCP](../agent-native/mcp-server.md), `kitaru_review_read` and `kitaru_review_manage` let a coding assistant read the review queue, answer questions, and create annotations. A human still decides which sessions to review and what verdict to assign.
-
-The client mirrors the surface: `client.investigations.*` and `client.annotations.*`.
+Over [MCP](../agent-native/setup.md), `kitaru_review_read` and `kitaru_review_manage` let a coding assistant read the review queue, answer questions, and create annotations. A human still decides which sessions to review and what verdict to assign. Before creating remote state or using worker or model compute, the skill explains the operation and asks for confirmation. If a required payload, permission, or worker is missing, it records a checkpoint so the interview can resume later. The client mirrors the surface: `client.investigations.*` and `client.annotations.*`.

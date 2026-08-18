@@ -8,6 +8,7 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.client.exceptions import APIError
 from kitaru.mcp import connection as mcp_connection
 from kitaru.mcp import server as mcp_server
@@ -202,4 +203,5 @@ def test_process_client_disables_transport_retries(
         "timeout": 30.0,
         "retries": 0,
         "pool_size": 20,
+        "analytics_source": AnalyticsSource.MCP,
     }

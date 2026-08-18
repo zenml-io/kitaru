@@ -3,11 +3,11 @@ description: Import provider traces or portable Kitaru session JSONL into a work
 icon: file-import
 ---
 
-# Import Sessions
+# Kitaru JSONL
 
-Kitaru importers convert exported trace data into one session graph. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
+Kitaru importers convert exported trace data into session graphs. Provider importers decode source records, join related traces into sessions, order turns, reconstruct node relationships, and project common fields for the UI while preserving source inputs and outputs.
 
-Use a provider importer for Langfuse, LangSmith, or Braintrust data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
+Use a provider importer for Langfuse, LangSmith, Braintrust, or Logfire data. Use the `kitaru-jsonl` importer when your producer already emits the Kitaru session and node contract.
 
 ## The portable session contract
 
@@ -53,7 +53,7 @@ Each node uses the fields below. Optional fields can be omitted or set to null.
 | `attributes` | any JSON value | Span attributes retained for diagnostics. |
 | `metadata` | JSON object | Bounded source metadata. |
 
-Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 6901 JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means that the importer could not choose one text value without guessing. The empty string is the JSON Pointer for the complete payload, which is useful when the payload itself is the selected string.
+Text selectors avoid copying potentially large values into separate columns. A selector is present only when the importer can identify one relevant string in the corresponding payload. A client resolves that [RFC 6901 JSON Pointer](https://www.rfc-editor.org/rfc/rfc6901.html) when it loads the node payload and can show the complete `inputs` or `outputs` value for inspection. The selectors remain available in node list responses without loading the payload columns. `system_prompt_selector` resolves against `inputs`. A null selector means the importer could not choose one text value without guessing. The empty string is the JSON Pointer for the complete payload, which is useful when the payload itself is the selected string.
 
 `reasoning` contains visible text only. Redacted, encrypted, or unavailable reasoning remains null, while the provider payload stays in `inputs` or `outputs`. Token usage can also include `reasoning_tokens` when a provider reports the count.
 
@@ -134,7 +134,7 @@ kitaru session import langfuse-observations.jsonl \
   --wait
 ```
 
-The example reads the scalar at `/metadata/customer/case_id`. Five traces with the value `case-42` become five ordered turns in the same Kitaru session. Traces with another value form another session.
+The example reads the scalar at `/metadata/customer/case_id`. Five traces with the value `case-42` become five ordered turns in the same Kitaru session. Traces with a different value form a different session.
 
 Escape source keys according to RFC 6901. Use `~1` for `/` and `~0` for `~`. For example, `/metadata/customer~1case~0id` selects the key `customer/case~id` inside `metadata`.
 
@@ -207,7 +207,7 @@ The import job result reports created, skipped, and failed counts plus a bounded
 
 You have two ways in, and neither requires waiting for us to ship an importer.
 
-**Convert to Kitaru JSONL.** Write out [Kitaru JSONL](#create-kitaru-jsonl) — one session object per line, exactly the contract above. This is the right choice for a one-off backfill or an export you can transform with a script. Nothing gets installed or registered.
+**Convert to Kitaru JSONL.** Write out [Kitaru JSONL](#create-kitaru-jsonl), one session object per line, exactly the contract above. This is the right choice for a one-off backfill or an export you can transform with a script. Nothing gets installed or registered.
 
 **Write an importer.** Worth it when the conversion is ongoing, or when the source needs real normalization rather than a field rename. The contract is one function:
 
@@ -215,7 +215,7 @@ You have two ways in, and neither requires waiting for us to ship an importer.
 Parser = Callable[[bytes, dict[str, Any]], Iterator[ImportedSession | ImportFailure]]
 ```
 
-That is the whole interface. You receive the uploaded bytes and the `--params` object, and yield one `ImportedSession` per session you recognize — or an `ImportFailure` for a record you cannot parse, which isolates that record instead of failing the whole import:
+That is the whole interface. You receive the uploaded bytes and the `--params` object, then yield one `ImportedSession` per session you recognize, or an `ImportFailure` for a record you cannot parse. A yielded failure isolates that record instead of failing the whole import:
 
 ```python
 from kitaru.api_models.v1.imports import ImportFailure
@@ -229,13 +229,13 @@ def parse(content: bytes, params: dict[str, Any]) -> Iterator[ImportedSession | 
             yield ImportFailure(line=line_number, external_id=None, error=str(exc))
 ```
 
-Three things to get right, because they are where custom importers usually go wrong:
+Three things matter most because they are where custom importers usually go wrong:
 
 - **`external_id` is your identity, and it must be stable.** Kitaru deduplicates on `(imported_from, external_id)`, so a re-import is only safe if the id does not move between runs. Derive it from the source's own identifier, never from a row number or a timestamp.
-- **Decide session boundaries deliberately.** One `ImportedSession` should be one end-to-end run — see [what a session is](../concepts/agents-and-sessions.md). If your source splits a run across records, join them in the parser.
+- **Decide session boundaries deliberately.** One `ImportedSession` should be one end-to-end run; see [what a session is](../concepts/agents-and-sessions.md). If your source splits a run across records, join them in the parser.
 - **Yield failures, don't raise them.** An exception ends the import; an `ImportFailure` costs you one record and keeps the rest.
 
-The shipped importers are the reference: `plugins/packages/jsonl-importer` is the smallest at under 80 lines, and the Langfuse one shows real normalization. The `kitaru-importer-builder` [agent skill](../agent-native/skills.md) exists for this job — it turns a representative export into a locally validated importer, keeps the mapping from source evidence to normalized sessions explicit so you can see what is preserved, approximated, or unavailable, and finishes locally until you approve registration:
+The shipped importers are the reference: `plugins/packages/jsonl-importer` is the smallest at under 80 lines, and the Langfuse one shows real normalization. The `kitaru-importer-builder` [agent skill](../agent-native/setup.md) exists for this job: it turns a representative export into a locally validated importer, keeps the mapping from source evidence to normalized sessions explicit so you can see what is preserved, approximated, or unavailable, and finishes locally until you approve registration:
 
 ```bash
 npx skills add zenml-io/kitaru-skills

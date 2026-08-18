@@ -1,11 +1,11 @@
 ---
-description: Every model call recorded — tokens, cost, and call counts on every session, and how to total them across cohorts and experiments.
+description: "Every model call recorded: tokens, cost, and call counts on every session, and how to total them across cohorts and experiments."
 icon: coins
 ---
 
 # Track cost and model usage
 
-Every model call in a recorded run lands as an `llm_call` node on the [session](../concepts/agents-and-sessions.md): the requested and resolved model, inputs and outputs, token usage (input, output, cached, reasoning), and cost. The session rolls them up as it goes, so the totals are already there when you read a run:
+Every model call in a recorded run lands as an `llm_call` node on the [session](../concepts/agents-and-sessions.md): the requested and resolved model, inputs and outputs, token usage (input, output, cached, reasoning), and cost. The session rolls those values up as it goes, so the totals are already there when you read a run:
 
 ```python
 session = await client.sessions.get(session_id)
@@ -14,7 +14,7 @@ print(session.tokens)           # input / output / cached_input / reasoning
 print(session.llm_call_count, session.tool_call_count)
 ```
 
-Imported sessions get the same treatment — when your Langfuse export carries usage and cost, the importer preserves them, so your history is costed the moment it lands.
+Imported sessions get the same treatment: when your Langfuse export carries usage and cost, the importer preserves them, so your history is costed the moment it lands.
 
 ## Per-call detail
 
@@ -31,7 +31,7 @@ for node in nodes.items:
         print(node.requested_model, node.model, node.tokens, node.cost)
 ```
 
-`requested_model` vs `model` is worth watching: it's how you see an alias or a replay [override](replay-and-overrides.md) resolving to the model that actually served the call.
+`requested_model` vs `model` is worth watching: it shows an alias or a replay [override](replay-and-overrides.md) resolving to the model that served the call.
 
 ## Cost as an experiment metric
 
@@ -53,8 +53,8 @@ async for r in client.replays.iter(ReplayListParams(
 print(f"cohort cost: ${baseline_cost} -> ${fork_cost}")
 ```
 
-A negative delta across a [cohort](../concepts/cohorts.md) is the cheaper model paying for itself — with the pass rates from your [evaluators](write-an-evaluator.md) sitting right next to it saying whether the savings were free.
+A negative delta across a [cohort](../concepts/cohorts.md) is the cheaper model paying for itself, with the pass rates from your [evaluators](write-an-evaluator.md) sitting right next to it saying whether the savings were free.
 
 {% hint style="info" %} Recorded cost is an observability number derived from provider usage data, not an invoice. Treat deltas as reliable and absolute values as estimates. {% endhint %}
 
-Budget-minded evaluator runs matter too: code evaluators cost nothing to run, while [LLM judges](write-an-evaluator.md) spend judge tokens per session — size your per-PR cohort accordingly and save the wide sweep for the nightly run.
+Budget-minded evaluator runs matter too: code evaluators cost nothing to run, while [LLM judges](write-an-evaluator.md) spend judge tokens per session; size your per-PR cohort accordingly and save the wide sweep for the nightly run.

@@ -31,4 +31,4 @@ Run the main package gate from the repository root:
 just plugin-artifact-smoke
 ```
 
-`default-requirements.txt` mirrors the exact package versions in Kitaru's default catalog. Adapter distributions are installed by agent projects and are not included in that file. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
+`default-requirements.txt` pins every independently released plugin distribution that is bundled with Kitaru. The server catalog remains limited to importers and evaluators; adapter distributions are installed directly by agent projects and are not registered as server plugins. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.

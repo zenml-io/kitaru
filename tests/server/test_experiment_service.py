@@ -30,6 +30,7 @@ from conftest import (
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.experiment import (
@@ -51,6 +52,7 @@ from kitaru.server.domain.experiment import (
 )
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind, PluginNotFound
 from kitaru.server.domain.replay_config import (
+    HistoryConfig,
     PassthroughConfig,
     ReplayConfigNotFound,
     ReplayOverride,
@@ -657,7 +659,7 @@ async def test_create_experiment_tracks_experiment_created(
     plugin_repository: FakePluginRepository,
     agent_id: uuid.UUID,
 ) -> None:
-    """Fire EXPERIMENT_CREATED with the evaluator and tool override counts."""
+    """Fire EXPERIMENT_CREATED with the override, tool policy and evaluator info."""
     await _register_evaluator(plugin_repository)
     analytics = _RecordingAnalytics()
     service = ExperimentService(
@@ -677,6 +679,15 @@ async def test_create_experiment_tracks_experiment_created(
         name="exp1",
         agent_id=agent_id,
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        override=ReplayOverride(system_prompt="be terse"),
+        tool_policy=ToolPolicy(
+            default=PassthroughConfig(),
+            tools={
+                "search": HistoryConfig(
+                    scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL
+                )
+            },
+        ),
     )
 
     await service.create_experiment(command, actor=ACTOR)
@@ -685,7 +696,16 @@ async def test_create_experiment_tracks_experiment_created(
     user_id, event, properties = analytics.tracked[0]
     assert user_id == ACTOR.account.id
     assert event == AnalyticsEvent.EXPERIMENT_CREATED
-    assert properties == {"evaluator_count": 1, "tool_override_count": 0}
+    assert properties == {
+        "model_override": False,
+        "system_prompt_override": True,
+        "prompt_override": False,
+        "model_params_override": False,
+        "tool_policy_default": "passthrough",
+        "tool_override_count": 1,
+        "tool_override_types": ["history"],
+        "evaluator_count": 1,
+    }
 
 
 async def test_create_experiment_without_analytics_tracker(

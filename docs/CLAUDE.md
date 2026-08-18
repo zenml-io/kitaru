@@ -15,7 +15,8 @@ Kitaru documentation is split across three surfaces:
   (`docs/worker/redirect.mjs` + `wrangler.redirect.toml`, worker `kitaru-site`).
 
 So **this app is reference-only** — its content is the generated
-`content/docs/reference/python/` plus a landing `index.mdx`.
+`content/docs/reference/python/` and `content/docs/cli/` plus a landing
+`index.mdx`.
 Do not add hand-written pages here; those belong in `docs/book/` (GitBook).
 
 ## Architecture
@@ -39,9 +40,9 @@ Python tooling except for the generated reference content. The static export in
 
 ## Deploying sdkdocs.kitaru.ai
 
-**Intended automatic path:** the `SDK Reference Docs` workflow (`.github/workflows/docs.yml`) is configured to regenerate the SDK reference, build the static export, and test the redirect worker. At this v2 baseline, `scripts/generate_sdk_docs.py` has not been restored, so the workflow cannot complete its reference-generation step. Treat SDK reference deployment as blocked until a v2 generator lands; do not copy the deleted v1 generator without reviewing the v2 public SDK surface.
+**Automatic path:** the `SDK Reference Docs` workflow (`.github/workflows/docs.yml`) regenerates the SDK reference via `scripts/generate_sdk_docs.py` (the v2 generator: a `PUBLIC_API` allowlist over `kitaru.client` and `kitaru.task`), builds the static export, and tests the redirect worker.
 
-Once that blocker is resolved, deployment is limited to:
+Deployment is limited to:
 
 - **push to `main`** (i.e. at release time), and
 - **manual `workflow_dispatch`** (Actions → "SDK Reference Docs" → Run workflow)
@@ -49,7 +50,7 @@ Once that blocker is resolved, deployment is limited to:
 
 PRs build and test only; they do not deploy or create preview Workers. The workflow does not run `scripts/generate_changelog_docs.py`; public changelog traffic is handled by the redirect worker.
 
-**Manual redirect-only deployment** requires Cloudflare credentials through `wrangler login`. Do not deploy the SDK reference app manually while the v2 generator is absent.
+**Manual redirect-only deployment** requires Cloudflare credentials through `wrangler login`.
 
 ```bash
 # from repo root
@@ -63,8 +64,8 @@ changes when redirect rules in `docs/worker/redirect.mjs` change.
 
 - **Never add Node.js tooling to the repo root.** No root `package.json`,
   no root `node_modules`, no workspace config.
-- **Never hand-edit generated files:** `content/docs/changelog.mdx` and `content/docs/reference/` are generated and gitignored. The public changelog is hosted at `docs.zenml.io/changelog`; the local `changelog.mdx` is only for local/reference builds. The Node conversion remains in `docs/scripts/convert-sdk-docs.mjs`, but its v2 Python input generator is currently absent. Do not present `just generate-docs` or docs CI as healthy until that generator is restored and verified against the v2 SDK.
-- **CLI contracts remain offline:** command metadata lives under `src/kitaru/cli/` and is exposed through `kitaru schema`; user-facing CLI reference publishing is deferred.
+- **Never hand-edit generated files:** `content/docs/changelog.mdx` and `content/docs/reference/` are generated and gitignored. The public changelog is hosted at `docs.zenml.io/changelog`; the local `changelog.mdx` is only for local/reference builds. The reference pipeline is `scripts/generate_sdk_docs.py` (Python, griffe extraction filtered to the `PUBLIC_API` allowlist) followed by `docs/scripts/convert-sdk-docs.mjs` (Node, JSON to MDX); run it via `just generate-docs`.
+- **CLI reference is schema-driven:** command metadata lives under `src/kitaru/cli/` and is exposed through `kitaru schema`; `scripts/generate_cli_docs.py` consumes that schema to generate `content/docs/cli/` (run via `just generate-docs`). The generator hardcodes no command names — CLI changes flow through automatically.
 - **Respect static export constraints:** No server-side features (middleware,
   rewrites, cookies, ISR). All content must be buildable at build time.
 - **Only document shipped features.** No "Coming Soon" sections for unimplemented
@@ -81,6 +82,7 @@ content/docs/
   index.mdx              # Reference-site landing page
   changelog.mdx          # AUTO-GENERATED, gitignored local/reference changelog page
   reference/python/      # AUTO-GENERATED, gitignored SDK reference via fumadocs-python
+  cli/                   # AUTO-GENERATED, gitignored CLI reference from `kitaru schema`
 ```
 
 ## Available MDX Components
@@ -111,7 +113,7 @@ pnpm run lint       # Biome lint
 pnpm run format     # Biome format
 ```
 
-**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. Fresh clones cannot currently generate the SDK reference because the v2 Python generator is absent. `just docs`, `just docs-build`, and `just docs-validate` can operate on the available app content, but the full reference sidebar and deployment remain blocked until a reviewed v2 generator lands. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
+**Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
 
 ## File Responsibilities
 
@@ -133,7 +135,7 @@ this FumaDocs reference app, and generated output).
 - Hand-written docs are **GitBook Markdown under `docs/book/`** (not MDX). Edit those `.md` files directly and add new pages to `docs/book/toc.md`. GitBook conventions live in `docs/book/AGENTS.md`.
 - Links **within the GitBook space** use relative `.md` paths (e.g. `../concepts/checkpoints.md`, `flows.md#runtime-options`). Link to the **SDK reference** with `https://sdkdocs.kitaru.ai` (the separate reference site, not in the GitBook space). Link to **other ZenML docs** with absolute `https://docs.zenml.io/...`. Diagrams are static PNG images hosted on Cloudflare R2 and referenced as `https://assets.kitaru.ai/docs/diagrams/<slug>.png` (regenerate via the diagram pipeline, not committed to the repo).
 - Do not commit temporary agent planning/review files such as `docs/plans/*`, `docs/reviews/*`, or prompt exports unless the user explicitly asks for a durable tracked document. Treat them as coordination scratchpads, not product docs.
-- Generated reference output must come from reviewed generation scripts rather than manual edits. The v2 Python generator is currently absent, so do not claim that fresh SDK reference output can be generated yet.
+- Generated reference output must come from reviewed generation scripts rather than manual edits. The public surface it documents is the `PUBLIC_API` allowlist in `scripts/generate_sdk_docs.py`; change that allowlist (and its tests) rather than hand-editing output when the SDK surface changes.
 
 ### Accuracy rules for what we describe
 

@@ -25,6 +25,7 @@ EXPECTED_UNITS = {
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
     "langgraph": "kitaru-langgraph",
+    "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
     "pydantic-ai": "kitaru-pydantic-ai",
@@ -35,6 +36,7 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
+    "kitaru-logfire-importer",
     "kitaru-langsmith-importer",
 }
 
@@ -61,7 +63,7 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_nine_python_distributions() -> None:
+def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -235,7 +237,7 @@ def test_release_wheel_install_fails_after_the_attempt_limit(
         ("kitaru-v0.21.0", "package tag"),
         ("python/unknown/v0.1.0", "unknown distribution"),
         ("python/kitaru/v0.22.0-rc.1", "canonical PEP 440"),
-        ("python/kitaru/v0.22.0", "does not match manifest version"),
+        ("python/kitaru/v0.22.2", "does not match manifest version"),
     ],
 )
 def test_invalid_or_mismatched_package_tags_are_rejected(
@@ -350,6 +352,18 @@ def test_python_release_workflow_can_resume_after_partial_publication() -> None:
         assert "gh release upload" not in workflow
 
 
+def test_stable_github_releases_are_marked_latest() -> None:
+    workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml", "release-typescript.yml")
+    ]
+
+    for workflow in workflows:
+        assert "latest=(--latest=false)" in workflow
+        assert "latest=(--latest)" in workflow
+        assert '"${latest[@]}"' in workflow
+
+
 def test_core_github_release_is_created_after_registry_publication() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
 
@@ -435,7 +449,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 9 release units."),
+        (["validate"], "Validated 10 release units."),
     ],
 )
 def test_cli_text_commands_succeed(

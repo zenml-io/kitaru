@@ -1,17 +1,17 @@
 ---
-description: Re-run a recorded session against your real code — unchanged for a faithful baseline, or forked with one thing different.
+description: Re-run a recorded session against your real code, unchanged for a faithful baseline or forked with one thing different.
 icon: rotate-left
 ---
 
 # Replay
 
-Replay is the verb the whole product hangs off. A [session](agents-and-sessions.md) is a recording; a **replay** re-executes it: your agent's real code runs again, and the recording answers for the world the original run saw. With a `history` [tool policy](#tool-policies), tool calls are served from the recorded session — nothing touches your real systems.
+Replay is the verb the whole product hangs on. A [session](agents-and-sessions.md) is a recording; a **replay** re-executes it. Your agent's real code runs again, and the recording answers for the world the original run saw. With a `history` [tool policy](#tool-policies), tool calls are served from the recorded session, so nothing touches your real systems.
 
-The discipline comes first: **replay unchanged before you change anything.** An unchanged replay that reproduces the original is your faithful baseline. Fork from that baseline with exactly one thing different — a model, a prompt, a code change — and the diff you read is your change, not replay noise.
+The discipline comes first: **replay unchanged before you change anything.** An unchanged replay that reproduces the original is your faithful baseline. Fork from that baseline with exactly one thing different (a model, a prompt, a code change) and the diff you read is your change, not replay noise.
 
 ## What a replay is
 
-A replay names a **baseline session**, the **agent version** to run (by default, the version the baseline was recorded with), an optional **override**, a **tool policy**, and at least one [evaluator](evaluators.md). The server turns it into a job; a [worker](workers.md) in your environment starts your agent from its run spec, feeding it the baseline's inputs. The re-run records a fresh session (`origin: replay`), and the evaluators score it as soon as it completes.
+A replay names a **baseline session**, the **agent version** to run (by default, the version the baseline was recorded with), an optional **override**, a **tool policy**, and at least one [evaluator](evaluators.md). The server turns it into a job; a [worker](workers.md) in your environment starts your agent from its run spec, feeding it the baseline's inputs. The re-run records a fresh session (`origin: replay`), and the evaluators evaluate it as soon as it completes.
 
 For a one-off replay, the CLI exposes the same create, list, and get flow:
 
@@ -55,13 +55,13 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`evaluate_baselines=True` scores the baseline session with the same evaluators, so the comparison you want — baseline evaluations next to replay evaluations — exists as soon as the replay settles. Watch the job with `kitaru job watch <job-id>`, then read `result_session_id` off the replay.
+`evaluate_baselines=True` evaluates the baseline session with the same evaluators, so the comparison you want, baseline evaluations next to replay evaluations, exists as soon as the replay settles. Watch the job with `kitaru job watch <job-id>`, then read `result_session_id` off the replay.
 
-A replay moves `pending → evaluating → completed` (or `failed` / `canceled`). Its output is deliberately plain: the result session plus its evaluation rows. You compare baseline and result by reading both sessions' evaluations, cost, and tokens — see [Replay a failure and fork it](../guides/replay-and-overrides.md) for the full loop.
+A replay moves `pending → evaluating → completed` (or `failed` / `canceled`). Its output is intentionally plain: the result session plus its evaluation rows. You compare baseline and result by reading both sessions' evaluations, cost, and tokens. See [Replay a failure and fork it](../guides/replay-and-overrides.md) for the full loop.
 
 ## Forking: the override
 
-There is no separate fork operation in the API — a "fork" is just a replay that carries an `override`. The word is shorthand for that, the way "baseline" is shorthand for a replay without one. Both are the same call.
+There is no separate fork operation in the API; a "fork" is a replay that carries an `override`. The word is shorthand for that, the way "baseline" is shorthand for a replay without one. Both are the same call.
 
 An override changes one thing about the re-run and leaves everything else alone:
 
@@ -76,11 +76,11 @@ override = ReplayOverride(
 )
 ```
 
-- `model` swaps the model on every matching model call — a plain string replaces all of them, a map replaces old with new per model.
+- `model` swaps the model on every matching model call: a plain string replaces all of them, a map replaces old with new per model.
 - `system_prompt` and `prompt` rewrite the run's inputs before the agent starts.
 - `model_params` adjusts sampling parameters at the adapter level.
 
-Replays re-run the agent **from the top**. There is no partial, mid-run cut point: the recording answers the world's side of the conversation, and your agent recomputes its own side in full. That is what makes a fork trustworthy — the whole decision path is real.
+Replays re-run the agent **from the top**. There is no partial, mid-run cut point: the recording answers the world's side of the conversation, and your agent recomputes its own side in full. That is what makes a fork trustworthy: the whole decision path is real.
 
 ## Tool policies
 
@@ -89,11 +89,11 @@ The tool policy decides what happens when the re-running agent calls a tool. The
 | Policy | What a tool call gets |
 | --- | --- |
 | `history` | The recorded result for the same call, matched by tool name and arguments, from the baseline (or a wider scope). `on_miss` decides what an unrecorded call does: `fail`, `passthrough`, or `error_result`. |
-| `static` | A canned result you define per case — exact or subset argument matching. |
+| `static` | A canned result you define per case, with exact or subset argument matching. |
 | `passthrough` | The real tool, live. This is the current server default when you set no policy. |
 | `llm` | A model answers the tool call in-distribution. The API accepts it, but adapter support varies; PydanticAI, Mastra, and Vercel AI SDK currently reject it. |
 
-For the "nothing touches real systems" guarantee, set `default=HistoryConfig(scope="baseline", on_miss="fail")` — recorded calls are answered from the recording and anything novel stops the replay instead of hitting production. The full matrix, including per-tool overrides and history scopes, is in [Tool policies](../guides/tool-policies.md).
+For the "nothing touches real systems" guarantee, set `default=HistoryConfig(scope="baseline", on_miss="fail")`. Recorded calls are answered from the recording and anything novel stops the replay instead of hitting production. The full matrix, including per-tool overrides and history scopes, is in [Tool policies](../guides/tool-policies.md).
 
 ## Scale: cohorts and experiments
 

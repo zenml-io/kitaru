@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-10T10:08:22.409882Z"
+exclude-newer = "2026-08-14T16:31:31.289253Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -20,6 +20,7 @@ members = [
     "kitaru-langfuse-importer",
     "kitaru-langgraph",
     "kitaru-langsmith-importer",
+    "kitaru-logfire-importer",
     "kitaru-openai-agents",
     "kitaru-pydantic-ai",
 ]
@@ -922,7 +923,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc8"
+version = "0.22.1"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -980,9 +981,10 @@ provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
+    { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
     { name = "import-linter", specifier = ">=2.0" },
     { name = "pip-audit", specifier = ">=2.10,<3" },
-    { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.14.1,<2.23" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.11" },
@@ -992,7 +994,7 @@ dev = [
 
 [[package]]
 name = "kitaru-braintrust-importer"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/braintrust-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1003,7 +1005,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-evaluator"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/evaluator" }
 dependencies = [
     { name = "kitaru" },
@@ -1014,7 +1016,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-jsonl-importer"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/jsonl-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1025,7 +1027,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1036,7 +1038,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langgraph"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/langgraph" }
 dependencies = [
     { name = "kitaru" },
@@ -1062,7 +1064,7 @@ provides-extras = ["deepagents"]
 
 [[package]]
 name = "kitaru-langsmith-importer"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/langsmith-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1072,8 +1074,19 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
+name = "kitaru-logfire-importer"
+version = "0.1.0"
+source = { editable = "packages/logfire-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
+
+[[package]]
 name = "kitaru-openai-agents"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/openai-agents" }
 dependencies = [
     { name = "kitaru" },
@@ -1088,7 +1101,7 @@ requires-dist = [
 
 [[package]]
 name = "kitaru-pydantic-ai"
-version = "0.1.0rc0"
+version = "0.1.0"
 source = { editable = "packages/pydantic-ai" }
 dependencies = [
     { name = "genai-prices" },
