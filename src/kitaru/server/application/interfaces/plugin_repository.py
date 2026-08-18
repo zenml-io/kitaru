@@ -103,7 +103,6 @@ class PluginRepository(Protocol):
 
         Raises:
             PluginNotFound: No plugin has this id.
-            PluginInUse: A version is referenced by a stored evaluation.
         """
         ...
 

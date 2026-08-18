@@ -30,6 +30,7 @@ from conftest import (
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
@@ -47,9 +48,10 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     ExperimentFrozen,
-    ExperimentInUse,
     ExperimentNotFound,
 )
+from kitaru.server.domain.experiment_run import ExperimentRunNotFound
+from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind, PluginNotFound
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
@@ -667,13 +669,13 @@ async def test_update_experiment_name_unaffected_by_runs(
     assert updated.name == "renamed"
 
 
-async def test_delete_experiment_conflicts_once_it_has_runs(
+async def test_delete_experiment_cascades_runs(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     services: ReplayServices,
     agent_id: uuid.UUID,
 ) -> None:
-    """Reject deleting an experiment that has runs."""
+    """Deleting an experiment cascades its runs."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
         name="exp1",
@@ -681,15 +683,59 @@ async def test_delete_experiment_conflicts_once_it_has_runs(
         evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
     )
     created, _ = await service.create_experiment(command, actor=ACTOR)
-    await create_experiment_run(
+    run = await create_experiment_run(
         services.experiment_runs,
         ACTOR.account.id,
         experiment_id=created.id,
         cohort_version_id=uuid.uuid4(),
         agent_version_id=uuid.uuid4(),
     )
-    with pytest.raises(ExperimentInUse):
-        await service.delete_experiment(created.id, actor=ACTOR)
+
+    await service.delete_experiment(created.id, actor=ACTOR)
+
+    with pytest.raises(ExperimentNotFound):
+        await service.get_experiment(created.id, actor=ACTOR)
+    with pytest.raises(ExperimentRunNotFound):
+        await services.experiment_runs.get(run.id)
+
+
+async def test_delete_experiment_deletes_replay_jobs(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    services: ReplayServices,
+    agent_id: uuid.UUID,
+) -> None:
+    """Deleting an experiment deletes its runs' replay jobs."""
+    await _register_evaluator(plugin_repository)
+    command = ExperimentCreate(
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+    )
+    created, config = await service.create_experiment(command, actor=ACTOR)
+    run = await create_experiment_run(
+        services.experiment_runs,
+        ACTOR.account.id,
+        experiment_id=created.id,
+        cohort_version_id=uuid.uuid4(),
+        agent_version_id=uuid.uuid4(),
+    )
+    job = await services.jobs.create(
+        Job(owner_id=ACTOR.account.id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+    )
+    await create_replay(
+        services.replays,
+        ACTOR.account.id,
+        job_id=job.id,
+        replay_config_id=config.id,
+        baseline_session_id=uuid.uuid4(),
+        experiment_run_id=run.id,
+    )
+
+    await service.delete_experiment(created.id, actor=ACTOR)
+
+    with pytest.raises(JobNotFound):
+        await services.jobs.get(job.id)
 
 
 async def test_create_experiment_tracks_experiment_created(

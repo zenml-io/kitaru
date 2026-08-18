@@ -87,5 +87,6 @@ class SecretRepository(Protocol):
 
         Raises:
             SecretNotFound: No secret has this id.
+            SecretInUse: The secret is referenced by an agent version.
         """
         ...

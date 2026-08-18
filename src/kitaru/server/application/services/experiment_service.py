@@ -93,16 +93,18 @@ class ExperimentService:
         Args:
             repository: Experiment and replay config repository.
             plugin_repository: Plugin repository, for evaluator resolution.
-            experiment_run_repository: Experiment run repository.
+            experiment_run_repository: Experiment run repository, for run
+                fan-out and delete cascade.
             agent_repository: Agent repository, to validate the owning
                 agent exists.
             cohort_version_repository: Cohort version repository, for run
                 fan-out.
             session_repository: Session repository, for run fan-out.
             agent_version_repository: Agent version repository.
-            replay_repository: Replay repository, for run fan-out and
-                progress.
-            job_repository: Job repository, for run fan-out.
+            replay_repository: Replay repository, for run fan-out, progress,
+                and delete cascade.
+            job_repository: Job repository, for run fan-out and delete
+                cascade.
             task_repository: Task repository, for run fan-out.
             analytics: Analytics tracker, None skips tracking.
         """
@@ -330,7 +332,10 @@ class ExperimentService:
     async def delete_experiment(
         self, experiment_id: uuid.UUID, actor: AuthContext
     ) -> None:
-        """Delete an experiment and its replay config.
+        """Delete an experiment, its runs, their replay jobs, and its replay config.
+
+        The job deletes cascade their replay rows, so the experiment row's
+        own delete cascades only the runs.
 
         Args:
             experiment_id: Id of the experiment.
@@ -341,6 +346,12 @@ class ExperimentService:
         """
         _ = actor
         experiment = await self._repository.get(experiment_id)
+        runs = await self._experiment_runs.list_by_experiment(experiment_id)
+        job_ids: list[uuid.UUID] = []
+        for run in runs:
+            replays = await self._replays.list_by_experiment_run(run.id)
+            job_ids.extend(replay.job_id for replay in replays)
+        await self._jobs.delete_many(job_ids)
         await self._repository.delete(experiment_id)
         await self._repository.delete_replay_config(experiment.replay_config_id)
 

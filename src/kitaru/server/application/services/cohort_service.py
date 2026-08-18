@@ -151,6 +151,7 @@ class CohortService:
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: An experiment run references one of its versions.
         """
         _ = actor
         await self._repository.delete(cohort_id)

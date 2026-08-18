@@ -205,3 +205,20 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
             .exists()
         )
         return bool(await self._session.scalar(statement))
+
+    async def list_by_experiment(self, experiment_id: uuid.UUID) -> list[ExperimentRun]:
+        """Load every run of an experiment.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            Runs of the experiment, in creation order.
+        """
+        statement = (
+            select(ExperimentRunORM)
+            .where(ExperimentRunORM.experiment_id == experiment_id)
+            .order_by(ExperimentRunORM.id.asc())
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return [row.to_domain() for row in rows]

@@ -118,8 +118,8 @@ export interface paths {
          * Delete Agent Version
          * @description Delete an agent version.
          *
-         *     Clients observe HTTP 204 on success and 404 when no agent version has
-         *     this id.
+         *     Clients observe HTTP 204 on success, 404 when no agent version has
+         *     this id, and 409 when an experiment run references it.
          *
          *     Args:
          *         agent_version_id: Id of the agent version.
@@ -222,8 +222,7 @@ export interface paths {
          * Delete Agent
          * @description Delete an agent.
          *
-         *     Clients observe HTTP 204 on success, 404 when no agent has this id, and
-         *     409 when the agent has versions.
+         *     Clients observe HTTP 204 on success and 404 when no agent has this id.
          *
          *     Args:
          *         agent_id: Id of the agent.
@@ -791,7 +790,8 @@ export interface paths {
          * @description Delete a cohort.
          *
          *     Deleting a cohort cascades its versions. Clients observe HTTP 204 on
-         *     success and 404 when no cohort has this id.
+         *     success, 404 when no cohort has this id, and 409 when an experiment
+         *     run references one of its versions.
          *
          *     Args:
          *         cohort_id: Id of the cohort.
@@ -2435,8 +2435,8 @@ export interface paths {
          * Delete Secret
          * @description Delete a secret.
          *
-         *     Clients observe HTTP 204 on success and 404 when no secret has this
-         *     id.
+         *     Clients observe HTTP 204 on success, 404 when no secret has this id,
+         *     and 409 when an agent version references it.
          *
          *     Args:
          *         secret_id: Id of the secret.
@@ -2639,7 +2639,8 @@ export interface paths {
          * @description Delete a session.
          *
          *     Deleting a session cascades its nodes. Clients observe HTTP 204 on
-         *     success and 404 when no session has this id.
+         *     success, 404 when no session has this id, and 409 when the session is
+         *     referenced by a cohort version, investigation, or replay.
          *
          *     Args:
          *         session_id: Id of the session.
@@ -2891,8 +2892,9 @@ export interface paths {
          * Create Tag Link
          * @description Link a tag to a resource.
          *
-         *     Clients observe HTTP 201 on success, 404 when no tag has this id, 409
-         *     when the link is already registered, and 422 on invalid input.
+         *     Clients observe HTTP 201 on success, 404 when no tag or no resource of
+         *     the given type and id exists, 409 when the link is already registered,
+         *     and 422 on invalid input.
          *
          *     Args:
          *         tag_id: Id of the tag.

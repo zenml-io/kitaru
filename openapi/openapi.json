@@ -8889,7 +8889,7 @@
     },
     "/api/v1/agent-versions/{agent_version_id}": {
       "delete": {
-        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
+        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success, 404 when no agent version has\nthis id, and 409 when an experiment run references it.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
         "operationId": "delete_agent_version_api_v1_agent_versions__agent_version_id__delete",
         "parameters": [
           {
@@ -9184,7 +9184,7 @@
     },
     "/api/v1/agents/{agent_id}": {
       "delete": {
-        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id, and\n409 when the agent has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
+        "description": "Delete an agent.\n\nClients observe HTTP 204 on success and 404 when no agent has this id.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
         "operationId": "delete_agent_api_v1_agents__agent_id__delete",
         "parameters": [
           {
@@ -10625,7 +10625,7 @@
     },
     "/api/v1/cohorts/{cohort_id}": {
       "delete": {
-        "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess and 404 when no cohort has this id.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
+        "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess, 404 when no cohort has this id, and 409 when an experiment\nrun references one of its versions.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
         "operationId": "delete_cohort_api_v1_cohorts__cohort_id__delete",
         "parameters": [
           {
@@ -14660,7 +14660,7 @@
     },
     "/api/v1/secrets/{secret_id}": {
       "delete": {
-        "description": "Delete a secret.\n\nClients observe HTTP 204 on success and 404 when no secret has this\nid.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
+        "description": "Delete a secret.\n\nClients observe HTTP 204 on success, 404 when no secret has this id,\nand 409 when an agent version references it.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
         "operationId": "delete_secret_api_v1_secrets__secret_id__delete",
         "parameters": [
           {
@@ -15147,7 +15147,7 @@
     },
     "/api/v1/sessions/{session_id}": {
       "delete": {
-        "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess, 404 when no session has this id, and 409 when the session is\nreferenced by a cohort version, investigation, or replay.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
         "operationId": "delete_session_api_v1_sessions__session_id__delete",
         "parameters": [
           {

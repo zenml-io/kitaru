@@ -204,17 +204,18 @@ async def test_delete_agent_not_found(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_delete_agent_in_use(
-    client: httpx.AsyncClient, agent_repository: FakeAgentRepository
-) -> None:
-    """Observe HTTP 409 when the agent has versions."""
+async def test_delete_agent_cascades_versions(client: httpx.AsyncClient) -> None:
+    """Deleting an agent cascades its versions."""
     created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
-    await client.post(f"/api/v1/agents/{created['id']}/versions", json={})
+    version = (
+        await client.post(f"/api/v1/agents/{created['id']}/versions", json={})
+    ).json()
+
     response = await client.delete(f"/api/v1/agents/{created['id']}")
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Agent {created['id']} has versions and cannot be deleted"
-    }
+    assert response.status_code == 204
+
+    response = await client.get(f"/api/v1/agent-versions/{version['id']}")
+    assert response.status_code == 404
 
 
 async def test_create_agent_version(client: httpx.AsyncClient) -> None:

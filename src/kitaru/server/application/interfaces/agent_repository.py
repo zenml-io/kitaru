@@ -85,6 +85,5 @@ class AgentRepository(Protocol):
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
         ...

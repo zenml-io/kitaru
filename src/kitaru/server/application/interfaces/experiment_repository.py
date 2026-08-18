@@ -90,12 +90,13 @@ class ExperimentRepository(Protocol):
     async def delete(self, experiment_id: uuid.UUID) -> None:
         """Delete an experiment by id.
 
+        Deleting an experiment cascades its runs and their replays.
+
         Args:
             experiment_id: Id of the experiment.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
-            ExperimentInUse: The experiment has runs.
         """
         ...
 

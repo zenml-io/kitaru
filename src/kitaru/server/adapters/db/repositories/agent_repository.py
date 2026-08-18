@@ -20,15 +20,11 @@ from sqlalchemy import select
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
-from kitaru.server.adapters.db.orm.agent_version import (
-    AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
-)
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.domain.agent import (
     Agent,
-    AgentInUse,
     AgentNotFound,
     DuplicateAgentName,
 )
@@ -141,9 +137,5 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
-        await self._delete_row(
-            agent_id,
-            {AGENT_VERSION_AGENT_ID_FOREIGN_KEY: lambda: AgentInUse(agent_id)},
-        )
+        await self._delete_row(agent_id)

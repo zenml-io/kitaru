@@ -102,18 +102,6 @@ class DuplicatePluginVersion(ConflictError):
         )
 
 
-class PluginInUse(ConflictError):
-    """Raised when a plugin version is referenced by a stored evaluation."""
-
-    def __init__(self, plugin_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            plugin_id: Id of the plugin in use.
-        """
-        super().__init__(f"Plugin {plugin_id} is in use by a stored evaluation")
-
-
 class PluginVersionNotFound(NotFoundError):
     """Raised when a plugin version lookup does not resolve."""
 

@@ -154,13 +154,15 @@ async def test_create_version_with_secrets_round_trips(
     ]
 
 
-async def test_delete_agent_restricted_by_versions(client: httpx.AsyncClient) -> None:
-    """Translate the FK restriction into HTTP 409 when versions exist."""
+async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
+    """Cascade an agent's versions when the agent is deleted."""
     agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
-    await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    version = (
+        await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    ).json()
 
     response = await client.delete(f"/api/v1/agents/{agent['id']}")
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Agent {agent['id']} has versions and cannot be deleted"
-    }
+    assert response.status_code == 204
+
+    response = await client.get(f"/api/v1/agent-versions/{version['id']}")
+    assert response.status_code == 404

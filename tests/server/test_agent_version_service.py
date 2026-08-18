@@ -21,9 +21,11 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeExperimentRunRepository,
     FakeTaskRepository,
     create_agent,
     create_agent_task,
+    create_experiment_run,
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.agent_version import (
@@ -39,6 +41,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
+    AgentVersionInUse,
     AgentVersionNotFound,
     RunSpec,
 )
@@ -476,6 +479,35 @@ async def test_delete_version_not_found(service: AgentVersionService) -> None:
     """Raise for an unknown agent version id."""
     with pytest.raises(AgentVersionNotFound):
         await service.delete_version(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_delete_version_restricted_by_experiment_run(
+    agent_repository: FakeAgentRepository, agent_id: uuid.UUID
+) -> None:
+    """Reject deleting a version referenced by an experiment run."""
+    experiment_runs = FakeExperimentRunRepository()
+    repository = FakeAgentVersionRepository(
+        agent_repository, experiment_runs=experiment_runs
+    )
+    service = AgentVersionService(repository=repository)
+    created = await service.create_version(
+        agent_id=agent_id,
+        display_version=None,
+        description=None,
+        run_spec=None,
+        capabilities=None,
+        actor=ACTOR,
+    )
+    await create_experiment_run(
+        experiment_runs,
+        ACTOR.account.id,
+        experiment_id=uuid.uuid4(),
+        cohort_version_id=uuid.uuid4(),
+        agent_version_id=created.id,
+    )
+
+    with pytest.raises(AgentVersionInUse):
+        await service.delete_version(created.id, actor=ACTOR)
 
 
 async def test_create_version_tracks_agent_version_created(

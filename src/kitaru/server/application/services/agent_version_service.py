@@ -179,6 +179,7 @@ class AgentVersionService:
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: The version is referenced by an experiment run.
         """
         _ = actor
         await self._repository.delete(agent_version_id)

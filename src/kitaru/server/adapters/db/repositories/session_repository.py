@@ -34,6 +34,9 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.investigation_session import (
+    INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.orm.replay import (
     REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
     REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
@@ -43,7 +46,6 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
-from kitaru.server.adapters.db.orm.task import TASK_INPUT_SESSION_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -53,8 +55,6 @@ from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
-    SessionInUseByReplay,
-    SessionInUseByTask,
     SessionNotFound,
     SessionRollups,
 )
@@ -360,12 +360,8 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionInUse: The session belongs to a cohort version and
-                cannot be deleted.
-            SessionInUseByTask: The session is a task's input session and
-                cannot be deleted.
-            SessionInUseByReplay: The session is a replay's baseline or
-                result session and cannot be deleted.
+            SessionInUse: The session is referenced by a cohort version,
+                investigation, or replay and cannot be deleted.
         """
         await self._delete_row(
             session_id,
@@ -373,13 +369,13 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                TASK_INPUT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
+                INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(
+                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(
+                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
             },

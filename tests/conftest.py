@@ -129,13 +129,13 @@ from kitaru.server.domain.account import (
 )
 from kitaru.server.domain.agent import (
     Agent,
-    AgentInUse,
     AgentNotFound,
     DuplicateAgentName,
 )
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
+    AgentVersionInUse,
     AgentVersionNotFound,
     RunSpec,
 )
@@ -150,7 +150,12 @@ from kitaru.server.domain.api_key import (
     encode_api_key,
 )
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
-from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
+from kitaru.server.domain.cohort import (
+    Cohort,
+    CohortInUse,
+    CohortNotFound,
+    DuplicateCohortName,
+)
 from kitaru.server.domain.cohort_version import (
     CohortVersion,
     CohortVersionIdNotFound,
@@ -162,7 +167,6 @@ from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
-    ExperimentInUse,
     ExperimentNotFound,
 )
 from kitaru.server.domain.experiment_run import (
@@ -186,7 +190,6 @@ from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
     Plugin,
-    PluginInUse,
     PluginKind,
     PluginNotFound,
     PluginSource,
@@ -209,6 +212,7 @@ from kitaru.server.domain.replay_config import (
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
+    SecretInUse,
     SecretNotFound,
 )
 from kitaru.server.domain.session import (
@@ -1559,9 +1563,17 @@ def marked_idempotent_routes(app: FastAPI) -> set[tuple[str, str]]:
 class FakeSecretRepository:
     """In-memory secret repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(
+        self, agent_versions: "FakeAgentVersionRepository | None" = None
+    ) -> None:
+        """Initialize the repository.
+
+        Args:
+            agent_versions: Fake agent version repository, consulted by
+                delete to check for an in-use secret.
+        """
         self._secrets: dict[uuid.UUID, Secret] = {}
+        self._agent_versions = agent_versions
 
     def _check_duplicate_name(self, secret: Secret) -> None:
         for other in self._secrets.values():
@@ -1666,9 +1678,15 @@ class FakeSecretRepository:
 
         Raises:
             SecretNotFound: No secret has this id.
+            SecretInUse: An agent version references the secret.
         """
         if secret_id not in self._secrets:
             raise SecretNotFound(secret_id)
+        if self._agent_versions is not None and any(
+            version.run_spec is not None and secret_id in version.run_spec.secret_ids
+            for version in self._agent_versions._versions.values()
+        ):
+            raise SecretInUse(secret_id)
         del self._secrets[secret_id]
 
 
@@ -1704,6 +1722,7 @@ class FakeAgentRepository:
     def __init__(self) -> None:
         """Initialize the repository."""
         self._agents: dict[uuid.UUID, Agent] = {}
+        # Wired back by FakeAgentVersionRepository, cascaded on delete.
         self._agent_versions: FakeAgentVersionRepository | None = None
 
     def _check_duplicate_name(self, agent: Agent) -> None:
@@ -1819,23 +1838,19 @@ class FakeAgentRepository:
         return updated.model_copy()
 
     async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id.
+        """Delete an agent by id, cascading its versions.
 
         Args:
             agent_id: Id of the agent.
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
         if agent_id not in self._agents:
             raise AgentNotFound(agent_id)
-        if self._agent_versions is not None and any(
-            version.agent_id == agent_id
-            for version in self._agent_versions._versions.values()
-        ):
-            raise AgentInUse(agent_id)
         del self._agents[agent_id]
+        if self._agent_versions is not None:
+            self._agent_versions.cascade_agent_delete(agent_id)
 
 
 async def create_agent(
@@ -1864,20 +1879,46 @@ class FakeAgentVersionRepository:
     """In-memory agent version repository."""
 
     def __init__(
-        self, agents: FakeAgentRepository, tags: "FakeTagRepository | None" = None
+        self,
+        agents: FakeAgentRepository,
+        tags: "FakeTagRepository | None" = None,
+        experiment_runs: "FakeExperimentRunRepository | None" = None,
+        sessions: "FakeSessionRepository | None" = None,
     ) -> None:
         """Initialize the repository.
 
         Args:
             agents: Fake agent repository sharing the version counter. Also
-                wired back onto the agent repository so its delete can check
-                for versions.
+                wired back onto the agent repository so its delete can
+                cascade this repository's versions.
             tags: Fake tag repository, consulted by the ``tag`` filter.
+            experiment_runs: Fake experiment run repository, consulted by
+                delete to check for an in-use version.
+            sessions: Fake session repository, whose agent version pointers
+                are cleared on delete.
         """
         self._agents = agents
         self._agents._agent_versions = self
         self._versions: dict[uuid.UUID, AgentVersion] = {}
         self._tags = tags
+        self._experiment_runs = experiment_runs
+        self._sessions = sessions
+
+    def cascade_agent_delete(self, agent_id: uuid.UUID) -> None:
+        """Drop the versions of a deleted agent, mirroring the cascading key.
+
+        Args:
+            agent_id: Id of the deleted agent.
+        """
+        stale_ids = [
+            version_id
+            for version_id, version in self._versions.items()
+            if version.agent_id == agent_id
+        ]
+        for version_id in stale_ids:
+            del self._versions[version_id]
+            if self._sessions is not None:
+                self._sessions._null_agent_version(version_id)
 
     async def create(self, agent_version: AgentVersion) -> AgentVersion:
         """Persist a new agent version.
@@ -2035,10 +2076,18 @@ class FakeAgentVersionRepository:
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: An experiment run references this version.
         """
         if agent_version_id not in self._versions:
             raise AgentVersionNotFound(agent_version_id)
+        if self._experiment_runs is not None and any(
+            run.agent_version_id == agent_version_id
+            for run in self._experiment_runs._runs.values()
+        ):
+            raise AgentVersionInUse(agent_version_id)
         del self._versions[agent_version_id]
+        if self._sessions is not None:
+            self._sessions._null_agent_version(agent_version_id)
 
 
 async def create_agent_version(
@@ -2308,6 +2357,12 @@ class FakeSessionRepository:
         )
         self._cohort_membership_counts: dict[uuid.UUID, int] = {}
         self._cohort_versions: FakeCohortVersionRepository | None = None
+        # Wired back by FakeInvestigationRepository, FakeReplayRepository,
+        # and FakeTaskRepository, to check restriction and clear pointers on
+        # delete.
+        self._investigations: FakeInvestigationRepository | None = None
+        self._replays: FakeReplayRepository | None = None
+        self._tasks: FakeTaskRepository | None = None
         self._session_numbers: dict[uuid.UUID, int] = {}
 
     def _mark_cohort_member(self, session_id: uuid.UUID) -> None:
@@ -2330,6 +2385,21 @@ class FakeSessionRepository:
             session_id: Id of the session.
         """
         self._cohort_membership_counts[session_id] -= 1
+
+    def _null_agent_version(self, agent_version_id: uuid.UUID) -> None:
+        """Clear a deleted agent version's session pointers.
+
+        Mirrors the SQL repository's SET NULL foreign key from
+        ``session.agent_version_id``.
+
+        Args:
+            agent_version_id: Id of the agent version being deleted.
+        """
+        for session_id, session in self._sessions.items():
+            if session.agent_version_id == agent_version_id:
+                self._sessions[session_id] = session.model_copy(
+                    update={"agent_version_id": None}
+                )
 
     def _check_duplicate_external_id(self, session: Session) -> None:
         if session.imported_from is None or session.external_id is None:
@@ -2579,12 +2649,22 @@ class FakeSessionRepository:
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionInUse: The session belongs to a cohort version and cannot
-                be deleted.
+            SessionInUse: The session is referenced by a cohort version,
+                investigation, or replay and cannot be deleted.
         """
         if session_id not in self._sessions:
             raise SessionNotFound(session_id)
         if self._cohort_membership_counts.get(session_id, 0) > 0:
+            raise SessionInUse(session_id)
+        if self._investigations is not None and any(
+            link.session_id == session_id
+            for link in self._investigations._sessions.values()
+        ):
+            raise SessionInUse(session_id)
+        if self._replays is not None and any(
+            session_id in (replay.baseline_session_id, replay.result_session_id)
+            for replay in self._replays._replays.values()
+        ):
             raise SessionInUse(session_id)
         del self._sessions[session_id]
 
@@ -2960,6 +3040,9 @@ class FakeCohortRepository:
         """
         self._cohorts: dict[uuid.UUID, Cohort] = {}
         self._tags = tags
+        # Wired back by FakeCohortVersionRepository, consulted by delete to
+        # check for an in-use version.
+        self._cohort_versions: FakeCohortVersionRepository | None = None
 
     def _check_duplicate_name(self, cohort: Cohort) -> None:
         for other in self._cohorts.values():
@@ -3114,9 +3197,21 @@ class FakeCohortRepository:
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: An experiment run references one of its versions.
         """
         if cohort_id not in self._cohorts:
             raise CohortNotFound(cohort_id)
+        if self._cohort_versions is not None:
+            version_ids = {
+                version.id
+                for version in self._cohort_versions._versions.values()
+                if version.cohort_id == cohort_id
+            }
+            runs = self._cohort_versions._experiment_runs
+            if runs is not None and any(
+                run.cohort_version_id in version_ids for run in runs._runs.values()
+            ):
+                raise CohortInUse(cohort_id)
         del self._cohorts[cohort_id]
 
 
@@ -3162,7 +3257,9 @@ class FakeCohortVersionRepository:
         """Initialize the repository.
 
         Args:
-            cohorts: Fake cohort repository sharing the version counter.
+            cohorts: Fake cohort repository sharing the version counter. Also
+                wired back onto the cohort repository so its delete can check
+                for an in-use version.
             sessions: Fake session repository, to mark member sessions
                 in-cohort-version. Also wired back onto the session
                 repository so its query can resolve the
@@ -3174,6 +3271,7 @@ class FakeCohortVersionRepository:
             tags: Fake tag repository, consulted by the ``tag`` filter.
         """
         self._cohorts = cohorts
+        self._cohorts._cohort_versions = self
         self._sessions = sessions
         self._sessions._cohort_versions = self
         self._experiment_runs = experiment_runs
@@ -3693,18 +3791,9 @@ class FakePluginRepository:
         self._versions: dict[uuid.UUID, PluginVersion] = {}
         self._blob_repository = blob_repository
         self._agent_repository = agent_repository
-        self._referenced_version_ids: set[uuid.UUID] = set()
-
-    def mark_version_referenced(self, version_id: uuid.UUID) -> None:
-        """Mark a plugin version as referenced by a stored evaluation.
-
-        Mirrors the FK restrict, called by
-        ``FakeEvaluationRepository.merge_session_evaluations``.
-
-        Args:
-            version_id: Id of the referenced plugin version.
-        """
-        self._referenced_version_ids.add(version_id)
+        # Wired back by FakeEvaluationRepository, to null the evaluator
+        # version pointer of a stored evaluation on delete.
+        self._evaluations: FakeEvaluationRepository | None = None
 
     def _check_duplicate_name(self, plugin: Plugin) -> None:
         for other in self._plugins.values():
@@ -3830,7 +3919,6 @@ class FakePluginRepository:
 
         Raises:
             PluginNotFound: No plugin has this id.
-            PluginInUse: A version is referenced by a stored evaluation.
         """
         if plugin_id not in self._plugins:
             raise PluginNotFound(plugin_id)
@@ -3839,12 +3927,11 @@ class FakePluginRepository:
             for version_id, version in self._versions.items()
             if version.plugin_id == plugin_id
         ]
-        for version_id in stale_ids:
-            if version_id in self._referenced_version_ids:
-                raise PluginInUse(plugin_id)
         del self._plugins[plugin_id]
         for version_id in stale_ids:
             del self._versions[version_id]
+        if self._evaluations is not None:
+            self._evaluations._null_evaluator_version(stale_ids)
 
     async def create_version(
         self,
@@ -4152,22 +4239,28 @@ class FakeExperimentRepository:
         return updated.model_copy()
 
     async def delete(self, experiment_id: uuid.UUID) -> None:
-        """Delete an experiment by id.
+        """Delete an experiment by id, cascading its runs and their replays.
 
         Args:
             experiment_id: Id of the experiment.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
-            ExperimentInUse: The experiment has runs.
         """
         if experiment_id not in self._experiments:
             raise ExperimentNotFound(experiment_id)
-        if self._experiment_run_repository is not None and any(
-            run.experiment_id == experiment_id
-            for run in self._experiment_run_repository._runs.values()
-        ):
-            raise ExperimentInUse(experiment_id)
+        if self._experiment_run_repository is not None:
+            run_ids = {
+                run.id
+                for run in self._experiment_run_repository._runs.values()
+                if run.experiment_id == experiment_id
+            }
+            for run_id in run_ids:
+                del self._experiment_run_repository._runs[run_id]
+            if self._replay_repository is not None:
+                for replay_id, replay in list(self._replay_repository._replays.items()):
+                    if replay.experiment_run_id in run_ids:
+                        del self._replay_repository._replays[replay_id]
         del self._experiments[experiment_id]
 
     async def create_replay_config(self, config: ReplayConfig) -> ReplayConfig:
@@ -4273,9 +4366,16 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(self, sessions: "FakeSessionRepository | None" = None) -> None:
+        """Initialize the repository.
+
+        Args:
+            sessions: Fake session repository, wired back onto the session
+                repository so its delete can check for a replay reference.
+        """
         self._replays: dict[uuid.UUID, Replay] = {}
+        if sessions is not None:
+            sessions._replays = self
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -4745,6 +4845,20 @@ class FakeExperimentRunRepository:
         """
         return any(run.experiment_id == experiment_id for run in self._runs.values())
 
+    async def list_by_experiment(self, experiment_id: uuid.UUID) -> list[ExperimentRun]:
+        """Load every run of an experiment.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            Runs of the experiment, in creation order.
+        """
+        runs = [
+            run for run in self._runs.values() if run.experiment_id == experiment_id
+        ]
+        return [run.model_copy() for run in sorted(runs, key=lambda run: run.id)]
+
 
 async def create_experiment_run(
     repository: FakeExperimentRunRepository,
@@ -4793,10 +4907,30 @@ class FakeEvaluationRepository:
 
         Args:
             plugin_repository: Fake plugin repository, consulted to
-                denormalize the evaluator name and version.
+                denormalize the evaluator name and version. Also wired back
+                onto the plugin repository so its delete can null this
+                evaluation's evaluator version pointer.
         """
         self._evaluations: dict[uuid.UUID, Evaluation] = {}
         self._plugin_repository = plugin_repository
+        if plugin_repository is not None:
+            plugin_repository._evaluations = self
+
+    def _null_evaluator_version(self, version_ids: Iterable[uuid.UUID]) -> None:
+        """Clear deleted plugin versions' evaluator version pointers.
+
+        Mirrors the SQL repository's SET NULL foreign key from
+        ``evaluation.evaluator_version_id``.
+
+        Args:
+            version_ids: Ids of the deleted plugin versions.
+        """
+        deleted = set(version_ids)
+        for evaluation_id, evaluation in self._evaluations.items():
+            if evaluation.evaluator_version_id in deleted:
+                self._evaluations[evaluation_id] = evaluation.model_copy(
+                    update={"evaluator_version_id": None}
+                )
 
     def _evaluator_info(
         self, evaluator_version_id: uuid.UUID | None
@@ -4908,13 +5042,6 @@ class FakeEvaluationRepository:
                 )
             self._evaluations[row.id] = row
             stored.append(row.model_copy())
-            if (
-                row.evaluator_version_id is not None
-                and self._plugin_repository is not None
-            ):
-                self._plugin_repository.mark_version_referenced(
-                    row.evaluator_version_id
-                )
         return stored
 
     def has_evaluation(self, session_id: uuid.UUID) -> bool:
@@ -4951,13 +5078,6 @@ class FakeEvaluationRepository:
             row = evaluation.model_copy(update={"created": now, "updated": now})
             self._evaluations[row.id] = row
             stored.append(row.model_copy())
-            if (
-                row.evaluator_version_id is not None
-                and self._plugin_repository is not None
-            ):
-                self._plugin_repository.mark_version_referenced(
-                    row.evaluator_version_id
-                )
         return stored
 
 
@@ -5212,11 +5332,14 @@ class FakeTaskRepository:
         """Initialize the repository.
 
         Args:
-            sessions: Fake session repository, marked so a linked session
-                cannot be deleted, mirroring the restricting foreign keys.
+            sessions: Fake session repository, wired back onto the session
+                repository so its delete can clear this task's session
+                pointers.
         """
         self._tasks: dict[uuid.UUID, Task] = {}
         self._sessions = sessions
+        if sessions is not None:
+            sessions._tasks = self
         # Assigned after construction, since the fake job repository takes
         # this repository in its own constructor.
         self.jobs: FakeJobRepository | None = None
@@ -6158,11 +6281,21 @@ def build_task_actor(
 class FakeInvestigationRepository:
     """In-memory investigation repository."""
 
-    def __init__(self) -> None:
-        """Initialize the repository."""
+    def __init__(
+        self, session_repository: "FakeSessionRepository | None" = None
+    ) -> None:
+        """Initialize the repository.
+
+        Args:
+            session_repository: Fake session repository, wired back onto the
+                session repository so its delete can check for investigation
+                membership.
+        """
         self._investigations: dict[uuid.UUID, Investigation] = {}
         self._sessions: dict[uuid.UUID, InvestigationSession] = {}
         self._annotations: FakeAnnotationRepository | None = None
+        if session_repository is not None:
+            session_repository._investigations = self
 
     def _counts(self, investigation_id: uuid.UUID) -> tuple[int, int]:
         """Count an investigation's linked sessions and non-null verdicts.

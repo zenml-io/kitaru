@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Unified all runnable examples under a single `examples/` tree: the Python adapter examples moved from `examples/integrations/` to `examples/python/`, and the TypeScript examples moved from `v2_examples/` to `examples/typescript/`. The `examples/v2/mcp` configuration example was removed in favor of the MCP setup documentation.
+- Deleting an agent, plugin, or experiment now cascades its versions, runs, and replays instead of rejecting the delete with HTTP 409. Deleting an agent version, cohort, or secret can now return HTTP 409 when an experiment run still references it. Deleting a session can now return HTTP 409 when an investigation or replay references it, in addition to a cohort version, and is no longer blocked by a task.
 
 ## [0.22.1]
 

@@ -96,8 +96,8 @@ async def delete_agent_version(
 ) -> None:
     """Delete an agent version.
 
-    Clients observe HTTP 204 on success and 404 when no agent version has
-    this id.
+    Clients observe HTTP 204 on success, 404 when no agent version has
+    this id, and 409 when an experiment run references it.
 
     Args:
         agent_version_id: Id of the agent version.

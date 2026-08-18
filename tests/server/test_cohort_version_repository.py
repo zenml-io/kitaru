@@ -521,6 +521,6 @@ async def test_session_in_cohort_version_delete_conflict(setup: Setup) -> None:
     )
     with pytest.raises(
         SessionInUse,
-        match=f"Session {session_id} belongs to a cohort version",
+        match=f"Session {session_id} is referenced by a cohort version",
     ):
         await sessions.delete(session_id)

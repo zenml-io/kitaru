@@ -52,18 +52,6 @@ class DuplicateAgentName(ConflictError):
         super().__init__(f"Agent name '{name}' is already registered")
 
 
-class AgentInUse(ConflictError):
-    """Raised when an agent has versions and cannot be deleted."""
-
-    def __init__(self, agent_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            agent_id: Id of the agent that cannot be deleted.
-        """
-        super().__init__(f"Agent {agent_id} has versions and cannot be deleted")
-
-
 class Agent(DomainModel):
     """Agent."""
 

@@ -30,9 +30,6 @@ from kitaru.server.adapters.db.orm.experiment import (
     ExperimentORM,
     ReplayConfigORM,
 )
-from kitaru.server.adapters.db.orm.experiment_run import (
-    EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY,
-)
 from kitaru.server.adapters.db.orm.replay import REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
@@ -41,7 +38,6 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
-    ExperimentInUse,
     ExperimentNotFound,
 )
 from kitaru.server.domain.replay_config import (
@@ -170,21 +166,15 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
     async def delete(self, experiment_id: uuid.UUID) -> None:
         """Delete an experiment by id.
 
+        Deleting an experiment cascades its runs and their replays.
+
         Args:
             experiment_id: Id of the experiment.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
-            ExperimentInUse: The experiment has runs.
         """
-        await self._delete_row(
-            experiment_id,
-            {
-                EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY: lambda: ExperimentInUse(
-                    experiment_id
-                )
-            },
-        )
+        await self._delete_row(experiment_id)
 
     async def create_replay_config(self, config: ReplayConfig) -> ReplayConfig:
         """Persist a new replay config.

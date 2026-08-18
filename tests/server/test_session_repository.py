@@ -26,8 +26,12 @@ from conftest import (
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
+    FakeInvestigationRepository,
+    FakeJobRepository,
+    FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    FakeTaskRepository,
     pg_session_with_engine,
     postgres_available,
 )
@@ -63,6 +67,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.investigation_repository import (
+    SQLInvestigationRepository,
+)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.replay_repository import (
     SQLReplayRepository,
@@ -71,6 +78,7 @@ from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
@@ -78,11 +86,16 @@ from kitaru.server.application.interfaces.cohort_version_repository import (
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
+from kitaru.server.application.interfaces.investigation_repository import (
+    InvestigationRepository,
+)
+from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
 from kitaru.server.application.interfaces.tag_repository import TagRepository
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent, AgentNotFound
@@ -93,6 +106,7 @@ from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.investigation import Investigation, InvestigationSession
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import (
@@ -104,7 +118,6 @@ from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
-    SessionInUseByReplay,
     SessionNotFound,
     SessionRollups,
 )
@@ -121,9 +134,6 @@ Setup = tuple[
 ]
 CohortSetup = tuple[
     SessionRepository, CohortRepository, CohortVersionRepository, uuid.UUID, uuid.UUID
-]
-ReplaySetup = tuple[
-    SessionRepository, ReplayRepository, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID
 ]
 
 
@@ -192,6 +202,115 @@ async def cohort_setup(
             SQLCohortVersionRepository(session),
             owner.id,
             agent.id,
+        )
+
+
+InvestigationSetup = tuple[
+    SessionRepository, InvestigationRepository, uuid.UUID, uuid.UUID
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def investigation_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[InvestigationSetup, None]:
+    """Provide a session repository wired to an investigation repository
+    sharing its backend, an owner id, and an agent id."""
+    if request.param == "fake":
+        sessions = FakeSessionRepository()
+        investigations = FakeInvestigationRepository(session_repository=sessions)
+        yield sessions, investigations, uuid.uuid4(), uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLInvestigationRepository(session),
+            owner.id,
+            agent.id,
+        )
+
+
+ReplaySetup = tuple[
+    SessionRepository, ReplayRepository, JobRepository, uuid.UUID, uuid.UUID, uuid.UUID
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def replay_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[ReplaySetup, None]:
+    """Provide a session repository wired to replay and job repositories
+    sharing its backend, an owner id, an agent id, and a replay config id."""
+    if request.param == "fake":
+        sessions = FakeSessionRepository()
+        jobs = FakeJobRepository()
+        replays = FakeReplayRepository(sessions=sessions)
+        yield sessions, replays, jobs, uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        experiments = SQLExperimentRepository(session)
+        config = await experiments.create_replay_config(
+            ReplayConfig(
+                owner_id=owner.id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLReplayRepository(session),
+            SQLJobRepository(session),
+            owner.id,
+            agent.id,
+            config.id,
+        )
+
+
+TaskSetup = tuple[
+    SessionRepository, TaskRepository, JobRepository, uuid.UUID, uuid.UUID, uuid.UUID
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def task_setup(request: pytest.FixtureRequest) -> AsyncGenerator[TaskSetup, None]:
+    """Provide a session repository wired to a task repository sharing its
+    backend, a job repository, an owner id, an agent id, and an agent
+    version id."""
+    if request.param == "fake":
+        sessions = FakeSessionRepository()
+        tasks = FakeTaskRepository(sessions=sessions)
+        jobs = FakeJobRepository(tasks=tasks)
+        yield sessions, tasks, jobs, uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        agent_version = await SQLAgentVersionRepository(session).create(
+            AgentVersion(owner_id=owner.id, agent_id=agent.id)
+        )
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLTaskRepository(session),
+            SQLJobRepository(session),
+            owner.id,
+            agent.id,
+            agent_version.id,
         )
 
 
@@ -693,45 +812,45 @@ async def test_delete_in_use_by_cohort_version(cohort_setup: CohortSetup) -> Non
         await sessions.delete(member.id)
 
 
-@pytest.fixture
-async def replay_setup() -> AsyncGenerator[ReplaySetup, None]:
-    """Provide a Postgres session repository and a replay's collaborators.
-
-    Yields a session repository, a replay repository sharing its backend,
-    an owner id, an agent id, a replay config id, and a job id.
-    """
-    if not await postgres_available():
-        pytest.skip("PostgreSQL is not reachable")
-    async with pg_session_with_engine() as (session, engine):
-        owner = await SQLAccountRepository(session).create(Account(name="owner"))
-        agent = await SQLAgentRepository(session).create(
-            Agent(owner_id=owner.id, name="assistant")
-        )
-        config = await SQLExperimentRepository(session).create_replay_config(
-            ReplayConfig(
-                owner_id=owner.id,
-                tool_policy=ToolPolicy(default=PassthroughConfig()),
-                evaluators=[],
-            )
-        )
-        job = await SQLJobRepository(session).create(
-            Job(owner_id=owner.id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
-        )
-        yield (
-            SQLSessionRepository(session, engine),
-            SQLReplayRepository(session),
-            owner.id,
-            agent.id,
-            config.id,
-            job.id,
-        )
-
-
-async def test_delete_in_use_by_replay_as_baseline_session(
-    replay_setup: ReplaySetup,
+async def test_delete_restricted_by_investigation_membership(
+    investigation_setup: InvestigationSetup,
 ) -> None:
-    """Reject deleting a session that is a replay's baseline session."""
-    sessions, replays, owner_id, agent_id, config_id, job_id = replay_setup
+    """Reject deleting a session linked to an investigation."""
+    sessions, investigations, owner_id, agent_id = investigation_setup
+    member = await sessions.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
+    )
+    investigation = Investigation(
+        owner_id=owner_id,
+        agent_id=agent_id,
+        name="investigation",
+        total_sessions=0,
+        completed_sessions=0,
+    )
+    await investigations.create(
+        investigation,
+        [
+            InvestigationSession(
+                investigation_id=investigation.id,
+                session_id=member.id,
+                position=0,
+                questions=[],
+            )
+        ],
+    )
+
+    with pytest.raises(SessionInUse, match=f"Session {member.id} is referenced"):
+        await sessions.delete(member.id)
+
+
+async def test_delete_restricted_by_replay_baseline(replay_setup: ReplaySetup) -> None:
+    """Reject deleting a session that is a replay's baseline."""
+    sessions, replays, jobs, owner_id, agent_id, replay_config_id = replay_setup
     baseline = await sessions.create(
         Session(
             owner_id=owner_id,
@@ -740,24 +859,25 @@ async def test_delete_in_use_by_replay_as_baseline_session(
             origin=SessionOrigin.RECORDED,
         )
     )
+    job = await jobs.create(
+        Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+    )
     await replays.create(
         Replay(
             owner_id=owner_id,
-            job_id=job_id,
-            replay_config_id=config_id,
+            job_id=job.id,
+            replay_config_id=replay_config_id,
             baseline_session_id=baseline.id,
         )
     )
 
-    with pytest.raises(SessionInUseByReplay):
+    with pytest.raises(SessionInUse, match=f"Session {baseline.id} is referenced"):
         await sessions.delete(baseline.id)
 
 
-async def test_delete_in_use_by_replay_as_result_session(
-    replay_setup: ReplaySetup,
-) -> None:
-    """Reject deleting a session that is a replay's result session."""
-    sessions, replays, owner_id, agent_id, config_id, job_id = replay_setup
+async def test_delete_restricted_by_replay_result(replay_setup: ReplaySetup) -> None:
+    """Reject deleting a session that is a replay's result."""
+    sessions, replays, jobs, owner_id, agent_id, replay_config_id = replay_setup
     baseline = await sessions.create(
         Session(
             owner_id=owner_id,
@@ -774,17 +894,20 @@ async def test_delete_in_use_by_replay_as_result_session(
             origin=SessionOrigin.RECORDED,
         )
     )
+    job = await jobs.create(
+        Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+    )
     await replays.create(
         Replay(
             owner_id=owner_id,
-            job_id=job_id,
-            replay_config_id=config_id,
+            job_id=job.id,
+            replay_config_id=replay_config_id,
             baseline_session_id=baseline.id,
             result_session_id=result.id,
         )
     )
 
-    with pytest.raises(SessionInUseByReplay):
+    with pytest.raises(SessionInUse, match=f"Session {result.id} is referenced"):
         await sessions.delete(result.id)
 
 

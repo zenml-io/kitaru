@@ -40,11 +40,10 @@ from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import (
     Agent,
-    AgentInUse,
     AgentNotFound,
     DuplicateAgentName,
 )
-from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.agent_version import AgentVersion, AgentVersionNotFound
 from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[AgentRepository, uuid.UUID, Callable[[], AgentVersionRepository]]
@@ -231,12 +230,18 @@ async def test_delete_not_found(setup: Setup) -> None:
         await repository.delete(missing_id)
 
 
-async def test_delete_in_use(setup: Setup) -> None:
-    """Reject deleting an agent that has versions."""
+async def test_delete_cascades_versions(setup: Setup) -> None:
+    """Deleting an agent cascades its versions."""
     repository, owner_id, make_version_repository = setup
     agent = await repository.create(Agent(owner_id=owner_id, name="assistant"))
     version_repository = make_version_repository()
-    await version_repository.create(AgentVersion(owner_id=owner_id, agent_id=agent.id))
+    version = await version_repository.create(
+        AgentVersion(owner_id=owner_id, agent_id=agent.id)
+    )
 
-    with pytest.raises(AgentInUse, match=f"Agent {agent.id} has versions"):
-        await repository.delete(agent.id)
+    await repository.delete(agent.id)
+
+    with pytest.raises(AgentNotFound):
+        await repository.get(agent.id)
+    with pytest.raises(AgentVersionNotFound):
+        await version_repository.get(version.id)

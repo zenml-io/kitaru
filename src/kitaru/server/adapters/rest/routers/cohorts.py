@@ -167,7 +167,8 @@ async def delete_cohort(
     """Delete a cohort.
 
     Deleting a cohort cascades its versions. Clients observe HTTP 204 on
-    success and 404 when no cohort has this id.
+    success, 404 when no cohort has this id, and 409 when an experiment
+    run references one of its versions.
 
     Args:
         cohort_id: Id of the cohort.

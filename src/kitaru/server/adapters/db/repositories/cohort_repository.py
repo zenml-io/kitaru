@@ -28,11 +28,19 @@ from kitaru.server.adapters.db.orm.cohort import (
     COHORT_NAME_UNIQUE_CONSTRAINT,
     CohortORM,
 )
+from kitaru.server.adapters.db.orm.experiment_run import (
+    EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.cohort import CohortFilter
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
+from kitaru.server.domain.cohort import (
+    Cohort,
+    CohortInUse,
+    CohortNotFound,
+    DuplicateCohortName,
+)
 
 COHORT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": CohortORM.id,
@@ -152,5 +160,13 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: An experiment run references one of its versions.
         """
-        await self._delete_row(cohort_id)
+        await self._delete_row(
+            cohort_id,
+            {
+                EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY: lambda: CohortInUse(
+                    cohort_id
+                )
+            },
+        )
