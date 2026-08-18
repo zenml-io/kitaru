@@ -352,6 +352,18 @@ def test_python_release_workflow_can_resume_after_partial_publication() -> None:
         assert "gh release upload" not in workflow
 
 
+def test_stable_github_releases_are_marked_latest() -> None:
+    workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml", "release-typescript.yml")
+    ]
+
+    for workflow in workflows:
+        assert "latest=(--latest=false)" in workflow
+        assert 'latest=(--latest)' in workflow
+        assert '"${latest[@]}"' in workflow
+
+
 def test_core_github_release_is_created_after_registry_publication() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
 

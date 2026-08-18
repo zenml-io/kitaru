@@ -150,12 +150,15 @@ jobs:
             exit 0
           fi
           prerelease=()
+          latest=(--latest=false)
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
+          else
+            latest=(--latest)
           fi
           gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
             "${prerelease[@]}" \
             --verify-tag \
-            --latest=false \
+            "${latest[@]}" \
             --title "$DISTRIBUTION $VERSION" \
             --generate-notes
