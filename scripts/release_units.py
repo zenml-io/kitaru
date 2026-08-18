@@ -245,19 +245,22 @@ def _validate_plugin_coverage(repo_root: Path, units: tuple[ReleaseUnit, ...]) -
         )
 
 
-def _validate_default_catalog(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
+def _validate_plugin_contracts(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
     inventory_defaults = {
         canonicalize_name(unit.distribution) for unit in units if unit.default_catalog
     }
+    inventory_plugins = {
+        canonicalize_name(unit.distribution) for unit in units if unit.slug != "kitaru"
+    }
     requirement_specs = _load_default_requirements(repo_root)
-    requirement_defaults = set(requirement_specs)
+    bundled_plugins = set(requirement_specs)
     bootstrap_defaults = _load_bootstrap_requirements(repo_root)
-    if requirement_defaults != bootstrap_defaults:
+    if inventory_defaults != bootstrap_defaults:
+        raise ReleaseInventoryError("server default catalog does not match inventory")
+    if inventory_plugins != bundled_plugins:
         raise ReleaseInventoryError(
-            "server default catalog does not match plugins/default-requirements.txt"
+            "bundled plugin requirements do not match inventory"
         )
-    if inventory_defaults != requirement_defaults:
-        raise ReleaseInventoryError("default catalog does not match inventory")
 
     units_by_name: dict[str, ReleaseUnit] = {
         str(canonicalize_name(unit.distribution)): unit for unit in units
@@ -372,7 +375,7 @@ def load_inventory(
     if len(root_units) != 1 or root_units[0].slug != "kitaru":
         raise ReleaseInventoryError("inventory must contain one root kitaru unit")
     _validate_plugin_coverage(root, resolved_units)
-    _validate_default_catalog(root, resolved_units)
+    _validate_plugin_contracts(root, resolved_units)
     return ReleaseInventory(
         schema_version=schema_version,
         common_checks=common_checks,

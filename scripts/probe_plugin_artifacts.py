@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate installed default-plugin entrypoints and registration."""
+"""Validate installed bundled-plugin artifacts and default registration."""
 
 import argparse
 import asyncio
 import importlib
+import importlib.metadata
 import uuid
 from typing import cast
 
@@ -80,22 +81,29 @@ class _MemoryPluginRepository:
 
 
 async def _probe(expected_requirements: set[str], import_modules: set[str]) -> None:
+    for requirement in expected_requirements:
+        distribution, separator, expected_version = requirement.partition("==")
+        if not separator:
+            raise RuntimeError(f"Bundled requirement is not exact: {requirement!r}")
+        installed_version = importlib.metadata.version(distribution)
+        if installed_version != expected_version:
+            raise RuntimeError(
+                f"Bundled requirement {requirement!r} installed as "
+                f"{installed_version!r}"
+            )
+
     for module_name in import_modules:
         module = importlib.import_module(module_name)
         if not getattr(module, "__all__", None):
             raise RuntimeError(f"Standalone package {module_name!r} has no public API")
 
-    definitions = tuple(
-        definition
-        for definition in DEFAULT_PLUGIN_DEFINITIONS
-        if definition.requirement in expected_requirements
-    )
-    actual_requirements = {definition.requirement for definition in definitions}
-    if actual_requirements != expected_requirements:
+    definitions = DEFAULT_PLUGIN_DEFINITIONS
+    catalog_requirements = {definition.requirement for definition in definitions}
+    if not catalog_requirements <= expected_requirements:
         raise RuntimeError(
-            "Default requirements differ from installed artifacts: "
-            f"expected={sorted(expected_requirements)!r}, "
-            f"actual={sorted(actual_requirements)!r}"
+            "Default catalog requirements are missing from bundled artifacts: "
+            f"catalog={sorted(catalog_requirements)!r}, "
+            f"bundled={sorted(expected_requirements)!r}"
         )
 
     identities = {(definition.kind, definition.name) for definition in definitions}
@@ -143,7 +151,7 @@ def main() -> int:
         "--requirement",
         action="append",
         default=[],
-        help="Exact installed plugin requirement expected in the default catalog.",
+        help="Exact installed plugin requirement expected in the bundle.",
     )
     parser.add_argument(
         "--module",

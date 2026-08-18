@@ -237,7 +237,7 @@ def test_release_wheel_install_fails_after_the_attempt_limit(
         ("kitaru-v0.21.0", "package tag"),
         ("python/unknown/v0.1.0", "unknown distribution"),
         ("python/kitaru/v0.22.0-rc.1", "canonical PEP 440"),
-        ("python/kitaru/v0.22.1", "does not match manifest version"),
+        ("python/kitaru/v0.22.2", "does not match manifest version"),
     ],
 )
 def test_invalid_or_mismatched_package_tags_are_rejected(
@@ -296,6 +296,21 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
 
     with pytest.raises(
         ReleaseInventoryError, match="default catalog does not match inventory"
+    ):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_a_missing_bundled_plugin_requirement(
+    release_repo: Path,
+) -> None:
+    requirements_path = release_repo / "plugins" / "default-requirements.txt"
+    requirements_path.write_text(
+        requirements_path.read_text().replace("kitaru-langgraph==0.1.0\n", "")
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match="bundled plugin requirements do not match inventory",
     ):
         load_inventory(release_repo)
 

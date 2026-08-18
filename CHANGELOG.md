@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.1]
+
+### Changed
+
+- Updated the bundled frontend to `kitaru-ui-v0.2.1`.
+- Included all nine stable Python plugin distributions in `plugins/default-requirements.txt`, while keeping adapter distributions out of the server plugin catalog.
+
 ## [0.22.0]
 
 ### Changed
