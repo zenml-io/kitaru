@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Added user-facing methods to `KitaruClient` and `KitaruSyncClient`: get agents and experiments by name or id, list sessions and session nodes, replay a session or start an experiment run and wait for the result. The one-method-per-endpoint API client stays reachable as `client.api`.
 
+## [0.22.1]
+
+### Changed
+
+- Updated the bundled frontend to `kitaru-ui-v0.2.1`.
+- Included all nine stable Python plugin distributions in `plugins/default-requirements.txt`, while keeping adapter distributions out of the server plugin catalog.
+
 ## [0.22.0]
 
 ### Changed

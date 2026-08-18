@@ -274,8 +274,8 @@ The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
 uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
 ```
 
-2. For an importer or evaluator in the default catalog, change the matching line in `plugins/default-requirements.txt` to the new exact version.
-3. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. Skip both catalog steps for an adapter distribution.
+2. Change the matching line in `plugins/default-requirements.txt` to the new exact version.
+3. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. Skip this catalog step for an adapter distribution.
 4. Add or update focused tests.
 5. Verify that no unrelated plugin package version changed.
 
