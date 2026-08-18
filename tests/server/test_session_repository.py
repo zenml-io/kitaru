@@ -214,8 +214,11 @@ InvestigationSetup = tuple[
 async def investigation_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[InvestigationSetup, None]:
-    """Provide a session repository wired to an investigation repository
-    sharing its backend, an owner id, and an agent id."""
+    """Provide a session repository and its investigation collaborators.
+
+    Yields the repository wired to an investigation repository sharing its
+    backend, an owner id, and an agent id.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         investigations = FakeInvestigationRepository(session_repository=sessions)
@@ -245,8 +248,11 @@ ReplaySetup = tuple[
 async def replay_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[ReplaySetup, None]:
-    """Provide a session repository wired to replay and job repositories
-    sharing its backend, an owner id, an agent id, and a replay config id."""
+    """Provide a session repository and its replay collaborators.
+
+    Yields the repository wired to replay and job repositories sharing its
+    backend, an owner id, an agent id, and a replay config id.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         jobs = FakeJobRepository()
@@ -285,9 +291,11 @@ TaskSetup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def task_setup(request: pytest.FixtureRequest) -> AsyncGenerator[TaskSetup, None]:
-    """Provide a session repository wired to a task repository sharing its
-    backend, a job repository, an owner id, an agent id, and an agent
-    version id."""
+    """Provide a session repository and its task collaborators.
+
+    Yields the repository wired to a task repository sharing its backend, a
+    job repository, an owner id, an agent id, and an agent version id.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         tasks = FakeTaskRepository(sessions=sessions)

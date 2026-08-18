@@ -17,16 +17,25 @@ import uuid
 from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
+from kitaru.server.adapters.db.errors import violated_constraint, violated_key_value
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
-from kitaru.server.adapters.db.orm.investigation import InvestigationORM
-from kitaru.server.adapters.db.orm.investigation_session import InvestigationSessionORM
+from kitaru.server.adapters.db.orm.investigation import (
+    INVESTIGATION_AGENT_ID_FOREIGN_KEY,
+    InvestigationORM,
+)
+from kitaru.server.adapters.db.orm.investigation_session import (
+    INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
+    InvestigationSessionORM,
+)
 from kitaru.server.adapters.db.pagination import paginate, paginate_by_index
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.investigation import (
     InvestigationFilter,
     InvestigationSessionFilter,
 )
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.investigation import (
     Investigation,
@@ -34,6 +43,7 @@ from kitaru.server.domain.investigation import (
     InvestigationSession,
     InvestigationSessionNotFound,
 )
+from kitaru.server.domain.session import SessionNotFound
 
 INVESTIGATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": InvestigationORM.id,
@@ -138,6 +148,10 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
             investigation: Investigation to store.
             sessions: Ordered investigation_session rows to link.
 
+        Raises:
+            AgentNotFound: No agent has the investigation's agent id.
+            SessionNotFound: No session has one of the linked session ids.
+
         Returns:
             Stored investigation with timestamps set.
         """
@@ -146,7 +160,21 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
         self._session.add_all(
             [InvestigationSessionORM.from_domain(session) for session in sessions]
         )
-        await self._flush()
+        try:
+            await self._flush(
+                {
+                    INVESTIGATION_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
+                        investigation.agent_id
+                    )
+                }
+            )
+        except IntegrityError as exc:
+            # The link rows flush as one statement, so the driver's detail is
+            # the only pointer to the missing session.
+            constraint = violated_constraint(exc)
+            if constraint == INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY:
+                raise SessionNotFound(uuid.UUID(violated_key_value(exc))) from exc
+            raise
         completed = sum(1 for session in sessions if session.verdict is not None)
         return row.to_domain(len(sessions), completed)
 

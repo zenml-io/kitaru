@@ -17,8 +17,10 @@ import uuid
 from collections.abc import Mapping, Sequence
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.tag import TagResourceType
+from kitaru.server.adapters.db.errors import violated_constraint, violated_key_value
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     build_tag_condition_binding,
@@ -27,6 +29,7 @@ from kitaru.server.adapters.db.filtering import (
 from kitaru.server.adapters.db.orm.cohort import CohortORM
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
+    COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY,
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.experiment_run import (
@@ -43,6 +46,7 @@ from kitaru.server.domain.cohort_version import (
     CohortVersionInUse,
     CohortVersionNotFound,
 )
+from kitaru.server.domain.session import SessionNotFound
 
 COHORT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": CohortVersionORM.id,
@@ -79,6 +83,7 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
 
         Raises:
             CohortNotFound: No cohort has the version's cohort id.
+            SessionNotFound: No session has one of the member session ids.
 
         Returns:
             Stored cohort version with its assigned version number and
@@ -102,7 +107,15 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
                     cohort_version_id=row.id, session_id=session_id, index=index
                 )
             )
-        await self._flush()
+        try:
+            await self._flush()
+        except IntegrityError as exc:
+            # The link rows flush as one statement, so the driver's detail is
+            # the only pointer to the missing session.
+            constraint = violated_constraint(exc)
+            if constraint == COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY:
+                raise SessionNotFound(uuid.UUID(violated_key_value(exc))) from exc
+            raise
         return row.to_domain()
 
     async def get(

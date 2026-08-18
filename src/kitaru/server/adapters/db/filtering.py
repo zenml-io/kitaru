@@ -49,7 +49,6 @@ def build_tag_condition_binding(
     Returns:
         Binding compiling a tag condition into an EXISTS predicate.
     """
-
     resource_column = TagLinkORM.get_resource_column(resource_type)
 
     def compile_tag_condition(condition: FilterCondition) -> ColumnElement[bool]:

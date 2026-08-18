@@ -34,6 +34,8 @@ class ReplayRepository(Protocol):
             DuplicateReplayForBaseline: The run already holds a replay for
                 this baseline session.
             ReplayAlreadyExistsForJob: The job already has a replay.
+            SessionNotFound: No session has the baseline session id.
+            ExperimentRunNotFound: No experiment run has the replay's run id.
 
         Returns:
             Stored replay with timestamps set.

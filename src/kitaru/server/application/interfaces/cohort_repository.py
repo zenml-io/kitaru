@@ -31,6 +31,7 @@ class CohortRepository(Protocol):
 
         Raises:
             DuplicateCohortName: The cohort name is already registered.
+            AgentNotFound: No agent has the cohort's agent id.
 
         Returns:
             Stored cohort with timestamps set.

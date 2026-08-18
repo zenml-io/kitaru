@@ -34,6 +34,7 @@ class ExperimentRepository(Protocol):
         Raises:
             DuplicateExperimentName: The experiment name is already
                 registered.
+            AgentNotFound: No agent has the experiment's agent id.
 
         Returns:
             Stored experiment with timestamps set.

@@ -39,6 +39,7 @@ class CohortVersionRepository(Protocol):
 
         Raises:
             CohortNotFound: No cohort has the version's cohort id.
+            SessionNotFound: No session has one of the member session ids.
 
         Returns:
             Stored cohort version with its assigned version number and

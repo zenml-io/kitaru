@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end agent tests against PostgreSQL."""
 
+import asyncio
 import uuid
 from collections.abc import AsyncGenerator
 from typing import Any
@@ -445,3 +446,49 @@ async def test_delete_agent_cascades_its_full_subtree(
                 assert row is None
         finally:
             await engine.dispose()
+
+
+async def test_concurrent_deletes_of_one_agent_both_succeed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Race two deletes of the same agent, each skipping rows the other took."""
+    monkeypatch.setattr(agent_deletion, "DELETE_BATCH_SIZE", 2)
+    settings = db_settings(DB_POOL_SIZE=2, DB_MAX_OVERFLOW=0)
+    async with lifespan_client(settings) as client:
+        setup = await _setup_agent_subtree(client)
+
+        first, second = await asyncio.gather(
+            client.delete(f"/api/v1/agents/{setup['agent_id']}"),
+            client.delete(f"/api/v1/agents/{setup['agent_id']}"),
+        )
+        assert first.status_code == 204, first.text
+        assert second.status_code == 204, second.text
+        assert (
+            await client.get(f"/api/v1/agents/{setup['agent_id']}")
+        ).status_code == 404
+        for session_id in setup["session_ids"]:
+            assert (
+                await client.get(f"/api/v1/sessions/{session_id}")
+            ).status_code == 404
+
+
+async def test_delete_agent_removes_standalone_replays(
+    client: httpx.AsyncClient,
+) -> None:
+    """Delete an agent whose session is the baseline of a standalone replay."""
+    setup = await _setup_agent_subtree(client)
+    response = await client.post(
+        "/api/v1/replays",
+        json={
+            "baseline_session_id": setup["session_ids"][2],
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert response.status_code == 201, response.text
+    job_id = response.json()["job_id"]
+
+    response = await client.delete(f"/api/v1/agents/{setup['agent_id']}")
+    assert response.status_code == 204, response.text
+    assert (await client.get(f"/api/v1/agents/{setup['agent_id']}")).status_code == 404
+    assert (await client.get(f"/api/v1/jobs/{job_id}")).status_code == 404
+    assert (await client.get("/api/v1/replays")).json()["items"] == []

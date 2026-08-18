@@ -369,8 +369,11 @@ async def test_delete_not_found(setup: Setup) -> None:
 async def restriction_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[RestrictionSetup, None]:
-    """Provide a secret repository wired to an agent version repository
-    sharing its backend, an owner id, and an agent id."""
+    """Provide a secret repository and its collaborators.
+
+    Yields the repository wired to an agent version repository sharing its
+    backend, an owner id, and an agent id.
+    """
     if request.param == "fake":
         owner_id = uuid.uuid4()
         agents = FakeAgentRepository()

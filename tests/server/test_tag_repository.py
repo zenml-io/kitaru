@@ -73,9 +73,12 @@ Setup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each tag repository implementation, an owner id, and a
-    factory per typed resource column that returns a real row's id on
-    postgres, forcing a given id when one is passed."""
+    """Provide each tag repository implementation and its collaborators.
+
+    Yields the repository, an owner id, and a factory per typed resource
+    column that returns a real row's id on postgres, forcing a given id
+    when one is passed.
+    """
     if request.param == "fake":
 
         async def make_id(id_: uuid.UUID | None) -> uuid.UUID:

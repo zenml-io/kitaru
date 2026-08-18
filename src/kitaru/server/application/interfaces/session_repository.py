@@ -50,6 +50,9 @@ class SessionRepository(Protocol):
         Raises:
             DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
+            AgentNotFound: No agent has the session's agent id.
+            AgentVersionNotFound: No agent version has the session's agent
+                version id.
 
         Returns:
             Stored session with timestamps set.

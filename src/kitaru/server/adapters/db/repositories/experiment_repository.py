@@ -26,6 +26,7 @@ from kitaru.server.adapters.db.filtering import (
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.experiment import (
+    EXPERIMENT_AGENT_ID_FOREIGN_KEY,
     EXPERIMENT_NAME_UNIQUE_CONSTRAINT,
     ExperimentORM,
     ReplayConfigORM,
@@ -34,6 +35,7 @@ from kitaru.server.adapters.db.orm.replay import REPLAY_REPLAY_CONFIG_ID_FOREIGN
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment import ExperimentFilter
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
@@ -79,6 +81,7 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         Raises:
             DuplicateExperimentName: The experiment name is already
                 registered.
+            AgentNotFound: No agent has the experiment's agent id.
 
         Returns:
             Stored experiment with timestamps set.
@@ -89,7 +92,10 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
             {
                 EXPERIMENT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateExperimentName(
                     experiment.name
-                )
+                ),
+                EXPERIMENT_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
+                    experiment.agent_id
+                ),
             },
         )
         return row.to_domain()
