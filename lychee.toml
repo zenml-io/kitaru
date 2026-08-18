@@ -40,6 +40,12 @@ exclude = [
     # 404s for links that are correct in the published site.
     # Remove this line after the v2 docs go live.
     "^https://docs\\.zenml\\.io/kitaru/",
+    # TEMPORARY (examples unification): docs link the unified
+    # examples/python/ and examples/typescript/ paths, which exist on
+    # develop only once the unification PR merges, so the checker sees
+    # 404s for links that are correct after merge.
+    # Remove this line after the examples unification lands on develop.
+    "^https://github\\.com/zenml-io/kitaru/tree/develop/examples/",
 ]
 
 # Paths to exclude from scanning.
