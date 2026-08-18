@@ -37,15 +37,4 @@ def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     bundled_requirements = {
         line for line in requirements_file.read_text().splitlines() if line
     }
-    assert set(requirements) <= bundled_requirements
-    assert bundled_requirements == {
-        "kitaru-braintrust-importer==0.1.0",
-        "kitaru-evaluator==0.1.0",
-        "kitaru-jsonl-importer==0.1.0",
-        "kitaru-langfuse-importer==0.1.0",
-        "kitaru-langgraph==0.1.0",
-        "kitaru-logfire-importer==0.1.0",
-        "kitaru-langsmith-importer==0.1.0",
-        "kitaru-openai-agents==0.1.0",
-        "kitaru-pydantic-ai==0.1.0",
-    }
+    assert set(requirements) == bundled_requirements

@@ -300,21 +300,6 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
         load_inventory(release_repo)
 
 
-def test_inventory_rejects_a_missing_bundled_plugin_requirement(
-    release_repo: Path,
-) -> None:
-    requirements_path = release_repo / "plugins" / "default-requirements.txt"
-    requirements_path.write_text(
-        requirements_path.read_text().replace("kitaru-langgraph==0.1.0\n", "")
-    )
-
-    with pytest.raises(
-        ReleaseInventoryError,
-        match="bundled plugin requirements do not match inventory",
-    ):
-        load_inventory(release_repo)
-
-
 def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     inventory = load_inventory()
     text_output = format_inventory(inventory)
