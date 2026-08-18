@@ -32,7 +32,7 @@ REQUESTED_MODEL_ID = "openai/gpt-5-nano"
 )
 def test_vercel_demo_rejects_a_baseline_without_text(outputs: object) -> None:
     """Do not replay a baseline that produced no usable final answer."""
-    demo = importlib.import_module("v2_examples.vercel_ai_support_triage.demo")
+    demo = importlib.import_module("examples.typescript.vercel_ai_support_triage.demo")
 
     with pytest.raises(RuntimeError, match="baseline session"):
         demo._require_nonempty_text(outputs)
@@ -101,7 +101,7 @@ async def test_worker_records_and_history_replays_compiled_vercel_ai(
             check=True,
         )
     sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-    demo = importlib.import_module("v2_examples.vercel_ai_support_triage.demo")
+    demo = importlib.import_module("examples.typescript.vercel_ai_support_triage.demo")
 
     async with _network_server() as api_url:
         result = await demo.run_demo(

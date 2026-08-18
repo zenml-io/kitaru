@@ -9,7 +9,7 @@ The default `MockLanguageModelV4` path is scripted. Its recordings use the reque
 From the repository root, enter the standalone example directory before running the commands below unless a command says otherwise:
 
 ```bash
-cd v2_examples/vercel_ai_ticket_resolver
+cd examples/typescript/vercel_ai_ticket_resolver
 ```
 
 ## 1. Install and start Kitaru
@@ -19,9 +19,9 @@ Use Node 22, Python 3.11 or newer, pnpm, uv, jq, Docker, and a source checkout o
 Build the local TypeScript packages without registering this standalone example in the root workspace, then install and verify the example:
 
 ```bash
-pnpm --dir ../.. install --frozen-lockfile
-pnpm --dir ../.. --filter @zenml-io/kitaru build
-pnpm --dir ../.. --filter @zenml-io/kitaru-vercel-ai build
+pnpm --dir ../../.. install --frozen-lockfile
+pnpm --dir ../../.. --filter @zenml-io/kitaru build
+pnpm --dir ../../.. --filter @zenml-io/kitaru-vercel-ai build
 CI=true pnpm --ignore-workspace install --frozen-lockfile
 pnpm build
 pnpm test
@@ -40,7 +40,7 @@ pnpm test:e2e
 Start PostgreSQL and the API, then install and connect the Python CLI and worker. That compose stack serves the REST API only; this walkthrough is entirely CLI-driven and never opens a browser.
 
 ```bash
-docker compose -f ../../docker-compose.yml up -d --build
+docker compose -f ../../../docker-compose.yml up -d --build
 uv sync --extra cli --extra worker --extra mcp
 cp .env.example .env
 set -a; source .env; set +a
@@ -539,7 +539,7 @@ jq -r '.sessions["ticket-001"].session_id, .sessions["ticket-009"].session_id, .
 Stop the worker with Ctrl-C, then stop the local services:
 
 ```bash
-docker compose -f ../../docker-compose.yml down
+docker compose -f ../../../docker-compose.yml down
 ```
 
 The database volume retains Kitaru resources. `.state/` retains local evidence identity and is gitignored. Delete neither casually; both are needed to reconstruct what was evaluated.

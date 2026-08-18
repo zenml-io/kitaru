@@ -32,7 +32,10 @@ const INITIAL_REQUEST = {
     "The customer reports a suspected duplicate charge.",
   name: "Mastra support triage baseline",
 };
-const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+const REPO_ROOT = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../..",
+);
 
 function agentVersion(stateDir: string): AgentVersionResponse {
   return {
@@ -48,7 +51,7 @@ function agentVersion(stateDir: string): AgentVersionResponse {
     id: AGENT_VERSION_ID,
     owner_id: OWNER_ID,
     run_spec: {
-      command: "node v2_examples/mastra_support_triage/dist/main.js",
+      command: "node examples/typescript/mastra_support_triage/dist/main.js",
       env: {
         KITARU_AGENT_ID: AGENT_ID,
         KITARU_MASTRA_TEST_MODEL: "1",

@@ -52,11 +52,11 @@ from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.worker import Worker, WorkerConfig
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_DIR = Path(__file__).resolve().parent
 COMPILED_MAIN = EXAMPLE_DIR / "dist" / "main.js"
 SCORER_SOURCE = EXAMPLE_DIR / "scorers.py"
-RUN_COMMAND = "node v2_examples/vercel_ai_support_triage/dist/main.js"
+RUN_COMMAND = "node examples/typescript/vercel_ai_support_triage/dist/main.js"
 REQUESTED_MODEL_ID = "openai/gpt-5-nano"
 INITIAL_PROMPT = (
     "Investigate account acct-1001 and delayed order ord-1001. "
