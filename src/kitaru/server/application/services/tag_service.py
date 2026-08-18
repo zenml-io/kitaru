@@ -129,6 +129,12 @@ class TagService:
 
         Raises:
             TagNotFound: No tag has this id.
+            SessionNotFound: No session has the resource id.
+            CohortNotFound: No cohort has the resource id.
+            CohortVersionIdNotFound: No cohort version has the resource id.
+            AgentVersionNotFound: No agent version has the resource id.
+            ExperimentNotFound: No experiment has the resource id.
+            ExperimentRunNotFound: No experiment run has the resource id.
             DuplicateTagLink: The tag is already linked to the resource.
 
         Returns:

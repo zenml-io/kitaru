@@ -15777,7 +15777,7 @@
     },
     "/api/v1/tags/{tag_id}/links": {
       "post": {
-        "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag has this id, 409\nwhen the link is already registered, and 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
+        "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag or no resource of\nthe given type and id exists, 409 when the link is already registered,\nand 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
         "operationId": "create_tag_link_api_v1_tags__tag_id__links_post",
         "parameters": [
           {

@@ -124,7 +124,10 @@ class ExperimentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["owner_id"], ["account.id"], name=EXPERIMENT_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=EXPERIMENT_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=EXPERIMENT_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["replay_config_id"],

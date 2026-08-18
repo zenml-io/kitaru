@@ -128,6 +128,7 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["evaluator_version_id"],
             ["plugin_version.id"],
             name=EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
         ),
         ForeignKeyConstraint(
             ["session_id"],
@@ -139,7 +140,7 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["task_id"],
             ["task.id"],
             name=EVALUATION_TASK_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
+            ondelete="SET NULL",
         ),
         UniqueConstraint(
             "task_id", "name", name=EVALUATION_TASK_ID_NAME_UNIQUE_CONSTRAINT

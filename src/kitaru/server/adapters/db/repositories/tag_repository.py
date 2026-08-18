@@ -21,8 +21,19 @@ from sqlalchemy import select
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.tag import (
+    TAG_LINK_AGENT_VERSION_ID_FOREIGN_KEY,
+    TAG_LINK_AGENT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT,
+    TAG_LINK_COHORT_ID_FOREIGN_KEY,
+    TAG_LINK_COHORT_ID_TAG_ID_UNIQUE_CONSTRAINT,
+    TAG_LINK_COHORT_VERSION_ID_FOREIGN_KEY,
+    TAG_LINK_COHORT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT,
+    TAG_LINK_EXPERIMENT_ID_FOREIGN_KEY,
+    TAG_LINK_EXPERIMENT_ID_TAG_ID_UNIQUE_CONSTRAINT,
+    TAG_LINK_EXPERIMENT_RUN_ID_FOREIGN_KEY,
+    TAG_LINK_EXPERIMENT_RUN_ID_TAG_ID_UNIQUE_CONSTRAINT,
+    TAG_LINK_SESSION_ID_FOREIGN_KEY,
+    TAG_LINK_SESSION_ID_TAG_ID_UNIQUE_CONSTRAINT,
     TAG_LINK_TAG_ID_FOREIGN_KEY,
-    TAG_LINK_UNIQUE_CONSTRAINT,
     TAG_NAME_UNIQUE_CONSTRAINT,
     TagLinkORM,
     TagORM,
@@ -30,7 +41,13 @@ from kitaru.server.adapters.db.orm.tag import (
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.tag import TagFilter
+from kitaru.server.domain.agent_version import AgentVersionNotFound
 from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.cohort import CohortNotFound
+from kitaru.server.domain.cohort_version import CohortVersionIdNotFound
+from kitaru.server.domain.experiment import ExperimentNotFound
+from kitaru.server.domain.experiment_run import ExperimentRunNotFound
+from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.tag import (
     DuplicateTagLink,
     DuplicateTagName,
@@ -154,19 +171,53 @@ class SQLTagRepository(BaseSQLRepository[TagORM]):
 
         Raises:
             TagNotFound: No tag has the link's tag id.
+            SessionNotFound: No session has the link's resource id.
+            CohortNotFound: No cohort has the link's resource id.
+            CohortVersionIdNotFound: No cohort version has the link's
+                resource id.
+            AgentVersionNotFound: No agent version has the link's resource
+                id.
+            ExperimentNotFound: No experiment has the link's resource id.
+            ExperimentRunNotFound: No experiment run has the link's resource
+                id.
             DuplicateTagLink: The tag is already linked to the resource.
 
         Returns:
             Stored tag link with timestamps set.
         """
         row = TagLinkORM.from_domain(link)
+
+        def duplicate_link() -> DuplicateTagLink:
+            return DuplicateTagLink(link.tag_id, link.resource_type, link.resource_id)
+
         await self._add(
             row,
             {
-                TAG_LINK_UNIQUE_CONSTRAINT: lambda: DuplicateTagLink(
-                    link.tag_id, link.resource_type, link.resource_id
-                ),
+                TAG_LINK_SESSION_ID_TAG_ID_UNIQUE_CONSTRAINT: duplicate_link,
+                TAG_LINK_COHORT_ID_TAG_ID_UNIQUE_CONSTRAINT: duplicate_link,
+                TAG_LINK_COHORT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT: duplicate_link,
+                TAG_LINK_AGENT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT: duplicate_link,
+                TAG_LINK_EXPERIMENT_ID_TAG_ID_UNIQUE_CONSTRAINT: duplicate_link,
+                TAG_LINK_EXPERIMENT_RUN_ID_TAG_ID_UNIQUE_CONSTRAINT: duplicate_link,
                 TAG_LINK_TAG_ID_FOREIGN_KEY: lambda: TagNotFound(link.tag_id),
+                TAG_LINK_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
+                    link.resource_id
+                ),
+                TAG_LINK_COHORT_ID_FOREIGN_KEY: lambda: CohortNotFound(
+                    link.resource_id
+                ),
+                TAG_LINK_COHORT_VERSION_ID_FOREIGN_KEY: lambda: CohortVersionIdNotFound(
+                    link.resource_id
+                ),
+                TAG_LINK_AGENT_VERSION_ID_FOREIGN_KEY: lambda: AgentVersionNotFound(
+                    link.resource_id
+                ),
+                TAG_LINK_EXPERIMENT_ID_FOREIGN_KEY: lambda: ExperimentNotFound(
+                    link.resource_id
+                ),
+                TAG_LINK_EXPERIMENT_RUN_ID_FOREIGN_KEY: lambda: ExperimentRunNotFound(
+                    link.resource_id
+                ),
             },
         )
         return row.to_domain()
@@ -187,10 +238,10 @@ class SQLTagRepository(BaseSQLRepository[TagORM]):
         Raises:
             TagLinkNotFound: No link matches the tag and resource.
         """
+        resource_column = TagLinkORM.get_resource_column(resource_type)
         statement = select(TagLinkORM).where(
             TagLinkORM.tag_id == tag_id,
-            TagLinkORM.resource_type == resource_type.value,
-            TagLinkORM.resource_id == resource_id,
+            resource_column == resource_id,
         )
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:

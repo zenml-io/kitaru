@@ -50,6 +50,8 @@ def build_tag_condition_binding(
         Binding compiling a tag condition into an EXISTS predicate.
     """
 
+    resource_column = TagLinkORM.get_resource_column(resource_type)
+
     def compile_tag_condition(condition: FilterCondition) -> ColumnElement[bool]:
         """Compile a tag filter condition into an EXISTS predicate.
 
@@ -64,8 +66,7 @@ def build_tag_condition_binding(
             select(TagLinkORM.id)
             .join(TagORM, TagORM.id == TagLinkORM.tag_id)
             .where(
-                TagLinkORM.resource_type == resource_type.value,
-                TagLinkORM.resource_id == id_column,
+                resource_column == id_column,
                 TagORM.name.in_(names),
             )
             .correlate(id_column.class_)

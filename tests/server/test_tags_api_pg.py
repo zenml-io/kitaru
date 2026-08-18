@@ -28,6 +28,24 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
         yield client
 
 
+async def _create_session_id(client: httpx.AsyncClient) -> str:
+    """Store an agent and a session on it, returning the session id."""
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    session = (
+        await client.post(
+            "/api/v1/sessions",
+            json={
+                "agent_id": agent["id"],
+                "origin": "recorded",
+                "inputs": {"prompt": "hi"},
+                "outputs": None,
+                "metadata": {},
+            },
+        )
+    ).json()
+    return session["id"]
+
+
 async def test_tags_persist_across_requests(client: httpx.AsyncClient) -> None:
     """Prove the per-request commit through separate requests."""
     response = await client.post("/api/v1/tags", json={"name": "prod"})
@@ -69,7 +87,7 @@ async def test_link_and_delete_persist_across_requests(
 ) -> None:
     """Persist a tag link and its deletion across requests."""
     created = (await client.post("/api/v1/tags", json={"name": "prod"})).json()
-    resource_id = "11111111-1111-1111-1111-111111111111"
+    resource_id = await _create_session_id(client)
     response = await client.post(
         f"/api/v1/tags/{created['id']}/links",
         json={"resource_type": "session", "resource_id": resource_id},
@@ -93,7 +111,7 @@ async def test_link_and_delete_persist_across_requests(
 async def test_delete_cascades_links_across_requests(client: httpx.AsyncClient) -> None:
     """Cascade a tag's links when the tag is deleted."""
     created = (await client.post("/api/v1/tags", json={"name": "prod"})).json()
-    resource_id = "22222222-2222-2222-2222-222222222222"
+    resource_id = await _create_session_id(client)
     await client.post(
         f"/api/v1/tags/{created['id']}/links",
         json={"resource_type": "session", "resource_id": resource_id},

@@ -32,6 +32,7 @@ from kitaru.server.domain.cohort_version import CohortVersion
 COHORT_VERSION_COHORT_ID_VERSION_UNIQUE_CONSTRAINT = unique_constraint_name(
     "cohort_version", ["cohort_id", "version"]
 )
+COHORT_VERSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("cohort_version", ["owner_id"])
 COHORT_VERSION_COHORT_ID_FOREIGN_KEY = foreign_key_name("cohort_version", ["cohort_id"])
 
 
@@ -44,6 +45,9 @@ class CohortVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "cohort_id",
             "version",
             name=COHORT_VERSION_COHORT_ID_VERSION_UNIQUE_CONSTRAINT,
+        ),
+        ForeignKeyConstraint(
+            ["owner_id"], ["account.id"], name=COHORT_VERSION_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
             ["cohort_id"],
