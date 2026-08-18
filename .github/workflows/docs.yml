@@ -90,6 +90,9 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # The repository root is a pnpm workspace. Letting the action infer
+          # pnpm makes its temporary Wrangler install fail at the workspace root.
+          packageManager: npm
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           command: deploy
       - name: Deploy redirect worker
@@ -104,5 +107,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          packageManager: npm
           wranglerVersion: ${{ env.WRANGLER_VERSION }}
           command: deploy --config wrangler.redirect.toml
