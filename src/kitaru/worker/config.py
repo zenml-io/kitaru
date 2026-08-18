@@ -25,8 +25,6 @@ from kitaru.worker.heartbeat import DEFAULT_HEARTBEAT_INTERVAL_SECONDS
 
 RUN_POLL_INTERVAL_SECONDS = 2.0
 
-# Worker tasks spend nearly all their wall time awaiting model and tool calls, so a
-# single slot leaves the process idle while queued work waits for a free worker.
 DEFAULT_CONCURRENCY = 10
 
 
