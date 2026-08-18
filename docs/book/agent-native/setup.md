@@ -95,7 +95,7 @@ If your host supports neither, copy the skill directory you want into wherever i
 
 ## The investigation skill
 
-`kitaru-investigation` is the front door, and it embodies the design: **you don't author investigations, your assistant does**. It maps your sessions, generates a baseline [investigation](../concepts/investigations.md) (the worklist, the questions, the evidence highlights), and interviews you against the trace; your job is answering. Use it when you have one surprising session, or a larger population you want to sample before defining a failure category.
+`kitaru-investigation` is the front door for your own agent, and it embodies the design: **you don't author investigations, your assistant does**. It maps your sessions, generates a baseline [investigation](../concepts/investigations.md) (the worklist, the questions, the evidence highlights), and interviews you against the trace; your job is answering. Use it when you have one surprising session, or a larger population you want to sample before defining a failure category.
 
 It picks one of two entry paths from what you already have:
 
@@ -114,6 +114,7 @@ Before creating remote state or using worker or model compute, the skill explain
 
 | Skill | Use it when |
 |---|---|
+| `kitaru-guided-tour` | First contact with no agent of your own: a value-first tour on the public template, from a prepared three-session review to an evaluator and one approved replay experiment |
 | `kitaru-investigation` | Reviewing sessions, recording evidence, and creating a cohort from confirmed cases |
 | [`kitaru-replay-experiment`](../guides/replay-and-overrides.md) | Testing one candidate change against an accepted cohort with pinned evaluators, and reading whether the evidence improved, regressed, traded off, or stayed inconclusive |
 | [`kitaru-adapter-builder`](../adapters/README.md) | Building a Python or TypeScript [adapter](../adapters/README.md) for a framework that Kitaru does not support yet, with explicit recording and replay capabilities |
@@ -150,6 +151,12 @@ The loop compresses well into assistant tasks. Some starting points, ready to pa
 
 ```
 Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
+```
+
+New to Kitaru with no agent or traces of your own yet? Start with the tour instead:
+
+```
+Use kitaru-guided-tour to walk me through Kitaru on the returns-agent template. I am new; explain each step as we go, and ask before anything paid or live.
 ```
 
 ```

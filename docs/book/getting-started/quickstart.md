@@ -10,7 +10,7 @@ icon: rocket
 And you don't work Kitaru by memorizing commands. The product is built to be driven by your coding assistant: you ask, it operates Kitaru through the MCP server and the agent skills, and you keep the judgment calls. Every step below is a prompt first; the equivalent command exists when you want your hands on it.
 
 {% hint style="info" %}
-**No agent in production yet?** Prepare the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template), a ready PydanticAI agent with checked-in Langfuse traces, and follow the [returns-agent tutorial](../tutorials/returns-agent/README.md). Everything on this page applies to it unchanged.
+**No agent in production yet?** Ask your assistant for the guided tour instead: the `kitaru-guided-tour` skill clones the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) (a ready agent with checked-in traces), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns-agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
 {% endhint %}
 
 Before starting, [install Kitaru and log in](installation.md), then [set up your coding agent](../agent-native/setup.md): the MCP server gives it bounded Kitaru operations, and the skills teach it the procedures.
