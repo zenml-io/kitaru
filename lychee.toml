@@ -47,6 +47,8 @@ exclude = [
 # internal agent scratch docs; stale links there should not block CI.
 exclude_path = [
     ".venv",
+    "node_modules",
+    "docs/out",
     "CHANGELOG.md",
     "design",
     "docs/investigations",
