@@ -75,8 +75,11 @@ ScopedSetup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each session node repository implementation, a session id to
-    attach nodes to, and a factory for further session ids."""
+    """Provide each session node repository implementation and its collaborators.
+
+    Yields the repository, a session id to attach nodes to, and a factory for
+    further session ids.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         owner_id = uuid.uuid4()
@@ -117,10 +120,13 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 async def scoped_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[ScopedSetup, None]:
-    """Provide a session node repository wired to sessions and cohort versions
+    """Provide a cohort-scoped session node repository and its collaborators.
+
+    Yields a session node repository wired to sessions and cohort versions
     sharing its backend, a cohort repository, a cohort version repository, an
     owner id, a factory for agent ids, and a factory for session ids on a
-    given agent."""
+    given agent.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         cohorts = FakeCohortRepository()

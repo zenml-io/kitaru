@@ -117,9 +117,12 @@ async def _link_investigation_session(
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each annotation repository implementation, an investigation
-    repository sharing its backend, an owner id, a factory for session ids,
-    and a factory linking a session into a fresh one-question investigation."""
+    """Provide each annotation repository implementation and its collaborators.
+
+    Yields the repository, an investigation repository sharing its backend, an
+    owner id, a factory for session ids, and a factory linking a session into a
+    fresh one-question investigation.
+    """
     if request.param == "fake":
         investigations = FakeInvestigationRepository()
         annotations = FakeAnnotationRepository(investigations=investigations)
