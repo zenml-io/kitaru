@@ -19,7 +19,7 @@ import pytest
 
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import LabelSelector, WorkerClaim, WorkerScope
-from kitaru.worker.config import WorkerConfig
+from kitaru.worker.config import DEFAULT_CONCURRENCY, WorkerConfig
 from kitaru.worker.worker import default_worker_name
 
 
@@ -31,7 +31,7 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert config.scope == WorkerScope(
         claims=[WorkerClaim(kind=kind) for kind in TaskKind]
     )
-    assert config.concurrency == 1
+    assert config.concurrency == DEFAULT_CONCURRENCY
     assert config.claim_batch_size is None
     assert config.timeout is None
     assert config.metadata == {}
