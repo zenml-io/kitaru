@@ -360,7 +360,7 @@ def test_stable_github_releases_are_marked_latest() -> None:
 
     for workflow in workflows:
         assert "latest=(--latest=false)" in workflow
-        assert 'latest=(--latest)' in workflow
+        assert "latest=(--latest)" in workflow
         assert '"${latest[@]}"' in workflow
 
 
