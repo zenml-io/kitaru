@@ -193,7 +193,7 @@ class ReplayService:
             self._analytics.track(
                 actor.account.id,
                 AnalyticsEvent.REPLAY_CREATED,
-                analytics_events.build_replay_created_properties(command.override),
+                analytics_events.build_replay_created_properties(config),
             )
         return (await self._bundle(replays))[0]
 
