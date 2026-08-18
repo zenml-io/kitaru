@@ -5,7 +5,7 @@ icon: vials
 
 # Experiments
 
-A [replay](replay.md) is one counterfactual. An **experiment** is that counterfactual at population scale: take a [cohort](cohorts.md) of real runs, apply one change to all of them, score every re-run with the same [evaluators](evaluators.md), and read what improved and what regressed.
+A [replay](replay.md) is one counterfactual. An **experiment** is that counterfactual at population scale: take a [cohort](cohorts.md) of real runs, apply one change to all of them, evaluate every re-run with the same [evaluators](evaluators.md), and read what improved and what regressed.
 
 The split of responsibilities is deliberate:
 
@@ -72,13 +72,13 @@ kitaru experiment run start cheaper-model \
   --evaluate-baselines --wait
 ```
 
-Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `evaluate_baselines=True` scores the original sessions too, so every replay has its baseline numbers to sit next to.
+Starting a run fans out **one replay per session** in the cohort version. [Workers](workers.md) in your environment execute them; the run's `progress` counts replays through `pending → evaluating → completed` (plus `failed` / `canceled`), and the run settles when the last replay does. `evaluate_baselines=True` evaluates the original sessions too, so every replay has its baseline numbers to sit next to.
 
 With a `history` tool policy scoped to `cohort_version`, replayed tool calls can be answered from any recording in the cohort (useful when runs share tool traffic), and `on_miss="fail"` keeps anything unrecorded from reaching a live system.
 
 ## Reading a run
 
-A run's output is deliberately raw: its replays, each with a result session, and the evaluation rows on both sides. Compare them by reading the evaluations:
+A run's output is intentionally plain: its replays, each with a result session, and the evaluation rows on both sides. Compare them by reading the evaluations:
 
 ```python
 from kitaru.api_models.v1.evaluation import EvaluationListParams

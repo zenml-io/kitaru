@@ -5,9 +5,9 @@ icon: rocket
 
 # Quickstart
 
-**You probably already have an agent in production.** It serves real users, it occasionally does something wrong, and when it does, you read the trace, tweak a prompt, and hope. This page is the way out of that loop: get the agent's runs into Kitaru, judge one bad behavior, and test a fix against recorded evidence instead of a fresh demo prompt.
+**You probably already have an agent in production.** It serves real users. Sometimes it does the wrong thing. When that happens, the usual workflow is to read the trace, tweak a prompt, and hope the fix holds. This page gives you a better loop: bring the agent's runs into Kitaru, judge one bad behavior, and test a fix against recorded evidence instead of a fresh demo prompt.
 
-And you don't work Kitaru by memorizing commands. The product is built to be driven by your coding assistant: you ask, it operates Kitaru through the MCP server and the agent skills, and you keep the judgment calls. Every step below is a prompt first; the equivalent command exists when you want your hands on it.
+You do not need to memorize commands to start. Kitaru is built for your coding assistant to drive: you ask, it operates Kitaru through the MCP server and the agent skills, and you keep the judgment calls. Every step below starts as a prompt; the equivalent command is there when you want to run it yourself.
 
 {% hint style="info" %}
 **No agent in production yet?** Ask your assistant for the guided tour instead: the `kitaru-guided-tour` skill clones the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) (a ready agent with checked-in traces), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns-agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
@@ -17,7 +17,7 @@ Before starting, [install Kitaru and log in](installation.md), then [set up your
 
 ## First: get your runs into Kitaru
 
-Nothing else works until your agent's runs land in Kitaru as [sessions](../concepts/agents-and-sessions.md). Both ways in are one ask away:
+Nothing else works until your agent's runs land in Kitaru as [sessions](../concepts/agents-and-sessions.md). You have two ways in, and both can start with a prompt:
 
 {% tabs %}
 {% tab title="Import the traces you already have" %}
@@ -70,7 +70,7 @@ The whole method fits in one ask. `kitaru-investigation` is the skill that runs 
 Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Assume I am new to Kitaru. Show me the recorded evidence before asking for a judgment, and ask before creating resources, changing code, or starting paid replay.
 ```
 
-The assistant selects sessions, walks the review, drafts the evaluator, and runs the experiment. You supply the domain judgments and approve consequential actions. These five steps are the record → replay → improve loop in working form: recording already got you the sessions above, observing, judging, and defining are where improvement gets its criteria, and replaying and comparing close the loop. What follows is what the assistant is doing at each step, with a worked example from a support agent that refunds, replaces, or escalates return requests, and the prompt you would use to drive that step alone.
+The assistant selects sessions, walks the review, drafts the evaluator, and runs the experiment. You supply the domain judgments and approve consequential actions. These five steps are the record → replay → improve loop in working form: recording got you the sessions above; observing, judging, and defining turn evidence into criteria; replaying and comparing close the loop. The example below uses a support agent that refunds, replaces, or escalates return requests, and each step includes the prompt you would use to drive that step by itself.
 
 {% stepper %}
 {% step %}
@@ -80,7 +80,7 @@ The assistant selects sessions, walks the review, drafts the evaluator, and runs
 Run the deterministic evaluators over support-agent's recent sessions, show me which ones look worst and why, and walk me through the worst one node by node.
 ```
 
-Observation starts wide: sweep the whole history before you stare at any single trace. Kitaru ships ten [deterministic evaluators](../guides/deterministic-evaluations.md), covering session diagnostics, tool health, trajectory signals, timing, and LLM-call signals, that read stored sessions without running the agent or calling a model. The sweep is cheap and repeatable, and the failures, retries, and tool errors it surfaces tell you which sessions deserve a human look. One of the surfaced sessions contains this path:
+Observation starts wide: scan the history before you stare at one trace. Kitaru ships ten [deterministic evaluators](../guides/deterministic-evaluations.md), covering session diagnostics, tool health, trajectory signals, timing, and LLM-call signals, that read stored sessions without running the agent or calling a model. The sweep is cheap and repeatable, and the failures, retries, and tool errors it surfaces tell you which sessions deserve a human look. One surfaced session contains this path:
 
 | Session node | Result |
 | --- | --- |
@@ -100,13 +100,13 @@ Each model call, tool call, and result is a **session node**. The `issue_refund`
 Open an investigation on this session. I will give the verdicts; record each one as an annotation pinned to the exact nodes that support it.
 ```
 
-This is the interview, and it is the crucial step of the whole game. Your assistant has already mapped your sessions and built a worklist (related failures plus at least one counterexample); now it creates an [**investigation**](../concepts/investigations.md) and asks you, against the evidence on screen, the questions Kitaru needs clarity on. Not "write down your eval criteria," but "given this policy lookup that returned nothing and this refund that was accepted anyway, was escalation required?"
+This is the interview. Your assistant has already mapped your sessions and built a worklist: related failures plus at least one counterexample. Now it creates an [**investigation**](../concepts/investigations.md) and asks you, against the evidence on screen, the questions Kitaru needs answered. Not "write down your eval criteria," but "given this policy lookup that returned nothing and this refund that was accepted anyway, was escalation required?"
 
 The expert answers:
 
 > When the agent cannot establish whether approval is required, it should escalate instead of issuing the refund.
 
-Each answer is stored as an **annotation** pinned to the exact nodes that support it, and the conclusion becomes the session's verdict. Statistics can surface an unusual trace, but they cannot infer your business policy; every judgment recorded here is the ground truth the next three steps are calibrated against.
+Each answer is stored as an **annotation** pinned to the exact nodes that support it, and the conclusion becomes the session's verdict. Statistics can surface an unusual trace, but they cannot infer your business policy. The judgment you record here is the ground truth the next three steps use.
 {% endstep %}
 
 {% step %}
@@ -123,7 +123,7 @@ The accepted judgment becomes a reusable [**evaluator**](../concepts/evaluators.
 | Approval cannot be established | Escalate without a refund | **Target:** what should change. |
 | Valid low-risk refund | Issue the refund | **Counterexample:** what must not break. |
 
-Both are frozen into a [**cohort**](../concepts/cohorts.md) version. The target catches a change that does nothing; the counterexample catches a blunt one such as "never issue refunds."
+Both are frozen into a [**cohort**](../concepts/cohorts.md) version. The target catches a change that does not fix the failure; the counterexample catches a blunt fix such as "never issue refunds."
 {% endstep %}
 
 {% step %}
@@ -154,7 +154,7 @@ The same evaluator version checks the original and replayed sessions:
 | Approval cannot be established | Refund accepted, fail | Escalation, pass | The reviewed failure improved. |
 | Valid low-risk refund | Refund accepted, pass | Refund accepted, pass | The counterexample held. |
 
-Four honest outcomes stay available: **improved**, **regressed**, **trade-off**, and **inconclusive**. Inconclusive is information too; it names the missing evidence or execution control before you trust the change. The deployment decision stays with you.
+Four honest outcomes stay available: **improved**, **regressed**, **trade-off**, and **inconclusive**. Inconclusive is still useful: it names the missing evidence or execution control before you trust the change. The deployment decision stays with you.
 {% endstep %}
 {% endstepper %}
 

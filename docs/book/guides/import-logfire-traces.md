@@ -5,7 +5,7 @@ icon: fire
 
 # Logfire
 
-If your agent already sends spans to Logfire, you don't need to instrument anything to start using Kitaru. Export the records, run one import, and each conversation lands as a [session](../concepts/agents-and-sessions.md): the same object a live-recorded run produces, ready to evaluate and replay.
+If your agent already sends spans to Logfire, you do not need to instrument anything to start using Kitaru. Export the records, run one import, and each conversation lands as a [session](../concepts/agents-and-sessions.md): the same object a live-recorded run produces, ready to evaluate and replay.
 
 **Logfire stays your system of record.** Kitaru takes a runnable copy of the runs you care about, so last Tuesday's incident becomes a test case and last month's traffic becomes a regression population.
 
@@ -56,7 +56,7 @@ Export whole traces rather than filtered subsets. A span whose parent is missing
 
 ## 2. Import it
 
-Register the agent the traces belong to, if you haven't, and start a worker:
+Register the agent the traces belong to, if you have not, and start a worker:
 
 ```bash
 kitaru agent register support-agent --command "python support.py"
@@ -143,7 +143,7 @@ Session metadata records the provenance you'll want when reading the import back
 
 ## Re-runs skip what is already there
 
-Every imported session records its source identity: `imported_from` (`logfire`) and an `external_id` of `<source_instance>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is a safe cron job, not a duplication engine.
+Every imported session records its source identity: `imported_from` (`logfire`) and an `external_id` of `<source_instance>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is safe; it will not duplicate earlier sessions.
 
 It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same records, the same conversation lands as a second session rather than deduping against the first.
 
@@ -160,11 +160,11 @@ Some problems fail one session or one row rather than the file, and are reported
 
 Two more things worth knowing before you rely on an import:
 
-- Logfire's own evaluations and alerts do not come across, and neither do metrics or logs that are not span records. Score imported sessions with Kitaru [evaluators](../concepts/evaluators.md) instead; backfilling your history is a single batch call.
+- Logfire's own evaluations and alerts do not come across, and neither do metrics or logs that are not span records. Evaluate imported sessions with Kitaru [evaluators](../concepts/evaluators.md) instead; backfilling your history is a single batch call.
 - Replay re-runs your agent's real code, which no trace export contains. Register the agent version whose code produced these records, with its run command, and imported sessions replay exactly like recorded ones.
 
 {% hint style="warning" %} An import stores the parsed trace content, including prompts, tool arguments, and tool results, on your Kitaru server. The server is self-hosted, but check your own access and retention rules before importing exports that contain customer data. {% endhint %}
 
 ## Next
 
-Score your imported history with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put a change to the test with [Build a regression suite from production](regression-suite.md).
+Evaluate your imported history with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put a change to the test with [Build a regression suite from production](regression-suite.md).
