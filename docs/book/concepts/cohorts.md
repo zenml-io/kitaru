@@ -17,6 +17,7 @@ from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.cohort import CohortCreateRequest
 from kitaru.api_models.v1.cohort_version import CohortVersionCreateRequest
 
+
 async def main() -> None:
     client = KitaruAPIClient()
 
@@ -31,6 +32,7 @@ async def main() -> None:
         ),
     )
     print(version.version, version.session_count)
+
 
 asyncio.run(main())
 ```

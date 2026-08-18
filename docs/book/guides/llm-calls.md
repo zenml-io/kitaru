@@ -9,8 +9,8 @@ Every model call in a recorded run lands as an `llm_call` node on the [session](
 
 ```python
 session = await client.sessions.get(session_id)
-print(session.cost)             # Decimal, summed across the run's model calls
-print(session.tokens)           # input / output / cached_input / reasoning
+print(session.cost)  # Decimal, summed across the run's model calls
+print(session.tokens)  # input / output / cached_input / reasoning
 print(session.llm_call_count, session.tool_call_count)
 ```
 
@@ -42,9 +42,11 @@ from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.replay import ReplayListParams
 
 baseline_cost = fork_cost = 0
-async for r in client.replays.iter(ReplayListParams(
-    filter=FilterCondition(field="experiment_run_id", op=FilterOp.EQ, value=RUN_ID)
-)):
+async for r in client.replays.iter(
+    ReplayListParams(
+        filter=FilterCondition(field="experiment_run_id", op=FilterOp.EQ, value=RUN_ID)
+    )
+):
     baseline = await client.sessions.get(r.baseline_session_id)
     fork = await client.sessions.get(r.result_session_id)
     baseline_cost += baseline.cost or 0

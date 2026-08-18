@@ -21,7 +21,8 @@ from kitaru.task.evaluator import EvaluationResult, SessionView
 
 def evaluate(session: SessionView, **params) -> EvaluationResult:
     refund_calls = [
-        node for node in session.nodes
+        node
+        for node in session.nodes
         if node.node_type == "tool_call" and node.tool_name == "refund_payment"
     ]
     return EvaluationResult(
@@ -72,8 +73,11 @@ await client.sessions.merge_evaluations(
     session_id,
     SessionEvaluationsRequest(
         evaluations=[
-            EvaluationResult(name="human_quality", score=True,
-                             explanation="Correct refund, good tone"),
+            EvaluationResult(
+                name="human_quality",
+                score=True,
+                explanation="Correct refund, good tone",
+            ),
         ]
     ),
 )

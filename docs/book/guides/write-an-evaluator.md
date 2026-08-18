@@ -22,7 +22,8 @@ from kitaru.task.evaluator import EvaluationResult, SessionView
 
 def evaluate(session: SessionView, **params) -> list[EvaluationResult]:
     refunds = [
-        n for n in session.nodes
+        n
+        for n in session.nodes
         if n.node_type == "tool_call" and n.tool_name == "refund_payment"
     ]
     reply = str(session.session.outputs or "")
@@ -58,11 +59,15 @@ from openai import OpenAI
 
 def evaluate(session: SessionView, **params) -> EvaluationResult:
     reply = str(session.session.outputs or "")
-    verdict = OpenAI().responses.create(
-        model=params.get("judge_model", "gpt-5-nano"),
-        input=f"Customer-support reply:\n{reply}\n\n"
-              "Is this reply professional and non-committal about policy? yes/no, one reason.",
-    ).output_text
+    verdict = (
+        OpenAI()
+        .responses.create(
+            model=params.get("judge_model", "gpt-5-nano"),
+            input=f"Customer-support reply:\n{reply}\n\n"
+            "Is this reply professional and non-committal about policy? yes/no, one reason.",
+        )
+        .output_text
+    )
     ok = verdict.strip().lower().startswith("yes")
     return EvaluationResult(name="tone", score=ok, passed=ok, explanation=verdict)
 ```
@@ -89,9 +94,13 @@ from kitaru.api_models.v1.session import SessionEvaluationsRequest
 
 await client.sessions.merge_evaluations(
     session_id,
-    SessionEvaluationsRequest(evaluations=[
-        EvaluationResult(name="human_tone", score=True, explanation="Good recovery"),
-    ]),
+    SessionEvaluationsRequest(
+        evaluations=[
+            EvaluationResult(
+                name="human_tone", score=True, explanation="Good recovery"
+            ),
+        ]
+    ),
 )
 ```
 
@@ -114,7 +123,7 @@ from kitaru.api_models.v1.replay_config import EvaluatorConfig
 
 job = await client.evaluations.create(
     EvaluationBatchCreateRequest(
-        input_session_ids=all_session_ids,     # capped per request; batch as needed
+        input_session_ids=all_session_ids,  # capped per request; batch as needed
         evaluators=[EvaluatorConfig(evaluator="refund-quality")],
     )
 )

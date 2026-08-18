@@ -77,6 +77,7 @@ from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.session import SessionListParams
 from kitaru.api_models.v1.session_node import SessionNodeListParams
 
+
 async def main() -> None:
     client = KitaruAPIClient()  # KITARU_API_URL, KITARU_API_KEY
     page = await client.sessions.list(SessionListParams())
@@ -88,6 +89,7 @@ async def main() -> None:
     )
     for node in nodes.items:
         print(node.index, node.node_type, node.name)
+
 
 asyncio.run(main())
 ```

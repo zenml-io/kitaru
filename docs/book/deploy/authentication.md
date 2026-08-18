@@ -41,7 +41,7 @@ Create a key with the Python client (the plaintext is returned exactly once, at 
 from kitaru.api_models.v1.api_key import ApiKeyCreateRequest
 
 issued = await client.api_keys.create(ApiKeyCreateRequest(name="ci-runner"))
-print(issued.key)        # shown once; store it in your secret manager
+print(issued.key)  # shown once; store it in your secret manager
 ```
 
 <!-- TODO(v2-launch): `kitaru api-key create` / `kitaru account` CLI verbs
@@ -87,7 +87,7 @@ from kitaru.api_models.v1.account import (
 
 account = await client.users.create(UserCreateRequest(name="dana"))
 assert isinstance(account, UserActivationTokenResponse)
-print(account.activation_token)   # share once, out of band
+print(account.activation_token)  # share once, out of band
 ```
 
 When a password is supplied, `create()` returns a normal `AccountResponse`. Without one, it returns `UserActivationTokenResponse` with the one-time token.

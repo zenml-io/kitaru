@@ -14,8 +14,9 @@ import uuid
 from pydantic_ai import Agent
 from kitaru_pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-5.4", name="support-agent",
-              system_prompt="You resolve support tickets.")
+agent = Agent(
+    "openai:gpt-5.4", name="support-agent", system_prompt="You resolve support tickets."
+)
 
 support = KitaruAgent(agent, agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
 
@@ -32,11 +33,11 @@ uv add kitaru-pydantic-ai
 
 ```python
 KitaruAgent(
-    agent,                      # the PydanticAI agent to wrap
-    agent_id=None,              # the registered Kitaru agent's UUID
-    agent_version_id=None,      # optional: pin sessions to a version
-    session_name=None,          # falls back to KITARU_SESSION_NAME
-    batch_size=20,              # nodes per ingest batch
+    agent,  # the PydanticAI agent to wrap
+    agent_id=None,  # the registered Kitaru agent's UUID
+    agent_version_id=None,  # optional: pin sessions to a version
+    session_name=None,  # falls back to KITARU_SESSION_NAME
+    batch_size=20,  # nodes per ingest batch
 )
 ```
 

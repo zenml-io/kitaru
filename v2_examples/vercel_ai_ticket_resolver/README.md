@@ -295,7 +295,9 @@ def _get_resolution(value: Any) -> dict[str, Any]:
         try:
             value = json.loads(text)
         except json.JSONDecodeError as exc:
-            raise ValueError("Vercel outputs.text is not valid resolution JSON.") from exc
+            raise ValueError(
+                "Vercel outputs.text is not valid resolution JSON."
+            ) from exc
     elif isinstance(value, str):
         try:
             value = json.loads(value)

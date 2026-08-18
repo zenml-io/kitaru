@@ -18,7 +18,9 @@ from typing import Any
 from kitaru.task.importer import ImportFailure, ParsedNode, ParsedSession
 
 
-def parse(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedSession | ImportFailure]:
+def parse(
+    payload: bytes, params: dict[str, Any]
+) -> Iterator[ParsedSession | ImportFailure]:
     for line_number, line in enumerate(payload.splitlines(), start=1):
         try:
             record = decode_my_format(line)
@@ -36,8 +38,13 @@ def parse(payload: bytes, params: dict[str, Any]) -> Iterator[ParsedSession | Im
             external_id=record.trace_id,
             metadata={},
             nodes=[
-                ParsedNode(node_type="llm_call", name="model", status="completed",
-                           inputs=record.prompt, outputs=record.completion),
+                ParsedNode(
+                    node_type="llm_call",
+                    name="model",
+                    status="completed",
+                    inputs=record.prompt,
+                    outputs=record.completion,
+                ),
             ],
         )
 ```

@@ -38,6 +38,7 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicy,
 )
 
+
 async def main() -> None:
     client = KitaruAPIClient()
     replay = await client.replays.create(
@@ -51,6 +52,7 @@ async def main() -> None:
         )
     )
     print(replay.id, replay.job_id, replay.status)
+
 
 asyncio.run(main())
 ```

@@ -27,6 +27,7 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicy,
 )
 
+
 async def main() -> None:
     client = KitaruAPIClient()
     agent_id = uuid.UUID(os.environ["KITARU_AGENT_ID"])
@@ -53,6 +54,7 @@ async def main() -> None:
         ),
     )
     print(run.id, run.status, run.progress)
+
 
 asyncio.run(main())
 ```

@@ -19,14 +19,19 @@ from kitaru.client import KitaruAPIClient
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.session import SessionListParams
 
+
 async def main() -> None:
     client = KitaruAPIClient()
     refund_runs = [
         s.id
-        async for s in client.sessions.iter(SessionListParams(
-            filter=FilterCondition(field="agent_id", op=FilterOp.EQ, value=AGENT_ID),
-            size=100,
-        ))
+        async for s in client.sessions.iter(
+            SessionListParams(
+                filter=FilterCondition(
+                    field="agent_id", op=FilterOp.EQ, value=AGENT_ID
+                ),
+                size=100,
+            )
+        )
     ][:50]
 ```
 
@@ -68,7 +73,10 @@ import uuid
 
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
 from kitaru.api_models.v1.replay_config import (
-    EvaluatorConfig, HistoryConfig, ReplayOverride, ToolPolicy,
+    EvaluatorConfig,
+    HistoryConfig,
+    ReplayOverride,
+    ToolPolicy,
 )
 
 experiment = await client.experiments.create(
@@ -122,7 +130,7 @@ run = await client.experiments.start_run(
     experiment.id,
     ExperimentRunCreateRequest(
         cohort_version_id=version.id,
-        agent_version_id=AGENT_VERSION_ID,   # e.g. your PR's registered version
+        agent_version_id=AGENT_VERSION_ID,  # e.g. your PR's registered version
         evaluate_baselines=True,
     ),
 )
@@ -137,18 +145,26 @@ from kitaru.api_models.v1.replay import ReplayListParams
 
 replays = [
     r
-    async for r in client.replays.iter(ReplayListParams(
-        filter=FilterCondition(field="experiment_run_id", op=FilterOp.EQ, value=run.id)
-    ))
+    async for r in client.replays.iter(
+        ReplayListParams(
+            filter=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        )
+    )
 ]
 
+
 async def passed(session_id, name="refund_issued"):
-    async for e in client.evaluations.iter(EvaluationListParams(
-        filter=FilterCondition(field="session_id", op=FilterOp.EQ, value=session_id)
-    )):
+    async for e in client.evaluations.iter(
+        EvaluationListParams(
+            filter=FilterCondition(field="session_id", op=FilterOp.EQ, value=session_id)
+        )
+    ):
         if e.name == name:
             return e.passed
     return None
+
 
 baseline_pass = [await passed(r.baseline_session_id) for r in replays]
 fork_pass = [await passed(r.result_session_id) for r in replays]

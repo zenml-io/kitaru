@@ -29,9 +29,9 @@ from kitaru.api_models.v1.imports import ImportCreateRequest
 
 job = await client.imports.create(
     ImportCreateRequest(
-        importer="langfuse",              # importer name in the registry
-        agent_id=AGENT_ID,                # sessions land under this agent
-        agent_version_id=None,            # optional: stamp a version on them
+        importer="langfuse",  # importer name in the registry
+        agent_id=AGENT_ID,  # sessions land under this agent
+        agent_version_id=None,  # optional: stamp a version on them
         payload_blob_id=blob.id,
         params={"source_instance": "my-langfuse-project"},
     )
