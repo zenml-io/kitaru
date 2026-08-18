@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added user-facing methods to `KitaruClient` and `KitaruSyncClient`: get agents and experiments by name or id, list sessions and session nodes, replay a session or start an experiment run and wait for the result. The one-method-per-endpoint API client stays reachable as `client.api`.
+
 ## [0.22.1]
 
 ### Changed
