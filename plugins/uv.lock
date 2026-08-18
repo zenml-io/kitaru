@@ -9,7 +9,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-14T14:14:47.699825Z"
+exclude-newer = "2026-08-14T16:31:31.289253Z"
 exclude-newer-span = "P3D"
 
 [manifest]
@@ -923,7 +923,7 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.0rc9"
+version = "0.22.0rc10"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
@@ -981,6 +981,8 @@ provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "griffe", specifier = ">=1.13.0,<2.0.0" },
+    { name = "griffe-typingdoc", specifier = ">=0.2.8,<1.0.0" },
     { name = "import-linter", specifier = ">=2.0" },
     { name = "pip-audit", specifier = ">=2.10,<3" },
     { name = "pydantic-ai-slim", extras = ["openai"], specifier = ">=2.14.1,<2.23" },
@@ -1026,7 +1028,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0rc2"
+version = "0.1.0rc3"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },

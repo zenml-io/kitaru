@@ -18,6 +18,7 @@ from enum import StrEnum
 from typing import Annotated, Any
 
 from pydantic import BeforeValidator, Field, PlainSerializer
+from pydantic_core import from_json
 
 from kitaru.api_models.v1.base import JsonValue, ListParams, RequestModel
 
@@ -81,7 +82,9 @@ def _parse_filter_json(value: Any) -> Any:
         Parsed filter input.
     """
     if isinstance(value, (str, bytes)):
-        return json.loads(value)
+        # Parse with pydantic_core because json.loads raises a raw
+        # RecursionError on deeply nested input.
+        return from_json(value)
     return value
 
 

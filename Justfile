@@ -193,6 +193,7 @@ server-dev-image:
 # Generate changelog and SDK reference content from Python source
 generate-docs:
     uv run python scripts/generate_changelog_docs.py
+    uv run python scripts/generate_cli_docs.py
     @# fumapy is bundled in the fumadocs-python npm package, not on PyPI.
     @# Auto-install it if docs/node_modules exists (requires prior pnpm install in docs/).
     @test -d docs/node_modules/fumadocs-python && uv pip install -q docs/node_modules/fumadocs-python || true

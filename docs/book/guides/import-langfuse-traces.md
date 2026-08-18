@@ -50,7 +50,7 @@ The Langfuse importer parses **Langfuse JSONL exports**, up to 50 MiB per payloa
 | --- | --- |
 | `source_instance` | The Langfuse project the export came from. Optional when the export itself carries project ids; required when it doesn't; it anchors the sessions' external identity. |
 | `filename` | Optional label used as a fallback source name. |
-| `infer_tool_call_links` | Optional boolean, default `true`. The importer matches tool-call ids emitted by a generation with `gen_ai.tool.call.id` on tool observations and adds the generation as a secondary parent. The Langfuse observation parent remains the primary parent. Unmatched or ambiguous ids remain unchanged. Set this to `false` to keep only the source observation hierarchy. |
+| `infer_tool_call_links` | Optional boolean, default `true`. The importer matches tool-call ids emitted by a generation with `gen_ai.tool.call.id` on tool observations, nests each unambiguous tool call under the requesting generation, and retains its original Langfuse parent as a secondary parent. Unmatched or ambiguous ids remain unchanged. Set this to `false` to keep only the source observation hierarchy. |
 
 Import in slices as often as you like; dedup makes it safe.
 
