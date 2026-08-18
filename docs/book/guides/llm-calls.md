@@ -5,7 +5,7 @@ icon: coins
 
 # Track cost and model usage
 
-Every model call in a recorded run lands as an `llm_call` node on the [session](../concepts/agents-and-sessions.md): the requested and resolved model, inputs and outputs, token usage (input, output, cached, reasoning), and cost. The session rolls them up as it goes, so the totals are already there when you read a run:
+Every model call in a recorded run lands as an `llm_call` node on the [session](../concepts/agents-and-sessions.md): the requested and resolved model, inputs and outputs, token usage (input, output, cached, reasoning), and cost. The session rolls those values up as it goes, so the totals are already there when you read a run:
 
 ```python
 session = await client.sessions.get(session_id)
@@ -31,7 +31,7 @@ for node in nodes.items:
         print(node.requested_model, node.model, node.tokens, node.cost)
 ```
 
-`requested_model` vs `model` is worth watching: it's how you see an alias or a replay [override](replay-and-overrides.md) resolving to the model that actually served the call.
+`requested_model` vs `model` is worth watching: it shows an alias or a replay [override](replay-and-overrides.md) resolving to the model that served the call.
 
 ## Cost as an experiment metric
 
