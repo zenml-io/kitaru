@@ -12,7 +12,6 @@
     "format": "biome format --write"
   },
   "dependencies": {
-    "@orama/orama": "^3.1.18",
     "@takumi-rs/image-response": "^0.73.1",
     "fumadocs-core": "16.14.3",
     "fumadocs-mdx": "15.2.3",
