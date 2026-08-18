@@ -97,13 +97,17 @@ async def _probe(expected_requirements: set[str], import_modules: set[str]) -> N
         if not getattr(module, "__all__", None):
             raise RuntimeError(f"Standalone package {module_name!r} has no public API")
 
-    definitions = DEFAULT_PLUGIN_DEFINITIONS
-    catalog_requirements = {definition.requirement for definition in definitions}
-    if not catalog_requirements <= expected_requirements:
+    definitions = tuple(
+        definition
+        for definition in DEFAULT_PLUGIN_DEFINITIONS
+        if definition.requirement in expected_requirements
+    )
+    actual_requirements = {definition.requirement for definition in definitions}
+    if actual_requirements != expected_requirements:
         raise RuntimeError(
-            "Default catalog requirements are missing from bundled artifacts: "
-            f"catalog={sorted(catalog_requirements)!r}, "
-            f"bundled={sorted(expected_requirements)!r}"
+            "Default requirements differ from installed artifacts: "
+            f"expected={sorted(expected_requirements)!r}, "
+            f"actual={sorted(actual_requirements)!r}"
         )
 
     identities = {(definition.kind, definition.name) for definition in definitions}
