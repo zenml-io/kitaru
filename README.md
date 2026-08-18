@@ -70,7 +70,13 @@ cd kitaru-template    # its README has the setup and import commands
 
 Already have an agent in production? [Import its traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) from Langfuse, LangSmith, Braintrust, or Logfire, or [record with an adapter](https://docs.zenml.io/kitaru/adapters/record-in-production): one wrapper, no rewrite.
 
-**4. Drive results.** Open the repo (the template or your own agent) in Claude Code, Codex, or Cursor and ask:
+**4. Drive results.** Open the repo in Claude Code, Codex, or Cursor. On the template, take the guided tour:
+
+```
+Use kitaru-guided-tour to walk me through Kitaru on the returns-agent template. I am new; explain each step as we go, and ask before anything paid or live.
+```
+
+On your own agent, run the investigation:
 
 ```
 Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Show me the recorded evidence before asking for a judgment, and ask before creating resources or starting paid replay.
