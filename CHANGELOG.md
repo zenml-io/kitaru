@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.0]
+
 ### Changed
 
+- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, nine stable `0.1.0` Python plugin distributions, and the stable `0.1.1` TypeScript packages.
 - Raised the default worker concurrency from 1 to 10, so `kitaru worker start` runs up to ten tasks in parallel without a flag. Set `--concurrency` or `KITARU_WORKER_CONCURRENCY` to restore the previous single-slot behavior.
 
 ## [0.22.0rc10]
