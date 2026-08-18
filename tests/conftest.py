@@ -2667,6 +2667,8 @@ class FakeSessionRepository:
         ):
             raise SessionInUse(session_id)
         del self._sessions[session_id]
+        if self._tasks is not None:
+            self._tasks._unlink_session(session_id)
 
     async def apply_rollups(
         self, session_id: uuid.UUID, deltas: SessionRollups
@@ -5343,6 +5345,19 @@ class FakeTaskRepository:
         # Assigned after construction, since the fake job repository takes
         # this repository in its own constructor.
         self.jobs: FakeJobRepository | None = None
+
+    def _unlink_session(self, session_id: uuid.UUID) -> None:
+        """Drop a deleted session's input tasks.
+
+        Mirrors the SQL repository's CASCADE foreign key from
+        ``task.input_session_id``.
+
+        Args:
+            session_id: Id of the session being deleted.
+        """
+        for task_id, task in list(self._tasks.items()):
+            if isinstance(task, EvaluationTask) and task.input_session_id == session_id:
+                del self._tasks[task_id]
 
     def _check_evaluator_pair(self, task: Task) -> None:
         """Mirror the unique (job_id, input_session_id, plugin_version_id) key.

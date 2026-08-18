@@ -214,7 +214,7 @@ def upgrade() -> None:
             "agent",
             ["agent_id"],
             ["id"],
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         )
         batch_op.drop_constraint(TASK_AGENT_VERSION_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
@@ -222,7 +222,7 @@ def upgrade() -> None:
             "agent_version",
             ["agent_version_id"],
             ["id"],
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         )
         batch_op.drop_constraint(TASK_PLUGIN_VERSION_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
@@ -230,7 +230,7 @@ def upgrade() -> None:
             "plugin_version",
             ["plugin_version_id"],
             ["id"],
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         )
         batch_op.drop_constraint(TASK_INPUT_SESSION_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
@@ -238,7 +238,7 @@ def upgrade() -> None:
             "session",
             ["input_session_id"],
             ["id"],
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         )
         batch_op.drop_constraint(TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
@@ -246,7 +246,7 @@ def upgrade() -> None:
             "blob",
             ["payload_blob_id"],
             ["id"],
-            ondelete="SET NULL",
+            ondelete="CASCADE",
         )
 
     # tag_link moves from a polymorphic resource_type/resource_id pair to one

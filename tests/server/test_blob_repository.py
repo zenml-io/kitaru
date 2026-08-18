@@ -21,7 +21,6 @@ import pytest
 
 from conftest import FakeBlobRepository, pg_session, postgres_available
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -43,7 +42,7 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     ScriptPluginSource,
 )
-from kitaru.server.domain.task import ImportTask
+from kitaru.server.domain.task import ImportTask, TaskNotFound
 
 Setup = tuple[BlobRepository, uuid.UUID]
 
@@ -159,14 +158,8 @@ async def test_delete_in_use(setup: Setup) -> None:
         await repository.delete(blob.id)
 
 
-async def test_delete_not_restricted_by_task_payload() -> None:
-    """Deleting a blob referenced only by a task's payload succeeds.
-
-    The task is not read back through the repository afterward: the domain
-    ``ImportTask.payload_blob_id`` field is still required non-null even
-    though the column itself allows null now, a pre-existing mismatch this
-    change did not introduce or resolve.
-    """
+async def test_delete_cascades_task_with_payload() -> None:
+    """Deleting a blob deletes the import task carrying it as payload."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session() as session:
@@ -203,6 +196,5 @@ async def test_delete_not_restricted_by_task_payload() -> None:
 
         await blob_repository.delete(payload_blob.id)
 
-        row = await session.get(TaskORM, task.id)
-        assert row is not None
-        assert row.payload_blob_id is None
+        with pytest.raises(TaskNotFound):
+            await task_repository.get(task.id)
