@@ -16,6 +16,7 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
+from functools import partial
 
 import httpx
 import pytest
@@ -30,6 +31,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_agent_service,
     get_agent_version_service,
 )
+from kitaru.server.api.agent_deletion import get_agent_deleter
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -46,6 +48,13 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 def agent_repository() -> FakeAgentRepository:
     """Provide the fake agent repository backing the app."""
     return FakeAgentRepository()
+
+
+async def _delete_agent(
+    service: AgentService, agent_id: uuid.UUID, actor: AuthContext
+) -> None:
+    """Drive the deletion through one fake-backed agent service."""
+    await service.delete_agent(agent_id, actor=actor)
 
 
 @pytest.fixture
@@ -68,6 +77,9 @@ async def client(
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
+    app.dependency_overrides[get_agent_deleter] = lambda: partial(
+        _delete_agent, agent_service
+    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

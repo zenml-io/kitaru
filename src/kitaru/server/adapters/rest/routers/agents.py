@@ -48,6 +48,7 @@ from kitaru.server.adapters.rest.mapping.agents import (
     agent_update_to_command,
 )
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
+from kitaru.server.api.agent_deletion import AgentDeleter, get_agent_deleter
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
@@ -159,7 +160,7 @@ async def update_agent(
 @router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent(
     agent_id: uuid.UUID,
-    service: Annotated[AgentService, Depends(get_agent_service)],
+    delete: Annotated[AgentDeleter, Depends(get_agent_deleter)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> None:
     """Delete an agent.
@@ -168,10 +169,10 @@ async def delete_agent(
 
     Args:
         agent_id: Id of the agent.
-        service: Agent service.
+        delete: Agent deletion flow, committed across its own transactions.
         actor: Caller context.
     """
-    await service.delete_agent(agent_id, actor=actor)
+    await delete(agent_id, actor)
 
 
 @router.post("/{agent_id}/versions", status_code=status.HTTP_201_CREATED)

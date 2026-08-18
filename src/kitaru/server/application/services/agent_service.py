@@ -124,7 +124,7 @@ class AgentService:
         return await self._repository.update(agent)
 
     async def delete_agent(self, agent_id: uuid.UUID, actor: AuthContext) -> None:
-        """Delete an agent.
+        """Delete an agent, cascading its versions.
 
         Args:
             agent_id: Id of the agent.

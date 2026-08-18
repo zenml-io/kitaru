@@ -13,12 +13,18 @@
 #  permissions and limitations under the License.
 """End-to-end agent tests against PostgreSQL."""
 
+import uuid
 from collections.abc import AsyncGenerator
+from typing import Any
 
 import httpx
 import pytest
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
 
 from conftest import db_settings, lifespan_client
+from kitaru.server.api import agent_deletion
+from kitaru.server.database.service import DatabaseService
 
 
 @pytest.fixture
@@ -166,3 +172,276 @@ async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
 
     response = await client.get(f"/api/v1/agent-versions/{version['id']}")
     assert response.status_code == 404
+
+
+async def test_delete_missing_agent(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when deleting an agent that does not exist."""
+    response = await client.delete(f"/api/v1/agents/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+async def _upload_blob(client: httpx.AsyncClient, name: str, content: bytes) -> str:
+    """Store a blob, returning its id."""
+    response = await client.post(
+        "/api/v1/blobs", files={"file": (name, content, "text/plain")}
+    )
+    return response.json()["id"]
+
+
+async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
+    """Build an agent with a version, a subtree, and an unrelated task.
+
+    Covers every phase of agent deletion: an experiment with a run whose
+    replay pins a cohort version and a session, a cohort, an investigation,
+    five sessions (more than the batch size the test shrinks deletion to),
+    a secret bound to a version, and tags linked to a session and a version.
+
+    Returns:
+        Ids needed to drive the deletion and assert its aftermath.
+    """
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+
+    secret = (
+        await client.post(
+            "/api/v1/secrets", json={"name": "run-secret", "values": {"k": "v"}}
+        )
+    ).json()
+    version = (
+        await client.post(
+            f"/api/v1/agents/{agent['id']}/versions",
+            json={
+                "run_spec": {
+                    "command": "run.sh",
+                    "timeout_seconds": 60,
+                    "secret_ids": [secret["id"]],
+                }
+            },
+        )
+    ).json()
+    other_version = (
+        await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
+    ).json()
+
+    session_ids = []
+    for _ in range(5):
+        session = (
+            await client.post(
+                "/api/v1/sessions",
+                json={
+                    "agent_id": agent["id"],
+                    "agent_version_id": version["id"],
+                    "origin": "recorded",
+                    "inputs": {"q": "hi"},
+                    "outputs": None,
+                },
+            )
+        ).json()
+        session_ids.append(session["id"])
+
+    await client.post(
+        f"/api/v1/sessions/{session_ids[0]}/nodes",
+        json={
+            "nodes": [
+                {
+                    "index": 0,
+                    "node_type": "llm_call",
+                    "name": "call",
+                    "status": "completed",
+                    "inputs": {"q": "hi"},
+                    "outputs": None,
+                    "attributes": None,
+                    "metadata": {},
+                }
+            ]
+        },
+    )
+
+    session_tag = (await client.post("/api/v1/tags", json={"name": "flagged"})).json()
+    await client.post(
+        f"/api/v1/tags/{session_tag['id']}/links",
+        json={"resource_type": "session", "resource_id": session_ids[0]},
+    )
+    version_tag = (await client.post("/api/v1/tags", json={"name": "stable"})).json()
+    await client.post(
+        f"/api/v1/tags/{version_tag['id']}/links",
+        json={"resource_type": "agent_version", "resource_id": version["id"]},
+    )
+
+    cohort = (
+        await client.post(
+            "/api/v1/cohorts", json={"name": "cohort-1", "agent_id": agent["id"]}
+        )
+    ).json()
+    cohort_version = (
+        await client.post(
+            f"/api/v1/cohorts/{cohort['id']}/versions",
+            json={"add_session_ids": [session_ids[0]]},
+        )
+    ).json()
+
+    investigation = (
+        await client.post(
+            "/api/v1/investigations",
+            json={
+                "agent_id": agent["id"],
+                "name": "payment-failures",
+                "sessions": [
+                    {
+                        "session_id": session_ids[1],
+                        "questions": [{"key": "cause", "question": "What happened?"}],
+                    }
+                ],
+            },
+        )
+    ).json()
+
+    blob = (
+        await client.post(
+            "/api/v1/blobs",
+            files={"file": ("score.py", b"def score(): pass", "text/plain")},
+        )
+    ).json()
+    evaluator = (
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "metadata": {}}
+        )
+    ).json()
+    await client.post(
+        f"/api/v1/evaluators/{evaluator['id']}/versions",
+        json={
+            "source": {"type": "script", "blob_id": blob["id"], "entrypoint": "score"}
+        },
+    )
+    experiment = (
+        await client.post(
+            "/api/v1/experiments",
+            json={
+                "name": "exp1",
+                "agent_id": agent["id"],
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    await client.post(
+        f"/api/v1/experiments/{experiment['id']}/runs",
+        json={
+            "cohort_version_id": cohort_version["id"],
+            "agent_version_id": version["id"],
+        },
+    )
+
+    payload_blob_id = await _upload_blob(client, "payload.json", b"[]")
+    importer_script_blob_id = await _upload_blob(
+        client, "importer.py", b"def run(): pass"
+    )
+    importer = (
+        await client.post("/api/v1/importers", json={"name": "importer-1"})
+    ).json()
+    await client.post(
+        f"/api/v1/importers/{importer['id']}/versions",
+        json={
+            "source": {
+                "type": "script",
+                "blob_id": importer_script_blob_id,
+                "entrypoint": "run",
+            }
+        },
+    )
+    job = (
+        await client.post(
+            "/api/v1/imports",
+            json={
+                "importer": "importer-1",
+                "agent_id": agent["id"],
+                "payload_blob_id": payload_blob_id,
+            },
+        )
+    ).json()
+    tasks = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()["items"]
+    assert tasks[0]["agent_id"] == agent["id"]
+
+    return {
+        "agent_id": agent["id"],
+        "version_ids": [version["id"], other_version["id"]],
+        "session_ids": session_ids,
+        "secret_id": secret["id"],
+        "session_tag_id": session_tag["id"],
+        "version_tag_id": version_tag["id"],
+        "cohort_id": cohort["id"],
+        "investigation_id": investigation["id"],
+        "experiment_id": experiment["id"],
+        "task_id": tasks[0]["id"],
+    }
+
+
+async def test_delete_agent_cascades_its_full_subtree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Delete an agent whose subtree spans every deletion phase.
+
+    Shrinking the batch size below the session count forces the session
+    phase to loop over more than one page.
+    """
+    monkeypatch.setattr(agent_deletion, "DELETE_BATCH_SIZE", 2)
+    settings = db_settings()
+    async with lifespan_client(settings) as client:
+        setup = await _setup_agent_subtree(client)
+
+        response = await client.delete(f"/api/v1/agents/{setup['agent_id']}")
+        assert response.status_code == 204
+
+        assert (
+            await client.get(f"/api/v1/agents/{setup['agent_id']}")
+        ).status_code == 404
+        for session_id in setup["session_ids"]:
+            assert (
+                await client.get(f"/api/v1/sessions/{session_id}")
+            ).status_code == 404
+        for version_id in setup["version_ids"]:
+            assert (
+                await client.get(f"/api/v1/agent-versions/{version_id}")
+            ).status_code == 404
+        assert (
+            await client.get(f"/api/v1/cohorts/{setup['cohort_id']}")
+        ).status_code == 404
+        assert (
+            await client.get(f"/api/v1/investigations/{setup['investigation_id']}")
+        ).status_code == 404
+        assert (
+            await client.get(f"/api/v1/experiments/{setup['experiment_id']}")
+        ).status_code == 404
+
+        # Secrets are account-level. Only the version binding cascades.
+        assert (
+            await client.get(f"/api/v1/secrets/{setup['secret_id']}")
+        ).status_code == 200
+
+        tags = (await client.get("/api/v1/tags")).json()["items"]
+        tag_ids = {tag["id"] for tag in tags}
+        assert setup["session_tag_id"] in tag_ids
+        assert setup["version_tag_id"] in tag_ids
+        assert (
+            await client.delete(
+                f"/api/v1/tags/{setup['session_tag_id']}/links/session/"
+                f"{setup['session_ids'][0]}"
+            )
+        ).status_code == 404
+        assert (
+            await client.delete(
+                f"/api/v1/tags/{setup['version_tag_id']}/links/agent_version/"
+                f"{setup['version_ids'][0]}"
+            )
+        ).status_code == 404
+
+        engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+        try:
+            async with engine.connect() as connection:
+                row = (
+                    await connection.execute(
+                        text("SELECT id FROM task WHERE id = :id"),
+                        {"id": setup["task_id"]},
+                    )
+                ).one_or_none()
+                assert row is None
+        finally:
+            await engine.dispose()
