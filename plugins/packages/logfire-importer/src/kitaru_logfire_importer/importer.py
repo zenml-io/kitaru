@@ -459,12 +459,33 @@ class LogfireRecordsImporter:
                 continue
             traces[str(trace_id)].append(record)
 
-        grouped: dict[str, list[tuple[str, list[dict[str, Any]]]]] = defaultdict(list)
-        join_paths: dict[str, set[str]] = defaultdict(set)
-        fallback_sessions: set[str] = set()
+        grouped: dict[tuple[str, str], list[tuple[str, list[dict[str, Any]]]]] = (
+            defaultdict(list)
+        )
+        join_paths: dict[tuple[str, str], set[str]] = defaultdict(set)
+        fallback_sessions: set[tuple[str, str]] = set()
         for trace_id, rows in traces.items():
             try:
                 session_id, join_path, fallback = _join_value(rows, params, trace_id)
+                project_ids = {
+                    str(row["project_id"])
+                    for row in rows
+                    if row.get("project_id") not in (None, "")
+                }
+                if len(project_ids) > 1:
+                    raise InvalidImport(
+                        f"Trace '{trace_id}' contains conflicting Logfire project ids"
+                    )
+                source_instance_value = (
+                    params.get("source_instance")
+                    or params.get("project_id")
+                    or next(iter(project_ids), None)
+                )
+                source_instance = (
+                    str(source_instance_value).strip()
+                    if source_instance_value
+                    else "logfire"
+                )
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
@@ -474,19 +495,21 @@ class LogfireRecordsImporter:
                     )
                 )
                 continue
-            grouped[session_id].append((trace_id, rows))
-            join_paths[session_id].add(join_path)
+            key = (source_instance, session_id)
+            grouped[key].append((trace_id, rows))
+            join_paths[key].add(join_path)
             if fallback:
-                fallback_sessions.add(session_id)
+                fallback_sessions.add(key)
 
-        for session_id, session_traces in sorted(grouped.items()):
+        for (source_instance, session_id), session_traces in sorted(grouped.items()):
             try:
                 yield self._parse_session(
+                    source_instance,
                     session_id,
                     session_traces,
-                    params,
-                    join_paths=join_paths[session_id],
-                    trace_fallback=session_id in fallback_sessions,
+                    framework=params.get("framework"),
+                    join_paths=join_paths[(source_instance, session_id)],
+                    trace_fallback=(source_instance, session_id) in fallback_sessions,
                 )
             except InvalidImport as exc:
                 yield ImportFailure(
@@ -498,10 +521,11 @@ class LogfireRecordsImporter:
 
     def _parse_session(
         self,
+        source_instance: str,
         session_id: str,
         traces: list[tuple[str, list[dict[str, Any]]]],
-        params: dict[str, Any],
         *,
+        framework: Any,
         join_paths: set[str],
         trace_fallback: bool,
     ) -> ImportedSession:
@@ -516,16 +540,8 @@ class LogfireRecordsImporter:
             raise InvalidImport(
                 f"Session '{session_id}' contains conflicting Logfire project ids"
             )
-        source_instance_value = (
-            params.get("source_instance")
-            or params.get("project_id")
-            or next(iter(project_ids), None)
-        )
-        source_instance = (
-            str(source_instance_value).strip() if source_instance_value else "logfire"
-        )
         warnings: list[str] = []
-        if not source_instance_value:
+        if not project_ids and source_instance == "logfire":
             warnings.append(
                 "No Logfire project identity supplied; using source_instance 'logfire'"
             )
@@ -789,7 +805,7 @@ class LogfireRecordsImporter:
                 (turn.ended_at for turn in turns if turn.ended_at), default=None
             ),
             metadata=metadata,
-            framework=_detect_framework(all_records, params.get("framework")),
+            framework=_detect_framework(all_records, framework),
             nodes=node_tree,
         )
 
