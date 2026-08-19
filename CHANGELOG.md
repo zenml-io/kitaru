@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Repeated identical tool calls with baseline-scoped history replay their distinct recorded results in baseline order instead of all resolving to the newest match. Replayed calls past the last recorded occurrence follow the configured `on_miss` behavior.
 ### Changed
 
+- The repository's development `docker-compose.yml` now defaults `KITARU_SERVER_ANALYTICS_OPT_IN` to `false`, so servers spun up from a source checkout stop emitting product analytics unless the variable is exported. The CLI-managed local deployment (`kitaru login --local`) and the published server image keep their existing opt-in default.
 - Unified all runnable examples under a single `examples/` tree: the Python adapter examples moved from `examples/integrations/` to `examples/python/`, and the TypeScript examples moved from `v2_examples/` to `examples/typescript/`. The `examples/v2/mcp` configuration example was removed in favor of the MCP setup documentation.
 
 ## [0.22.1]
