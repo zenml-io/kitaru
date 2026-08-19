@@ -74,6 +74,10 @@ Worker inspection is read-only by design. Use `kitaru_registry_read` with `kind:
 
 Skills ship separately from Kitaru as Markdown procedures in [`zenml-io/kitaru-skills`](https://github.com/zenml-io/kitaru-skills). A skill does not start another service or process; your assistant reads the document and follows its procedure with the tools already available in the host.
 
+{% hint style="info" %}
+**Want to see a Kitaru skill in action before installing it?** Watch the 26-minute [guided tour](https://youtu.be/aYLfzXEr2Rk). It follows the `kitaru-guided-tour` skill from a prepared session review through a deterministic evaluator, frozen cohort, replay experiment, and comparison.
+{% endhint %}
+
 {% tabs %}
 {% tab title="Any skill-aware host" %}
 ```bash

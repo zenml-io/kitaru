@@ -257,13 +257,16 @@ jobs:
         run: |-
           set -euo pipefail
           prerelease=()
+          latest=(--latest=false)
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
+          else
+            latest=(--latest)
           fi
           if gh release view "$PACKAGE_TAG" >/dev/null 2>&1; then
             gh release upload "$PACKAGE_TAG" typescript-dist/*.tgz evidence/SHA256SUMS --clobber
             gh release edit "$PACKAGE_TAG" \
-              --latest=false \
+              "${latest[@]}" \
               --prerelease="$IS_PRERELEASE" \
               --title "Kitaru TypeScript $VERSION" \
               --verify-tag
@@ -271,7 +274,7 @@ jobs:
             gh release create "$PACKAGE_TAG" typescript-dist/*.tgz evidence/SHA256SUMS \
               "${prerelease[@]}" \
               --verify-tag \
-              --latest=false \
+              "${latest[@]}" \
               --title "Kitaru TypeScript $VERSION" \
               --generate-notes
           fi

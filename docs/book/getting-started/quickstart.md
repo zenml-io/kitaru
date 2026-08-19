@@ -10,7 +10,9 @@ icon: rocket
 You do not need to memorize commands to start. Kitaru is built for your coding assistant to drive: you ask, it operates Kitaru through the MCP server and the agent skills, and you keep the judgment calls. Every step below starts as a prompt; the equivalent command is there when you want to run it yourself.
 
 {% hint style="info" %}
-**No agent in production yet?** Ask your assistant for the guided tour instead: the `kitaru-guided-tour` skill clones the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) (a ready agent with checked-in traces), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns-agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
+**Want to see the complete loop before setting anything up?** Watch the 26-minute [Kitaru guided tour](https://youtu.be/aYLfzXEr2Rk). It starts with this Quickstart, then uses the `kitaru-guided-tour` skill to inspect recorded sessions, collect human judgments, define an evaluator and cohort, and test one improvement.
+
+**No agent in production yet?** When you are ready to try it yourself, ask your assistant for the guided tour. The skill clones the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns-agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
 {% endhint %}
 
 Before starting, [install Kitaru and log in](installation.md), then [set up your coding agent](../agent-native/setup.md): the MCP server gives it bounded Kitaru operations, and the skills teach it the procedures.
