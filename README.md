@@ -23,6 +23,12 @@
   <a href="https://kitaru.ai/slack">Community</a>
 </p>
 
+<p align="center">
+  <a href="https://youtu.be/aYLfzXEr2Rk">
+    <img src="assets/guided-tour-thumbnail.jpg" alt="Watch the 26-minute Kitaru guided tour" width="900">
+  </a>
+</p>
+
 ---
 
 ## 🎯 Why
