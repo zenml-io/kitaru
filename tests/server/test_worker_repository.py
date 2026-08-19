@@ -48,6 +48,8 @@ from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[WorkerRepository, uuid.UUID]
 
+_CUTOFF = datetime.now(UTC) - timedelta(minutes=1)
+
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
@@ -104,8 +106,8 @@ async def test_register_sets_timestamps(setup: Setup) -> None:
     assert worker.updated is not None
 
 
-async def test_register_upsert_keeps_id_and_created(setup: Setup) -> None:
-    """Re-registering under the same name keeps the id and created time."""
+async def test_register_same_name_creates_a_second_worker(setup: Setup) -> None:
+    """Registering under an existing name creates a separate worker."""
     repository, owner_id = setup
     first = await repository.register(
         _worker(owner_id, scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]))
@@ -115,56 +117,9 @@ async def test_register_upsert_keeps_id_and_created(setup: Setup) -> None:
             owner_id, scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
         )
     )
-    assert second.id == first.id
-    assert second.created == first.created
-    assert second.scope == WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
-
-
-async def test_register_upsert_renews_updated_and_last_seen_at(setup: Setup) -> None:
-    """Re-registering renews the updated timestamp and last_seen_at."""
-    repository, owner_id = setup
-    first = await repository.register(_worker(owner_id))
-    second = await repository.register(
-        _worker(owner_id, last_seen_at=datetime.now(UTC) + timedelta(seconds=1))
-    )
-    assert second.updated is not None
-    assert first.updated is not None
-    assert second.updated > first.updated
-    assert second.last_seen_at > first.last_seen_at
-
-
-async def test_register_upsert_refreshes_scope_runtime_and_metadata(
-    setup: Setup,
-) -> None:
-    """Re-registering replaces the scope, runtime, and metadata."""
-    repository, owner_id = setup
-    await repository.register(
-        _worker(
-            owner_id,
-            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
-            runtime=WorkerRuntime(platform="bare"),
-            metadata={"region": "eu"},
-        )
-    )
-    second = await repository.register(
-        _worker(
-            owner_id,
-            scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)]),
-            runtime=WorkerRuntime(platform="docker", hostname="worker-a"),
-            metadata={"region": "us"},
-        )
-    )
-    assert second.scope == WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
-    assert second.runtime == WorkerRuntime(platform="docker", hostname="worker-a")
-    assert second.metadata == {"region": "us"}
-
-
-async def test_register_upsert_distinct_names_coexist(setup: Setup) -> None:
-    """Registering under a different name creates a separate worker."""
-    repository, owner_id = setup
-    first = await repository.register(_worker(owner_id, name="worker-1"))
-    second = await repository.register(_worker(owner_id, name="worker-2"))
-    assert first.id != second.id
+    assert second.id != first.id
+    assert (await repository.get(first.id)).scope == first.scope
+    assert (await repository.get(second.id)).scope == second.scope
 
 
 async def test_get(setup: Setup) -> None:
@@ -190,14 +145,15 @@ async def test_query(setup: Setup) -> None:
     await repository.register(_worker(owner_id, name="worker-2"))
     third = await repository.register(_worker(owner_id, name="worker-3"))
 
-    workers, next_cursor = await repository.query(WorkerFilter())
+    workers, next_cursor = await repository.query(WorkerFilter(), _CUTOFF)
     assert next_cursor is None
     assert [worker.name for worker in workers] == ["worker-3", "worker-2", "worker-1"]
 
     workers, next_cursor = await repository.query(
         WorkerFilter(
             expression=FilterCondition(field="name", op=FilterOp.EQ, value="worker-1")
-        )
+        ),
+        _CUTOFF,
     )
     assert next_cursor is None
     assert workers[0] == first
@@ -205,27 +161,30 @@ async def test_query(setup: Setup) -> None:
     workers, next_cursor = await repository.query(
         WorkerFilter(
             expression=FilterCondition(field="name", op=FilterOp.EQ, value="missing")
-        )
+        ),
+        _CUTOFF,
     )
     assert next_cursor is None
     assert workers == []
     assert third.name == "worker-3"
 
 
-async def test_query_seen_after(setup: Setup) -> None:
-    """Filter workers by last_seen_at, an internal filter field."""
+async def test_query_hides_stale_unless_included(setup: Setup) -> None:
+    """Leave workers past the cutoff out unless no cutoff is given."""
     repository, owner_id = setup
     now = datetime.now(UTC)
-    await repository.register(
+    stale = await repository.register(
         _worker(owner_id, name="stale", last_seen_at=now - timedelta(hours=1))
     )
     fresh = await repository.register(_worker(owner_id, name="fresh", last_seen_at=now))
+    cutoff = now - timedelta(minutes=1)
 
-    workers, next_cursor = await repository.query(
-        WorkerFilter(seen_after=now - timedelta(minutes=1))
-    )
+    workers, next_cursor = await repository.query(WorkerFilter(), cutoff)
     assert next_cursor is None
     assert [worker.id for worker in workers] == [fresh.id]
+
+    workers, _ = await repository.query(WorkerFilter(), None)
+    assert {worker.id for worker in workers} == {stale.id, fresh.id}
 
 
 async def test_query_walks_pages(setup: Setup) -> None:
@@ -241,7 +200,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
     cursor = None
     while True:
         workers, next_cursor = await repository.query(
-            WorkerFilter(cursor=cursor, size=2)
+            WorkerFilter(cursor=cursor, size=2), _CUTOFF
         )
         collected.extend(workers)
         if next_cursor is None:
@@ -256,7 +215,7 @@ async def test_query_invalid_cursor(setup: Setup) -> None:
     """Raise for a cursor string that fails to decode."""
     repository, _ = setup
     with pytest.raises(ValidationError):
-        await repository.query(WorkerFilter(cursor="not-a-valid-cursor"))
+        await repository.query(WorkerFilter(cursor="not-a-valid-cursor"), _CUTOFF)
 
 
 async def test_delete(setup: Setup) -> None:

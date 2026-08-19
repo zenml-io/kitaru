@@ -161,6 +161,10 @@ class WorkerCreateRequest(RequestModel):
 class WorkerListParams(FilterableListParams):
     """Worker list params."""
 
+    include_stale: bool = Field(
+        default=False, description="Include workers past the liveness window."
+    )
+
 
 class WorkerHeartbeatRequest(RequestModel):
     """Worker heartbeat request."""
@@ -188,11 +192,16 @@ class WorkerResponse(OwnedResponseModel):
     metadata: dict[str, str] = Field(description="Arbitrary metadata.")
 
 
-class WorkerRegistrationResponse(ResponseModel):
-    """Worker registration response."""
+class WorkerTokenResponse(ResponseModel):
+    """Worker token response."""
 
-    worker: WorkerResponse = Field(description="Registered worker.")
     token: PlainSerializedSecretStr = Field(
         description="Bearer token scoped to this worker."
     )
     token_expires_at: datetime = Field(description="Time the token expires.")
+
+
+class WorkerRegistrationResponse(WorkerTokenResponse):
+    """Worker registration response."""
+
+    worker: WorkerResponse = Field(description="Registered worker.")

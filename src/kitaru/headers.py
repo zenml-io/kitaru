@@ -11,18 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the analytics source helpers."""
+"""Kitaru request header names."""
 
-from importlib.metadata import version
-
-from kitaru.analytics.source import (
-    AnalyticsSource,
-    format_client_header,
-)
-
-
-def test_format_client_header() -> None:
-    """Format the source and package version into the header value."""
-    assert format_client_header(AnalyticsSource.PYTHON) == (
-        f"kitaru-python/{version('kitaru')}"
-    )
+CLIENT_HEADER = "X-Kitaru-Client"
+SKILL_HEADER = "X-Kitaru-Skill"

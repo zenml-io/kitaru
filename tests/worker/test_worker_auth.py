@@ -11,8 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the worker registration token source."""
+"""Tests for the worker token source."""
 
+import uuid
+from datetime import datetime
+
+import pytest
 from fastapi import FastAPI
 
 from conftest import (
@@ -25,6 +29,7 @@ from conftest import (
     local_settings,
 )
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
+from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
@@ -41,17 +46,23 @@ RUNTIME = WorkerRuntime(platform="bare")
 
 
 class _CountingWorkerRepository(FakeWorkerRepository):
-    """Fake worker repository counting the registration calls it received."""
+    """Fake worker repository counting the registration and renewal calls."""
 
     def __init__(self) -> None:
         """Initialize the repository with no recorded calls."""
         super().__init__()
         self.register_calls = 0
+        self.renewal_calls = 0
 
     async def register(self, worker: Worker) -> Worker:
-        """Record the call and delegate to the fake upsert-by-name behavior."""
+        """Record the call and delegate to the fake insert."""
         self.register_calls += 1
         return await super().register(worker)
+
+    async def update_last_seen_at(self, worker_id: uuid.UUID, now: datetime) -> None:
+        """Record the call and delegate to the fake stamp."""
+        self.renewal_calls += 1
+        await super().update_last_seen_at(worker_id, now)
 
 
 async def _registration_app() -> tuple[FastAPI, _CountingWorkerRepository, str]:
@@ -73,7 +84,7 @@ async def _registration_app() -> tuple[FastAPI, _CountingWorkerRepository, str]:
     repository = _CountingWorkerRepository()
     app = create_app(local_settings())
     app.dependency_overrides[get_worker_service] = lambda: WorkerService(
-        repository=repository
+        repository=repository, liveness_timeout_seconds=60
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     return app, repository, account_token
@@ -93,39 +104,43 @@ def _registration_request(name: str = "worker-1") -> WorkerCreateRequest:
     )
 
 
-async def test_initial_token_is_served_without_registering() -> None:
-    """Return the token from the initial registration without a new registration."""
+async def test_initial_token_is_served_without_renewing() -> None:
+    """Return the token from the registration without a renewal request."""
     app, repository, account_token = await _registration_app()
     client = asgi_api_client(app, api_key=account_token)
-    source = WorkerTokenSource(client, _registration_request(), "initial-token")
+    registered = await client.workers.create(_registration_request())
+    source = WorkerTokenSource(client, registered.worker.id, "initial-token")
 
     token = source.get_cached_token()
 
     assert token == "initial-token"
-    assert repository.register_calls == 0
+    assert repository.renewal_calls == 0
 
 
-async def test_fetch_reregisters_and_caches_the_fresh_token() -> None:
-    """Re-register the worker and serve the freshly issued token from the cache."""
+async def test_fetch_renews_and_caches_the_fresh_token() -> None:
+    """Renew the worker token and serve the freshly issued token from the cache."""
     app, repository, account_token = await _registration_app()
     client = asgi_api_client(app, api_key=account_token)
-    source = WorkerTokenSource(client, _registration_request(), "initial-token")
+    registered = await client.workers.create(_registration_request())
+    source = WorkerTokenSource(client, registered.worker.id, "initial-token")
 
     token = await source.fetch_token()
 
     assert isinstance(token, str) and token != "initial-token"
     assert repository.register_calls == 1
+    assert repository.renewal_calls == 1
     assert source.get_cached_token() == token
 
 
-async def test_reregistration_upserts_by_name() -> None:
-    """Keep the same worker id when re-registering under the same worker name."""
-    app, repository, account_token = await _registration_app()
+async def test_fetch_fails_for_a_deleted_worker() -> None:
+    """Raise when the worker the source renews for no longer exists."""
+    app, _, account_token = await _registration_app()
     client = asgi_api_client(app, api_key=account_token)
-    request = _registration_request(name="shared-worker")
+    registered = await client.workers.create(_registration_request())
+    await client.workers.delete(registered.worker.id)
+    source = WorkerTokenSource(client, registered.worker.id, "initial-token")
 
-    first = await client.workers.create(request)
-    second = await client.workers.create(request)
+    with pytest.raises(NotFoundError):
+        await source.fetch_token()
 
-    assert first.worker.id == second.worker.id
-    assert repository.register_calls == 2
+    assert source.get_cached_token() == "initial-token"

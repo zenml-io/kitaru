@@ -18,9 +18,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from importlib.metadata import version
 
-CLIENT_HEADER = "X-Kitaru-Client"
-SKILL_HEADER = "X-Kitaru-Skill"
-
 
 class AnalyticsSource(StrEnum):
     """Analytics event source."""
@@ -38,6 +35,7 @@ class AnalyticsAttribution:
     """Analytics attribution."""
 
     source: AnalyticsSource = AnalyticsSource.PYTHON
+    version: str | None = None
     skill: str | None = None
 
 
@@ -58,21 +56,3 @@ def format_client_header(source: AnalyticsSource) -> str:
         ``<source>/<version>`` header value.
     """
     return f"{source.value}/{version('kitaru')}"
-
-
-def parse_client_header(value: str) -> AnalyticsSource | None:
-    """Parse the source from a client identification header value.
-
-    Args:
-        value: ``<source>/<version>`` header value.
-
-    Returns:
-        Parsed source, or None for an unknown client.
-    """
-    if not value:
-        return None
-    name, _, _ = value.partition("/")
-    try:
-        return AnalyticsSource(name)
-    except ValueError:
-        return None

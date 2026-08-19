@@ -3335,7 +3335,8 @@ export interface paths {
          * List Workers
          * @description List workers.
          *
-         *     Clients observe HTTP 200 on success and 422 on invalid pagination
+         *     Workers past the liveness window are left out unless include_stale is
+         *     set. Clients observe HTTP 200 on success and 422 on invalid pagination
          *     parameters.
          *
          *     Args:
@@ -3351,13 +3352,11 @@ export interface paths {
         put?: never;
         /**
          * Register Worker
-         * @description Register a worker, upserting by name.
+         * @description Register a worker.
          *
-         *     Re-registration refreshes the scope, runtime, and metadata, stamps
-         *     last_seen_at, and mints a fresh token, keeping the id and created time.
-         *     Re-registering with a fresh token is how a worker renews before its
-         *     current token expires. Clients observe HTTP 200 on both the first
-         *     registration and every re-registration, and 422 on invalid input.
+         *     Every registration creates a new worker, names are labels and need not
+         *     be unique. Clients observe HTTP 200 on success, 426 from a Kitaru client
+         *     that renews by re-registering, and 422 on invalid input.
          *
          *     Args:
          *         body: Worker create request.
@@ -3365,6 +3364,7 @@ export interface paths {
          *         auth_service: Authentication service for the current request.
          *         actor: Caller context.
          *         settings: API settings for this process.
+         *         client: Client identification header value.
          *
          *     Returns:
          *         Stored worker with a bearer token scoped to it.
@@ -3445,6 +3445,39 @@ export interface paths {
          *         Held tasks the worker should stop running.
          */
         post: operations["heartbeat_worker_api_v1_workers__worker_id__heartbeat_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workers/{worker_id}/token": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Renew Worker Token
+         * @description Issue a fresh token for a registered worker.
+         *
+         *     Renewal stamps last_seen_at. Clients observe HTTP 200 on success, 403
+         *     when the worker belongs to another account, and 404 when no worker has
+         *     this id.
+         *
+         *     Args:
+         *         worker_id: Id of the worker.
+         *         service: Worker service.
+         *         auth_service: Authentication service for the current request.
+         *         actor: Caller context.
+         *
+         *     Returns:
+         *         Bearer token scoped to the worker.
+         */
+        post: operations["renew_worker_token_api_v1_workers__worker_id__token_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -8238,6 +8271,24 @@ export interface components {
              */
             selectors?: components["schemas"]["LabelSelector"][] | null;
         };
+        /**
+         * WorkerTokenResponse
+         * @description Worker token response.
+         */
+        WorkerTokenResponse: {
+            /**
+             * Token
+             * Format: password
+             * @description Bearer token scoped to this worker.
+             */
+            token: string;
+            /**
+             * Token Expires At
+             * Format: date-time
+             * @description Time the token expires.
+             */
+            token_expires_at: string;
+        };
     };
     responses: never;
     parameters: never;
@@ -12633,6 +12684,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include workers past the liveness window. */
+                include_stale?: boolean;
             };
             header?: never;
             path?: never;
@@ -12663,7 +12716,9 @@ export interface operations {
     register_worker_api_v1_workers_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "X-Kitaru-Client"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12775,6 +12830,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkerHeartbeatResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    renew_worker_token_api_v1_workers__worker_id__token_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                worker_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkerTokenResponse"];
                 };
             };
             /** @description Validation Error */

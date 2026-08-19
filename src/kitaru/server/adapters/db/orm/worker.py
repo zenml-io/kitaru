@@ -16,7 +16,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String, UniqueConstraint
+from sqlalchemy import DateTime, ForeignKeyConstraint, Index, String
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,17 +26,13 @@ from kitaru.server.adapters.db.orm.base import (
     TimestampMixin,
     UUIDPrimaryKeyMixin,
 )
-from kitaru.server.adapters.db.orm.orm_utils import (
-    foreign_key_name,
-    index_name,
-    unique_constraint_name,
-)
+from kitaru.server.adapters.db.orm.orm_utils import foreign_key_name, index_name
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 from kitaru.server.domain.worker import Worker
 
-WORKER_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("worker", ["name"])
 WORKER_OWNER_ID_FOREIGN_KEY = foreign_key_name("worker", ["owner_id"])
 WORKER_OWNER_ID_INDEX = index_name("worker", ["owner_id"])
+WORKER_LAST_SEEN_AT_INDEX = index_name("worker", ["last_seen_at", "id"])
 
 
 class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -44,11 +40,11 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "worker"
     __table_args__ = (
-        UniqueConstraint("name", name=WORKER_NAME_UNIQUE_CONSTRAINT),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=WORKER_OWNER_ID_FOREIGN_KEY
         ),
         Index(WORKER_OWNER_ID_INDEX, "owner_id"),
+        Index(WORKER_LAST_SEEN_AT_INDEX, "last_seen_at", "id"),
     )
 
     owner_id: Mapped[uuid.UUID]
@@ -57,29 +53,6 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     runtime: Mapped[dict] = mapped_column(JSONB)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     metadata_: Mapped[dict[str, str]] = mapped_column("metadata", JSONB)
-
-    @classmethod
-    def column_values(cls, worker: Worker) -> dict[str, object]:
-        """Map a domain worker to its column values, id included.
-
-        Shared by `from_domain` and the upsert statement in
-        `SQLWorkerRepository.register`, so the field list is written once.
-
-        Args:
-            worker: Worker to store.
-
-        Returns:
-            Column values keyed by column name.
-        """
-        return {
-            "id": worker.id,
-            "owner_id": worker.owner_id,
-            "name": worker.name,
-            "scope": worker.scope.model_dump(mode="json"),
-            "runtime": worker.runtime.model_dump(mode="json"),
-            "last_seen_at": worker.last_seen_at,
-            "metadata_": worker.metadata,
-        }
 
     @classmethod
     def from_domain(cls, worker: Worker) -> "WorkerORM":
@@ -91,7 +64,15 @@ class WorkerORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Returns:
             Row without timestamps set.
         """
-        return cls(**cls.column_values(worker))
+        return cls(
+            id=worker.id,
+            owner_id=worker.owner_id,
+            name=worker.name,
+            scope=worker.scope.model_dump(mode="json"),
+            runtime=worker.runtime.model_dump(mode="json"),
+            last_seen_at=worker.last_seen_at,
+            metadata_=worker.metadata,
+        )
 
     def to_domain(self) -> Worker:
         """Build a domain worker from this row.

@@ -8373,9 +8373,9 @@
           }
         },
         "required": [
-          "worker",
           "token",
-          "token_expires_at"
+          "token_expires_at",
+          "worker"
         ],
         "title": "WorkerRegistrationResponse",
         "type": "object"
@@ -8603,12 +8603,36 @@
         ],
         "title": "WorkerScope",
         "type": "object"
+      },
+      "WorkerTokenResponse": {
+        "description": "Worker token response.",
+        "properties": {
+          "token": {
+            "description": "Bearer token scoped to this worker.",
+            "format": "password",
+            "title": "Token",
+            "type": "string",
+            "writeOnly": true
+          },
+          "token_expires_at": {
+            "description": "Time the token expires.",
+            "format": "date-time",
+            "title": "Token Expires At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "token_expires_at"
+        ],
+        "title": "WorkerTokenResponse",
+        "type": "object"
       }
     }
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.22.2"
+    "version": "0.22.1+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -16119,7 +16143,7 @@
     },
     "/api/v1/workers": {
       "get": {
-        "description": "List workers.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n    params: Worker list params.\n\nReturns:\n    Page of workers.",
+        "description": "List workers.\n\nWorkers past the liveness window are left out unless include_stale is\nset. Clients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Worker service.\n    actor: Caller context.\n    settings: API settings for this process.\n    params: Worker list params.\n\nReturns:\n    Page of workers.",
         "operationId": "list_workers_api_v1_workers_get",
         "parameters": [
           {
@@ -16193,6 +16217,18 @@
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
             }
+          },
+          {
+            "description": "Include workers past the liveness window.",
+            "in": "query",
+            "name": "include_stale",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include workers past the liveness window.",
+              "title": "Include Stale",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -16223,8 +16259,20 @@
         ]
       },
       "post": {
-        "description": "Register a worker, upserting by name.\n\nRe-registration refreshes the scope, runtime, and metadata, stamps\nlast_seen_at, and mints a fresh token, keeping the id and created time.\nRe-registering with a fresh token is how a worker renews before its\ncurrent token expires. Clients observe HTTP 200 on both the first\nregistration and every re-registration, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
+        "description": "Register a worker.\n\nEvery registration creates a new worker, names are labels and need not\nbe unique. Clients observe HTTP 200 on success, 426 from a Kitaru client\nthat renews by re-registering, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n    client: Client identification header value.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
         "operationId": "register_worker_api_v1_workers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "X-Kitaru-Client",
+            "required": false,
+            "schema": {
+              "default": "",
+              "title": "X-Kitaru-Client",
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -16391,6 +16439,50 @@
           }
         },
         "summary": "Heartbeat Worker",
+        "tags": [
+          "workers"
+        ]
+      }
+    },
+    "/api/v1/workers/{worker_id}/token": {
+      "post": {
+        "description": "Issue a fresh token for a registered worker.\n\nRenewal stamps last_seen_at. Clients observe HTTP 200 on success, 403\nwhen the worker belongs to another account, and 404 when no worker has\nthis id.\n\nArgs:\n    worker_id: Id of the worker.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n\nReturns:\n    Bearer token scoped to the worker.",
+        "operationId": "renew_worker_token_api_v1_workers__worker_id__token_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "worker_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Worker Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkerTokenResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Renew Worker Token",
         "tags": [
           "workers"
         ]

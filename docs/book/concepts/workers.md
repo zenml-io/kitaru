@@ -51,6 +51,6 @@ kitaru worker list
 kitaru worker get <worker-id>
 ```
 
-A worker record exposes `last_seen_at`, the time of its last observed heartbeat, and `live`, the server's current liveness calculation. These are observations, not assignment guarantees: a worker can become unavailable after its last heartbeat, and a live worker may not match a task's scope or win its claim. The native MCP server exposes the same list and exact-UUID get operations through the read-only `kitaru_registry_read` tool. It cannot register, update, delete, or control workers.
+`kitaru worker list` shows live workers, add `--include-stale` for the rest. Names are labels shared by any number of workers, so `kitaru worker get` takes an id from that listing. A worker record exposes `last_seen_at`, the time of its last observed heartbeat, and `live`, the server's current liveness calculation. These are observations, not assignment guarantees: a worker can become unavailable after its last heartbeat, and a live worker may not match a task's scope or win its claim. The native MCP server exposes the same list and exact-UUID get operations through the read-only `kitaru_registry_read` tool. It cannot register, update, delete, or control workers.
 
 A worker that stops heartbeating loses its tasks: the server requeues them for the next worker (or fails them at the retry cap), so a crashed pod never strands a replay.

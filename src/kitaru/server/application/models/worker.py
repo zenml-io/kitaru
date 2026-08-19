@@ -17,8 +17,6 @@ import uuid
 from collections.abc import Mapping
 from typing import ClassVar
 
-from pydantic import AwareDatetime
-
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import EQUALITY_OPS, STRING_OPS, FilterField
 
@@ -31,4 +29,4 @@ class WorkerFilter(ListFilter):
         "name": FilterField(value_type=str, ops=STRING_OPS),
     }
 
-    seen_after: AwareDatetime | None = None
+    include_stale: bool = False

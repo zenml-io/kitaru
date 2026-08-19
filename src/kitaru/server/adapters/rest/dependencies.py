@@ -820,18 +820,24 @@ def get_tag_service(
 
 def get_worker_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> WorkerService:
     """Return a worker service for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
         analytics: Analytics tracker for the current request.
 
     Returns:
         Worker service bound to the SQL repository.
     """
-    return WorkerService(repository=SQLWorkerRepository(session), analytics=analytics)
+    return WorkerService(
+        repository=SQLWorkerRepository(session),
+        liveness_timeout_seconds=settings.WORKER_LIVENESS_TIMEOUT_SECONDS,
+        analytics=analytics,
+    )
 
 
 def get_idempotency_key_repository(

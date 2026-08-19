@@ -56,8 +56,8 @@ async def test_workers_persist_across_requests(client: httpx.AsyncClient) -> Non
     assert body["items"][0] == created
 
 
-async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> None:
-    """Persist a re-registration across requests, keeping id and created."""
+async def test_same_name_registers_a_second_worker(client: httpx.AsyncClient) -> None:
+    """Persist two workers registered under one name across requests."""
     first = (
         await client.post(
             "/api/v1/workers",
@@ -82,16 +82,38 @@ async def test_upsert_persists_across_requests(client: httpx.AsyncClient) -> Non
         )
     ).json()["worker"]
 
-    assert second["id"] == first["id"]
-    assert second["created"] == first["created"]
-    assert second["updated"] > first["updated"]
+    assert second["id"] != first["id"]
 
     response = await client.get(f"/api/v1/workers/{first['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["scope"]["claims"] == [{"kind": "importer", "agent_version_id": None}]
-    assert body["runtime"]["platform"] == "docker"
-    assert body["metadata"] == {"region": "us"}
+    assert body["scope"]["claims"] == [{"kind": "agent", "agent_version_id": None}]
+    assert body["runtime"]["platform"] == "bare"
+    assert body["metadata"] == {"region": "eu"}
+
+
+async def test_token_renewal_persists_across_requests(
+    client: httpx.AsyncClient,
+) -> None:
+    """Renew a worker token and observe the seen stamp on a later read."""
+    created = (
+        await client.post(
+            "/api/v1/workers",
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
+        )
+    ).json()["worker"]
+
+    response = await client.post(f"/api/v1/workers/{created['id']}/token")
+    assert response.status_code == 200
+    assert response.json()["token"]
+
+    response = await client.get(f"/api/v1/workers/{created['id']}")
+    assert response.json()["last_seen_at"] >= created["last_seen_at"]
 
 
 async def test_delete_persists_across_requests(client: httpx.AsyncClient) -> None:

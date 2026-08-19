@@ -63,6 +63,7 @@ def worker_list_params_to_filter(params: WorkerListParams) -> WorkerFilter:
         expression=filter_to_expression(params.filter)
         if params.filter is not None
         else None,
+        include_stale=params.include_stale,
         cursor=params.cursor,
         size=params.size,
         sort=params.sort,

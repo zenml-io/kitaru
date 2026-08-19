@@ -24,7 +24,7 @@ kitaru worker start
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `KITARU_WORKER_NAME` | hostname-pid | Stable name; restarts reuse the worker registration. In Kubernetes the pod name works out of the box. |
+| `KITARU_WORKER_NAME` | hostname-pid | Label shown in worker listings. Every start registers a new worker, names need not be unique. |
 | `KITARU_WORKER_CONCURRENCY` | 10 | Tasks run in parallel |
 | `KITARU_WORKER_SCOPE__CLAIMS` | all | JSON list of claims, such as `{"kind":"agent"}` or `{"kind":"agent","agent_version_id":"<UUID>"}` |
 | `KITARU_WORKER_SCOPE__SELECTORS` | none | JSON label selectors (e.g. limit to one agent version's environment) |
@@ -64,5 +64,5 @@ This is the pattern for [CI regression gates](../guides/regression-suite.md): th
 
 - **Draining**: SIGINT/SIGTERM stops claiming and finishes in-flight tasks; a second signal exits immediately. Per-task timeouts (set server-side and on agent versions) bound the wait.
 - **Crash safety**: a worker that dies stops heartbeating; the server requeues its tasks to the next worker (up to the retry limit). No replay is lost to a pod eviction.
-- **Liveness**: `kitaru worker list` shows the fleet and when each worker was last seen.
+- **Liveness**: `kitaru worker list` shows the live fleet and when each worker was last seen. Add `--include-stale` to see workers past the liveness window.
 - **Subprocess environments**: evaluator and importer plugins run via `uv` in isolated per-plugin environments, cached by content hash; agent tasks run the agent version's command in the worker's own environment plus the version's [secrets](secrets.md). The default plugins (the five `kitaru/` importers and the built-in evaluator suite) run under the same isolation as plugins you write yourself.
