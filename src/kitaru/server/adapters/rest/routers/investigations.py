@@ -28,7 +28,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionUpdateRequest,
     InvestigationUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_investigation_service,
@@ -50,6 +50,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_investigation(
     body: InvestigationCreateRequest,
     service: Annotated[InvestigationService, Depends(get_investigation_service)],

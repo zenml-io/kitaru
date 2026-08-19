@@ -29,7 +29,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunCreateRequest,
     ExperimentRunResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import authorize, get_experiment_service
 from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_create_to_command,
@@ -48,6 +48,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_experiment(
     body: ExperimentCreateRequest,
     service: Annotated[ExperimentService, Depends(get_experiment_service)],
@@ -175,6 +176,7 @@ async def delete_experiment(
 
 
 @router.post("/{experiment_id}/runs", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def start_run(
     experiment_id: uuid.UUID,
     body: ExperimentRunCreateRequest,

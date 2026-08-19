@@ -26,7 +26,7 @@ from kitaru.api_models.v1.replay import (
     ToolLookupRequest,
     ToolLookupResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -45,6 +45,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_replay(
     body: ReplayCreateRequest,
     service: Annotated[ReplayService, Depends(get_replay_service)],

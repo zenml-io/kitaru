@@ -20,8 +20,16 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeAgentRepository, FakeCohortRepository, create_agent
-from kitaru.server.adapters.rest.dependencies import authorize, get_cohort_service
+from conftest import (
+    FakeAgentRepository,
+    FakeCohortRepository,
+    create_agent,
+    override_idempotency,
+)
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_cohort_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -61,6 +69,7 @@ async def client(
     )
     app.dependency_overrides[get_cohort_service] = lambda: cohort_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

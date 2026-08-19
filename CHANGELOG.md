@@ -10,11 +10,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Added user-facing methods to `KitaruClient` and `KitaruSyncClient`: get agents and experiments by name or id, list sessions and session nodes, replay a session or start an experiment run and wait for the result. The one-method-per-endpoint API client stays reachable as `client.api`.
+- Added server-side idempotency keys: a retried POST or PATCH request with the same `Idempotency-Key` replays the first committed response instead of re-executing, marked with an `Idempotent-Replayed: true` header. The same key with a different request body is rejected with 422, and the SDK raises `IdempotencyError`. Keys are retained for `KITARU_SERVER_IDEMPOTENCY_KEY_RETENTION_SECONDS` (default 900 seconds).
 
 ### Fixed
 
 - Repeated identical tool calls with baseline-scoped history replay their distinct recorded results in baseline order instead of all resolving to the newest match. Replayed calls past the last recorded occurrence follow the configured `on_miss` behavior.
 - The TypeScript adapters (Mastra and Vercel AI SDK) now apply the same baseline occurrence ordering: repeated identical tool calls send a zero-based `occurrence` with each history lookup and advance it only on a found result.
+- Task-bound adapters (Python and TypeScript) recover from a 409 on retried session creation by reading the task's already-linked result session instead of failing the run.
 
 ### Changed
 

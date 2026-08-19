@@ -30,7 +30,7 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionResponse,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
@@ -57,6 +57,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_agent(
     body: AgentCreateRequest,
     service: Annotated[AgentService, Depends(get_agent_service)],
@@ -176,6 +177,7 @@ async def delete_agent(
 
 
 @router.post("/{agent_id}/versions", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_agent_version(
     agent_id: uuid.UUID,
     body: AgentVersionCreateRequest,

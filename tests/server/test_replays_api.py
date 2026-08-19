@@ -28,6 +28,7 @@ from conftest import (
     create_blob,
     create_plugin,
     create_session,
+    override_idempotency,
 )
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.rest.dependencies import (
@@ -64,6 +65,7 @@ async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, 
     app.dependency_overrides[get_replay_service] = lambda: services.replay_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

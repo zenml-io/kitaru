@@ -24,6 +24,7 @@ from conftest import (
     FakePasswordHasher,
     asgi_api_client,
     local_settings,
+    override_idempotency,
 )
 from kitaru.api_models.v1.account import AccountListParams, UserCreateRequest
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
@@ -59,6 +60,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR
+    override_idempotency(app, ACTOR.account)
     async with asgi_api_client(app) as client:
         yield client
 

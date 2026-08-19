@@ -46,6 +46,7 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.client import KitaruAPIClient
+from kitaru.client.exceptions import APIError
 from kitaru_openai_agents import KitaruRunner
 from kitaru_openai_agents.recording import (
     KitaruRecordingError,
@@ -85,6 +86,10 @@ class _FakeSessions:
             raise self._client.update_error
         return None
 
+    async def get(self, session_id: uuid.UUID) -> Any:
+        self._client.events.append("session:get")
+        return SimpleNamespace(id=session_id)
+
 
 class _FakeTasks:
     def __init__(self, client: "_FakeClient") -> None:
@@ -94,6 +99,12 @@ class _FakeTasks:
         self._client.events.append("task:get_spec")
         return SimpleNamespace(
             details=AgentTaskDetails(inputs=self._client.task_inputs)
+        )
+
+    async def get(self, task_id: uuid.UUID) -> Any:
+        self._client.events.append("task:get")
+        return SimpleNamespace(
+            id=task_id, result_session_id=self._client.result_session_id
         )
 
 
@@ -115,6 +126,7 @@ class _FakeClient:
     next_ingest_error: ClassVar[BaseException | None] = None
     next_update_error: ClassVar[BaseException | None] = None
     next_replay_error: ClassVar[BaseException | None] = None
+    next_result_session_id: ClassVar[uuid.UUID | None] = None
 
     def __init__(self) -> None:
         self.session_id = uuid.uuid4()
@@ -123,6 +135,7 @@ class _FakeClient:
         self.ingest_error = type(self).next_ingest_error
         self.update_error = type(self).next_update_error
         self.replay_error = type(self).next_replay_error
+        self.result_session_id = type(self).next_result_session_id
         self.events: list[str] = []
         self.sessions = _FakeSessions(self)
         self.tasks = _FakeTasks(self)
@@ -145,6 +158,7 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeClient.next_ingest_error = None
     _FakeClient.next_update_error = None
     _FakeClient.next_replay_error = None
+    _FakeClient.next_result_session_id = None
     for name in ("KITARU_TASK_INPUTS", "KITARU_REPLAY_ID"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setattr(recording_module, "KitaruAPIClient", _FakeClient)
@@ -184,6 +198,31 @@ async def test_records_complete_session_and_model_node(
         "session:completed",
         "client:close",
     ]
+
+
+async def test_start_recovers_existing_result_session_on_conflict() -> None:
+    """Recover the task's result session when the create call 409s."""
+    client = _FakeClient()
+    task_id = uuid.uuid4()
+    result_session_id = uuid.uuid4()
+    client.create_error = APIError(
+        409, f"Task {task_id} already links a result session"
+    )
+    client.result_session_id = result_session_id
+    recorder = RunRecorder(client=cast(KitaruAPIClient, client), batch_size=20)
+
+    session = await recorder.start(
+        inputs="hello",
+        agent_id=None,
+        agent_version_id=None,
+        session_name=None,
+        replay=False,
+        task_id=task_id,
+    )
+
+    assert session.id == result_session_id
+    assert client.sessions.created == []
+    assert "task:get" in client.events
 
 
 async def test_task_input_environment_wins_and_preserves_json(

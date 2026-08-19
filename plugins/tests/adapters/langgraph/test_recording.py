@@ -1,11 +1,14 @@
 """Callback recording and ancestry contracts."""
 
+import json
 import uuid
 from typing import Any
 
+import pytest
 from langchain_core.outputs import LLMResult
 
 from kitaru.api_models.v1.session_node import NodeType
+from kitaru.client.exceptions import APIError
 from kitaru_langgraph.callbacks import AsyncKitaruCallback
 from kitaru_langgraph.capture import CapturePolicy
 from kitaru_langgraph.recording import InvocationRecorder
@@ -50,3 +53,29 @@ async def test_nested_ancestor_is_persisted_before_child(fake_client: Any) -> No
     assert all(
         node.parent_index is None or node.parent_index < node.index for node in nodes
     )
+
+
+async def test_setup_recovers_existing_result_session_on_conflict(
+    fake_client: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Recover the task's result session when the create call 409s."""
+    task_id = uuid.uuid4()
+    result_session_id = uuid.uuid4()
+    monkeypatch.setenv("KITARU_TASK_ID", str(task_id))
+    monkeypatch.setenv("KITARU_TASK_INPUTS", json.dumps("hello"))
+    fake_client.next_create_error = APIError(
+        409, f"Task {task_id} already links a result session"
+    )
+    fake_client.next_result_session_id = result_session_id
+
+    recorder = await InvocationRecorder.setup(
+        {"input": True},
+        None,
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        batch_size=1,
+        policy=CapturePolicy(),
+    )
+
+    assert recorder.session_id == result_session_id

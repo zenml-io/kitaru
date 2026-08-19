@@ -42,12 +42,14 @@ from kitaru.client.exceptions import (
     APIError,
     AuthenticationError,
     AuthorizationError,
+    IdempotencyError,
     KitaruClientError,
     NotFoundError,
     ServerError,
     TokenGrantError,
     ValidationError,
 )
+from kitaru.client.session_recovery import create_or_get_result_session
 from kitaru.client.sync_client import KitaruSyncClient
 
 __all__ = [
@@ -62,6 +64,7 @@ __all__ = [
     "CredentialStore",
     "CredentialStoreTokenSource",
     "DeviceLoginError",
+    "IdempotencyError",
     "KitaruAPIClient",
     "KitaruClient",
     "KitaruClientError",
@@ -76,6 +79,7 @@ __all__ = [
     "TokenSource",
     "ValidationError",
     "control_plane_login",
+    "create_or_get_result_session",
     "device_login",
     "get_server_url",
     "load_config",

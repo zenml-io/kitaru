@@ -62,7 +62,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeCreateRequest,
 )
 from kitaru.api_models.v1.task import AgentTaskDetails
-from kitaru.client import KitaruAPIClient
+from kitaru.client import KitaruAPIClient, create_or_get_result_session
 
 from .inputs import normalize_openai_input
 
@@ -117,7 +117,7 @@ class ResolvedRunInput:
     recorded: Any
     openai: str | list[TResponseInputItem]
     replay: ReplayResponse | None
-    task_bound: bool
+    task_id: uuid.UUID | None
 
 
 async def resolve_run_input(
@@ -146,7 +146,7 @@ async def resolve_run_input(
         recorded=recorded,
         openai=normalize_openai_input(recorded),
         replay=replay,
-        task_bound=task_id is not None,
+        task_id=task_id,
     )
 
 
@@ -183,11 +183,13 @@ class RunRecorder:
         agent_version_id: uuid.UUID | None,
         session_name: str | None,
         replay: bool,
+        task_id: uuid.UUID | None = None,
     ) -> SessionResponse:
         """Create the session and root before model execution."""
         started_at = datetime.now(UTC)
         root_inputs = _capture(inputs)
-        session = await self.client.sessions.create(
+        session = await create_or_get_result_session(
+            self.client,
             SessionCreateRequest(
                 agent_id=agent_id,
                 agent_version_id=agent_version_id,
@@ -199,7 +201,8 @@ class RunRecorder:
                 started_at=started_at,
                 framework=FRAMEWORK,
                 adapter_version=ADAPTER_VERSION,
-            )
+            ),
+            task_id,
         )
         self.session = session
         self.started_at = started_at

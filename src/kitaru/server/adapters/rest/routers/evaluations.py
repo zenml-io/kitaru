@@ -25,7 +25,7 @@ from kitaru.api_models.v1.evaluation import (
     EvaluationResponse,
 )
 from kitaru.api_models.v1.job import JobResponse
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_evaluation_service,
@@ -45,6 +45,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_evaluations(
     body: EvaluationBatchCreateRequest,
     service: Annotated[JobService, Depends(get_job_service)],

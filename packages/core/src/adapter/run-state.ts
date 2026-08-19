@@ -3,6 +3,7 @@ import type { JsonValue, ReplaySpec } from "../types.js";
 
 export type AdapterClient = Pick<
   KitaruClient,
+  | "createOrGetResultSession"
   | "createSession"
   | "getReplay"
   | "getTaskSpec"

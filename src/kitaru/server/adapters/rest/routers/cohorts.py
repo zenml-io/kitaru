@@ -30,7 +30,7 @@ from kitaru.api_models.v1.cohort_version import (
     CohortVersionListParams,
     CohortVersionResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_cohort_service,
@@ -57,6 +57,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_cohort(
     body: CohortCreateRequest,
     service: Annotated[CohortService, Depends(get_cohort_service)],
@@ -177,6 +178,7 @@ async def delete_cohort(
 
 
 @router.post("/{cohort_id}/versions", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_cohort_version(
     cohort_id: uuid.UUID,
     body: CohortVersionCreateRequest,

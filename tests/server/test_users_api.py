@@ -19,9 +19,17 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeAccountRepository, FakePasswordHasher, local_settings
+from conftest import (
+    FakeAccountRepository,
+    FakePasswordHasher,
+    local_settings,
+    override_idempotency,
+)
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
-from kitaru.server.adapters.rest.dependencies import authorize, get_account_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_account_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -45,6 +53,7 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR
+    override_idempotency(app, ACTOR.account)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -61,6 +70,7 @@ async def non_admin_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: NON_ADMIN_ACTOR
+    override_idempotency(app, NON_ADMIN_ACTOR.account)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -81,6 +91,7 @@ async def non_admin_client_with_target() -> AsyncGenerator[
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: NON_ADMIN_ACTOR
+    override_idempotency(app, NON_ADMIN_ACTOR.account)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client, target.id
@@ -101,6 +112,7 @@ async def self_client() -> AsyncGenerator[httpx.AsyncClient, None]:
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR
+    override_idempotency(app, ACTOR.account)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

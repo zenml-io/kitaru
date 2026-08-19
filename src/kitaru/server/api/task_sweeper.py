@@ -18,14 +18,16 @@ import contextlib
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from functools import partial
 
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.db.errors import is_lock_not_available
 from kitaru.server.adapters.rest.dependencies import (
+    get_idempotency_key_repository,
     get_server_analytics,
     get_task_service,
 )
@@ -38,6 +40,32 @@ logger = logging.getLogger(__name__)
 SweepUnit = Callable[[TaskService], Awaitable[None]]
 
 
+async def _run_transaction(
+    database: DatabaseService,
+    body: Callable[[AsyncSession], Awaitable[None]],
+    label: str,
+) -> None:
+    """Run a body in its own transaction and commit it.
+
+    A failure rolls the body back and leaves the remaining sweep work to run.
+
+    Args:
+        database: Database service the body opens a session against.
+        body: Work to run against the session.
+        label: Name of the work for the failure log.
+    """
+    async for session in database.get_async_session():
+        try:
+            await body(session)
+            await session.commit()
+        except Exception as exc:
+            await session.rollback()
+            if isinstance(exc, DBAPIError) and is_lock_not_available(exc):
+                logger.debug("Sweep unit %s skipped a contended row.", label)
+            else:
+                logger.warning("Sweep unit %s failed: %s", label, exc)
+
+
 async def _run_unit(
     database: DatabaseService,
     settings: APISettings,
@@ -48,8 +76,7 @@ async def _run_unit(
     """Run one sweep unit in its own transaction and commit it.
 
     Builds the task service the same way a request does, so a settlement the
-    unit applies dispatches through the same event subscribers. A failure
-    rolls the unit back and leaves the remaining units to run.
+    unit applies dispatches through the same event subscribers.
 
     Args:
         database: Database service the unit opens a session against.
@@ -58,17 +85,36 @@ async def _run_unit(
         unit: Work to run against the service.
         label: Name of the unit for the failure log.
     """
-    async for session in database.get_async_session():
-        try:
-            tracker = get_server_analytics(session, analytics)
-            await unit(get_task_service(session, database.engine, settings, tracker))
-            await session.commit()
-        except Exception as exc:
-            await session.rollback()
-            if isinstance(exc, DBAPIError) and is_lock_not_available(exc):
-                logger.debug("Sweep unit %s skipped a contended row.", label)
-            else:
-                logger.warning("Sweep unit %s failed: %s", label, exc)
+
+    async def body(session: AsyncSession) -> None:
+        tracker = get_server_analytics(session, analytics)
+        await unit(get_task_service(session, database.engine, settings, tracker))
+
+    await _run_transaction(database, body, label)
+
+
+async def _sweep_idempotency_keys(
+    database: DatabaseService,
+    settings: APISettings,
+    now: datetime,
+) -> None:
+    """Delete one batch of expired idempotency keys in its own transaction.
+
+    Args:
+        database: Database service the sweep opens a session against.
+        settings: API settings for this process.
+        now: Current time.
+    """
+    cutoff = now - timedelta(seconds=settings.IDEMPOTENCY_KEY_RETENTION_SECONDS)
+
+    async def body(session: AsyncSession) -> None:
+        deleted = await get_idempotency_key_repository(session).delete_expired(
+            cutoff=cutoff, limit=settings.TASK_SWEEP_BATCH_LIMIT
+        )
+        if deleted > 0:
+            logger.debug("Sweep deleted %d expired idempotency keys.", deleted)
+
+    await _run_transaction(database, body, "idempotency key retention")
 
 
 async def _read_candidates(
@@ -138,6 +184,7 @@ async def sweep_once(
             partial(TaskService.sweep_stale_task, task_id=task_id, now=now),
             f"stale task {task_id}",
         )
+    await _sweep_idempotency_keys(database, settings, now)
 
 
 async def _run_sweep_loop(

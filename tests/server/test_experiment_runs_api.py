@@ -31,6 +31,7 @@ from conftest import (
     create_cohort_version,
     create_plugin,
     create_session,
+    override_idempotency,
 )
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.server.adapters.rest.dependencies import (
@@ -87,6 +88,7 @@ async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, 
         services.experiment_run_service
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     app.dependency_overrides[get_run_canceler] = lambda: partial(
         _cancel_run, services.experiment_run_service
     )

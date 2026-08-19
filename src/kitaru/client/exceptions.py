@@ -51,6 +51,10 @@ class ValidationError(APIError):
     """Validation error."""
 
 
+class IdempotencyError(APIError):
+    """Raised when an idempotency key is reused with a different request."""
+
+
 class ServerError(APIError):
     """Server error."""
 
@@ -81,6 +85,10 @@ _STATUS_ERRORS: dict[int, type[APIError]] = {
     422: ValidationError,
 }
 
+_IDEMPOTENCY_MISMATCH_DETAIL = (
+    "Idempotency-Key was already used with a different request"
+)
+
 
 def raise_for_response(response: httpx.Response) -> None:
     """Raise a typed error for an error response.
@@ -110,6 +118,12 @@ def raise_for_response(response: httpx.Response) -> None:
             if isinstance(description, str):
                 detail = description
             raise TokenGrantError(response.status_code, detail, error)
+
+    if (
+        response.status_code == httpx.codes.UNPROCESSABLE_ENTITY
+        and detail == _IDEMPOTENCY_MISMATCH_DETAIL
+    ):
+        raise IdempotencyError(response.status_code, detail)
 
     error_class = _STATUS_ERRORS.get(response.status_code)
     if error_class is None:

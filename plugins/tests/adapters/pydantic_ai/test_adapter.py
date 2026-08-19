@@ -66,6 +66,7 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
+from kitaru.client.exceptions import APIError
 from kitaru_pydantic_ai import (
     KitaruAgent,
     PydanticAIUsageSummary,
@@ -82,9 +83,15 @@ class _FakeSessions:
         self.node_batches: list[tuple[uuid.UUID, Any]] = []
 
     async def create(self, request: Any) -> Any:
+        if self._client.create_error is not None:
+            raise self._client.create_error
         self.created.append(request)
         self._client.events.append("session:create")
         return SimpleNamespace(id=self._client.session_id)
+
+    async def get(self, session_id: uuid.UUID) -> Any:
+        self._client.events.append("session:get")
+        return SimpleNamespace(id=session_id)
 
     async def update(self, session_id: uuid.UUID, request: Any) -> Any:
         if self._client.update_error is not None:
@@ -111,6 +118,12 @@ class _FakeTasks:
     async def get_spec(self, task_id: uuid.UUID) -> Any:
         assert task_id == self._client.task_id
         return SimpleNamespace(details=AgentTaskDetails(inputs=self._client.inputs))
+
+    async def get(self, task_id: uuid.UUID) -> Any:
+        assert task_id == self._client.task_id
+        return SimpleNamespace(
+            id=task_id, result_session_id=self._client.result_session_id
+        )
 
 
 class _FakeReplays:
@@ -140,6 +153,8 @@ class _FakeClient:
     next_ingest_error: ClassVar[BaseException | None] = None
     next_ingest_error_after: ClassVar[int | None] = None
     next_update_error: ClassVar[BaseException | None] = None
+    next_create_error: ClassVar[BaseException | None] = None
+    next_result_session_id: ClassVar[uuid.UUID | None] = None
 
     def __init__(self, **kwargs: Any) -> None:
         self.kwargs = kwargs
@@ -153,6 +168,8 @@ class _FakeClient:
         self.ingest_error = type(self).next_ingest_error
         self.ingest_error_after = type(self).next_ingest_error_after
         self.update_error = type(self).next_update_error
+        self.create_error = type(self).next_create_error
+        self.result_session_id = type(self).next_result_session_id
         self.events: list[str] = []
         self.sessions = _FakeSessions(self)
         self.tasks = _FakeTasks(self)
@@ -184,6 +201,8 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeClient.next_ingest_error = None
     _FakeClient.next_ingest_error_after = None
     _FakeClient.next_update_error = None
+    _FakeClient.next_create_error = None
+    _FakeClient.next_result_session_id = None
     monkeypatch.setattr(capability_module, "KitaruAPIClient", _FakeClient)
 
 
@@ -291,6 +310,28 @@ async def test_task_bound_run_leaves_agent_identity_for_server_inference(
     request = _FakeClient.instances[0].sessions.created[0]
     assert request.agent_id is None
     assert request.agent_version_id is None
+
+
+async def test_task_bound_run_recovers_existing_result_session_on_conflict(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Recover the task's result session when the create call 409s."""
+    spec = _replay_spec(PassthroughConfig())
+    _set_replay(monkeypatch, spec)
+    result_session_id = uuid.uuid4()
+    _FakeClient.next_create_error = APIError(
+        409, f"Task {spec.task_id} already links a result session"
+    )
+    _FakeClient.next_result_session_id = result_session_id
+    wrapped = KitaruAgent(
+        Agent(TestModel(call_tools=[])),
+    )
+
+    await wrapped.run("ignored prompt")
+
+    client = _FakeClient.instances[0]
+    assert client.sessions.created == []
+    assert client.sessions.node_batches[0][0] == result_session_id
 
 
 def test_constructor_validates_batch_size() -> None:

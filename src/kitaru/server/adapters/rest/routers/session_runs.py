@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, status
 
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.session_run import SessionRunCreateRequest
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import authorize, get_job_service
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
 from kitaru.server.adapters.rest.mapping.session_runs import (
@@ -32,6 +32,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_session_run(
     body: SessionRunCreateRequest,
     service: Annotated[JobService, Depends(get_job_service)],

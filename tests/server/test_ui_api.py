@@ -32,6 +32,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTagRepository,
     FakeTaskRepository,
+    override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -160,6 +161,7 @@ async def client(
     app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

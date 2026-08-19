@@ -64,6 +64,10 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneUser,
 )
 from kitaru.server.adapters.db.orm.base import Base
+from kitaru.server.adapters.rest.dependencies import (
+    _resolve_auth_context,
+    get_idempotency_key_repository,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.composition import register_subscribers
 from kitaru.server.api.config import APISettings
@@ -77,6 +81,7 @@ from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.application.models.annotation import AnnotationFilter
 from kitaru.server.application.models.api_key import ApiKeyFilter
 from kitaru.server.application.models.auth import (
+    AuthContext,
     GrantKind,
     TaskAuthContext,
     TaskPrincipal,
@@ -160,6 +165,10 @@ from kitaru.server.domain.experiment_run import (
     DuplicateExperimentRunNumber,
     ExperimentRun,
     ExperimentRunNotFound,
+)
+from kitaru.server.domain.idempotency_key import (
+    IdempotencyKey,
+    IdempotencyKeyAlreadyExists,
 )
 from kitaru.server.domain.investigation import (
     Investigation,
@@ -1363,6 +1372,118 @@ async def create_device(
         )
     )
     return device, user_code, device_code
+
+
+class FakeIdempotencyKeyRepository:
+    """In-memory idempotency key repository."""
+
+    def __init__(self) -> None:
+        """Initialize the repository."""
+        self._idempotency_keys: dict[uuid.UUID, IdempotencyKey] = {}
+
+    async def create(self, idempotency_key: IdempotencyKey) -> IdempotencyKey:
+        """Persist a new idempotency key.
+
+        Args:
+            idempotency_key: Idempotency key to store.
+
+        Raises:
+            IdempotencyKeyAlreadyExists: The account already has this key.
+
+        Returns:
+            Stored idempotency key with the created timestamp set.
+        """
+        for other in self._idempotency_keys.values():
+            if (
+                other.account_id == idempotency_key.account_id
+                and other.key == idempotency_key.key
+            ):
+                raise IdempotencyKeyAlreadyExists(
+                    idempotency_key.account_id, idempotency_key.key
+                )
+        stored = idempotency_key.model_copy(update={"created": datetime.now(UTC)})
+        self._idempotency_keys[stored.id] = stored
+        return stored.model_copy()
+
+    async def get(self, account_id: uuid.UUID, key: str) -> IdempotencyKey | None:
+        """Load an idempotency key by account and key.
+
+        Args:
+            account_id: Id of the account the key is scoped to.
+            key: Idempotency key.
+
+        Returns:
+            Stored idempotency key, or ``None`` when no row matches.
+        """
+        for stored in self._idempotency_keys.values():
+            if stored.account_id == account_id and stored.key == key:
+                return stored.model_copy()
+        return None
+
+    async def store_response(
+        self,
+        idempotency_key_id: uuid.UUID,
+        response_status: int,
+        response_body: bytes,
+        response_content_type: str | None,
+    ) -> None:
+        """Record the response a request committed under this key.
+
+        Args:
+            idempotency_key_id: Id of the idempotency key.
+            response_status: HTTP status code of the committed response.
+            response_body: Raw response body.
+            response_content_type: Content type of the response, when set.
+        """
+        stored = self._idempotency_keys.get(idempotency_key_id)
+        if stored is None:
+            return
+        self._idempotency_keys[idempotency_key_id] = stored.model_copy(
+            update={
+                "response_status": response_status,
+                "response_body": response_body,
+                "response_content_type": response_content_type,
+            }
+        )
+
+    async def delete_expired(self, cutoff: datetime, limit: int) -> int:
+        """Delete idempotency keys created before a cutoff, up to a limit.
+
+        Args:
+            cutoff: Rows created before this time are eligible for deletion.
+            limit: Maximum number of rows to delete in this batch.
+
+        Returns:
+            Number of deleted rows.
+        """
+        expired = [
+            idempotency_key_id
+            for idempotency_key_id, stored in self._idempotency_keys.items()
+            if stored.created is not None and stored.created < cutoff
+        ][:limit]
+        for idempotency_key_id in expired:
+            del self._idempotency_keys[idempotency_key_id]
+        return len(expired)
+
+
+def override_idempotency(
+    app: FastAPI, account: Account
+) -> FakeIdempotencyKeyRepository:
+    """Route idempotency enforcement through a fake repository for ``account``.
+
+    Args:
+        app: App to override dependencies on.
+        account: Account the resolved auth context authenticates as.
+
+    Returns:
+        Fake repository backing the override.
+    """
+    repository = FakeIdempotencyKeyRepository()
+    app.dependency_overrides[_resolve_auth_context] = lambda: AuthContext(
+        account=account
+    )
+    app.dependency_overrides[get_idempotency_key_repository] = lambda: repository
+    return repository
 
 
 class FakeSecretRepository:

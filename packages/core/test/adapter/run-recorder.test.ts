@@ -3,7 +3,10 @@ import type { AdapterClient } from "../../src/adapter/index.js";
 import { RunRecorder, recordNormalizedStep } from "../../src/adapter/index.js";
 import { fakeClient, SESSION_ID } from "./helpers.js";
 
-async function recorder(client: AdapterClient): Promise<RunRecorder> {
+async function recorder(
+  client: AdapterClient,
+  taskId?: string,
+): Promise<RunRecorder> {
   return RunRecorder.create({
     adapterVersion: "test-adapter",
     agentId: "018f0000-0000-7000-8000-000000000100",
@@ -12,6 +15,7 @@ async function recorder(client: AdapterClient): Promise<RunRecorder> {
     framework: "test",
     requestedModelId: "requested-model",
     startedAt: "2026-01-01T00:00:00.000Z",
+    taskId,
   });
 }
 
@@ -297,6 +301,16 @@ describe("normalized run lifecycle", () => {
       "run",
     ]);
     expect(client.nodes.at(-1)?.nodes[0]).toMatchObject({ status: "failed" });
+  });
+
+  it("recovers the task's result session instead of creating a new one", async () => {
+    const RESULT_SESSION_ID = "018f0000-0000-7000-8000-000000000900";
+    const client = fakeClient({ resultSessionId: RESULT_SESSION_ID });
+
+    const run = await recorder(client, "018f0000-0000-7000-8000-000000000901");
+
+    expect(run.state.sessionId).toBe(RESULT_SESSION_ID);
+    expect(client.created).toHaveLength(0);
   });
 
   it("creates no nodes when session creation fails", async () => {

@@ -27,7 +27,7 @@ from kitaru.api_models.v1.api_key import (
     ApiKeyUpdateRequest,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_api_key_service,
@@ -44,6 +44,7 @@ router = APIRouter(route_class=CommitRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_api_key(
     body: ApiKeyCreateRequest,
     service: Annotated[ApiKeyService, Depends(get_api_key_service)],
@@ -143,6 +144,7 @@ async def update_api_key(
 
 
 @router.post("/{api_key_id}/rotate")
+@idempotent
 async def rotate_api_key(
     api_key_id: uuid.UUID,
     body: ApiKeyRotateRequest,

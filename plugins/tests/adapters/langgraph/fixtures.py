@@ -40,6 +40,9 @@ class FakeSessions:
         self.node_batches.append((session_id, request))
         return []
 
+    async def get(self, session_id: uuid.UUID) -> Any:
+        return SimpleNamespace(id=session_id)
+
 
 class FakeClient:
     """Small resource-shaped Kitaru API client."""
@@ -50,6 +53,7 @@ class FakeClient:
     next_ingest_error_at: ClassVar[int | None] = None
     next_replay: ClassVar[Any | None] = None
     next_lookup: ClassVar[Any | None] = None
+    next_result_session_id: ClassVar[uuid.UUID | None] = None
 
     def __init__(self, **_: Any) -> None:
         self.session_id = uuid.uuid4()
@@ -60,8 +64,9 @@ class FakeClient:
         self.sessions = FakeSessions(self)
         self.replay = type(self).next_replay
         self.lookup = type(self).next_lookup
+        self.result_session_id = type(self).next_result_session_id
         self.replays = SimpleNamespace(get=self._get_replay, tool_lookup=self._lookup)
-        self.tasks = SimpleNamespace(get_spec=self._get_task)
+        self.tasks = SimpleNamespace(get_spec=self._get_task, get=self._get_task_full)
         self.closed = False
         type(self).instances.append(self)
 
@@ -75,6 +80,9 @@ class FakeClient:
 
     async def _get_task(self, _: uuid.UUID) -> Any:
         raise AssertionError("unexpected task lookup")
+
+    async def _get_task_full(self, task_id: uuid.UUID) -> Any:
+        return SimpleNamespace(id=task_id, result_session_id=self.result_session_id)
 
     async def close(self) -> None:
         self.closed = True
@@ -99,5 +107,6 @@ def fake_client(monkeypatch: pytest.MonkeyPatch) -> type[FakeClient]:
     FakeClient.next_ingest_error_at = None
     FakeClient.next_replay = None
     FakeClient.next_lookup = None
+    FakeClient.next_result_session_id = None
     monkeypatch.setattr(recording_module, "KitaruAPIClient", FakeClient)
     return FakeClient

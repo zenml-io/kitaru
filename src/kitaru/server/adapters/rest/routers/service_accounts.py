@@ -23,7 +23,7 @@ from kitaru.api_models.v1.account import (
     ServiceAccountCreateRequest,
     ServiceAccountUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
+from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_account_service,
@@ -41,6 +41,7 @@ router = APIRouter(route_class=CommitRoute)
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_local_account_management)],
 )
+@idempotent
 async def create_service_account(
     body: ServiceAccountCreateRequest,
     service: Annotated[AccountService, Depends(get_account_service)],

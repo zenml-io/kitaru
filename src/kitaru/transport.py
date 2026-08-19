@@ -21,6 +21,7 @@ from typing import ClassVar
 import httpx
 
 IDEMPOTENCY_KEY_HEADER = "Idempotency-Key"
+_IDEMPOTENT_METHODS = {"POST", "PATCH"}
 
 
 class RetryTransport(httpx.AsyncBaseTransport):
@@ -48,8 +49,8 @@ class RetryTransport(httpx.AsyncBaseTransport):
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         """Send a request, retrying transport errors and retryable statuses.
 
-        Requests with a non-replayable body are sent exactly once. The same
-        idempotency key is sent on every attempt.
+        Requests with a non-replayable body are sent exactly once. POST and
+        PATCH requests carry an idempotency key held stable across attempts.
 
         Args:
             request: Request to send.
@@ -57,7 +58,8 @@ class RetryTransport(httpx.AsyncBaseTransport):
         Returns:
             HTTP response.
         """
-        request.headers.setdefault(IDEMPOTENCY_KEY_HEADER, str(uuid.uuid4()))
+        if request.method in _IDEMPOTENT_METHODS:
+            request.headers.setdefault(IDEMPOTENCY_KEY_HEADER, str(uuid.uuid4()))
         retries = self._retries if self._is_replayable(request) else 0
         attempt = 0
         while True:

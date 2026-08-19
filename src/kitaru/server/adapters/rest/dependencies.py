@@ -66,6 +66,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
+    SQLIdempotencyKeyRepository,
+)
 from kitaru.server.adapters.db.repositories.investigation_repository import (
     SQLInvestigationRepository,
 )
@@ -95,6 +98,9 @@ from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvi
 from kitaru.server.adapters.rest.commit_route import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.idempotency_key_repository import (
+    IdempotencyKeyRepository,
+)
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -826,6 +832,20 @@ def get_worker_service(
         Worker service bound to the SQL repository.
     """
     return WorkerService(repository=SQLWorkerRepository(session), analytics=analytics)
+
+
+def get_idempotency_key_repository(
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> IdempotencyKeyRepository:
+    """Return an idempotency key repository for the current request.
+
+    Args:
+        session: Request-scoped database session.
+
+    Returns:
+        Idempotency key repository bound to the SQL implementation.
+    """
+    return SQLIdempotencyKeyRepository(session)
 
 
 def get_auth_service(

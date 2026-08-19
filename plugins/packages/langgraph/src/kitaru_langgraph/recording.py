@@ -34,7 +34,7 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeCreateRequest,
 )
 from kitaru.api_models.v1.task import AgentTaskDetails
-from kitaru.client import KitaruAPIClient
+from kitaru.client import KitaruAPIClient, create_or_get_result_session
 
 from .capability import UnsupportedWorkerInterruptError
 from .capture import CaptureBudget, CapturePolicy, capture_execution_view, capture_value
@@ -136,7 +136,8 @@ class InvocationRecorder:
             input_capture = capture_value(effective_input, policy)
             config_capture = capture_execution_view(config, policy)
             started_at = datetime.now(UTC)
-            session = await client.sessions.create(
+            session = await create_or_get_result_session(
+                client,
                 SessionCreateRequest(
                     agent_id=agent_id,
                     agent_version_id=agent_version_id,
@@ -152,7 +153,8 @@ class InvocationRecorder:
                     metadata={"execution": config_capture.value},
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,
-                )
+                ),
+                task_id,
             )
             session_id = session.id
             await client.sessions.ingest_nodes(

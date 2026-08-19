@@ -22,9 +22,11 @@ import pytest
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
+    IdempotencyError,
     InvalidServerResponseError,
     NotFoundError,
     ServerError,
+    ValidationError,
 )
 from kitaru.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
 
@@ -100,6 +102,34 @@ async def test_no_retry_on_client_error() -> None:
     assert len(requests) == 1
 
 
+async def test_idempotency_key_mismatch_raises_idempotency_error() -> None:
+    """Map the fingerprint-mismatch detail to IdempotencyError."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={
+                "detail": "Idempotency-Key was already used with a different request"
+            },
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(IdempotencyError) as exc_info:
+        await client.request("POST", "/api/v1/users", json={"name": "alice"})
+    assert exc_info.value.status_code == 422
+
+
+async def test_other_422_detail_raises_validation_error() -> None:
+    """Map an unrelated 422 detail to the generic ValidationError."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(422, json={"detail": "name is required"})
+
+    client = mock_api_client(handler)
+    with pytest.raises(ValidationError):
+        await client.request("POST", "/api/v1/users", json={})
+
+
 async def test_html_success_response_raises_a_typed_error() -> None:
     """Surface a success response carrying an HTML page as a typed error."""
 
@@ -158,6 +188,33 @@ async def test_fresh_idempotency_key_per_request() -> None:
     await client.request("POST", "/api/v1/users", json={"name": "bob"})
     keys = {request.headers[IDEMPOTENCY_KEY_HEADER] for request in requests}
     assert len(keys) == 2
+
+
+async def test_idempotency_key_stamped_only_for_post_and_patch() -> None:
+    """Stamp the idempotency key for POST and PATCH, not other methods."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    await client.request("GET", "/api/v1/accounts")
+    await client.request("PUT", "/api/v1/accounts/1")
+    await client.request("DELETE", "/api/v1/accounts/1")
+    await client.request("POST", "/api/v1/users", json={"name": "alice"})
+    await client.request("PATCH", "/api/v1/users/1", json={"name": "alice"})
+    methods = {
+        request.method: IDEMPOTENCY_KEY_HEADER in request.headers
+        for request in requests
+    }
+    assert methods == {
+        "GET": False,
+        "PUT": False,
+        "DELETE": False,
+        "POST": True,
+        "PATCH": True,
+    }
 
 
 async def test_no_retry_for_streaming_request_body() -> None:
