@@ -323,6 +323,28 @@ class Session(DomainModel):
         """Clear the task this session was produced by."""
         self.task_id = None
 
+    def is_same_create(self, other: "Session") -> bool:
+        """Report whether another session carries the same created fields.
+
+        Args:
+            other: Session to compare against.
+
+        Returns:
+            Whether every field a create sets is equal, ignoring identity,
+            number, timestamps, and counters.
+        """
+        exclude = {
+            "id",
+            "number",
+            "created",
+            "updated",
+            "cost",
+            "tokens",
+            "llm_call_count",
+            "tool_call_count",
+        }
+        return self.model_dump(exclude=exclude) == other.model_dump(exclude=exclude)
+
     def check_node_ingest(self) -> None:
         """Require the session to currently accept node ingestion.
 

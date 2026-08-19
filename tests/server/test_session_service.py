@@ -779,23 +779,51 @@ async def test_create_session_links_an_agent_tasks_result_session(
     assert stored_task.result_session_id == session.id
 
 
-async def test_create_session_rejects_a_second_link_to_an_agent_task(
+async def test_create_session_returns_the_existing_link_on_a_retry(
     service: SessionService,
     task_repository: FakeTaskRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
-    """A second session cannot link to an agent task that already has one."""
+    """A retried create for an already-linked agent task returns that session."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    actor = _task_principal(task.id)
+    first = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=actor,
+    )
+    second = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=actor,
+    )
+    assert second.id == first.id
+    sessions, _ = await service.list_sessions(
+        SessionFilter(
+            expression=FilterCondition(field="task_id", op=FilterOp.EQ, value=task.id)
+        ),
+        actor=actor,
+    )
+    assert len(sessions) == 1
+
+
+async def test_create_session_rejects_a_differing_second_link_to_an_agent_task(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """A second, differing session cannot link to an agent task that already has one."""
     version = await _stored_agent_version(agent_repository, agent_version_repository)
     task = await _running_agent_task(task_repository, version.id)
     actor = _task_principal(task.id)
     await service.create_session(
-        SessionCreate(origin=SessionOrigin.RECORDED),
+        SessionCreate(origin=SessionOrigin.RECORDED, name="first"),
         actor=actor,
     )
     with pytest.raises(TaskResultSessionAlreadyLinked):
         await service.create_session(
-            SessionCreate(origin=SessionOrigin.RECORDED),
+            SessionCreate(origin=SessionOrigin.RECORDED, name="second"),
             actor=actor,
         )
 

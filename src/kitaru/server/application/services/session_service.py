@@ -105,7 +105,7 @@ class SessionService:
             TaskAttemptMismatch: The principal's token is fenced by an attempt
                 the task has moved past.
             TaskResultSessionAlreadyLinked: The principal's agent task already
-                links a session.
+                links a session that differs from the command.
             SessionAgentVersionMismatch: The command names a different agent
                 version than the task runs.
             SessionAgentMismatch: The command names a different agent than the
@@ -131,8 +131,6 @@ class SessionService:
             # Check the attempt on the locked task so a requeue cannot race
             # the result link.
             task.check_attempt(actor.principal.attempt)
-            if isinstance(task, AgentTask) and task.result_session_id is not None:
-                raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
         number = await self._repository.allocate_session_number(agent_id)
         session = Session(
@@ -157,6 +155,14 @@ class SessionService:
             framework=command.framework,
             adapter_version=command.adapter_version,
         )
+        if isinstance(task, AgentTask) and task.result_session_id is not None:
+            # check_attempt above pins this call to the task's attempt, and claim
+            # bumps it while requeue clears the link, so an identical session
+            # is a retry of the create that linked it.
+            linked = await self._repository.get(task.result_session_id)
+            if not linked.is_same_create(session):
+                raise TaskResultSessionAlreadyLinked(task.id)
+            return linked
         stored = await self._repository.create(session)
         if isinstance(task, AgentTask):
             task.link_result_session(stored.id)
