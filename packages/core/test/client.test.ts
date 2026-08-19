@@ -13,34 +13,12 @@ const NODE_ID = "018f0000-0000-7000-8000-000000000002";
 const REPLAY_ID = "018f0000-0000-7000-8000-000000000003";
 const ORIGINAL_SESSION_ID = "018f0000-0000-7000-8000-000000000004";
 const TASK_ID = "018f0000-0000-7000-8000-000000000005";
-const RESULT_SESSION_ID = "018f0000-0000-7000-8000-000000000006";
 
 const sessionResponse = {
   id: SESSION_ID,
   origin: "recorded",
   status: "in_progress",
 };
-
-function taskResponse(resultSessionId: string | null): unknown {
-  return {
-    attempt: 1,
-    id: TASK_ID,
-    job_id: "018f0000-0000-7000-8000-000000000007",
-    kind: "agent",
-    labels: {},
-    on_failure: "abort",
-    result: null,
-    result_session_id: resultSessionId,
-    status: "running",
-  };
-}
-
-function conflictResponse(): Response {
-  return jsonResponse(
-    { detail: `Task ${TASK_ID} already links a result session` },
-    409,
-  );
-}
 
 const createRequest = {
   agent_id: "agent-id",
@@ -287,80 +265,6 @@ describe("KitaruClient", () => {
       `https://api.example/api/v1/tasks/${TASK_ID}/spec`,
       expect.objectContaining({ method: "GET" }),
     );
-  });
-
-  it("creates a session and skips task recovery on success", async () => {
-    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
-      jsonResponse(sessionResponse, 201),
-    );
-    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
-
-    await expect(
-      client.createOrGetResultSession(createRequest, TASK_ID),
-    ).resolves.toEqual(sessionResponse);
-    expect(fetch).toHaveBeenCalledOnce();
-  });
-
-  it("recovers the task's result session on a 409 conflict", async () => {
-    const recoveredSession = {
-      id: RESULT_SESSION_ID,
-      origin: "recorded",
-      status: "in_progress",
-    };
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(conflictResponse())
-      .mockResolvedValueOnce(jsonResponse(taskResponse(RESULT_SESSION_ID)))
-      .mockResolvedValueOnce(jsonResponse(recoveredSession));
-    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
-
-    await expect(
-      client.createOrGetResultSession(createRequest, TASK_ID),
-    ).resolves.toEqual(recoveredSession);
-    expect(fetch).toHaveBeenCalledTimes(3);
-    expect(fetch.mock.calls[1]?.[0]).toBe(
-      `https://api.example/api/v1/tasks/${TASK_ID}`,
-    );
-    expect(fetch.mock.calls[2]?.[0]).toBe(
-      `https://api.example/api/v1/sessions/${RESULT_SESSION_ID}`,
-    );
-  });
-
-  it("re-raises the 409 when the task has no result session", async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(conflictResponse())
-      .mockResolvedValueOnce(jsonResponse(taskResponse(null)));
-    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
-
-    await expect(
-      client.createOrGetResultSession(createRequest, TASK_ID),
-    ).rejects.toMatchObject({ status: 409 });
-    expect(fetch).toHaveBeenCalledTimes(2);
-  });
-
-  it("re-raises the 409 without a task id to recover from", async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(conflictResponse());
-    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
-
-    await expect(
-      client.createOrGetResultSession(createRequest),
-    ).rejects.toMatchObject({ status: 409 });
-    expect(fetch).toHaveBeenCalledOnce();
-  });
-
-  it("re-raises a non-conflict error without attempting recovery", async () => {
-    const fetch = vi
-      .fn<typeof globalThis.fetch>()
-      .mockResolvedValueOnce(jsonResponse({ detail: "not found" }, 404));
-    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
-
-    await expect(
-      client.createOrGetResultSession(createRequest, TASK_ID),
-    ).rejects.toMatchObject({ status: 404 });
-    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("retries node upsert with the identical body and node indexes", async () => {

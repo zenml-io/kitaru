@@ -236,7 +236,6 @@ export function createKitaruGenerateText(
       requestedModelId,
       sessionIdFile: environment.KITARU_SESSION_ID_FILE,
       spec: replay.spec,
-      taskId: replay.taskId,
     });
     const tickets = new ExecutionTickets(adapterOptions.ticketTimeoutMs);
     const state = recorder.state;

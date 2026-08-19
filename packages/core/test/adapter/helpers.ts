@@ -59,7 +59,6 @@ export function fakeClient(
   options: {
     lookup?: (request: ToolLookupRequest) => unknown;
     replay?: ReplayResponse;
-    resultSessionId?: string;
     taskInput?: unknown;
     throwOnNodes?: boolean;
     throwOnUpdate?: boolean;
@@ -81,16 +80,6 @@ export function fakeClient(
         origin: request.origin,
         status: request.status ?? "in_progress",
       } as never;
-    },
-    async createOrGetResultSession(request, taskId) {
-      if (options.resultSessionId !== undefined && taskId !== undefined) {
-        return {
-          id: options.resultSessionId,
-          origin: request.origin,
-          status: request.status ?? "in_progress",
-        } as never;
-      }
-      return this.createSession(request);
     },
     async getReplay() {
       return options.replay ?? replay();

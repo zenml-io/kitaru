@@ -199,7 +199,6 @@ class KitaruRunner(Generic[TContext]):
         )
         try:
             resolved = await resolve_run_input(recorder.client, input)
-            task_bound = resolved.task_id is not None
             run_agent = starting_agent
             run_input = resolved.openai
             if resolved.replay is not None:
@@ -214,11 +213,12 @@ class KitaruRunner(Generic[TContext]):
                 options["run_config"] = prepared.run_config
             await recorder.start(
                 inputs=resolved.recorded,
-                agent_id=None if task_bound else self._agent_id,
-                agent_version_id=None if task_bound else self._agent_version_id,
+                agent_id=None if resolved.task_bound else self._agent_id,
+                agent_version_id=(
+                    None if resolved.task_bound else self._agent_version_id
+                ),
                 session_name=self._session_name,
                 replay=resolved.replay is not None,
-                task_id=resolved.task_id,
             )
         except BaseException as error:
             await _finalize_failure_and_close(recorder, error)

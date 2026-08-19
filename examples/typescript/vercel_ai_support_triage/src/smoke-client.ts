@@ -22,12 +22,6 @@ export class SmokeClient implements AdapterClient {
     } as SessionResponse;
   }
 
-  async createOrGetResultSession(
-    request: SessionCreateRequest,
-  ): Promise<SessionResponse> {
-    return this.createSession(request);
-  }
-
   async getReplay(): Promise<ReplayResponse> {
     throw new Error("SmokeClient does not support replay");
   }

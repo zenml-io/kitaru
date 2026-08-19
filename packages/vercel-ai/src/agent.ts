@@ -303,7 +303,6 @@ function createKitaruToolLoopAgentImpl<
           requestedModelId,
           sessionIdFile: environment.KITARU_SESSION_ID_FILE,
           spec: replay.spec,
-          taskId: replay.taskId,
         });
         state.recorder = recorder;
         state.tickets = new ExecutionTickets(adapterOptions.ticketTimeoutMs);

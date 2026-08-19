@@ -188,7 +188,6 @@ export class KitaruAgent<TAgent extends GenerateCapable> {
       requestedModelId,
       sessionIdFile: process.env.KITARU_SESSION_ID_FILE,
       spec: replay.spec,
-      taskId: replay.taskId,
     });
     const state = recorder.state;
 

@@ -113,38 +113,29 @@ export interface ReplayContext {
   replayId?: string;
   replacementModelId?: string;
   spec?: ReplaySpec;
-  taskId?: string;
-}
-
-interface WorkerInput {
-  input: unknown;
-  taskId?: string;
 }
 
 async function resolveWorkerInput(options: {
   callerInput: unknown;
   client: AdapterClient;
   environment: KitaruEnvironmentVariables;
-}): Promise<WorkerInput> {
+}): Promise<unknown> {
+  const taskInputs = options.environment.KITARU_TASK_INPUTS;
+  if (taskInputs !== undefined) {
+    return parseJsonEnvironment("KITARU_TASK_INPUTS", taskInputs);
+  }
   const taskId = parseUuidEnvironment(
     "KITARU_TASK_ID",
     options.environment.KITARU_TASK_ID,
   );
-  const taskInputs = options.environment.KITARU_TASK_INPUTS;
-  if (taskInputs !== undefined) {
-    return {
-      input: parseJsonEnvironment("KITARU_TASK_INPUTS", taskInputs),
-      taskId,
-    };
-  }
   if (taskId === undefined) {
-    return { input: options.callerInput };
+    return options.callerInput;
   }
   const spec = await options.client.getTaskSpec(taskId);
   if (spec.kind !== "agent" || spec.details.kind !== "agent") {
     throw new TypeError(`Task ${taskId} is not an agent task`);
   }
-  return { input: spec.details.inputs, taskId };
+  return spec.details.inputs;
 }
 
 interface EffectiveInputs {
@@ -249,7 +240,7 @@ export async function resolveReplayContext(options: {
           "KITARU_OVERRIDE",
         )
       : undefined;
-  const effective = resolveEffectiveInputs(workerInput.input, override);
+  const effective = resolveEffectiveInputs(workerInput, override);
   const replacementModelId = modelReplacement(
     override,
     options.requestedModelId,
@@ -267,6 +258,5 @@ export async function resolveReplayContext(options: {
     replayId,
     replacementModelId,
     spec,
-    taskId: workerInput.taskId,
   };
 }

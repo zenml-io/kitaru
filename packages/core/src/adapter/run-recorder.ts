@@ -67,7 +67,6 @@ export interface RunRecorderOptions {
   sessionIdFile?: string;
   spec?: ReplaySpec;
   startedAt?: string;
-  taskId?: string;
 }
 
 export class RunRecorder {
@@ -91,21 +90,18 @@ export class RunRecorder {
 
   static async create(options: RunRecorderOptions): Promise<RunRecorder> {
     const startedAt = options.startedAt ?? new Date().toISOString();
-    const session = await options.client.createOrGetResultSession(
-      {
-        adapter_version: options.adapterVersion,
-        agent_id: options.agentId,
-        agent_version_id: options.agentVersionId,
-        framework: options.framework,
-        inputs: options.effectiveInput,
-        name: options.name,
-        origin: options.replayId ? "replay" : "recorded",
-        outputs: null,
-        started_at: startedAt,
-        status: "in_progress",
-      },
-      options.taskId,
-    );
+    const session = await options.client.createSession({
+      adapter_version: options.adapterVersion,
+      agent_id: options.agentId,
+      agent_version_id: options.agentVersionId,
+      framework: options.framework,
+      inputs: options.effectiveInput,
+      name: options.name,
+      origin: options.replayId ? "replay" : "recorded",
+      outputs: null,
+      started_at: startedAt,
+      status: "in_progress",
+    });
     const state = new RunState({
       client: options.client,
       effectiveInput: options.effectiveInput,

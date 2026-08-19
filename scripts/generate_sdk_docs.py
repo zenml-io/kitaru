@@ -85,7 +85,6 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "ControlPlaneSession",
                 "ControlPlaneLoginError",
                 "control_plane_login",
-                "create_or_get_result_session",
                 "device_login",
                 "DeviceLoginError",
                 "KitaruClientError",
@@ -94,7 +93,6 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "AuthorizationError",
                 "NotFoundError",
                 "ValidationError",
-                "IdempotencyError",
                 "ServerError",
                 "TokenGrantError",
             }

@@ -55,7 +55,6 @@ export interface FakeClientOptions {
   failNodeBatch?: (batch: SessionNodeBatchRequest, index: number) => boolean;
   lookup?: (request: ToolLookupRequest) => ToolLookupResponse;
   replay?: ReplayResponse;
-  resultSessionId?: string;
   taskInput?: unknown;
   updateFails?: boolean;
 }
@@ -80,20 +79,6 @@ export class FakeClient implements AdapterClient {
       origin: request.origin,
       status: "in_progress",
     } as SessionResponse;
-  }
-
-  async createOrGetResultSession(
-    request: SessionCreateRequest,
-    taskId?: string,
-  ): Promise<SessionResponse> {
-    if (this.#options.resultSessionId !== undefined && taskId !== undefined) {
-      return {
-        id: this.#options.resultSessionId,
-        origin: request.origin,
-        status: "in_progress",
-      } as SessionResponse;
-    }
-    return this.createSession(request);
   }
 
   async getReplay(): Promise<ReplayResponse> {

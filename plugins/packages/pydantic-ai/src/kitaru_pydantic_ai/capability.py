@@ -91,7 +91,7 @@ from kitaru.api_models.v1.session_node import (
 )
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.cache_keys import compute_tool_cache_key
-from kitaru.client import KitaruAPIClient, create_or_get_result_session
+from kitaru.client import KitaruAPIClient
 
 from .pricing import CostCalculator, PydanticAIUsageSummary, normalize_cost
 
@@ -532,8 +532,7 @@ class _KitaruCapability(AbstractCapability[Any]):
         state = self._require_state()
         started_at = datetime.now(UTC)
         try:
-            session = await create_or_get_result_session(
-                state.client,
+            session = await state.client.sessions.create(
                 SessionCreateRequest(
                     agent_id=self.agent_id,
                     agent_version_id=self.agent_version_id,
@@ -548,8 +547,7 @@ class _KitaruCapability(AbstractCapability[Any]):
                     started_at=started_at,
                     framework=FRAMEWORK,
                     adapter_version=ADAPTER_VERSION,
-                ),
-                state.task_id,
+                )
             )
             state.session_id = session.id
             state.started_at = started_at

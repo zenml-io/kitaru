@@ -7,7 +7,6 @@ import type {
   KitaruEnvironmentVariables,
 } from "./environment.js";
 import { resolveKitaruEnvironment } from "./environment.js";
-import { KitaruApiError } from "./errors.js";
 import {
   AccountsResource,
   AgentsResource,
@@ -123,40 +122,6 @@ export class KitaruClient {
     options: KitaruRequestOptions = {},
   ): Promise<SessionResponse> {
     return this.sessions.create(request, options);
-  }
-
-  /**
-   * Create a session, recovering from a task's already-linked result session.
-   *
-   * A retry of a task's session create can 409 when the first attempt
-   * committed and linked the task's result session but its response was
-   * lost. When taskId is set, that 409 is resolved by reading the task's
-   * result session instead of failing the retry.
-   */
-  async createOrGetResultSession(
-    request: SessionCreateRequest,
-    taskId?: string,
-    options: KitaruRequestOptions = {},
-  ): Promise<SessionResponse> {
-    try {
-      return await this.sessions.create(request, options);
-    } catch (error) {
-      if (
-        taskId === undefined ||
-        !(error instanceof KitaruApiError) ||
-        error.status !== 409
-      ) {
-        throw error;
-      }
-      const task = await this.tasks.get(taskId, options);
-      if (
-        task.result_session_id === undefined ||
-        task.result_session_id === null
-      ) {
-        throw error;
-      }
-      return this.sessions.get(task.result_session_id, options);
-    }
   }
 
   async updateSession(
