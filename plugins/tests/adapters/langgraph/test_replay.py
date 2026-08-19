@@ -308,9 +308,7 @@ async def test_history_hits_consume_baseline_occurrences_in_order() -> None:
     recorder = _Recorder(override=None, policy=policy)
     requests: list[Any] = []
     envelopes = [
-        encode_tool_outcome(
-            ToolMessage(content=ticket, tool_call_id="old", name="old")
-        )
+        encode_tool_outcome(ToolMessage(content=ticket, tool_call_id="old", name="old"))
         for ticket in ["a", "b", "c"]
     ]
 
