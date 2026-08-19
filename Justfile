@@ -72,11 +72,11 @@ audit:
 # Source MDX uses docs-app-root routes such as /guides/...; site-build validates
 # those after materializing public /docs/... links, where lychee can resolve them.
 links:
-    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
+    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
 
 # Check raw Markdown links including external URLs (slow, used in CI)
 links-external:
-    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
+    lychee --root-dir . --exclude-path '.venv' --exclude-path 'node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:

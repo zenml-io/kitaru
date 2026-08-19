@@ -160,8 +160,11 @@ async def _create_session_row(
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each evaluation repository implementation, an owner id, and a
-    session id to attach evaluations to."""
+    """Provide each evaluation repository implementation and its collaborators.
+
+    Yields the repository, an owner id, and a session id to attach
+    evaluations to.
+    """
     if request.param == "fake":
         yield FakeEvaluationRepository(), uuid.uuid4(), uuid.uuid4()
         return
@@ -191,8 +194,10 @@ async def test_merge_inserts_new_evaluations(setup: Setup) -> None:
 
 
 async def test_merge_overwrites_matching_name_and_keeps_id(setup: Setup) -> None:
-    """Resending a name overwrites its score, value, data type, and
-    explanation, while keeping the row id, owner, and creation time."""
+    """Resending a name overwrites its score, value, data type, and explanation.
+
+    The row id, owner, and creation time are kept.
+    """
     repository, owner_id, session_id = setup
     first = await repository.merge_session_evaluations(
         session_id,
@@ -309,8 +314,10 @@ async def test_get_not_found(setup: Setup) -> None:
 async def session_pair(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[tuple[EvaluationRepository, uuid.UUID, uuid.UUID, uuid.UUID], None]:
-    """Provide an evaluation repository, an owner id, and two distinct
-    session ids to score."""
+    """Provide an evaluation repository and its collaborators.
+
+    Yields the repository, an owner id, and two distinct session ids to score.
+    """
     if request.param == "fake":
         yield FakeEvaluationRepository(), uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
         return
@@ -425,8 +432,11 @@ async def test_query_task_id_filter(setup: Setup) -> None:
 async def plugin_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[PluginSetup, None]:
-    """Provide a plugin repository and an evaluation repository sharing one
-    backend, an owner id, and a session id."""
+    """Provide plugin and evaluation repositories and their collaborators.
+
+    Yields a plugin repository and an evaluation repository sharing one
+    backend, an owner id, and a session id.
+    """
     if request.param == "fake":
         plugin_repository = FakePluginRepository()
         evaluation_repository = FakeEvaluationRepository(

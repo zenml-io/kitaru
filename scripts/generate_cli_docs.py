@@ -61,14 +61,17 @@ class CommandDoc:
 
     @property
     def slug(self) -> str:
+        """Return the final path segment of the command."""
         return self.path[-1]
 
     @property
     def invocation(self) -> str:
+        """Return the full command line used to invoke the command."""
         return " ".join(("kitaru", *self.path))
 
     @property
     def docs_url(self) -> str:
+        """Return the docs site path for the command's page."""
         return f"/cli/{'/'.join(self.path)}/"
 
 
@@ -86,14 +89,17 @@ class GroupDoc:
 
     @property
     def slug(self) -> str:
+        """Return the final path segment of the group."""
         return self.path[-1]
 
     @property
     def invocation(self) -> str:
+        """Return the full command line prefix for the group."""
         return " ".join(("kitaru", *self.path))
 
     @property
     def docs_url(self) -> str:
+        """Return the docs site path for the group's index page."""
         return f"/cli/{'/'.join(self.path)}/" if self.path else "/cli/"
 
     @property

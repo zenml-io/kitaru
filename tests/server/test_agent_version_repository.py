@@ -70,10 +70,12 @@ Setup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each agent version repository implementation, an owner id, an
-    agent id to attach versions to, factories for further agent ids and
-    secret ids a run spec can reference, and a tag repository sharing the
-    backend."""
+    """Provide each agent version repository implementation and its collaborators.
+
+    Yields the repository, an owner id, an agent id to attach versions to,
+    factories for further agent ids and secret ids a run spec can reference,
+    and a tag repository sharing the backend.
+    """
     if request.param == "fake":
         agents = FakeAgentRepository()
         secrets = FakeSecretRepository()
