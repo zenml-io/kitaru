@@ -135,7 +135,8 @@ async def tool_lookup(
 
     Clients observe HTTP 200 on success, 403 when a task token names a task
     outside this replay's job, 404 when no replay has this id, and 422 when
-    the tool is not configured for history.
+    the tool is not configured for history or an occurrence was given for a
+    non-baseline history scope.
 
     Args:
         replay_id: Id of the replay.
@@ -147,6 +148,6 @@ async def tool_lookup(
         Whether a cached result was found, and the result if so.
     """
     result = await service.tool_lookup(
-        replay_id, body.tool_name, body.cache_key, actor=actor
+        replay_id, body.tool_name, body.cache_key, body.occurrence, actor=actor
     )
     return tool_lookup_result_to_response(result)

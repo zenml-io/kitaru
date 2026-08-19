@@ -2339,7 +2339,8 @@ export interface paths {
          *
          *     Clients observe HTTP 200 on success, 403 when a task token names a task
          *     outside this replay's job, 404 when no replay has this id, and 422 when
-         *     the tool is not configured for history.
+         *     the tool is not configured for history or an occurrence was given for a
+         *     non-baseline history scope.
          *
          *     Args:
          *         replay_id: Id of the replay.
@@ -7840,6 +7841,11 @@ export interface components {
              * @description Call cache key.
              */
             cache_key: string;
+            /**
+             * Occurrence
+             * @description Zero-based match position in baseline order, the newest match when unset.
+             */
+            occurrence?: number | null;
             /**
              * Tool Name
              * @description Tool being called.

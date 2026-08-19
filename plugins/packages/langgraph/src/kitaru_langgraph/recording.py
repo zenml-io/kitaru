@@ -91,6 +91,7 @@ class InvocationRecorder:
     started_at: datetime
     budget: CaptureBudget
     next_index: int = 1
+    history_occurrences: dict[str, int] = field(default_factory=dict)
     buffer: list[tuple[SessionNodeCreateRequest, int]] = field(default_factory=list)
     run_indexes: dict[uuid.UUID, int] = field(default_factory=dict)
     pending_runs: dict[uuid.UUID, PendingRun] = field(default_factory=dict)

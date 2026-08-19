@@ -43,6 +43,7 @@ class _Recorder:
             else None
         )
         self.recorded: list[dict[str, Any]] = []
+        self.history_occurrences: dict[str, int] = {}
         self.sync_bridge = _SyncBridge()
         self.client = SimpleNamespace(
             replays=SimpleNamespace(tool_lookup=self._unexpected_lookup)
@@ -295,6 +296,110 @@ async def test_history_hit_decodes_current_tool_identity() -> None:
     assert result.content == "history"
     assert result.tool_call_id == "call-1"
     assert result.name == "weather"
+
+
+async def test_history_hits_consume_baseline_occurrences_in_order() -> None:
+    policy = ToolPolicy(
+        default=HistoryConfig(
+            scope=HistoryScope.BASELINE,
+            on_miss=ToolPolicyOnMiss.FAIL,
+        )
+    )
+    recorder = _Recorder(override=None, policy=policy)
+    requests: list[Any] = []
+    envelopes = [
+        encode_tool_outcome(ToolMessage(content=ticket, tool_call_id="old", name="old"))
+        for ticket in ["a", "b", "c"]
+    ]
+
+    async def lookup(_: Any, request: Any) -> Any:
+        requests.append(request)
+        return SimpleNamespace(found=True, result=envelopes[len(requests) - 1])
+
+    recorder.client.replays.tool_lookup = lookup
+    middleware = KitaruLangGraphMiddleware(requested_model=None)
+    token = _ACTIVE_INVOCATION.set(cast(Any, recorder))
+    try:
+        results = [
+            await middleware.awrap_tool_call(
+                _request(), cast(Any, lambda _: pytest.fail("live tool called"))
+            )
+            for _ in range(3)
+        ]
+    finally:
+        _ACTIVE_INVOCATION.reset(token)
+
+    assert [result.content for result in results] == ["a", "b", "c"]
+    assert [request.occurrence for request in requests] == [0, 1, 2]
+
+
+async def test_history_miss_does_not_advance_occurrence() -> None:
+    policy = ToolPolicy(
+        default=HistoryConfig(
+            scope=HistoryScope.BASELINE,
+            on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+        )
+    )
+    recorder = _Recorder(override=None, policy=policy)
+    requests: list[Any] = []
+    envelope = encode_tool_outcome(
+        ToolMessage(content="history", tool_call_id="old", name="old")
+    )
+
+    async def lookup(_: Any, request: Any) -> Any:
+        requests.append(request)
+        if len(requests) == 1:
+            return SimpleNamespace(found=False, result=None)
+        return SimpleNamespace(found=True, result=envelope)
+
+    async def handler(_: ToolCallRequest) -> ToolMessage:
+        return ToolMessage(content="live", tool_call_id="call-1")
+
+    recorder.client.replays.tool_lookup = lookup
+    middleware = KitaruLangGraphMiddleware(requested_model=None)
+    token = _ACTIVE_INVOCATION.set(cast(Any, recorder))
+    try:
+        first = await middleware.awrap_tool_call(_request(), handler)
+        second = await middleware.awrap_tool_call(_request(), handler)
+    finally:
+        _ACTIVE_INVOCATION.reset(token)
+
+    assert isinstance(first, ToolMessage)
+    assert first.content == "live"
+    assert isinstance(second, ToolMessage)
+    assert second.content == "history"
+    assert [request.occurrence for request in requests] == [0, 0]
+
+
+async def test_history_non_baseline_scope_sends_no_occurrence() -> None:
+    policy = ToolPolicy(
+        default=HistoryConfig(
+            scope=HistoryScope.AGENT,
+            on_miss=ToolPolicyOnMiss.FAIL,
+        )
+    )
+    recorder = _Recorder(override=None, policy=policy)
+    requests: list[Any] = []
+    envelope = encode_tool_outcome(
+        ToolMessage(content="history", tool_call_id="old", name="old")
+    )
+
+    async def lookup(_: Any, request: Any) -> Any:
+        requests.append(request)
+        return SimpleNamespace(found=True, result=envelope)
+
+    recorder.client.replays.tool_lookup = lookup
+    token = _ACTIVE_INVOCATION.set(cast(Any, recorder))
+    try:
+        await KitaruLangGraphMiddleware(requested_model=None).awrap_tool_call(
+            _request(), cast(Any, lambda _: pytest.fail("live tool called"))
+        )
+    finally:
+        _ACTIVE_INVOCATION.reset(token)
+
+    assert len(requests) == 1
+    assert requests[0].occurrence is None
+    assert recorder.history_occurrences == {}
 
 
 @pytest.mark.parametrize(
