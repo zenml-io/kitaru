@@ -203,6 +203,106 @@ describe("normalized replay policy decisions", () => {
     expect(run.failure).toBeUndefined();
   });
 
+  const baselineHistory = (onMiss: "fail" | "passthrough") =>
+    ({
+      default: { on_miss: onMiss, scope: "baseline", type: "history" },
+      tools: {},
+    }) as const;
+  const weatherDelft = { inputs: { city: "Delft" }, toolName: "weather" };
+
+  it("replays repeated identical baseline calls in recorded order", async () => {
+    const recorded = ["first", "second", "third"];
+    const { client, run } = runState(baselineHistory("fail"), (request) => ({
+      found: true,
+      result: { value: recorded[request.occurrence ?? 0] },
+    }));
+
+    for (const [index, value] of recorded.entries()) {
+      await expect(
+        decideToolCall(run, { callId: `call-${index}`, ...weatherDelft }),
+      ).resolves.toEqual({ output: { value }, type: "mocked_result" });
+    }
+    expect(client.lookups.map((lookup) => lookup.occurrence)).toEqual([
+      0, 1, 2,
+    ]);
+  });
+
+  it("counts baseline occurrences per cache key, not per run", async () => {
+    const { client, run } = runState(baselineHistory("fail"), (request) => ({
+      found: true,
+      result: { value: request.occurrence ?? 0 },
+    }));
+
+    await decideToolCall(run, { callId: "call-1", ...weatherDelft });
+    await decideToolCall(run, {
+      callId: "call-2",
+      inputs: { city: "Rotterdam" },
+      toolName: "weather",
+    });
+    await decideToolCall(run, { callId: "call-3", ...weatherDelft });
+    // A shared per-run counter would send [0, 1, 2] here.
+    expect(client.lookups.map((lookup) => lookup.occurrence)).toEqual([
+      0, 0, 1,
+    ]);
+  });
+
+  it("keeps the baseline occurrence counter still on a miss", async () => {
+    let firstCall = true;
+    const { client, run } = runState(baselineHistory("passthrough"), () => {
+      if (firstCall) {
+        firstCall = false;
+        return { found: false, result: null };
+      }
+      return { found: true, result: { value: "recorded" } };
+    });
+
+    await expect(
+      decideToolCall(run, { callId: "call-1", ...weatherDelft }),
+    ).resolves.toEqual({ type: "execute" });
+    await expect(
+      decideToolCall(run, { callId: "call-2", ...weatherDelft }),
+    ).resolves.toEqual({
+      output: { value: "recorded" },
+      type: "mocked_result",
+    });
+    expect(client.lookups.map((lookup) => lookup.occurrence)).toEqual([0, 0]);
+  });
+
+  it.each([
+    "agent",
+    "cohort_version",
+  ] as const)("sends no occurrence for the %s scope", async (scope) => {
+    const { client, run } = runState(
+      {
+        default: { on_miss: "fail", scope, type: "history" },
+        tools: {},
+      },
+      () => ({ found: true, result: { value: "recorded" } }),
+    );
+    await decideToolCall(run, { callId: "call-1", ...weatherDelft });
+    await decideToolCall(run, { callId: "call-2", ...weatherDelft });
+    expect(client.lookups).toHaveLength(2);
+    for (const lookup of client.lookups) {
+      expect(lookup).not.toHaveProperty("occurrence");
+    }
+  });
+
+  it("follows on_miss for a call past the last recorded occurrence", async () => {
+    const { client, run } = runState(baselineHistory("fail"), (request) =>
+      (request.occurrence ?? 0) < 1
+        ? { found: true, result: { value: "only" } }
+        : { found: false, result: null },
+    );
+
+    await expect(
+      decideToolCall(run, { callId: "call-1", ...weatherDelft }),
+    ).resolves.toEqual({ output: { value: "only" }, type: "mocked_result" });
+    await expect(
+      decideToolCall(run, { callId: "call-2", ...weatherDelft }),
+    ).rejects.toBeInstanceOf(ToolPolicyMissError);
+    expect(client.lookups.map((lookup) => lookup.occurrence)).toEqual([0, 1]);
+  });
+
   it("refuses a later tool once a policy has already failed", async () => {
     const run = state({ default: { type: "passthrough" }, tools: {} });
     const failure = new ToolPolicyMissError("No static result for 'normalize'");
