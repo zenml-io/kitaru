@@ -15,7 +15,7 @@
     "zod": "3.25.76"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",
+    "build": "node ../../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",
     "demo": "node dist/demo.js",
     "lint": "biome check .",
     "test": "vitest run test",

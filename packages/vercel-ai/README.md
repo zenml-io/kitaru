@@ -12,7 +12,7 @@ pnpm add @zenml-io/kitaru-vercel-ai ai@7.0.65
 
 - [Vercel AI SDK adapter documentation](https://docs.zenml.io/kitaru/adapters/vercel-ai)
 - [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
-- [Run the TypeScript returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver)
+- [Run the TypeScript returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/vercel_ai_ticket_resolver)
 
 ```ts
 import { openai } from "@ai-sdk/openai";

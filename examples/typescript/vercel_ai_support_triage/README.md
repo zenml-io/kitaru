@@ -18,7 +18,7 @@ Use Node 22 and a running Kitaru API backed by PostgreSQL. Export `KITARU_API_UR
 ```bash
 pnpm install --frozen-lockfile
 pnpm build
-OPENAI_API_KEY='your-openai-key' uv run python -m v2_examples.vercel_ai_support_triage.demo
+OPENAI_API_KEY='your-openai-key' uv run python -m examples.typescript.vercel_ai_support_triage.demo
 ```
 
 The command prints session and replay IDs, node counts, both outbox counts, the mocked history action, and individual evaluation scores. It never prints credentials.
@@ -31,7 +31,7 @@ The deterministic path uses the public AI SDK 7 `MockLanguageModelV4` test model
 
 ```bash
 pnpm build
-KITARU_VERCEL_AI_SMOKE=1 KITARU_VERCEL_AI_TEST_MODEL=1 KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 node v2_examples/vercel_ai_support_triage/dist/main.js
+KITARU_VERCEL_AI_SMOKE=1 KITARU_VERCEL_AI_TEST_MODEL=1 KITARU_AGENT_ID=018f0000-0000-7000-8000-000000000100 node examples/typescript/vercel_ai_support_triage/dist/main.js
 ```
 
 The full Worker-backed path needs the repository's PostgreSQL test service on port 5433 and is exercised by the TypeScript integration test suite.

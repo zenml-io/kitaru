@@ -44,10 +44,7 @@ LLM_INTEGRATION_PROVIDER_INPUTS = (
     "include_anthropic",
     "include_google_adk",
 )
-EXAMPLE_PATH_RE = re.compile(
-    r"(?:https://github\.com/zenml-io/kitaru/(?:tree|blob)/develop/)?"
-    r"((?:v2_)?examples/[A-Za-z0-9_./#-]+)"
-)
+EXAMPLE_PATH_RE = re.compile(r"examples/[A-Za-z0-9_./#-]+")
 MARKDOWN_LINK_TARGET_RE = re.compile(r"\]\(([^)\s]+)")
 SHELL_PLACEHOLDER_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=<[^<>\s]+>$")
 
@@ -75,7 +72,6 @@ def audit_manifest() -> list[str]:
 
     manifest_paths: dict[str, str] = {}
     manifest_ids: set[str] = set()
-    excluded_paths = set(_explicit_exclusions(data))
 
     for index, entry in enumerate(examples):
         context = _entry_context(entry, index)
@@ -106,12 +102,10 @@ def audit_manifest() -> list[str]:
         errors.extend(_audit_release_policy(entry, context))
 
     for docs_path in _public_example_paths_from_docs(examples):
-        if docs_path in excluded_paths:
-            continue
         if not _is_manifest_aware(docs_path, manifest_paths):
             errors.append(
                 f"public docs list {docs_path}, but examples/example-coverage.yaml "
-                "has no matching entry or explicit exclusion"
+                "has no matching entry"
             )
 
     return errors
@@ -133,21 +127,6 @@ def _entry_context(entry: object, index: int) -> str:
         if isinstance(entry.get("id"), str):
             return f"entry {entry['id']!r}"
     return f"entry #{index}"
-
-
-def _explicit_exclusions(data: dict[str, Any]) -> list[str]:
-    exclusions = data.get("explicit_exclusions", [])
-    if not isinstance(exclusions, list):
-        return []
-    paths: list[str] = []
-    for item in exclusions:
-        if isinstance(item, str):
-            paths.append(_normalize_example_path(item))
-        elif isinstance(item, dict):
-            item = cast(dict[str, Any], item)
-            if isinstance(item.get("path"), str):
-                paths.append(_normalize_example_path(item["path"]))
-    return paths
 
 
 def _audit_public_docs(entry: dict[str, Any], context: str) -> list[str]:
@@ -581,7 +560,7 @@ def _example_paths_from_doc(doc_path: Path) -> set[str]:
         except ValueError:
             continue
         path = _normalize_example_path(relative_path.as_posix())
-        if path.startswith(("examples/", "v2_examples/")):
+        if path.startswith("examples/") and not _should_ignore_public_path(path):
             paths.add(path)
     return paths
 
@@ -594,7 +573,7 @@ def _doc_is_within_example(doc_path: Path, example_path: str) -> bool:
 
 def _normalize_example_path(path: str) -> str:
     normalized = path.split("#", 1)[0].strip("`.,) ")
-    normalized = normalized.rstrip("/") if normalized != "examples" else normalized
+    normalized = normalized.rstrip("/")
     if normalized.endswith("/README.md"):
         normalized = normalized[: -len("/README.md")]
     return normalized
@@ -632,10 +611,8 @@ def _command_paths(command: str) -> set[str]:
 
     for part in parts:
         cleaned = _normalize_example_path(part)
-        if cleaned.startswith(("examples/", "v2_examples/", "scripts/")):
+        if cleaned.startswith(("examples/", "scripts/")):
             paths.add(cleaned)
-        elif cleaned.startswith("./scripts/"):
-            paths.add(cleaned[2:])
     return paths
 
 

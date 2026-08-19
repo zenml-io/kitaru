@@ -137,12 +137,12 @@ Effective prompts, tool arguments, tool results, and exception summaries can sti
 The repository example has a no-cost help check and an opt-in real run:
 
 ```bash
-uv run --project plugins python -m examples.integrations.openai_agents_v2.agent --help
+uv run --project plugins python -m examples.python.openai_agents_v2.agent --help
 
 export OPENAI_API_KEY="..."
 export KITARU_AGENT_ID="..."
-uv run --project plugins python -m examples.integrations.openai_agents_v2.agent \
+uv run --project plugins python -m examples.python.openai_agents_v2.agent \
   "Use the tool to check order ORD-1007"
 ```
 
-See [`examples/integrations/openai_agents_v2/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/integrations/openai_agents_v2) for setup details.
+See [`examples/python/openai_agents_v2/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/python/openai_agents_v2) for setup details.
