@@ -114,8 +114,10 @@ async def agent_id(services: ReplayServices) -> uuid.UUID:
 async def run_request(
     services: ReplayServices, agent_id: uuid.UUID
 ) -> ExperimentRunCreateRequest:
-    """Provide a run request naming a non-empty cohort version and a runnable
-    version."""
+    """Provide a run request for an experiment run.
+
+    The request names a non-empty cohort version and a runnable version.
+    """
     version = await create_agent_version(
         services.agent_versions,
         agent_id=agent_id,

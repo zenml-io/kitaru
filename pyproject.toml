@@ -142,7 +142,16 @@ select = [
     "B",    # bugbear
     "SIM",  # simplify
     "RUF",  # ruff-specific rules
+    "D",    # pydocstyle (Google convention, see [tool.ruff.lint.pydocstyle])
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may omit docstrings (D1xx), but any docstring they do have must still
+# follow the Google formatting rules (D2xx and up).
+"tests/**" = ["D1"]
+# Test doubles whose methods only mirror the real ADK surface; class-level
+# docstrings already say what each fake stands in for.
+"scripts/google_adk_fakes.py" = ["D1"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]

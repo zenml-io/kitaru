@@ -48,8 +48,11 @@ Setup = tuple[CohortRepository, uuid.UUID, uuid.UUID, TagRepository]
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each cohort repository implementation, an owner id, an agent
-    id to attach cohorts to, and a tag repository sharing the backend."""
+    """Provide each cohort repository implementation and its collaborators.
+
+    Yields the repository, an owner id, an agent id to attach cohorts to, and
+    a tag repository sharing the backend.
+    """
     if request.param == "fake":
         tags = FakeTagRepository()
         yield FakeCohortRepository(tags=tags), uuid.uuid4(), uuid.uuid4(), tags

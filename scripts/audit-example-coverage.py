@@ -50,6 +50,7 @@ SHELL_PLACEHOLDER_ASSIGNMENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=<[^<>\s]+
 
 
 def main() -> int:
+    """Run the example coverage audit and return a process exit code."""
     errors = audit_manifest()
     if errors:
         print("Example coverage audit failed:", file=sys.stderr)
@@ -61,6 +62,7 @@ def main() -> int:
 
 
 def audit_manifest() -> list[str]:
+    """Check the example coverage manifest and return the problems found."""
     data = _load_yaml(MANIFEST_PATH)
     errors: list[str] = []
 

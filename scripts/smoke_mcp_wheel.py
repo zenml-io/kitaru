@@ -103,6 +103,7 @@ def _smoke_mcp(uv: str, root: Path, wheel: Path, repository: Path) -> None:
 
 
 def main() -> int:
+    """Smoke test a built wheel's base and MCP installations."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "wheel",

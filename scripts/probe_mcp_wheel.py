@@ -176,6 +176,7 @@ async def _run(console: Path) -> None:
 
 
 def main() -> int:
+    """Probe the installed MCP server in every capability mode."""
     parser = argparse.ArgumentParser()
     parser.add_argument("console", type=Path)
     arguments = parser.parse_args()

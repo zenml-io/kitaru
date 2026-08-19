@@ -52,8 +52,11 @@ Setup = tuple[AgentRepository, uuid.UUID, Callable[[], AgentVersionRepository]]
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each agent repository implementation, an owner id, and a
-    version repository factory sharing the same backing store."""
+    """Provide each agent repository implementation and its collaborators.
+
+    Yields the repository, an owner id, and a version repository factory
+    sharing the same backing store.
+    """
     if request.param == "fake":
         agents = FakeAgentRepository()
         yield agents, uuid.uuid4(), lambda: FakeAgentVersionRepository(agents)

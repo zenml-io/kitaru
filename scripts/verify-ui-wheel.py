@@ -29,6 +29,7 @@ def _missing_ui_files(names: set[str]) -> list[str]:
 
 
 def main() -> int:
+    """Verify the wheel contains the packaged UI assets and report the result."""
     args = _parse_args()
     wheel = args.wheel
     if not wheel.is_file():
