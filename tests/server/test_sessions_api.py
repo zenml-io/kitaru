@@ -83,8 +83,7 @@ def session_repository(
     tag_repository: FakeTagRepository,
     evaluation_repository: FakeEvaluationRepository,
 ) -> FakeSessionRepository:
-    """Provide the fake session repository backing the app, tag- and
-    evaluation-aware."""
+    """Provide the tag- and evaluation-aware fake session repository for the app."""
     return FakeSessionRepository(tags=tag_repository, evaluations=evaluation_repository)
 
 
@@ -105,8 +104,10 @@ def cohort_version_repository(
     cohort_repository: FakeCohortRepository,
     session_repository: FakeSessionRepository,
 ) -> FakeCohortVersionRepository:
-    """Provide the fake cohort version repository wired to the session
-    repository backing the app."""
+    """Provide the fake cohort version repository backing the app.
+
+    The repository is wired to the fake session repository.
+    """
     return FakeCohortVersionRepository(
         cohorts=cohort_repository, sessions=session_repository
     )
@@ -624,8 +625,7 @@ async def test_update_session_status_cannot_be_cleared(
 async def test_update_session_rejects_terminal_back_to_in_progress(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 409 when the update moves a terminal session back to
-    in_progress."""
+    """Return HTTP 409 when an update moves a terminal session to in_progress."""
     created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.patch(f"/api/v1/sessions/{created['id']}", json={"status": "failed"})
     response = await client.patch(

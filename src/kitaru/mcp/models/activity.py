@@ -31,6 +31,8 @@ class ActivityGetRequest(MCPModel):
 
 
 class SessionNodesRequest(MCPModel):
+    """List a session's child nodes."""
+
     operation: Literal["list_children"]
     kind: Literal["session_nodes"]
     parent_id: uuid.UUID
@@ -40,6 +42,8 @@ class SessionNodesRequest(MCPModel):
 
 
 class SortedChildrenRequest(PageOptions):
+    """List an experiment run's jobs or a job's tasks, sorted."""
+
     operation: Literal["list_children"]
     kind: Literal["experiment_run_jobs", "job_tasks"]
     parent_id: uuid.UUID

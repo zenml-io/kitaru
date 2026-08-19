@@ -224,6 +224,7 @@ def _print_worker_tail(events: Iterable[dict[str, Any]]) -> None:
 
 
 def main(argv: list[str]) -> int:
+    """Print a speed summary for the probe events in the given report directory."""
     if len(argv) != 2:
         print("Usage: summarize_pytest_speed.py REPORT_DIR", file=sys.stderr)
         return 2

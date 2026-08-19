@@ -72,8 +72,7 @@ def session_repository(
     tag_repository: FakeTagRepository,
     evaluation_repository: FakeEvaluationRepository,
 ) -> FakeSessionRepository:
-    """Provide the fake session repository backing the app, tag- and
-    evaluation-aware."""
+    """Provide the tag- and evaluation-aware fake session repository for the app."""
     return FakeSessionRepository(tags=tag_repository, evaluations=evaluation_repository)
 
 
@@ -94,8 +93,10 @@ def cohort_version_repository(
     cohort_repository: FakeCohortRepository,
     session_repository: FakeSessionRepository,
 ) -> FakeCohortVersionRepository:
-    """Provide the fake cohort version repository wired to the session
-    repository backing the app."""
+    """Provide the fake cohort version repository backing the app.
+
+    The repository is wired to the fake session repository.
+    """
     return FakeCohortVersionRepository(
         cohorts=cohort_repository, sessions=session_repository
     )
