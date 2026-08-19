@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - Repeated identical tool calls with baseline-scoped history replay their distinct recorded results in baseline order instead of all resolving to the newest match. Replayed calls past the last recorded occurrence follow the configured `on_miss` behavior.
+### Changed
+
+- Unified all runnable examples under a single `examples/` tree: the Python adapter examples moved from `examples/integrations/` to `examples/python/`, and the TypeScript examples moved from `v2_examples/` to `examples/typescript/`. The `examples/v2/mcp` configuration example was removed in favor of the MCP setup documentation.
 
 ## [0.22.1]
 

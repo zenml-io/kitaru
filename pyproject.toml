@@ -168,9 +168,12 @@ known-first-party = [
 ]
 
 [tool.ty.src]
-include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
-# TODO: Re-enable once the examples are migrated to the v2 SDK.
-exclude = ["examples/**"]
+include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py", "examples/**/*.py"]
+# Exclude the Python adapter examples: they import plugin packages (kitaru-langgraph,
+# kitaru-openai-agents) from the separate plugins workspace, which are not installed
+# in the root environment. The TypeScript examples' Python drivers import only kitaru
+# and are checked.
+exclude = ["examples/python/**"]
 
 [tool.ty.environment]
 python-version = "3.11"

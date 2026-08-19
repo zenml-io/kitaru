@@ -41,12 +41,12 @@ Standard mode can read sessions and nodes, run bounded evaluations and experimen
 
 ```text
 Help me improve the TypeScript returns agent in
-v2_examples/vercel_ai_ticket_resolver using the connected Kitaru MCP server
+examples/typescript/vercel_ai_ticket_resolver using the connected Kitaru MCP server
 in standard mode and the Kitaru CLI. Explain each Kitaru concept when it first
 becomes useful.
 
 Use only the exact recorded session IDs in
-v2_examples/vercel_ai_ticket_resolver/.state/baseline-sessions.json. Direct
+examples/typescript/vercel_ai_ticket_resolver/.state/baseline-sessions.json. Direct
 Vercel-adapter recording has already replaced Langfuse import. Do not inspect
 fixture scenario or expected_action oracle fields during evidence discovery.
 

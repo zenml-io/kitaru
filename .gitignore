@@ -9,8 +9,8 @@ helm/Chart.lock
 # Root TypeScript workspace
 /node_modules/
 /packages/*/node_modules/
-/v2_examples/mastra_support_triage/node_modules/
-/v2_examples/vercel_ai_support_triage/node_modules/
+/examples/typescript/mastra_support_triage/node_modules/
+/examples/typescript/vercel_ai_support_triage/node_modules/
 /packages/*/dist/
 /typescript-dist/
 

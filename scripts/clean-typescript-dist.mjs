@@ -7,11 +7,11 @@ const packageRoot = resolve(process.cwd());
 const relativeRoot = packageRoot.slice(repositoryRoot.length + 1);
 const allowedRoot =
   packageRoot.startsWith(`${repositoryRoot}${sep}packages${sep}`) ||
-  packageRoot.startsWith(`${repositoryRoot}${sep}v2_examples${sep}`);
+  packageRoot.startsWith(`${repositoryRoot}${sep}examples${sep}typescript${sep}`);
 
 if (!allowedRoot || !existsSync(join(packageRoot, "package.json"))) {
   throw new Error(
-    `Refusing to clean dist outside a TypeScript workspace package: ${relativeRoot || basename(packageRoot)}`,
+    `Refusing to clean dist outside a TypeScript package root: ${relativeRoot || basename(packageRoot)}`,
   );
 }
 

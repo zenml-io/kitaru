@@ -18,9 +18,16 @@
 
 <p align="center">
   <a href="https://docs.zenml.io/kitaru">Docs</a> &middot;
+  <a href="https://youtu.be/aYLfzXEr2Rk">Guided Tour</a> &middot;
   <a href="#-get-started">Get Started</a> &middot;
   <a href="https://www.zenml.io/roadmap">Roadmap</a> &middot;
   <a href="https://kitaru.ai/slack">Community</a>
+</p>
+
+<p align="center">
+  <a href="https://youtu.be/aYLfzXEr2Rk">
+    <img src="assets/guided-tour-thumbnail.jpg" alt="Watch the 26-minute Kitaru guided tour" width="900">
+  </a>
 </p>
 
 ---

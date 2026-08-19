@@ -13,7 +13,7 @@
     "ai": "7.0.65"
   },
   "scripts": {
-    "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",
+    "build": "node ../../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.json",
     "lint": "biome check .",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   }

@@ -21,15 +21,15 @@ def audit_module() -> ModuleType:
     return module
 
 
-def test_v2_example_url_keeps_v2_prefix(audit_module: ModuleType) -> None:
-    """Do not misread v2_examples paths as examples paths."""
+def test_example_url_extracts_full_nested_path(audit_module: ModuleType) -> None:
+    """Capture the complete nested example path from a GitHub URL."""
     text = (
         "https://github.com/zenml-io/kitaru/tree/develop/"
-        "v2_examples/mastra_support_triage"
+        "examples/typescript/mastra_support_triage"
     )
 
     assert audit_module.EXAMPLE_PATH_RE.findall(text) == [
-        "v2_examples/mastra_support_triage"
+        "examples/typescript/mastra_support_triage"
     ]
 
 
@@ -43,7 +43,7 @@ def test_public_doc_must_link_declared_example(
 
     errors = audit_module._audit_public_docs(
         {
-            "path": "v2_examples/mastra_support_triage",
+            "path": "examples/typescript/mastra_support_triage",
             "public_docs": ["adapter.md"],
         },
         "entry 'mastra-support-triage'",
@@ -51,7 +51,7 @@ def test_public_doc_must_link_declared_example(
 
     assert errors == [
         "entry 'mastra-support-triage': public docs path adapter.md does not link "
-        "to v2_examples/mastra_support_triage"
+        "to examples/typescript/mastra_support_triage"
     ]
 
 
@@ -62,7 +62,7 @@ def test_public_doc_accepts_related_example_url(
     docs_path = tmp_path / "adapter.md"
     docs_path.write_text(
         "https://github.com/zenml-io/kitaru/tree/develop/"
-        "v2_examples/mastra_support_triage\n",
+        "examples/typescript/mastra_support_triage\n",
         encoding="utf-8",
     )
     monkeypatch.setattr(audit_module, "ROOT", tmp_path)
@@ -70,7 +70,7 @@ def test_public_doc_accepts_related_example_url(
     assert (
         audit_module._audit_public_docs(
             {
-                "path": "v2_examples/mastra_support_triage",
+                "path": "examples/typescript/mastra_support_triage",
                 "public_docs": ["adapter.md"],
             },
             "entry 'mastra-support-triage'",

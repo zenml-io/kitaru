@@ -41,9 +41,10 @@ import {
 import { preflightDedicatedWorker, runDedicatedWorker } from "./worker.js";
 
 const EXAMPLE_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const REPO_ROOT = resolve(EXAMPLE_DIR, "../..");
+const REPO_ROOT = resolve(EXAMPLE_DIR, "../../..");
 const SCORER_SOURCE = resolve(EXAMPLE_DIR, "scorers.py");
-const RUN_COMMAND = "node v2_examples/mastra_support_triage/dist/main.js";
+const RUN_COMMAND =
+  "node examples/typescript/mastra_support_triage/dist/main.js";
 const REQUESTED_MODEL_ID = "openai/gpt-5-nano";
 const INITIAL_PROMPT =
   "Investigate account acct-1001 and delayed order ord-1001. " +
