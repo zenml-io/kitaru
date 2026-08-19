@@ -36,6 +36,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.idempotency_key import (
     MAX_IDEMPOTENCY_KEY_LENGTH,
+    MAX_IDEMPOTENCY_PATH_LENGTH,
     IdempotencyKey,
 )
 
@@ -68,7 +69,7 @@ class IdempotencyKeyORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     key: Mapped[str] = mapped_column(String(MAX_IDEMPOTENCY_KEY_LENGTH))
     fingerprint: Mapped[str] = mapped_column(String(64))
     method: Mapped[str] = mapped_column(String(16))
-    path: Mapped[str] = mapped_column(String(2048))
+    path: Mapped[str] = mapped_column(String(MAX_IDEMPOTENCY_PATH_LENGTH))
     response_status: Mapped[int | None]
     response_body: Mapped[bytes | None] = mapped_column(LargeBinary)
     response_content_type: Mapped[str | None] = mapped_column(String(255))

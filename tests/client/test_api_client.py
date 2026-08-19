@@ -160,8 +160,8 @@ async def test_fresh_idempotency_key_per_request() -> None:
     assert len(keys) == 2
 
 
-async def test_idempotency_key_stamped_only_for_post_and_patch() -> None:
-    """Stamp the idempotency key for POST and PATCH, not other methods."""
+async def test_idempotency_key_stamped_only_for_post() -> None:
+    """Stamp the idempotency key for POST, not other methods."""
     requests: list[httpx.Request] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -183,7 +183,7 @@ async def test_idempotency_key_stamped_only_for_post_and_patch() -> None:
         "PUT": False,
         "DELETE": False,
         "POST": True,
-        "PATCH": True,
+        "PATCH": False,
     }
 
 

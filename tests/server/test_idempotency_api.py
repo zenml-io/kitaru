@@ -20,20 +20,38 @@ import httpx
 import pytest
 from fastapi.routing import iter_route_contexts
 
-from conftest import FakeIdempotencyKeyRepository, FakeTagRepository
-from kitaru.server.adapters.rest.commit_route import is_idempotent
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeApiKeyRepository,
+    FakeIdempotencyKeyRepository,
+    FakeTagRepository,
+)
 from kitaru.server.adapters.rest.dependencies import (
     _resolve_auth_context,
-    authorize,
+    get_agent_version_service,
+    get_api_key_service,
     get_idempotency_key_repository,
     get_tag_service,
 )
+from kitaru.server.adapters.rest.route import is_idempotent
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
-from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.models.auth import (
+    AuthContext,
+    WorkerAuthContext,
+    WorkerPrincipal,
+)
+from kitaru.server.application.services.agent_version_service import (
+    AgentVersionService,
+)
+from kitaru.server.application.services.api_key_service import ApiKeyService
 from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.idempotency_key import MAX_IDEMPOTENCY_KEY_LENGTH
+from kitaru.server.domain.idempotency_key import (
+    MAX_IDEMPOTENCY_KEY_LENGTH,
+    MAX_IDEMPOTENCY_PATH_LENGTH,
+)
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 OTHER_ACCOUNT = Account(id=uuid.uuid4(), name="bob")
@@ -87,6 +105,7 @@ def _build_client(
     tag_repository: FakeTagRepository,
     idempotency_key_repository: FakeIdempotencyKeyRepository,
     account: Account,
+    context: AuthContext | None = None,
 ) -> httpx.AsyncClient:
     """Build an HTTP client for the app authorized as the given account.
 
@@ -95,6 +114,7 @@ def _build_client(
         idempotency_key_repository: Fake idempotency key repository backing
             the app.
         account: Account the client authenticates as.
+        context: Resolved auth context, defaulting to an account context.
 
     Returns:
         HTTP client routed to the app.
@@ -106,10 +126,14 @@ def _build_client(
     app.dependency_overrides[get_idempotency_key_repository] = lambda: (
         idempotency_key_repository
     )
-    app.dependency_overrides[authorize] = lambda: AuthContext(account=account)
-    app.dependency_overrides[_resolve_auth_context] = lambda: AuthContext(
-        account=account
+    app.dependency_overrides[get_api_key_service] = lambda: ApiKeyService(
+        repository=FakeApiKeyRepository()
     )
+    app.dependency_overrides[get_agent_version_service] = lambda: AgentVersionService(
+        repository=FakeAgentVersionRepository(FakeAgentRepository())
+    )
+    resolved = context if context is not None else AuthContext(account=account)
+    app.dependency_overrides[_resolve_auth_context] = lambda: resolved
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 
@@ -251,3 +275,91 @@ async def test_idempotent_routes_match_the_expected_set() -> None:
     }
     assert marked == EXPECTED_IDEMPOTENT_ROUTES
     assert ("POST", "/api/v1/tasks/claim") not in marked
+
+
+async def test_non_printable_header_returns_400(client: httpx.AsyncClient) -> None:
+    """Reject an Idempotency-Key header carrying control characters."""
+    response = await client.post(
+        "/api/v1/tags",
+        json={"name": "prod"},
+        headers={b"Idempotency-Key": b"abc\x00def"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Invalid Idempotency-Key header."}
+
+
+async def test_overlong_path_returns_400(client: httpx.AsyncClient) -> None:
+    """Reject a keyed request whose path exceeds the stored path length."""
+    garbage = "a" * (MAX_IDEMPOTENCY_PATH_LENGTH + 1)
+    response = await client.post(
+        f"/api/v1/agents/{garbage}/versions",
+        json={},
+        headers={"Idempotency-Key": "long-path"},
+    )
+    assert response.status_code == 400
+    assert response.json() == {"detail": "Request path too long for Idempotency-Key."}
+
+
+async def test_query_string_is_part_of_the_fingerprint(
+    client: httpx.AsyncClient,
+) -> None:
+    """Reject a reused key whose query string differs from the stored request."""
+    headers = {"Idempotency-Key": "create-prod"}
+    first = await client.post(
+        "/api/v1/tags?source=a", json={"name": "prod"}, headers=headers
+    )
+    assert first.status_code == 201
+
+    second = await client.post(
+        "/api/v1/tags?source=b", json={"name": "prod"}, headers=headers
+    )
+    assert second.status_code == 422
+
+
+async def test_replay_runs_after_authorization(
+    tag_repository: FakeTagRepository,
+    idempotency_key_repository: FakeIdempotencyKeyRepository,
+) -> None:
+    """Reject a disallowed principal before replaying a stored response."""
+    headers = {"Idempotency-Key": "create-prod"}
+    body = {"name": "prod"}
+    async with _build_client(
+        tag_repository, idempotency_key_repository, ACCOUNT
+    ) as account_client:
+        first = await account_client.post("/api/v1/tags", json=body, headers=headers)
+    assert first.status_code == 201
+
+    worker = WorkerAuthContext(
+        account=ACCOUNT, principal=WorkerPrincipal(worker_id=uuid.uuid4())
+    )
+    async with _build_client(
+        tag_repository, idempotency_key_repository, ACCOUNT, context=worker
+    ) as worker_client:
+        replay = await worker_client.post("/api/v1/tags", json=body, headers=headers)
+    assert replay.status_code == 403
+    assert "Idempotent-Replayed" not in replay.headers
+
+
+async def test_api_key_responses_are_stored_encrypted(
+    client: httpx.AsyncClient,
+    idempotency_key_repository: FakeIdempotencyKeyRepository,
+) -> None:
+    """Store the issued API key response through the encrypting path."""
+    response = await client.post(
+        "/api/v1/api-keys",
+        json={"name": "ci"},
+        headers={"Idempotency-Key": "create-key"},
+    )
+    assert response.status_code == 201
+
+    stored = await idempotency_key_repository.get(ACCOUNT.id, "create-key")
+    assert stored is not None
+    assert stored.id in idempotency_key_repository.encrypted_ids
+
+    tag = await client.post(
+        "/api/v1/tags", json={"name": "prod"}, headers={"Idempotency-Key": "tag"}
+    )
+    assert tag.status_code == 201
+    stored_tag = await idempotency_key_repository.get(ACCOUNT.id, "tag")
+    assert stored_tag is not None
+    assert stored_tag.id not in idempotency_key_repository.encrypted_ids

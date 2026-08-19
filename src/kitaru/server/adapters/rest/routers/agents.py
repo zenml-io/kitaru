@@ -30,7 +30,6 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionResponse,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
@@ -47,13 +46,14 @@ from kitaru.server.adapters.rest.mapping.agents import (
     agent_to_response,
     agent_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

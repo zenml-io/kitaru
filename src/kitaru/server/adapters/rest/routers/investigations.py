@@ -28,7 +28,6 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionUpdateRequest,
     InvestigationUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_investigation_service,
@@ -41,12 +40,13 @@ from kitaru.server.adapters.rest.mapping.investigations import (
     investigation_to_response,
     investigation_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.investigation_service import (
     InvestigationService,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

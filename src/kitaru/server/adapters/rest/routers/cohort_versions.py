@@ -22,7 +22,6 @@ from kitaru.api_models.v1.cohort_version import (
     CohortVersionResponse,
     CohortVersionUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_cohort_version_service,
@@ -31,12 +30,13 @@ from kitaru.server.adapters.rest.mapping.cohort_versions import (
     cohort_version_to_response,
     cohort_version_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.cohort_version_service import (
     CohortVersionService,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("/{cohort_version_id}")

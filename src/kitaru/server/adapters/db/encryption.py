@@ -38,6 +38,41 @@ class AesGcmCipher:
         """
         self._aesgcm = AESGCM(hashlib.sha256(key.encode("utf-8")).digest())
 
+    def encrypt_bytes(self, plaintext: bytes) -> bytes:
+        """Encrypt plaintext bytes.
+
+        Args:
+            plaintext: Bytes to encrypt.
+
+        Returns:
+            Nonce followed by ciphertext.
+        """
+        nonce = os.urandom(_NONCE_LENGTH)
+        return nonce + self._aesgcm.encrypt(nonce, plaintext, None)
+
+    def decrypt_bytes(self, token: bytes) -> bytes:
+        """Decrypt encrypted bytes.
+
+        Args:
+            token: Nonce followed by ciphertext.
+
+        Raises:
+            DecryptionError: The token was encrypted with a different key
+                or is corrupted.
+
+        Returns:
+            Plaintext bytes.
+        """
+        try:
+            return self._aesgcm.decrypt(
+                token[:_NONCE_LENGTH], token[_NONCE_LENGTH:], None
+            )
+        except (InvalidTag, ValueError) as exc:
+            raise DecryptionError(
+                "Decryption failed. The token was encrypted with a different "
+                "key or is corrupted"
+            ) from exc
+
     def encrypt(self, plaintext: str) -> str:
         """Encrypt a plaintext string.
 
@@ -47,9 +82,8 @@ class AesGcmCipher:
         Returns:
             Base64-encoded nonce and ciphertext.
         """
-        nonce = os.urandom(_NONCE_LENGTH)
-        ciphertext = self._aesgcm.encrypt(nonce, plaintext.encode("utf-8"), None)
-        return base64.b64encode(nonce + ciphertext).decode("utf-8")
+        token = self.encrypt_bytes(plaintext.encode("utf-8"))
+        return base64.b64encode(token).decode("utf-8")
 
     def decrypt(self, token: str) -> str:
         """Decrypt an encrypted string.
@@ -66,12 +100,9 @@ class AesGcmCipher:
         """
         try:
             raw = base64.b64decode(token)
-            plaintext = self._aesgcm.decrypt(
-                raw[:_NONCE_LENGTH], raw[_NONCE_LENGTH:], None
-            )
-        except (InvalidTag, ValueError) as exc:
+        except ValueError as exc:
             raise DecryptionError(
                 "Decryption failed. The token was encrypted with a different "
                 "key or is corrupted"
             ) from exc
-        return plaintext.decode("utf-8")
+        return self.decrypt_bytes(raw).decode("utf-8")

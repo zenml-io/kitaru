@@ -17,7 +17,9 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import CursorResult, delete, select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.orm.idempotency_key import (
     IDEMPOTENCY_KEY_ACCOUNT_ID_KEY_UNIQUE_CONSTRAINT,
     IdempotencyKeyORM,
@@ -33,6 +35,16 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
     """Idempotency key repository backed by the application database."""
 
     orm_class = IdempotencyKeyORM
+
+    def __init__(self, session: AsyncSession, cipher: AesGcmCipher) -> None:
+        """Initialize the repository.
+
+        Args:
+            session: Database session for all operations.
+            cipher: Cipher for response bodies stored encrypted at rest.
+        """
+        super().__init__(session)
+        self._cipher = cipher
 
     async def create(self, idempotency_key: IdempotencyKey) -> IdempotencyKey:
         """Persist a new idempotency key.
@@ -59,12 +71,15 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
         )
         return row.to_domain()
 
-    async def get(self, account_id: uuid.UUID, key: str) -> IdempotencyKey | None:
+    async def get(
+        self, account_id: uuid.UUID, key: str, encrypted: bool = False
+    ) -> IdempotencyKey | None:
         """Load an idempotency key by account and key.
 
         Args:
             account_id: Id of the account the key is scoped to.
             key: Idempotency key.
+            encrypted: Whether the stored response body is encrypted at rest.
 
         Returns:
             Stored idempotency key, or ``None`` when no row matches.
@@ -73,7 +88,14 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
             IdempotencyKeyORM.account_id == account_id, IdempotencyKeyORM.key == key
         )
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain() if row is not None else None
+        if row is None:
+            return None
+        idempotency_key = row.to_domain()
+        if encrypted and idempotency_key.response_body is not None:
+            idempotency_key.response_body = self._cipher.decrypt_bytes(
+                idempotency_key.response_body
+            )
+        return idempotency_key
 
     async def store_response(
         self,
@@ -81,6 +103,7 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
         response_status: int,
         response_body: bytes,
         response_content_type: str | None,
+        encrypt: bool = False,
     ) -> None:
         """Record the response a request committed under this key.
 
@@ -89,7 +112,10 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
             response_status: HTTP status code of the committed response.
             response_body: Raw response body.
             response_content_type: Content type of the response, when set.
+            encrypt: Whether to store the body encrypted at rest.
         """
+        if encrypt:
+            response_body = self._cipher.encrypt_bytes(response_body)
         statement = (
             update(IdempotencyKeyORM)
             .where(IdempotencyKeyORM.id == idempotency_key_id)
@@ -111,6 +137,8 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
         Returns:
             Number of deleted rows.
         """
+        if limit <= 0:
+            return 0
         candidates = (
             select(IdempotencyKeyORM.id)
             .where(IdempotencyKeyORM.created < cutoff)

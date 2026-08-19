@@ -95,7 +95,7 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
-from kitaru.server.adapters.rest.commit_route import attach_request_session
+from kitaru.server.adapters.rest.request_state import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.idempotency_key_repository import (
@@ -167,7 +167,7 @@ class RequestCredential(NamedTuple):
 async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Provide a request-scoped database session.
 
-    The session is attached to the request for ``CommitRoute`` to commit
+    The session is attached to the request for ``KitaruAPIRoute`` to commit
     before the response is returned. Any exception skips the commit and
     pending writes roll back when the session closes.
 
@@ -836,16 +836,20 @@ def get_worker_service(
 
 def get_idempotency_key_repository(
     session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> IdempotencyKeyRepository:
     """Return an idempotency key repository for the current request.
 
     Args:
         session: Request-scoped database session.
+        settings: API settings for this process.
 
     Returns:
         Idempotency key repository bound to the SQL implementation.
     """
-    return SQLIdempotencyKeyRepository(session)
+    return SQLIdempotencyKeyRepository(
+        session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+    )
 
 
 def get_auth_service(

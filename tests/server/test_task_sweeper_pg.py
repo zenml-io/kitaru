@@ -22,9 +22,12 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from conftest import db_settings, lifespan_client
+from kitaru.analytics.client import AnalyticsClient
+from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
     SQLIdempotencyKeyRepository,
 )
+from kitaru.server.api import task_sweeper
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.idempotency_key import IdempotencyKey
 
@@ -208,12 +211,13 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
 async def test_background_sweep_deletes_expired_idempotency_keys() -> None:
     """The sweep loop deletes a key past retention and keeps a fresh one.
 
-    No route creates idempotency keys yet, so the keys are stored directly
-    through the repository against the app's own database.
+    The keys are stored directly through the repository against the app's
+    own database, so the test controls their age.
     """
     settings = db_settings(
         TASK_SWEEP_INTERVAL_SECONDS=1, IDEMPOTENCY_KEY_RETENTION_SECONDS=1
     )
+    cipher = AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
     async with lifespan_client(settings) as client:
         account_id = uuid.UUID((await client.get("/api/v1/accounts/me")).json()["id"])
 
@@ -223,7 +227,7 @@ async def test_background_sweep_deletes_expired_idempotency_keys() -> None:
         )
         try:
             async with session_factory() as session:
-                await SQLIdempotencyKeyRepository(session).create(
+                await SQLIdempotencyKeyRepository(session, cipher).create(
                     IdempotencyKey(
                         account_id=account_id,
                         key="expired",
@@ -239,7 +243,7 @@ async def test_background_sweep_deletes_expired_idempotency_keys() -> None:
             await asyncio.sleep(1.5)
 
             async with session_factory() as session:
-                await SQLIdempotencyKeyRepository(session).create(
+                await SQLIdempotencyKeyRepository(session, cipher).create(
                     IdempotencyKey(
                         account_id=account_id,
                         key="fresh",
@@ -253,7 +257,7 @@ async def test_background_sweep_deletes_expired_idempotency_keys() -> None:
             deadline = asyncio.get_running_loop().time() + 10.0
             while asyncio.get_running_loop().time() < deadline:
                 async with session_factory() as session:
-                    found = await SQLIdempotencyKeyRepository(session).get(
+                    found = await SQLIdempotencyKeyRepository(session, cipher).get(
                         account_id, "expired"
                     )
                 if found is None:
@@ -264,8 +268,59 @@ async def test_background_sweep_deletes_expired_idempotency_keys() -> None:
 
             async with session_factory() as session:
                 assert (
-                    await SQLIdempotencyKeyRepository(session).get(account_id, "fresh")
+                    await SQLIdempotencyKeyRepository(session, cipher).get(
+                        account_id, "fresh"
+                    )
                     is not None
                 )
         finally:
+            await engine.dispose()
+
+
+async def test_sweep_once_drains_more_than_one_batch_of_idempotency_keys() -> None:
+    """One sweep tick deletes every expired key, not only the first batch."""
+    settings = db_settings(
+        TASK_SWEEP_INTERVAL_SECONDS=0,
+        TASK_SWEEP_BATCH_LIMIT=5,
+        IDEMPOTENCY_KEY_RETENTION_SECONDS=0,
+    )
+    cipher = AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+    async with lifespan_client(settings) as client:
+        account_id = uuid.UUID((await client.get("/api/v1/accounts/me")).json()["id"])
+        engine = create_async_engine(DatabaseService.generate_database_uri(settings))
+        session_factory = async_sessionmaker(
+            bind=engine, class_=AsyncSession, expire_on_commit=False
+        )
+        database = DatabaseService(settings)
+        try:
+            async with session_factory() as session:
+                repository = SQLIdempotencyKeyRepository(session, cipher)
+                for index in range(12):
+                    await repository.create(
+                        IdempotencyKey(
+                            account_id=account_id,
+                            key=f"expired-{index}",
+                            fingerprint="f" * 64,
+                            method="POST",
+                            path="/api/v1/agents",
+                        )
+                    )
+                await session.commit()
+
+            # Retention is zero, so every key created before now is expired.
+            await asyncio.sleep(0.05)
+            await task_sweeper.sweep_once(
+                database, settings, AnalyticsClient(enabled=False)
+            )
+
+            async with session_factory() as session:
+                repository = SQLIdempotencyKeyRepository(session, cipher)
+                remaining = [
+                    index
+                    for index in range(12)
+                    if await repository.get(account_id, f"expired-{index}") is not None
+                ]
+            assert remaining == []
+        finally:
+            await database.engine.dispose()
             await engine.dispose()

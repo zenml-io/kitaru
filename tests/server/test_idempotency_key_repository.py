@@ -24,6 +24,8 @@ from conftest import (
     pg_session_with_engine,
     postgres_available,
 )
+from kitaru.server.adapters.db.encryption import AesGcmCipher
+from kitaru.server.adapters.db.orm.idempotency_key import IdempotencyKeyORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -56,7 +58,11 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         accounts = SQLAccountRepository(session)
         owner = await accounts.create(Account(name="owner"))
         other_owner = await accounts.create(Account(name="other-owner"))
-        yield SQLIdempotencyKeyRepository(session), owner.id, other_owner.id
+        yield (
+            SQLIdempotencyKeyRepository(session, AesGcmCipher("test-key")),
+            owner.id,
+            other_owner.id,
+        )
 
 
 async def test_create_and_get_roundtrip(setup: Setup) -> None:
@@ -157,6 +163,60 @@ async def test_store_response_roundtrip(setup: Setup) -> None:
     assert loaded.response_status == 201
     assert loaded.response_body == b'{"id": "abc"}'
     assert loaded.response_content_type == "application/json"
+
+
+async def test_store_response_encrypted_roundtrip() -> None:
+    """Store the body encrypted at rest and decrypt it on read."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, _engine):
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        repository = SQLIdempotencyKeyRepository(session, AesGcmCipher("test-key"))
+        created = await repository.create(
+            IdempotencyKey(
+                account_id=owner.id,
+                key="request-1",
+                fingerprint="f" * 64,
+                method="POST",
+                path="/api/v1/api-keys",
+            )
+        )
+        await repository.store_response(
+            created.id,
+            response_status=201,
+            response_body=b'{"key": "secret"}',
+            response_content_type="application/json",
+            encrypt=True,
+        )
+
+        row = await session.get(IdempotencyKeyORM, created.id)
+        assert row is not None
+        assert row.response_body is not None
+        assert b"secret" not in row.response_body
+
+        loaded = await repository.get(owner.id, "request-1", encrypted=True)
+        assert loaded is not None
+        assert loaded.response_body == b'{"key": "secret"}'
+
+
+async def test_delete_expired_with_zero_limit_deletes_nothing(setup: Setup) -> None:
+    """Treat a non-positive limit as an empty batch."""
+    repository, account_id, _ = setup
+    created = await repository.create(
+        IdempotencyKey(
+            account_id=account_id,
+            key="old",
+            fingerprint="f" * 64,
+            method="POST",
+            path="/api/v1/agents",
+        )
+    )
+    assert created.created is not None
+    cutoff = created.created + timedelta(seconds=1)
+
+    assert await repository.delete_expired(cutoff, limit=0) == 0
+    assert await repository.delete_expired(cutoff, limit=-1) == 0
+    assert await repository.get(account_id, "old") == created
 
 
 async def test_delete_expired_respects_cutoff(setup: Setup) -> None:

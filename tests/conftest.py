@@ -1380,6 +1380,7 @@ class FakeIdempotencyKeyRepository:
     def __init__(self) -> None:
         """Initialize the repository."""
         self._idempotency_keys: dict[uuid.UUID, IdempotencyKey] = {}
+        self.encrypted_ids: set[uuid.UUID] = set()
 
     async def create(self, idempotency_key: IdempotencyKey) -> IdempotencyKey:
         """Persist a new idempotency key.
@@ -1405,12 +1406,15 @@ class FakeIdempotencyKeyRepository:
         self._idempotency_keys[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, account_id: uuid.UUID, key: str) -> IdempotencyKey | None:
+    async def get(
+        self, account_id: uuid.UUID, key: str, encrypted: bool = False
+    ) -> IdempotencyKey | None:
         """Load an idempotency key by account and key.
 
         Args:
             account_id: Id of the account the key is scoped to.
             key: Idempotency key.
+            encrypted: Whether the stored response body is encrypted at rest.
 
         Returns:
             Stored idempotency key, or ``None`` when no row matches.
@@ -1426,6 +1430,7 @@ class FakeIdempotencyKeyRepository:
         response_status: int,
         response_body: bytes,
         response_content_type: str | None,
+        encrypt: bool = False,
     ) -> None:
         """Record the response a request committed under this key.
 
@@ -1434,10 +1439,13 @@ class FakeIdempotencyKeyRepository:
             response_status: HTTP status code of the committed response.
             response_body: Raw response body.
             response_content_type: Content type of the response, when set.
+            encrypt: Whether to store the body encrypted at rest.
         """
         stored = self._idempotency_keys.get(idempotency_key_id)
         if stored is None:
             return
+        if encrypt:
+            self.encrypted_ids.add(idempotency_key_id)
         self._idempotency_keys[idempotency_key_id] = stored.model_copy(
             update={
                 "response_status": response_status,
@@ -1456,6 +1464,8 @@ class FakeIdempotencyKeyRepository:
         Returns:
             Number of deleted rows.
         """
+        if limit <= 0:
+            return 0
         expired = [
             idempotency_key_id
             for idempotency_key_id, stored in self._idempotency_keys.items()

@@ -33,7 +33,6 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeResponse,
     SessionWithNodesResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -57,6 +56,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_to_response,
     session_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.application.services.session_node_service import (
@@ -64,7 +64,7 @@ from kitaru.server.application.services.session_node_service import (
 )
 from kitaru.server.application.services.session_service import SessionService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)

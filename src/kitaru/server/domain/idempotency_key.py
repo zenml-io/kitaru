@@ -22,6 +22,7 @@ from kitaru.server.domain.base import ConflictError, DomainModel, ValidationErro
 from kitaru.server.domain.ids import uuid7
 
 MAX_IDEMPOTENCY_KEY_LENGTH = 255
+MAX_IDEMPOTENCY_PATH_LENGTH = 2048
 
 
 class IdempotencyKeyAlreadyExists(ConflictError):

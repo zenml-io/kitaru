@@ -30,7 +30,6 @@ from kitaru.api_models.v1.cohort_version import (
     CohortVersionListParams,
     CohortVersionResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute, idempotent
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_cohort_service,
@@ -47,13 +46,14 @@ from kitaru.server.adapters.rest.mapping.cohorts import (
     cohort_to_response,
     cohort_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.cohort_service import CohortService
 from kitaru.server.application.services.cohort_version_service import (
     CohortVersionService,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
