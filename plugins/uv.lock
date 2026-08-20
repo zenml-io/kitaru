@@ -1027,7 +1027,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1075,7 +1075,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-logfire-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/logfire-importer" }
 dependencies = [
     { name = "kitaru" },

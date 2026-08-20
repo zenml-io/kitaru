@@ -116,8 +116,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Langfuse JSON and JSONL trace exports.",
         provider="langfuse",
         entrypoint="kitaru_langfuse_importer.importer:parse",
-        requirement="kitaru-langfuse-importer==0.1.0",
-        display_version="0.1.0",
+        requirement="kitaru-langfuse-importer==0.1.1",
+        display_version="0.1.1",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
@@ -125,8 +125,8 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         description="Import Logfire records-query JSON and NDJSON exports.",
         provider="logfire",
         entrypoint="kitaru_logfire_importer.importer:parse",
-        requirement="kitaru-logfire-importer==0.1.0",
-        display_version="0.1.0",
+        requirement="kitaru-logfire-importer==0.1.1",
+        display_version="0.1.1",
     ),
     DefaultPluginDefinition(
         kind=PluginKind.IMPORTER,
