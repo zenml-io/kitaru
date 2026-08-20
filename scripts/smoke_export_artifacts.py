@@ -281,6 +281,7 @@ def _template_evaluator_source() -> bytes:
 
 
 def _copy_template_source(source: Path, destination: Path) -> None:
+    source = source.resolve()
     archive = destination.parent / "kitaru-template.tar"
     _run(
         [

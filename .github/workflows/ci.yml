@@ -423,7 +423,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Test generated Harbor, Verifiers, and PrimeRL contracts
-        run: just export-artifact-smoke --template-source kitaru-template
+        run: >-
+          uv run --no-project --python 3.12 python scripts/smoke_export_artifacts.py
+          --template-source kitaru-template
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

@@ -1,8 +1,10 @@
 """Tests for the complete Verifiers 0.3 v1 export renderer."""
 
 import ast
+import builtins
 import hashlib
 import json
+import sys
 import tomllib
 import uuid
 from dataclasses import replace
@@ -538,15 +540,52 @@ def test_structural_validation_does_not_import_exported_code(
 ) -> None:
     root = tmp_path / "bundle"
     render_verifiers_v1(_resolved(tmp_path / "source"), root)
+    _, module = _module(root)
+    generated_package = module.name
+    generated_root = root.resolve()
+    original_import = builtins.__import__
 
-    def reject_import(*args: object, **kwargs: object) -> object:
-        raise AssertionError("structural validation imported generated code")
+    def reject_generated_import(
+        name: str,
+        globals: dict[str, Any] | None = None,
+        locals: dict[str, Any] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> Any:
+        package = globals.get("__package__") if globals is not None else None
+        module_name = globals.get("__name__") if globals is not None else None
+        module_file = globals.get("__file__") if globals is not None else None
+        if name == generated_package or name.startswith(f"{generated_package}."):
+            raise AssertionError("structural validation imported generated code")
+        generated_module = any(
+            value == generated_package
+            or (isinstance(value, str) and value.startswith(f"{generated_package}."))
+            for value in (package, module_name)
+        )
+        generated_file = isinstance(module_file, str) and Path(
+            module_file
+        ).resolve().is_relative_to(generated_root)
+        if generated_module or generated_file:
+            raise AssertionError("structural validation imported generated code")
+        return original_import(name, globals, locals, fromlist, level)
 
-    monkeypatch.setattr("builtins.__import__", reject_import)
-    receipt = validate_verifiers_v1(root)
+    with pytest.raises(AssertionError, match="imported generated code"):
+        reject_generated_import(
+            "verifiers.v1",
+            {
+                "__name__": "loaded_under_an_alias",
+                "__file__": str(module / "plugin.py"),
+            },
+        )
+
+    with monkeypatch.context() as import_guard:
+        import_guard.setattr(builtins, "__import__", reject_generated_import)
+        receipt = validate_verifiers_v1(root)
 
     assert receipt.status == "passed"
     assert receipt.level == "structural"
+    assert generated_package not in sys.modules
+    assert not any(name.startswith(f"{generated_package}.") for name in sys.modules)
 
 
 @pytest.mark.parametrize(
