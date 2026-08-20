@@ -53,6 +53,7 @@ from kitaru.server.domain.task import (
     TaskResultTooLarge,
     TaskSpec,
     TaskUpdateRequiresStatus,
+    stale_abandon_error,
 )
 from kitaru.server.domain.worker import WorkerAccessDenied, WorkerCredentialRequired
 
@@ -336,11 +337,10 @@ class TaskService:
             await self._unlink_result_session(task)
             await self._apply_status(task, Task.requeue)
         else:
-            error = (
-                f"Task stopped reporting after {task.attempt} attempts "
-                "and was abandoned"
+            await self._apply_status(
+                task,
+                partial(Task.abandon, error=stale_abandon_error(task.attempt), now=now),
             )
-            await self._apply_status(task, partial(Task.abandon, error=error, now=now))
 
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.

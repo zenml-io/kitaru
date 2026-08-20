@@ -253,6 +253,18 @@ class InvalidTaskEnv(ValidationError):
         super().__init__(f"Task env must not set the contract variable '{name}'")
 
 
+def stale_abandon_error(attempt: int) -> str:
+    """Build the error a task carries when the sweep abandons it.
+
+    Args:
+        attempt: Attempts the task made.
+
+    Returns:
+        Abandon error message.
+    """
+    return f"Task stopped reporting after {attempt} attempts and was abandoned"
+
+
 class Task(DomainModel):
     """Task."""
 
@@ -536,7 +548,7 @@ class Task(DomainModel):
     def with_staleness(
         self, now: datetime, timeout_seconds: int, retry_limit: int
     ) -> Self:
-        """Return the task carrying the status the next sweep would write.
+        """Return the task carrying the fields the next sweep would write.
 
         A task that is not stale is returned unchanged.
 
@@ -547,17 +559,20 @@ class Task(DomainModel):
                 abandoned.
 
         Returns:
-            Task carrying its effective status.
+            Task carrying its effective fields.
         """
         if not self.is_stale(now, timeout_seconds):
             return self
+        # Apply the transition the sweep applies, so a projected status never
+        # arrives without the field changes that status implies.
+        preview = self.model_copy()
         if self.cancel_requested_at is not None:
-            status = TaskStatus.CANCELED
+            preview.cancel(now=now)
         elif self.attempt < retry_limit:
-            status = TaskStatus.PENDING
+            preview.requeue()
         else:
-            status = TaskStatus.ABANDONED
-        return self.model_copy(update={"status": status})
+            preview.abandon(error=stale_abandon_error(self.attempt), now=now)
+        return preview
 
 
 class AgentTask(Task):
