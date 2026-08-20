@@ -6,7 +6,7 @@
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 163836,
+      "discovery_response_bytes": 163830,
       "tool_count": 12,
       "tools": {
         "kitaru_activity_read": {
@@ -123,7 +123,7 @@
       }
     },
     "standard": {
-      "discovery_response_bytes": 152444,
+      "discovery_response_bytes": 152438,
       "tool_count": 10,
       "tools": {
         "kitaru_activity_read": {

@@ -10160,7 +10160,7 @@
       "openWorldHint": true,
       "readOnlyHint": false
     },
-    "description": "Export exact experiment inputs and local agent code for an eval runtime.",
+    "description": "Export through the installed Harbor or Verifiers exporter package.",
     "inputSchema": {
       "$defs": {
         "ContentPolicy": {

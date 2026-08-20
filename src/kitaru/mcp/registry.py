@@ -184,7 +184,7 @@ async def evaluators_manage_tool(
 async def experiment_export_tool(
     request: ExperimentExportRequest, context: Context
 ) -> ExperimentExportResult:
-    """Export exact experiment inputs and local agent code for an eval runtime."""
+    """Export through the installed Harbor or Verifiers exporter package."""
     return cast(
         ExperimentExportResult,
         await _invoke(
