@@ -38,7 +38,7 @@ Auth is deliberately simple: [API keys](../deploy/authentication.md) (`KITKEY_` 
 
 ## Where Kitaru sits in your stack
 
-Kitaru is a debugger with a memory, sitting **beside** your observability stack, not replacing it. Langfuse, LangSmith, Braintrust, and Logfire remain your system of record for traces; Kitaru holds runnable copies of the runs you care about and the machinery to re-execute and evaluate them. The [import path](../getting-started/import-your-traces.md) is that bridge.
+Kitaru is a debugger with a memory, sitting **beside** your observability stack, not replacing it. Langfuse, LangSmith, Braintrust, Logfire, and Arize Phoenix remain your system of record for traces; Kitaru holds runnable copies of the runs you care about and the machinery to re-execute and evaluate them. The [import path](../getting-started/import-your-traces.md) is that bridge.
 
 On the other side, Kitaru deliberately does **not** run your production agent. Your agent runs wherever it runs today; the adapter records it. Durable execution of agents in production is [ZenML](https://docs.zenml.io)'s job: ZenML runs agents durably; Kitaru replays and improves them.
 

@@ -138,6 +138,15 @@ DEFAULT_PLUGIN_DEFINITIONS: tuple[DefaultPluginDefinition, ...] = (
         display_version="0.1.0",
     ),
     DefaultPluginDefinition(
+        kind=PluginKind.IMPORTER,
+        name=f"{RESERVED_NAMESPACE}/phoenix",
+        description="Import Arize Phoenix JSON and JSONL trace exports.",
+        provider="phoenix",
+        entrypoint="kitaru_phoenix_importer.importer:parse",
+        requirement="kitaru-phoenix-importer==0.1.0",
+        display_version="0.1.0",
+    ),
+    DefaultPluginDefinition(
         kind=PluginKind.EVALUATOR,
         name=f"{RESERVED_NAMESPACE}/cost",
         description="Report the total recorded session cost.",
