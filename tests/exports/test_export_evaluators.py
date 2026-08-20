@@ -1,6 +1,9 @@
 """Tests for exported evaluator execution and reward mapping."""
 
 import hashlib
+import json
+import sys
+import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,7 +15,11 @@ from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
-from kitaru.exports.evaluators import evaluate_session, load_evaluator
+from kitaru.exports.evaluators import (
+    evaluate_session,
+    load_evaluator,
+    run_evaluator_process,
+)
 from kitaru.exports.models import (
     ExportError,
     MaterializedEvaluator,
@@ -211,3 +218,72 @@ def test_evaluate_session_rejects_short_secret_values() -> None:
         )
 
     assert raised.value.code == "unsafe_secret_value"
+
+
+def test_evaluator_process_uses_private_cwd_and_explicit_environment(
+    tmp_path: Path,
+) -> None:
+    cwd = tmp_path / "private"
+    cwd.mkdir()
+    script = tmp_path / "inspect.py"
+    script.write_text(
+        "import json, os\n"
+        "print(json.dumps({'cwd': os.getcwd(), 'env': dict(os.environ)}))\n"
+    )
+
+    result = run_evaluator_process(
+        [sys.executable, str(script)],
+        cwd=cwd,
+        env={"DECLARED_VALUE": "available"},
+        timeout_seconds=5,
+    )
+
+    payload = json.loads(result.stdout)
+    assert result.return_code == 0
+    assert payload["cwd"] == str(cwd)
+    assert payload["env"]["DECLARED_VALUE"] == "available"
+    assert "HOME" not in payload["env"]
+
+
+def test_evaluator_process_bounds_stdout_and_preserves_failure(tmp_path: Path) -> None:
+    cwd = tmp_path / "private"
+    cwd.mkdir()
+    script = tmp_path / "fail.py"
+    script.write_text(
+        "import os, sys\n"
+        "os.write(1, b'x' * 100000)\n"
+        "os.write(2, b'failure-detail')\n"
+        "sys.exit(7)\n"
+    )
+
+    result = run_evaluator_process(
+        [sys.executable, str(script)],
+        cwd=cwd,
+        env={},
+        timeout_seconds=5,
+        max_output_bytes=128,
+    )
+
+    assert result.return_code == 7
+    assert result.stdout == "x" * 128
+    assert result.stdout_truncated is True
+    assert result.stderr == "failure-detail"
+
+
+def test_evaluator_process_timeout_kills_owned_process(tmp_path: Path) -> None:
+    cwd = tmp_path / "private"
+    cwd.mkdir()
+    script = tmp_path / "sleep.py"
+    script.write_text("import time\ntime.sleep(30)\n")
+    started = time.monotonic()
+
+    with pytest.raises(ExportError) as raised:
+        run_evaluator_process(
+            [sys.executable, str(script)],
+            cwd=cwd,
+            env={},
+            timeout_seconds=0.05,
+        )
+
+    assert raised.value.code == "evaluator_timeout"
+    assert time.monotonic() - started < 2

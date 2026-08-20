@@ -1,20 +1,25 @@
 """Render a Kitaru experiment as a Harbor 0.20 task dataset."""
 
 import hashlib
-import importlib.metadata
 import json
-import shlex
 import tomllib
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from kitaru.api_models.v1.agent_version import RunSpec
+from packaging.requirements import InvalidRequirement, Requirement
+from packaging.utils import canonicalize_name
+
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
+from kitaru.exports._bridge import materialize_runtime_bridge
 from kitaru.exports.config import normalize_environment_names
 from kitaru.exports.models import (
+    V1_EXPORT_BUDGETS,
+    DependencyPlan,
+    DependencyReceipt,
     ExportError,
     ExportManifest,
     ResolvedExport,
+    RuntimeBridgeReceipt,
     ValidationReceipt,
 )
 from kitaru.exports.source import copy_source
@@ -27,16 +32,19 @@ from kitaru.exports.writer import (
 
 HARBOR_VERSION = "0.20.0"
 TASK_SCHEMA_VERSION = "1.3"
+SCORING_TIMEOUT_SECONDS = 300
+_VERIFIER_TIMEOUT_OVERHEAD_SECONDS = 30
+_MAX_EVALUATOR_OUTPUT_BYTES = 64 * 1024
+_UV_VERSION = "0.12.1"
 _IMAGE_PREFIX = "kitaru-export"
 _SUPPORTED_TRACES = {"atif", "kitaru"}
 
 
 def harbor_task_digest(task_dir: Path) -> str:
-    """Compute Harbor's task package content digest.
+    """Compute the local structural digest written to the Harbor dataset.
 
-    This mirrors ``harbor.publisher.packager.Packager`` without importing Harbor.
-    Harbor packages only its native task files, not exporter metadata under
-    ``inputs/``.
+    Exact compatibility is proved separately against Harbor's pinned Packager. This
+    local implementation is only a download-free structural consistency check.
     """
     included: list[Path] = []
     for name in ("task.toml", "instruction.md", "README.md"):
@@ -77,20 +85,36 @@ def _validate_trace_declaration(trace_format: str, trace_path: str) -> None:
         )
 
 
-def _copy_bridge(destination: Path) -> None:
-    source_dir = Path(__file__).parents[1]
-    destination.mkdir(parents=True)
-    (destination / "__init__.py").write_text("")
-    for name in ("models.py", "trace.py", "evaluators.py"):
-        (destination / name).write_bytes((source_dir / name).read_bytes())
+def _validate_kitaru_requirement(requirement: str, version: str) -> None:
+    try:
+        parsed = Requirement(requirement)
+    except InvalidRequirement as error:
+        raise ExportError(
+            "invalid_dependency_metadata", "A Kitaru requirement is invalid."
+        ) from error
+    if canonicalize_name(parsed.name) != "kitaru":
+        return
+    if parsed.url is not None or not parsed.specifier.contains(
+        version, prereleases=True
+    ):
+        raise ExportError(
+            "dependency_conflict",
+            f"Generated evaluation requires Kitaru {version}; a declared Kitaru "
+            "requirement excludes that version.",
+        )
 
 
-def _write_evaluators(resolved: ResolvedExport, root: Path) -> list[str]:
+def _write_evaluators(
+    resolved: ResolvedExport, root: Path, *, kitaru_version: str
+) -> None:
     evaluator_dir = root / "evaluators"
     evaluator_dir.mkdir()
     requirements: list[str] = []
     metadata: list[dict[str, object]] = []
-    for index, evaluator in enumerate(resolved.evaluators):
+    total_script_bytes = 0
+    for index, evaluator in enumerate(
+        sorted(resolved.evaluators, key=lambda item: item.name)
+    ):
         script_path: str | None = None
         source = evaluator.version.source
         if isinstance(source, ScriptPluginSource):
@@ -99,9 +123,26 @@ def _write_evaluators(resolved: ResolvedExport, root: Path) -> list[str]:
                     "missing_evaluator_source",
                     f"Evaluator {evaluator.name!r} has no materialized script.",
                 )
+            total_script_bytes += len(evaluator.script)
+            if len(evaluator.script) > V1_EXPORT_BUDGETS.max_evaluator_bytes:
+                raise ExportError(
+                    "evaluator_too_large",
+                    "An evaluator source blob exceeds the 10 MiB export limit.",
+                )
+            if total_script_bytes > V1_EXPORT_BUDGETS.max_total_evaluator_bytes:
+                raise ExportError(
+                    "evaluators_too_large",
+                    "Evaluator source blobs exceed the 100 MiB aggregate export limit.",
+                )
             script_path = f"evaluator-{index}.py"
             (evaluator_dir / script_path).write_bytes(evaluator.script)
         elif isinstance(source, PackagePluginSource):
+            if any(character in source.requirement for character in "\r\n\0"):
+                raise ExportError(
+                    "invalid_dependency_metadata",
+                    "Evaluator requirements must be one inert requirement per line.",
+                )
+            _validate_kitaru_requirement(source.requirement, kitaru_version)
             requirements.append(source.requirement)
         else:
             raise ExportError(
@@ -118,52 +159,68 @@ def _write_evaluators(resolved: ResolvedExport, root: Path) -> list[str]:
             }
         )
     write_canonical_json(root / "evaluators.json", metadata)
-    return requirements
-
-
-def _dockerfile(requirements: list[str]) -> str:
-    kitaru_version = importlib.metadata.version("kitaru")
-    install_requirements = " ".join(
-        shlex.quote(requirement)
-        for requirement in [f"kitaru=={kitaru_version}", *requirements]
+    (root / "evaluator-requirements.txt").write_text(
+        "".join(f"{requirement}\n" for requirement in sorted(requirements))
     )
-    return f"""FROM python:3.12-slim
+
+
+def _dependency_install(plan: DependencyPlan) -> str:
+    if plan.manifests == ("pyproject.toml", "uv.lock") and plan.status == "locked":
+        return "RUN uv sync --project /workspace --frozen --no-dev --no-editable"
+    if plan.manifests == ("pyproject.toml",) and plan.status == "declared":
+        return "RUN uv sync --project /workspace --no-dev --no-editable"
+    if plan.manifests == ("requirements.txt",):
+        hash_option = " --require-hashes" if plan.status == "locked" else ""
+        return (
+            "RUN uv venv /workspace/.venv && uv pip install"
+            f" --python /workspace/.venv/bin/python{hash_option}"
+            " -r /workspace/requirements.txt"
+        )
+    raise ExportError(
+        "invalid_dependency_plan",
+        "The agent dependency plan is not a supported locked or declared shape.",
+    )
+
+
+def _dockerfile(plan: DependencyPlan) -> str:
+    dependency_install = _dependency_install(plan)
+    return f"""# syntax=docker/dockerfile:1
+ARG UV_VERSION={_UV_VERSION}
+FROM docker.io/astral/uv:${{UV_VERSION}} AS uv
+
+FROM python:3.12-slim
+
+COPY --from=uv /uv /uvx /bin/
+ENV UV_NO_CACHE=1
 
 WORKDIR /workspace
 COPY agent_source/ /workspace/
-RUN if [ -f pyproject.toml ] || [ -f setup.py ]; then \
-      python -m pip install --no-cache-dir -e .; \
-    elif [ -f requirements.txt ]; then \
-      python -m pip install --no-cache-dir -r requirements.txt; \
-    fi
-RUN python -m pip install --no-cache-dir {install_requirements}
+{dependency_install}
+COPY bridge-requirements.txt evaluator-requirements.txt /opt/kitaru-export/
+RUN uv pip install --system -r /opt/kitaru-export/bridge-requirements.txt \
+    -r /opt/kitaru-export/evaluator-requirements.txt
 COPY bridge/ /opt/kitaru-export/bridge/
 COPY evaluators/ /opt/kitaru-export/evaluators/
-COPY evaluators.json evaluate.py /opt/kitaru-export/
+COPY agent-runtime.json evaluators.json evaluate.py /opt/kitaru-export/
 ENV PYTHONPATH=/opt/kitaru-export
 """
 
 
-def _agent_source(run_spec: RunSpec, trace_format: str, trace_path: str) -> str:
-    command = json.dumps(run_spec.command)
-    working_dir = json.dumps(
-        f"/workspace/{run_spec.working_dir}" if run_spec.working_dir else "/workspace"
-    )
-    env = json.dumps(run_spec.env, sort_keys=True)
-    emitted_name = (
-        "trajectory.json" if trace_format == "atif" else "kitaru-session.json"
-    )
-    return f'''"""Harbor adapter for the exact Kitaru agent run specification."""
+_AGENT_SOURCE = '''"""Harbor adapter for one inert Kitaru run specification."""
 
+import json
 import shlex
+from pathlib import Path
 
 from harbor.agents.base import BaseAgent
+
+_RUNTIME = json.loads(Path("/opt/kitaru-export/agent-runtime.json").read_text())
 
 
 class KitaruAgent(BaseAgent):
     """Run the exported agent command inside Harbor's task environment."""
 
-    SUPPORTS_ATIF = {trace_format == "atif"!r}
+    SUPPORTS_ATIF = _RUNTIME["trace_format"] == "atif"
 
     @staticmethod
     def name() -> str:
@@ -176,26 +233,54 @@ class KitaruAgent(BaseAgent):
         return None
 
     async def run(self, instruction, environment, context) -> None:
-        env = {env}
+        env = dict(_RUNTIME["environment"])
         env.update(self.extra_env)
+        env["PATH"] = "/workspace/.venv/bin:" + env.get(
+            "PATH", "/usr/local/bin:/usr/bin:/bin"
+        )
         env["KITARU_TASK_INPUTS"] = instruction
-        env["KITARU_TRACE_PATH"] = {trace_path!r}
+        env["KITARU_TRACE_PATH"] = _RUNTIME["trace_path"]
         result = await environment.exec(
-            {command},
-            cwd={working_dir},
+            shlex.join(_RUNTIME["command_argv"]),
+            cwd=_RUNTIME["working_directory"],
             env=env,
-            timeout_sec={run_spec.timeout_seconds},
+            timeout_sec=_RUNTIME["agent_timeout_seconds"],
         )
         if result.return_code != 0:
-            detail = result.stderr or result.stdout or "no output"
-            raise RuntimeError(f"Exported agent failed: {{detail}}")
+            raise RuntimeError(
+                f"Exported agent failed with exit code {result.return_code}"
+            )
+        destination = "/logs/agent/" + _RUNTIME["trace_log_name"]
         copied = await environment.exec(
-            "mkdir -p /logs/agent && cp "
-            + shlex.quote({trace_path!r})
-            + " /logs/agent/{emitted_name}"
+            "mkdir -p /logs/agent && cp -- "
+            + shlex.quote(_RUNTIME["trace_path"])
+            + " "
+            + shlex.quote(destination),
+            timeout_sec=30,
         )
         if copied.return_code != 0:
             raise RuntimeError("Exported agent did not produce its declared trace")
+
+    def populate_context_post_run(self, context) -> None:
+        if not self.SUPPORTS_ATIF:
+            return
+        try:
+            trajectory = json.loads((self.logs_dir / "trajectory.json").read_text())
+        except (OSError, json.JSONDecodeError):
+            return
+        metrics = trajectory.get("final_metrics")
+        if not isinstance(metrics, dict):
+            return
+        fields = {
+            "n_input_tokens": "total_prompt_tokens",
+            "n_cache_tokens": "total_cached_tokens",
+            "n_output_tokens": "total_completion_tokens",
+            "cost_usd": "total_cost_usd",
+        }
+        for context_name, metric_name in fields.items():
+            value = metrics.get(metric_name)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                setattr(context, context_name, value)
 '''
 
 
@@ -204,56 +289,72 @@ _EVALUATE_SOURCE = '''"""Evaluate a Harbor trace with pinned evaluators."""
 import json
 import os
 import sys
+import tempfile
 from pathlib import Path
 
-from bridge.evaluators import evaluate_session, load_evaluator
-from bridge.models import MaterializedEvaluator, RewardSelector
-from bridge.trace import convert_trace
-from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
-from kitaru.api_models.v1.session_node import SessionWithNodesResponse
+from bridge._sanitize import EphemeralSanitizer
+from bridge.evaluators import run_evaluator_process
+
+_BRIDGE_ROOT = Path("/opt/kitaru-export")
+_MAX_RESULT_BYTES = 1024 * 1024
+
+
+def _read_result(path: Path) -> dict[str, object]:
+    if not path.is_file() or path.stat().st_size > _MAX_RESULT_BYTES:
+        raise RuntimeError("Evaluator did not produce a bounded result")
+    value = json.loads(path.read_bytes())
+    if not isinstance(value, dict):
+        raise RuntimeError("Evaluator result is not a JSON object")
+    return value
 
 
 def main() -> None:
     task = json.loads(Path(sys.argv[1]).read_text())
-    trace = json.loads(Path(sys.argv[2]).read_text())
-    metadata = json.loads(Path("/opt/kitaru-export/evaluators.json").read_text())
-    loaded = []
-    for item in metadata:
-        evaluator = MaterializedEvaluator(
-            name=item["name"],
-            version=EvaluatorVersionResponse.model_validate(item["version"]),
-            params=item["params"],
-            script=(
-                (
-                    Path("/opt/kitaru-export/evaluators") / item["script_path"]
-                ).read_bytes()
-                if item["script_path"]
-                else None
-            ),
-            source_sha256=item["source_sha256"],
+    required_names = task["required_environment_names"]
+    missing = [name for name in required_names if name not in os.environ]
+    if missing:
+        raise RuntimeError(
+            "Missing required evaluator environment names: " + ", ".join(missing)
         )
-        script_path = (
-            Path("/opt/kitaru-export/evaluators") / item["script_path"]
-            if item["script_path"]
-            else None
+    minimal_env = {
+        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PYTHONPATH": str(_BRIDGE_ROOT),
+    }
+    minimal_env.update({name: os.environ[name] for name in required_names})
+    secrets = [os.environ[name] for name in required_names]
+    sanitizer = EphemeralSanitizer(secrets)
+    with tempfile.TemporaryDirectory(prefix="kitaru-evaluator-") as temporary:
+        cwd = Path(temporary)
+        process = run_evaluator_process(
+            [
+                sys.executable,
+                "-m",
+                "bridge.runtime",
+                sys.argv[1],
+                sys.argv[2],
+                str(_BRIDGE_ROOT / "evaluators.json"),
+            ],
+            cwd=cwd,
+            env=minimal_env,
+            timeout_seconds=task["evaluator_timeout_seconds"],
+            max_output_bytes=task["evaluator_max_output_bytes"],
         )
-        loaded.append((evaluator, load_evaluator(evaluator, script_path=script_path)))
-    selector = RewardSelector(**task["primary_reward"])
-    secrets = [
-        os.environ[name]
-        for name in task["required_environment_names"]
-        if name in os.environ
-    ]
-    session = convert_trace(
-        trace,
-        format=task["trace_format"],
-        context=SessionWithNodesResponse.model_validate(task["context"]),
-        secret_values=secrets,
-    )
-    outcome = evaluate_session(loaded, selector, session, secret_values=secrets)
-    Path("/logs/verifier/reward.txt").write_text(str(outcome.reward))
+        result = _read_result(cwd / "result.json")
+    if process.return_code != 0 or result.get("ok") is not True:
+        message = result.get("message")
+        if not isinstance(message, str):
+            captured = process.stderr or process.stdout
+            message = str(sanitizer.sanitize(captured)) if captured else "no detail"
+        raise RuntimeError("Evaluator failed: " + message[:65536])
+    reward = result.get("reward")
+    metrics = result.get("metrics")
+    if isinstance(reward, bool) or not isinstance(reward, (int, float)):
+        raise RuntimeError("Evaluator reward is not numeric")
+    if not isinstance(metrics, dict):
+        raise RuntimeError("Evaluator metrics are not an object")
+    Path("/logs/verifier/reward.txt").write_text(str(reward))
     Path("/logs/verifier/metrics.json").write_text(
-        json.dumps(outcome.metrics, sort_keys=True) + "\\n"
+        json.dumps(metrics, sort_keys=True, allow_nan=False) + "\\n"
     )
 
 
@@ -272,7 +373,7 @@ if [ ! -f \"$trace\" ]; then
   exit 1
 fi
 mkdir -p /logs/verifier
-python /opt/kitaru-export/evaluate.py /tests/task.json \"$trace\"
+/usr/local/bin/python /opt/kitaru-export/evaluate.py /tests/task.json \"$trace\"
 """
 
 
@@ -283,6 +384,7 @@ def _task_toml(
     timeout: int,
     required_environment_names: tuple[str, ...],
 ) -> str:
+    verifier_timeout = SCORING_TIMEOUT_SECONDS + _VERIFIER_TIMEOUT_OVERHEAD_SECONDS
     lines = [
         f'schema_version = "{TASK_SCHEMA_VERSION}"',
         "",
@@ -296,7 +398,7 @@ def _task_toml(
         f"timeout_sec = {float(timeout)}",
         "",
         "[verifier]",
-        f"timeout_sec = {float(timeout)}",
+        f"timeout_sec = {float(verifier_timeout)}",
         "",
         "[environment]",
         f"docker_image = {_toml_string(image)}",
@@ -330,9 +432,20 @@ def render_harbor(
     run_spec = resolved.agent_version.run_spec
     if run_spec is None:
         raise ExportError("missing_run_spec", "Agent version has no run specification.")
+    if not resolved.command_argv:
+        raise ExportError(
+            "missing_run_command",
+            "Agent command argv was not validated during preflight.",
+        )
+    dependency_plan = resolved.dependency_plan
+    if dependency_plan is None:
+        raise ExportError(
+            "missing_dependency_plan",
+            "Agent dependencies were not classified during preflight.",
+        )
     try:
         required_environment_names = normalize_environment_names(
-            required_environment_names
+            (*resolved.required_environment_names, *required_environment_names)
         )
     except ValueError as error:
         raise ExportError(
@@ -343,23 +456,55 @@ def render_harbor(
     destination.mkdir(parents=True, exist_ok=True)
     agent_image = destination / "agent_image"
     copy_source(resolved.source, agent_image / "agent_source")
-    _copy_bridge(agent_image / "bridge")
-    requirements = _write_evaluators(resolved, agent_image)
+    bridge = materialize_runtime_bridge(agent_image / "bridge")
+    for requirement in dependency_plan.requirements:
+        if requirement.project == "kitaru":
+            _validate_kitaru_requirement(
+                requirement.requirement, bridge.originating_kitaru_version
+            )
+    (agent_image / "bridge-requirements.txt").write_text(
+        f"kitaru=={bridge.originating_kitaru_version}\n"
+    )
+    _write_evaluators(
+        resolved,
+        agent_image,
+        kitaru_version=bridge.originating_kitaru_version,
+    )
+    trace_log_name = (
+        "trajectory.json" if trace_format == "atif" else "kitaru-session.json"
+    )
+    write_canonical_json(
+        agent_image / "agent-runtime.json",
+        {
+            "agent_timeout_seconds": run_spec.timeout_seconds,
+            "command_argv": list(resolved.command_argv),
+            "environment": run_spec.env,
+            "required_environment_names": list(required_environment_names),
+            "trace_format": trace_format,
+            "trace_log_name": trace_log_name,
+            "trace_path": trace_path,
+            "working_directory": (
+                f"/workspace/{run_spec.working_dir}"
+                if run_spec.working_dir
+                else "/workspace"
+            ),
+        },
+    )
     (agent_image / "evaluate.py").write_text(_EVALUATE_SOURCE)
-    (agent_image / "Dockerfile").write_text(_dockerfile(requirements))
+    (agent_image / "Dockerfile").write_text(_dockerfile(dependency_plan))
 
     agent_dir = destination / "agent"
     agent_dir.mkdir()
     (agent_dir / "__init__.py").write_text("")
-    (agent_dir / "kitaru_agent.py").write_text(
-        _agent_source(run_spec, trace_format, trace_path)
-    )
+    (agent_dir / "kitaru_agent.py").write_text(_AGENT_SOURCE)
 
     image = f"{_IMAGE_PREFIX}:{directory_digest(agent_image)[:12]}"
     dataset_dir = destination / "dataset"
     dataset_dir.mkdir()
     references: list[tuple[str, str]] = []
-    for index, session in enumerate(resolved.sessions, start=1):
+    for index, session in enumerate(
+        sorted(resolved.sessions, key=lambda item: str(item.session.id)), start=1
+    ):
         task_id = f"task-{index:05d}-{str(session.session.id)[:8]}"
         task_name = f"kitaru/{task_id}"
         task_dir = dataset_dir / task_id
@@ -378,6 +523,8 @@ def render_harbor(
                 "field": resolved.reward.field,
             },
             "required_environment_names": list(required_environment_names),
+            "evaluator_max_output_bytes": _MAX_EVALUATOR_OUTPUT_BYTES,
+            "evaluator_timeout_seconds": SCORING_TIMEOUT_SECONDS,
             "trace_format": trace_format,
         }
         write_canonical_json(task_dir / "inputs/task.json", task_data)
@@ -431,6 +578,10 @@ registered agent source and command. It is not the user's agent name or class.
 
 The agent must write its {trace_format} trace to `{trace_path}`. Missing or
 malformed traces and evaluator failures fail the task. There is no fallback reward.
+
+Agent dependencies are classified as {dependency_plan.status}. Export performed
+structural validation only; exact Harbor {HARBOR_VERSION} execution is release-level
+evidence and is not a claim that this user artifact was executed.
 """
     if required_environment_names:
         readme += (
@@ -446,7 +597,10 @@ malformed traces and evaluator failures fail the task. There is no fallback rewa
         experiment_id=resolved.experiment.id,
         cohort_version_id=resolved.cohort_version.id,
         agent_version_id=resolved.agent_version.id,
-        evaluator_version_ids=tuple(item.version.id for item in resolved.evaluators),
+        evaluator_version_ids=tuple(
+            item.version.id
+            for item in sorted(resolved.evaluators, key=lambda item: item.name)
+        ),
         primary_reward=(
             f"{resolved.reward.evaluator}:{resolved.reward.result}:{resolved.reward.field}"
         ),
@@ -454,6 +608,11 @@ malformed traces and evaluator failures fail the task. There is no fallback rewa
         generated_files=file_digests(destination),
         required_environment_names=required_environment_names,
         exclusions=resolved.source.excluded,
+        dependencies=DependencyReceipt(
+            status=dependency_plan.status,
+            requirement_digest=dependency_plan.requirement_digest,
+        ),
+        runtime_bridge=bridge,
         validation=ValidationReceipt(
             level="structural", status="passed", target_version=HARBOR_VERSION
         ),
@@ -461,8 +620,69 @@ malformed traces and evaluator failures fail the task. There is no fallback rewa
     write_canonical_json(
         destination / "kitaru-export.json", manifest.model_dump(mode="json")
     )
+    _validate_generated_resources(destination)
     validate_harbor(destination)
     return manifest
+
+
+def _validate_generated_resources(root: Path) -> None:
+    count = 0
+    total_bytes = 0
+    for path in root.rglob("*"):
+        if path.is_symlink():
+            raise ExportError(
+                "unsupported_bundle_symlink",
+                "Generated bundles cannot contain symlinks.",
+            )
+        if not path.is_file():
+            continue
+        count += 1
+        if count > V1_EXPORT_BUDGETS.max_generated_files:
+            raise ExportError(
+                "generated_files_limit",
+                f"Generated file count {count} exceeds limit "
+                f"{V1_EXPORT_BUDGETS.max_generated_files}.",
+            )
+        relative = path.relative_to(root).as_posix()
+        path_bytes = len(relative.encode("utf-8"))
+        if path_bytes > V1_EXPORT_BUDGETS.max_relative_path_bytes:
+            raise ExportError(
+                "generated_path_limit",
+                f"Generated path length {path_bytes} exceeds limit "
+                f"{V1_EXPORT_BUDGETS.max_relative_path_bytes} bytes.",
+            )
+        total_bytes += path.stat().st_size
+        if total_bytes > V1_EXPORT_BUDGETS.max_artifact_bytes:
+            raise ExportError(
+                "artifact_size_limit",
+                f"Generated artifact bytes {total_bytes} exceed limit "
+                f"{V1_EXPORT_BUDGETS.max_artifact_bytes}.",
+            )
+
+
+def _validate_runtime_bridge(root: Path, receipt_data: object) -> None:
+    try:
+        receipt = RuntimeBridgeReceipt.model_validate(receipt_data)
+    except ValueError as error:
+        raise ExportError(
+            "invalid_harbor_bundle", "Runtime bridge receipt is invalid."
+        ) from error
+    bridge_root = root / "agent_image/bridge"
+    aggregate = hashlib.sha256()
+    for relative, expected in receipt.files.items():
+        path = bridge_root / relative
+        if not path.is_file() or file_digest(path) != expected:
+            raise ExportError(
+                "invalid_harbor_bundle", "Runtime bridge bytes do not match manifest."
+            )
+        aggregate.update(relative.encode("utf-8"))
+        aggregate.update(b"\0")
+        aggregate.update(path.read_bytes())
+        aggregate.update(b"\n")
+    if aggregate.hexdigest() != receipt.sha256:
+        raise ExportError(
+            "invalid_harbor_bundle", "Runtime bridge digest does not match manifest."
+        )
 
 
 def validate_harbor(root: Path) -> None:
@@ -493,6 +713,31 @@ def validate_harbor(root: Path) -> None:
         raise ExportError(
             "invalid_harbor_bundle", "Manifest target is not Harbor 0.20.0."
         )
+    _validate_runtime_bridge(root, manifest.get("runtime_bridge"))
+    expected_files = manifest.get("generated_files")
+    if not isinstance(expected_files, dict):
+        raise ExportError(
+            "invalid_harbor_bundle", "Manifest generated file inventory is invalid."
+        )
+    actual_files = file_digests(root)
+    actual_files.pop("kitaru-export.json", None)
+    if actual_files != expected_files:
+        raise ExportError(
+            "invalid_harbor_bundle", "Generated file bytes do not match manifest."
+        )
+    for path in (
+        root / "agent/kitaru_agent.py",
+        root / "agent_image/evaluate.py",
+        *(root / "agent_image/bridge").glob("*.py"),
+    ):
+        source = path.read_text()
+        if "kitaru.exports" in source:
+            raise ExportError(
+                "invalid_harbor_bundle",
+                "Generated runtime imports private Kitaru exporter modules.",
+            )
+        compile(source, str(path.relative_to(root)), "exec")
+    _validate_generated_resources(root)
     references = dataset.get("tasks")
     if not isinstance(references, list) or not references:
         raise ExportError("invalid_harbor_bundle", "Dataset contains no tasks.")

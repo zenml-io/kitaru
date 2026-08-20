@@ -450,6 +450,44 @@ class DependencyReceipt(BaseModel):
         return value
 
 
+class RuntimeBridgeReceipt(BaseModel):
+    """Identify the exact target-neutral runtime bridge vendored in an artifact."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: int = Field(ge=1)
+    sha256: str
+    originating_kitaru_version: str = Field(min_length=1)
+    files: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("sha256")
+    @classmethod
+    def _validate_sha256(cls, value: str) -> str:
+        if len(value) != 64 or any(
+            character not in "0123456789abcdef" for character in value
+        ):
+            raise ValueError("runtime bridge digest must be a lowercase SHA-256 digest")
+        return value
+
+    @field_validator("files")
+    @classmethod
+    def _validate_files(cls, value: dict[str, str]) -> dict[str, str]:
+        for path, digest in value.items():
+            if (
+                not path
+                or PurePosixPath(path).is_absolute()
+                or ".." in PurePosixPath(path).parts
+            ):
+                raise ValueError("runtime bridge file paths must be relative")
+            if len(digest) != 64 or any(
+                character not in "0123456789abcdef" for character in digest
+            ):
+                raise ValueError(
+                    "runtime bridge file digests must be lowercase SHA-256 digests"
+                )
+        return dict(sorted(value.items()))
+
+
 class ArtifactProvenance(BaseModel):
     """Record deterministic component identities and native package names."""
 
@@ -547,6 +585,7 @@ class ExportManifest(BaseModel):
     warnings: tuple[ExportWarning, ...] = ()
     assurance: ExportAssurance | None = None
     dependencies: DependencyReceipt = Field(default_factory=DependencyReceipt)
+    runtime_bridge: RuntimeBridgeReceipt | None = None
     provenance: ArtifactProvenance | None = None
     runtime_requirements: RuntimeRequirements = Field(
         default_factory=RuntimeRequirements

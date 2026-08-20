@@ -21,8 +21,10 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
+from kitaru.exports._dependencies import classify_dependencies
 from kitaru.exports.formats.harbor import (
     HARBOR_VERSION,
+    SCORING_TIMEOUT_SECONDS,
     harbor_task_digest,
     render_harbor,
     validate_harbor,
@@ -34,9 +36,16 @@ from kitaru.exports.models import (
     RewardSelector,
 )
 from kitaru.exports.source import inventory_source
+from kitaru.exports.writer import file_digests
 
 
 def _resolved(source_root: Path, *, session_count: int = 2) -> ResolvedExport:
+    if not any(
+        (source_root / name).exists() for name in ("pyproject.toml", "requirements.txt")
+    ):
+        (source_root / "pyproject.toml").write_text(
+            '[project]\nname = "fixture-agent"\nversion = "1.0.0"\n'
+        )
     now = datetime(2026, 1, 1, tzinfo=UTC)
     agent_id = uuid.UUID(int=10)
     evaluator_script = (
@@ -100,7 +109,9 @@ def _resolved(source_root: Path, *, session_count: int = 2) -> ResolvedExport:
         sessions=sessions,
         evaluators=(evaluator,),
         reward=RewardSelector.parse("quality:correctness:score"),
-        source=inventory_source(source_root),
+        source=(source := inventory_source(source_root)),
+        command_argv=("python", "agent.py"),
+        dependency_plan=classify_dependencies(source),
     )
 
 
@@ -135,6 +146,9 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
             "field": "score",
             "result": "correctness",
         }
+        assert config["agent"]["timeout_sec"] == 90.0
+        assert config["verifier"]["timeout_sec"] > SCORING_TIMEOUT_SECONDS
+        assert task_data["evaluator_timeout_seconds"] == SCORING_TIMEOUT_SECONDS
 
     dataset = tomllib.loads((output / "dataset/dataset.toml").read_text())
     assert dataset["dataset"]["name"].startswith("kitaru/")
@@ -146,9 +160,21 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
     assert manifest["target_version"] == HARBOR_VERSION
     assert manifest["source_digest"] == _resolved(source).source.digest
     assert manifest["required_environment_names"] == ["MODEL_API_KEY"]
+    assert manifest["dependencies"]["status"] == "declared"
+    assert manifest["runtime_bridge"]["schema_version"] == 1
+    assert len(manifest["runtime_bridge"]["sha256"]) == 64
     launcher = (output / "agent/kitaru_agent.py").read_text()
-    assert "python agent.py" in launcher
+    runtime = json.loads((output / "agent_image/agent-runtime.json").read_text())
+    assert runtime["command_argv"] == ["python", "agent.py"]
+    assert "python agent.py" not in launcher
+    assert "populate_context_post_run" in launcher
     compile(launcher, "kitaru_agent.py", "exec")
+    dockerfile = (output / "agent_image/Dockerfile").read_text()
+    assert "uv sync --project /workspace --no-dev --no-editable" in dockerfile
+    assert "evaluator-requirements.txt" in dockerfile
+    assert "kitaru.exports" not in "".join(
+        path.read_text() for path in (output / "agent_image/bridge").glob("*.py")
+    )
     evaluator_metadata = json.loads(
         (output / "agent_image/evaluators.json").read_text()
     )
@@ -246,3 +272,150 @@ def test_validate_harbor_does_not_import_agent_or_evaluator(tmp_path: Path) -> N
     )
 
     validate_harbor(output)
+
+
+@pytest.mark.parametrize(
+    ("files", "expected_status", "expected_install"),
+    [
+        (
+            {
+                "pyproject.toml": (
+                    '[project]\nname = "fixture-agent"\nversion = "1.0.0"\n'
+                )
+            },
+            "declared",
+            "uv sync --project /workspace --no-dev --no-editable",
+        ),
+        (
+            {
+                "pyproject.toml": (
+                    '[project]\nname = "fixture-agent"\nversion = "1.0.0"\n'
+                ),
+                "uv.lock": "version = 1\n",
+            },
+            "locked",
+            "uv sync --project /workspace --frozen --no-dev --no-editable",
+        ),
+        (
+            {"requirements.txt": "httpx==0.28.1\n"},
+            "declared",
+            "uv pip install --python /workspace/.venv/bin/python",
+        ),
+        (
+            {"requirements.txt": ("httpx==0.28.1 --hash=sha256:" + "a" * 64 + "\n")},
+            "locked",
+            "--require-hashes -r /workspace/requirements.txt",
+        ),
+    ],
+)
+def test_harbor_consumes_dependency_plan_without_reclassification(
+    tmp_path: Path,
+    files: dict[str, str],
+    expected_status: str,
+    expected_install: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    for name, content in files.items():
+        (source / name).write_text(content)
+
+    output = tmp_path / "bundle"
+    render_harbor(
+        _resolved(source, session_count=1),
+        output,
+        trace_format="atif",
+        trace_path="/workspace/trajectory.json",
+    )
+
+    dockerfile = (output / "agent_image/Dockerfile").read_text()
+    manifest = json.loads((output / "kitaru-export.json").read_text())
+    assert expected_install in dockerfile
+    assert manifest["dependencies"]["status"] == expected_status
+
+
+def test_harbor_preserves_workspace_dependency_install(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    (source / "packages/child").mkdir(parents=True)
+    (source / "agent.py").write_text("print('agent')\n")
+    (source / "pyproject.toml").write_text(
+        """[project]
+name = "fixture-agent"
+version = "1.0.0"
+dependencies = ["child==1.0.0"]
+
+[tool.uv.sources]
+child = { workspace = true }
+
+[tool.uv.workspace]
+members = ["packages/*"]
+"""
+    )
+    (source / "packages/child/pyproject.toml").write_text(
+        '[project]\nname = "child"\nversion = "1.0.0"\n'
+    )
+
+    output = tmp_path / "bundle"
+    render_harbor(
+        _resolved(source, session_count=1),
+        output,
+        trace_format="atif",
+        trace_path="/workspace/trajectory.json",
+    )
+
+    assert (output / "agent_image/agent_source/packages/child/pyproject.toml").is_file()
+    assert (
+        "uv sync --project /workspace"
+        in (output / "agent_image/Dockerfile").read_text()
+    )
+
+
+def test_harbor_keeps_command_argv_and_trace_path_as_inert_json(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    resolved = replace(
+        _resolved(source, session_count=1),
+        command_argv=("python", "agent.py", "$(touch /tmp/not-run)", "line\nbreak"),
+    )
+    trace_path = "/workspace/trace'; touch /tmp/not-run; #.json"
+    output = tmp_path / "bundle"
+
+    render_harbor(
+        resolved,
+        output,
+        trace_format="atif",
+        trace_path=trace_path,
+    )
+
+    runtime = json.loads((output / "agent_image/agent-runtime.json").read_text())
+    assert runtime["command_argv"] == list(resolved.command_argv)
+    assert runtime["trace_path"] == trace_path
+    generated_python = "".join(
+        path.read_text()
+        for path in (
+            output / "agent/kitaru_agent.py",
+            output / "agent_image/evaluate.py",
+        )
+    )
+    assert "touch /tmp/not-run" not in generated_python
+    assert "touch /tmp/not-run" not in (output / "agent_image/Dockerfile").read_text()
+
+
+def test_harbor_bridge_and_bundle_bytes_are_deterministic(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    resolved = _resolved(source, session_count=2)
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+
+    for output in (first, second):
+        render_harbor(
+            resolved,
+            output,
+            trace_format="atif",
+            trace_path="/workspace/trajectory.json",
+        )
+
+    assert file_digests(first) == file_digests(second)

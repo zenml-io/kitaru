@@ -2,9 +2,14 @@
 
 import hashlib
 import math
+import os
+import selectors
+import subprocess
+import time
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO, Any
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
@@ -38,6 +43,152 @@ class EvaluationOutcome:
     reward: float
     metrics: dict[str, float]
     results: dict[str, tuple[EvaluationResult, ...]]
+
+
+@dataclass(frozen=True)
+class BoundedProcessResult:
+    """Record bounded output from one directly managed evaluator process."""
+
+    return_code: int
+    stdout: str
+    stderr: str
+    stdout_truncated: bool
+    stderr_truncated: bool
+
+
+def _append_bounded(target: bytearray, chunk: bytes, limit: int) -> bool:
+    remaining = max(0, limit - len(target))
+    target.extend(chunk[:remaining])
+    return len(chunk) > remaining
+
+
+def run_evaluator_process(
+    argv: Sequence[str],
+    *,
+    cwd: Path,
+    env: dict[str, str],
+    timeout_seconds: float,
+    max_output_bytes: int = 64 * 1024,
+) -> BoundedProcessResult:
+    """Run one evaluator worker with a hard timeout and bounded captured output.
+
+    The caller supplies the complete environment and a private working directory.
+    Timeout and cancellation kill the directly owned process. This function does not
+    claim to contain or terminate descendants started by trusted evaluator code.
+
+    Raises:
+        ExportError: The process cannot start or exceeds its timeout.
+    """
+    if not argv or timeout_seconds <= 0 or max_output_bytes <= 0:
+        raise ExportError(
+            "invalid_evaluator_process",
+            "Evaluator argv, timeout, and output limit must be positive.",
+        )
+    if not cwd.is_dir():
+        raise ExportError(
+            "invalid_evaluator_process",
+            "Evaluator working directory must be an existing private directory.",
+        )
+
+    try:
+        process = subprocess.Popen(
+            list(argv),
+            cwd=cwd,
+            env=dict(env),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError as error:
+        raise ExportError(
+            "evaluator_process_failed", "Evaluator process could not start."
+        ) from error
+
+    assert process.stdout is not None
+    assert process.stderr is not None
+    stdout_fd = process.stdout.fileno()
+    stderr_fd = process.stderr.fileno()
+    streams: dict[int, tuple[IO[Any], bytearray, bool]] = {
+        stdout_fd: (process.stdout, bytearray(), False),
+        stderr_fd: (process.stderr, bytearray(), False),
+    }
+    selector = selectors.DefaultSelector()
+    for stream, _, _ in streams.values():
+        os.set_blocking(stream.fileno(), False)
+        selector.register(stream, selectors.EVENT_READ)
+
+    deadline = time.monotonic() + timeout_seconds
+    timed_out = False
+    try:
+        while process.poll() is None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                timed_out = True
+                process.kill()
+                process.wait()
+                break
+            for key, _ in selector.select(min(remaining, 0.1)):
+                stream, captured, truncated = streams[key.fd]
+                try:
+                    chunk = os.read(key.fd, 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if chunk:
+                    truncated = (
+                        _append_bounded(captured, chunk, max_output_bytes) or truncated
+                    )
+                    streams[key.fd] = (stream, captured, truncated)
+                else:
+                    selector.unregister(stream)
+
+        # Drain bytes already present without waiting for evaluator descendants that
+        # may have inherited the descriptors.
+        while True:
+            events = selector.select(0)
+            if not events:
+                break
+            progressed = False
+            for key, _ in events:
+                stream, captured, truncated = streams[key.fd]
+                try:
+                    chunk = os.read(key.fd, 64 * 1024)
+                except BlockingIOError:
+                    continue
+                if chunk:
+                    progressed = True
+                    truncated = (
+                        _append_bounded(captured, chunk, max_output_bytes) or truncated
+                    )
+                    streams[key.fd] = (stream, captured, truncated)
+                else:
+                    selector.unregister(stream)
+            if not progressed:
+                break
+    except BaseException:
+        if process.poll() is None:
+            process.kill()
+            process.wait()
+        raise
+    finally:
+        selector.close()
+        process.stdout.close()
+        process.stderr.close()
+
+    if timed_out:
+        raise ExportError(
+            "evaluator_timeout",
+            f"Evaluator exceeded its {timeout_seconds:g} second scoring timeout.",
+        )
+    return_code = process.wait()
+    stdout_stream = streams[stdout_fd]
+    stderr_stream = streams[stderr_fd]
+    return BoundedProcessResult(
+        return_code=return_code,
+        stdout=stdout_stream[1].decode("utf-8", errors="replace"),
+        stderr=stderr_stream[1].decode("utf-8", errors="replace"),
+        stdout_truncated=stdout_stream[2],
+        stderr_truncated=stderr_stream[2],
+    )
 
 
 def load_evaluator(
