@@ -422,6 +422,10 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
         with:
           python-version: '3.12'
+      - name: Start Docker
+        run: |
+          sudo systemctl start docker
+          docker info
       - name: Test generated Harbor, Verifiers, and PrimeRL contracts
         run: >-
           uv run --no-project --python 3.12 python scripts/smoke_export_artifacts.py
