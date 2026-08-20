@@ -149,7 +149,11 @@ class AgentsResource:
         return AgentResponse.model_validate(response.json())
 
     async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent, hiding it and everything under it.
+        """Delete an agent, hiding the agent and retaining its subtree.
+
+        The agent's stored sessions, versions, cohorts, experiments, and
+        investigations are retained and stay readable through their own
+        resources. Creating new ones for the agent fails.
 
         Args:
             agent_id: Id of the agent.

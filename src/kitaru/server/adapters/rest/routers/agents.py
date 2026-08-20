@@ -162,9 +162,12 @@ async def delete_agent(
     service: Annotated[AgentService, Depends(get_agent_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> None:
-    """Delete an agent, hiding it and everything under it.
+    """Delete an agent, hiding the agent and retaining its subtree.
 
-    Clients observe HTTP 204 on success and 404 when no agent has this id.
+    The agent's stored sessions, versions, cohorts, experiments, and
+    investigations are retained and stay readable through their own routes.
+    Creating new ones for the agent returns HTTP 404. Clients observe HTTP
+    204 on success and 404 when no agent has this id.
 
     Args:
         agent_id: Id of the agent.

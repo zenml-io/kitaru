@@ -124,7 +124,7 @@ class AgentService:
         return await self._repository.update(agent)
 
     async def delete_agent(self, agent_id: uuid.UUID, actor: AuthContext) -> None:
-        """Delete an agent, hiding it and everything under it.
+        """Delete an agent, hiding the agent and retaining its subtree.
 
         Args:
             agent_id: Id of the agent.
