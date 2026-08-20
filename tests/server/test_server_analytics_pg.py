@@ -302,8 +302,8 @@ async def test_track_merges_the_client_with_its_version() -> None:
     assert properties["client_version"] == "kitaru-ui/0.2.2"
 
 
-async def test_track_merges_the_client_without_a_version() -> None:
-    """A client that reports no version lands under its source alone."""
+async def test_track_omits_the_client_without_a_version() -> None:
+    """A client that reports no version contributes no client property."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
 
@@ -321,7 +321,7 @@ async def test_track_merges_the_client_without_a_version() -> None:
         current_attribution.reset(token)
 
     _, _, properties = client.tracked[0]
-    assert properties["client_version"] == "kitaru-api"
+    assert "client_version" not in properties
 
 
 async def test_track_omits_control_plane_user_id_without_external_id() -> None:

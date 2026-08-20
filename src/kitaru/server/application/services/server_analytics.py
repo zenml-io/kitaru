@@ -152,11 +152,10 @@ class ServerAnalytics:
         attribution = current_attribution.get()
         # Each client versions on its own series, so the version is only
         # readable attached to the client that reported it.
-        properties["client_version"] = (
-            f"{attribution.source.value}/{attribution.version}"
-            if attribution.version is not None
-            else attribution.source.value
-        )
+        if attribution.version is not None:
+            properties["client_version"] = (
+                f"{attribution.source.value}/{attribution.version}"
+            )
         if attribution.skill is not None:
             properties["skill"] = attribution.skill
         self._get_buffer().messages.append(
