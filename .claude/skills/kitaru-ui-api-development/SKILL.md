@@ -1,30 +1,30 @@
 ---
 name: kitaru-ui-api-development
-description: Add, reuse, or change a frontend-specific Kitaru REST read model under /api/v1/ui and its typed consumer in zenml-frontend-monorepo. Use when the dashboard needs server-side joins or aggregates, not for ordinary reusable resources or UI bundle releases.
+description: Add, reuse, or change a frontend-specific Kitaru REST response under /api/v1/ui and its OpenAPI contract in zenml-frontend-monorepo. Use when a dashboard screen needs a purpose-built data shape, not for ordinary reusable resources or UI bundle releases.
 ---
 
 # Kitaru UI API Development
 
 Use this for changes that cross the Kitaru server API and the Kitaru UI in `zenml-frontend-monorepo`. Load the same-name `kitaru-dev` repo skill for the current host for general commands and PR guidance. Use `FRONTEND-TESTING.md` and the current host's `kitaru-release` repo skill only when the change also affects UI bundling, serving, selection, or publication.
 
-These are conservative initial rules inferred from the current UI endpoints and their frontend consumers. Ask the Kitaru frontend maintainer to review any new endpoint's placement and contract; do not turn an inference here into policy by silently expanding it.
+These rules reflect the current UI endpoints, their frontend consumers, and frontend maintainer guidance.
 
 ## Decide whether the route belongs under `/api/v1/ui`
 
 Search the live routers, OpenAPI contract, and frontend modules for an existing route and consumer before designing another one. If they already satisfy the requested screen, verify that flow and do not add a duplicate endpoint.
 
-Use a UI-specific endpoint for a read model that the frontend cannot derive correctly or efficiently from the normal paginated resource APIs. Current examples join evaluations to each session page and aggregate all evaluations across an experiment run. Both avoid frontend-side page caps and differing aggregation semantics.
+Use a UI-specific endpoint when a frontend screen needs a response shape that the existing resource APIs do not provide. For example, `/api/v1/sessions` returns sessions without their evaluations, while `/api/v1/ui/sessions` returns sessions together with their evaluations for the sessions table. Another current endpoint aggregates evaluations across an experiment run for a frontend view.
 
 Prefer the normal `/api/v1/<resource>` API when the behavior is a reusable domain operation or an external SDK consumer would reasonably need it. Do not add a UI endpoint merely to move ordinary presentation logic to the server.
 
 Before implementation, state:
 
-- the concrete frontend consumer and the incorrect, capped, or wasteful request sequence it replaces
+- the concrete frontend consumer and the data shape it needs
 - why the contract is UI-specific rather than a reusable resource API
-- ordering, pagination, caps, missing-data, and empty-state semantics
+- whether the response is a pageable collection, a singular resource, or a bounded aggregate, with its ordering, pagination, caps, missing-data, and empty-state semantics
 - whether the response can be assembled through current application services
 
-If the request adds a mutation, new domain behavior, or a generally useful external API, stop and ask whether it should go through the normal resource checklist instead. Do not create a frontend-only write path by default.
+There is no established precedent for frontend-only mutations. If the request adds one, stop and ask the maintainers to agree on its placement. New domain behavior and generally useful external APIs should go through the normal resource checklist instead.
 
 ## Backend shape
 
@@ -38,15 +38,17 @@ Follow `src/kitaru/server/adapters/rest/AGENTS.md`:
 - use explicit response DTO mappings and let app-level handlers map domain errors
 - state client-visible statuses in route docstrings
 
-UI read models may traverse all pages needed for correct joins or aggregates, but review the cost of that full traversal and define and test the response bounds. Treat result ordering, truncation, missing evaluations, duplicate names, type grouping, and `null` values as API contract, not implementation detail. The current experiment-run aggregate covers all replays; do not assume that is correct for a comparison screen that may need a shared cohort or other subset. Keep frontend keys aligned with the backend grouping, including data type when the same evaluation name can carry more than one type.
+Paginate a UI endpoint when it returns a collection that clients need to page through, using the same pagination contract as other collection endpoints. Do not add artificial pagination to singular resources or bounded aggregate responses.
+
+UI read models may internally traverse all pages needed for correct joins or aggregates, but review the cost of that full traversal and define and test the response bounds. Treat result ordering, truncation, missing evaluations, duplicate names, type grouping, and `null` values as API contract, not implementation detail. The current experiment-run aggregate covers all replays; do not assume that is correct for a comparison screen that may need a shared cohort or other subset. Keep frontend keys aligned with the backend grouping, including data type when the same evaluation name can carry more than one type.
 
 Do not add SDK, CLI, or MCP parity automatically for a UI-only read model. If another consumer needs the same contract, stop and decide whether to promote it to a normal resource API.
 
 ## Frontend consumer
 
-The generated frontend types live in `zenml-frontend-monorepo/shared/kitaru/src/api/openapi.d.ts`. Regenerate them from a server exposing the current `openapi.json`; never hand-edit that file.
+The generated frontend types live in `zenml-frontend-monorepo/shared/kitaru/src/api/openapi.d.ts`. Apply the same OpenAPI rules as for any other endpoint: regenerate the declarations when the endpoint adds or changes a response schema; no new frontend type is needed when it returns an existing schema. Regenerate from a server exposing the current `openapi.json`; never hand-edit that file.
 
-Keep the transport call and API-to-domain mapping in the owning module under `shared/kitaru/src/modules/`. Add focused tests for the request, mapping, empty states, errors, and any cap or ordering that affects what the user sees. Update the actual consumer in the same change or explain why the backend endpoint must land first.
+Keep the transport call and API-to-domain mapping in the owning module under `shared/kitaru/src/modules/`. Add focused tests for the request, mapping, empty states, errors, and any cap or ordering that affects what the user sees. Treat backend and frontend delivery like any other cross-repository API change: verify compatibility and deployment order, but do not impose a blanket same-merge requirement.
 
 The existing generation command is run from `shared/kitaru/`:
 
@@ -66,11 +68,6 @@ In Kitaru:
 
 In `zenml-frontend-monorepo`, regenerate the OpenAPI declarations, then run the shared Kitaru package's typecheck and tests plus the affected Kitaru UI checks. Exercise the real UI flow against the changed backend when the environment is available.
 
-## Maintainer review
+## Reviewer focus
 
-Ask the frontend maintainer to confirm these points in the PR:
-
-1. Does this read model belong under `/api/v1/ui`, or should it be a reusable resource endpoint?
-2. Are its caps, ordering, missing-data, and error semantics what the UI should promise?
-3. Must the backend endpoint and typed frontend consumer merge together?
-4. Which OSS Kitaru UI and managed Pro flows need live verification before the draft is ready?
+Ask reviewers to verify that the response shape is genuinely specific to a frontend screen, that pageable collections use the normal pagination contract, and that caps, ordering, missing-data, and error semantics match what the UI should promise. Exercise the affected OSS or managed Pro flow when the endpoint changes one; there is no blanket requirement to test unrelated frontend deployments.
