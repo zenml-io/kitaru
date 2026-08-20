@@ -78,6 +78,12 @@ include a regression test that fails before the fix and passes after it.
 
 When you work under `tests/`, also read `tests/AGENTS.md`.
 
+Tests cover ordinary changes. When a change can only be proven against a live
+stack, such as import, replay, experiment, job, or worker behavior, `devtools/`
+runs one locally: `uv run python devtools/seed.py --db-name kitaru_<yourtask>
+--keep` seeds a server end to end. Read `devtools/AGENTS.md` first, and clean up
+the stacks and databases you create.
+
 ## Docs
 
 - Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
