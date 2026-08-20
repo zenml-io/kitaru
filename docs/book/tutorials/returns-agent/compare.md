@@ -97,16 +97,6 @@ The script makes ten paid agent runs, waits for the Langfuse observations, and r
 
 For your own agent, keep collecting traces where you already collect them and use [Import your traces](../../getting-started/import-your-traces.md) to select the matching importer. Historical investigation does not require the original code to remain runnable. Replay does require a compatible registered candidate and a worker that can execute it.
 
-## Clean up
-
-Stop the worker in Terminal 2 with `Ctrl-C`, then disconnect the CLI:
-
-```bash
-uv run kitaru logout
-```
-
-For a CLI-managed local workspace, logout stops its containers but keeps the PostgreSQL data volume.
-
 ## What you completed
 
 You followed the full evidence chain:
@@ -118,6 +108,37 @@ You followed the full evidence chain:
 5. **Compared** complete baseline and replay evidence without hiding failures or uncertainty.
 
 The durable result is not a predetermined passing demo. It is an auditable claim about one reviewed behavior, one frozen population, and one candidate.
+
+## Optional: export the benchmark to Verifiers
+
+You can now turn the same cohort, candidate, and pinned evaluator into a complete Verifiers 0.3 project. Set the result name and field to the result you calibrated in step 3; the example evaluator above returns `terminal_action_consistency:passed`.
+
+```bash
+PRIMARY_REWARD="${BEHAVIOR_EVALUATOR%@*}:terminal_action_consistency:passed"
+
+uv run kitaru experiment export returns-candidate \
+  --cohort-version "$COHORT_REFERENCE" \
+  --agent "$CANDIDATE_AGENT" \
+  --format verifiers-v1 \
+  --source-root "$PWD" \
+  --destination ./exports/returns-verifiers \
+  --primary-reward "$PRIMARY_REWARD" \
+  --dry-run
+```
+
+Review the dry-run receipt, remove `--dry-run`, and run the command again. Then enter `./exports/returns-verifiers` and follow its generated README to install the project, run the frozen Taskset with the bundled returns-agent Harness, or use its PrimeRL 0.8 training-source configuration. The template's registered command recognizes external-evaluation mode, consumes the exported task inputs, and runs the underlying agent without creating a nested Kitaru recording.
+
+The export remains tied to the exact `$COHORT_REFERENCE` and `$CANDIDATE_AGENT`. Create a new immutable cohort version and a new destination when the benchmark membership changes. See [Export experiments](../../guides/exporting-experiments.md) for data choices, runtime requirements, and Harness replacement.
+
+## Clean up
+
+Stop the worker in Terminal 2 with `Ctrl-C`, then disconnect the CLI:
+
+```bash
+uv run kitaru logout
+```
+
+For a CLI-managed local workspace, logout stops its containers but keeps the PostgreSQL data volume.
 
 ## Where to go next
 

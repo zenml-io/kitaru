@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Added experiment export projects for Harbor 0.20 and Verifiers 0.3, with explicit content, environment, and source policies; protected runtime values; deterministic provenance; target-native agent and evaluator execution; and a PrimeRL 0.8 training-source handoff.
 - Added user-facing methods to `KitaruClient` and `KitaruSyncClient`: get agents and experiments by name or id, list sessions and session nodes, replay a session or start an experiment run and wait for the result. The one-method-per-endpoint API client stays reachable as `client.api`.
 
 ### Fixed
