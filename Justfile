@@ -104,6 +104,10 @@ cli-artifact-smoke:
 plugin-artifact-smoke:
     uv run --no-sync python scripts/smoke_plugin_artifacts.py
 
+# Verify exporter projects against exact target packages and provider-free runtimes
+export-artifact-smoke *ARGS:
+    uv run --no-project --python 3.12 python scripts/smoke_export_artifacts.py {{ ARGS }}
+
 # Verify the measured MCP schemas and committed snapshots
 mcp-schema-check:
     uv run --extra mcp python scripts/report_mcp_schema.py --check

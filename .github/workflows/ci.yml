@@ -403,6 +403,27 @@ jobs:
           python-version: '3.12'
       - name: Test clean CLI wheel and source installations
         run: uv run --no-sync python scripts/smoke_cli_artifacts.py
+  export-artifact-contract:
+    name: Exact exporter target contracts
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Check out the canonical Kitaru template
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: zenml-io/kitaru-template
+          ref: 2e5606198d560a9d412e89de8f4629952d439602
+          path: kitaru-template
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
+        with:
+          python-version: '3.12'
+      - name: Test generated Harbor, Verifiers, and PrimeRL contracts
+        run: just export-artifact-smoke --template-source kitaru-template
   test:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest

@@ -983,6 +983,7 @@ def _convert_verifiers_trace(
                 )
             )
             serialized_calls: list[dict[str, Any]] = []
+            structured_output: dict[str, Any] | None = None
             for call_position, raw_tool_call in enumerate(tool_calls):
                 tool_call = _require_dict(
                     raw_tool_call,
@@ -1014,6 +1015,16 @@ def _convert_verifiers_trace(
                         "invalid_trace",
                         "Verifiers tool arguments must be a JSON object.",
                     )
+                is_terminal_output = (
+                    len(tool_calls) == 1
+                    and position == len(source_nodes) - 1
+                    and name == "final_result"
+                    and content is None
+                )
+                if is_terminal_output:
+                    structured_output = parsed_arguments
+                    final_output = parsed_arguments
+                    continue
                 known_tool_calls[call_id] = (position, name, parsed_arguments)
                 serialized_calls.append(
                     {"id": call_id, "name": name, "arguments": arguments}
@@ -1044,12 +1055,18 @@ def _convert_verifiers_trace(
                     node_type=NodeType.LLM_CALL,
                     name="model_call",
                     inputs={"messages": _verifiers_message_path(source_nodes, parent)},
-                    outputs={
-                        "message": content,
-                        **(
-                            {"tool_calls": serialized_calls} if serialized_calls else {}
-                        ),
-                    },
+                    outputs=(
+                        structured_output
+                        if structured_output is not None
+                        else {
+                            "message": content,
+                            **(
+                                {"tool_calls": serialized_calls}
+                                if serialized_calls
+                                else {}
+                            ),
+                        }
+                    ),
                     started_at=start,
                     ended_at=end,
                     reasoning=message.get("reasoning_content"),

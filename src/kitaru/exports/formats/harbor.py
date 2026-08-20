@@ -214,13 +214,19 @@ from pathlib import Path
 
 from harbor.agents.base import BaseAgent
 
-_RUNTIME = json.loads(Path("/opt/kitaru-export/agent-runtime.json").read_text())
+_RUNTIME_PATH = (
+    Path(__file__).resolve().parents[1] / "agent_image" / "agent-runtime.json"
+)
+
+
+def _load_runtime():
+    return json.loads(_RUNTIME_PATH.read_text())
 
 
 class KitaruAgent(BaseAgent):
     """Run the exported agent command inside Harbor's task environment."""
 
-    SUPPORTS_ATIF = _RUNTIME["trace_format"] == "atif"
+    SUPPORTS_ATIF = __KITARU_SUPPORTS_ATIF__
 
     @staticmethod
     def name() -> str:
@@ -233,27 +239,28 @@ class KitaruAgent(BaseAgent):
         return None
 
     async def run(self, instruction, environment, context) -> None:
-        env = dict(_RUNTIME["environment"])
+        runtime = _load_runtime()
+        env = dict(runtime["environment"])
         env.update(self.extra_env)
         env["PATH"] = "/workspace/.venv/bin:" + env.get(
             "PATH", "/usr/local/bin:/usr/bin:/bin"
         )
         env["KITARU_TASK_INPUTS"] = instruction
-        env["KITARU_TRACE_PATH"] = _RUNTIME["trace_path"]
+        env["KITARU_TRACE_PATH"] = runtime["trace_path"]
         result = await environment.exec(
-            shlex.join(_RUNTIME["command_argv"]),
-            cwd=_RUNTIME["working_directory"],
+            shlex.join(runtime["command_argv"]),
+            cwd=runtime["working_directory"],
             env=env,
-            timeout_sec=_RUNTIME["agent_timeout_seconds"],
+            timeout_sec=runtime["agent_timeout_seconds"],
         )
         if result.return_code != 0:
             raise RuntimeError(
                 f"Exported agent failed with exit code {result.return_code}"
             )
-        destination = "/logs/agent/" + _RUNTIME["trace_log_name"]
+        destination = "/logs/agent/" + runtime["trace_log_name"]
         copied = await environment.exec(
             "mkdir -p /logs/agent && cp -- "
-            + shlex.quote(_RUNTIME["trace_path"])
+            + shlex.quote(runtime["trace_path"])
             + " "
             + shlex.quote(destination),
             timeout_sec=30,
@@ -496,7 +503,9 @@ def render_harbor(
     agent_dir = destination / "agent"
     agent_dir.mkdir()
     (agent_dir / "__init__.py").write_text("")
-    (agent_dir / "kitaru_agent.py").write_text(_AGENT_SOURCE)
+    (agent_dir / "kitaru_agent.py").write_text(
+        _AGENT_SOURCE.replace("__KITARU_SUPPORTS_ATIF__", repr(trace_format == "atif"))
+    )
 
     image = f"{_IMAGE_PREFIX}:{directory_digest(agent_image)[:12]}"
     dataset_dir = destination / "dataset"
@@ -508,6 +517,8 @@ def render_harbor(
         task_id = f"task-{index:05d}-{str(session.session.id)[:8]}"
         task_name = f"kitaru/{task_id}"
         task_dir = dataset_dir / task_id
+        (task_dir / "environment").mkdir(parents=True)
+        (task_dir / "environment/.gitkeep").write_text("")
         (task_dir / "tests").mkdir(parents=True)
         (task_dir / "inputs").mkdir()
         inputs = session.session.inputs
@@ -582,6 +593,13 @@ malformed traces and evaluator failures fail the task. There is no fallback rewa
 Agent dependencies are classified as {dependency_plan.status}. Export performed
 structural validation only; exact Harbor {HARBOR_VERSION} execution is release-level
 evidence and is not a claim that this user artifact was executed.
+
+Content omissions: {", ".join(resolved.content_policy.omit) or "none"}.
+Registered environment handling: {resolved.environment_policy.mode}.
+Explicit source includes: {", ".join(resolved.source_policy.include) or "none"}.
+Explicit source exclusions: {", ".join(resolved.source_policy.exclude) or "none"}.
+Current resolved attached-secret values and protected local files are excluded;
+runtime values must be supplied through Harbor's environment mechanism.
 """
     if required_environment_names:
         readme += (
@@ -608,6 +626,9 @@ evidence and is not a claim that this user artifact was executed.
         generated_files=file_digests(destination),
         required_environment_names=required_environment_names,
         exclusions=resolved.source.excluded,
+        content_policy=resolved.content_policy,
+        environment_policy=resolved.environment_policy,
+        source_policy=resolved.source_policy,
         dependencies=DependencyReceipt(
             status=dependency_plan.status,
             requirement_digest=dependency_plan.requirement_digest,

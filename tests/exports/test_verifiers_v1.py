@@ -33,10 +33,13 @@ from kitaru.exports.formats.verifiers_v1 import (
     validate_verifiers_v1,
 )
 from kitaru.exports.models import (
+    ContentPolicy,
+    EnvironmentPolicy,
     ExportError,
     MaterializedEvaluator,
     ResolvedExport,
     RewardSelector,
+    SourcePolicy,
 )
 from kitaru.exports.source import inventory_source
 
@@ -182,6 +185,24 @@ def test_render_writes_one_complete_collision_safe_plugin(tmp_path: Path) -> Non
     assert (module / "scoring/evaluators/evaluator-0.py").is_file()
 
 
+def test_verifiers_readme_records_effective_policies(tmp_path: Path) -> None:
+    resolved = replace(
+        _resolved(tmp_path / "source"),
+        content_policy=ContentPolicy(omit=("visible_reasoning",)),
+        environment_policy=EnvironmentPolicy(mode="runtime_only"),
+        source_policy=SourcePolicy(include=("agent.py",), exclude=("build/cache",)),
+    )
+    root = tmp_path / "bundle"
+
+    render_verifiers_v1(resolved, root)
+
+    readme = (root / "README.md").read_text()
+    assert "Content omissions: visible_reasoning." in readme
+    assert "Registered environment handling: runtime_only." in readme
+    assert "Explicit source includes: agent.py." in readme
+    assert "Explicit source exclusions: build/cache." in readme
+
+
 @pytest.mark.parametrize("session_count", [1, 7, 1000])
 def test_one_taskset_and_harness_cover_every_session(
     tmp_path: Path, session_count: int
@@ -230,6 +251,71 @@ def test_taskdata_is_public_and_scoring_is_private(tmp_path: Path) -> None:
     }
     assert private["bridge_task"]["primary_reward"]["evaluator"] == "quality"
     assert manifest["runtime_requirements"]["task_private"] == ["SCORING_TOKEN"]
+
+
+def test_scoring_reads_requirements_from_private_bridge_task(tmp_path: Path) -> None:
+    root = tmp_path / "bundle"
+    render_verifiers_v1(
+        _resolved(tmp_path / "source"),
+        root,
+        required_environment_names=("SCORING_TOKEN",),
+    )
+    _, module = _module(root)
+
+    scoring_source = (module / "scoring.py").read_text()
+    assert 'task["bridge_task"]["required_environment_names"]' in scoring_source
+    assert 'task["required_environment_names"]' not in scoring_source
+
+
+@pytest.mark.parametrize(
+    ("payload", "expected_ok"),
+    [
+        ({"is_completed": True, "ok": False, "errors": []}, True),
+        (
+            {
+                "is_completed": True,
+                "ok": False,
+                "errors": [{"type": "HarnessError", "message": "failed"}],
+            },
+            False,
+        ),
+        ({"is_completed": False, "ok": False, "errors": []}, False),
+    ],
+)
+def test_scoring_normalizes_only_verifiers_close_transient(
+    tmp_path: Path, payload: dict[str, Any], expected_ok: bool
+) -> None:
+    root = tmp_path / "bundle"
+    render_verifiers_v1(_resolved(tmp_path / "source"), root)
+    _, module = _module(root)
+    tree = ast.parse((module / "plugin.py").read_text())
+    helper = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "_trace_for_scoring"
+    )
+    namespace: dict[str, Any] = {
+        "Any": Any,
+        "vf": type("FakeVerifiers", (), {"Trace": object}),
+    }
+    exec(
+        compile(
+            ast.fix_missing_locations(ast.Module(body=[helper], type_ignores=[])),
+            "generated-plugin.py",
+            "exec",
+        ),
+        namespace,
+    )
+    trace = type(
+        "FakeTrace",
+        (),
+        {"model_dump": lambda self, **kwargs: dict(payload)},
+    )()
+
+    normalized = namespace["_trace_for_scoring"](trace)
+
+    assert normalized["ok"] is expected_ok
+    assert normalized["errors"] == payload["errors"]
 
 
 def test_shuffled_sessions_reproduce_full_taskdata_digests_and_bytes(

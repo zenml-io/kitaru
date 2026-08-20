@@ -911,6 +911,7 @@ version = "0.22.1"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "packaging" },
     { name = "pydantic" },
 ]
 
@@ -984,6 +985,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.44" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'mcp'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },

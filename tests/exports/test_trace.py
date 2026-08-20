@@ -1,5 +1,6 @@
 """Tests for target trace conversion."""
 
+import json
 import uuid
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -353,6 +354,104 @@ def test_convert_verifiers_preserves_linear_message_trace() -> None:
     assert view.session.tokens is not None
     assert view.session.tokens.input_tokens == 22
     assert view.session.cost == Decimal("0.02")
+
+
+def test_convert_verifiers_maps_terminal_structured_output_call() -> None:
+    trace = _verifiers_trace()
+    output = {
+        "action": "refund",
+        "amount": 98,
+        "reason": "Defective item",
+        "customer_reply": "Dana, your refund was issued.",
+    }
+    trace["nodes"] = [
+        trace["nodes"][0],
+        {
+            "parent": 0,
+            "message": {
+                "role": "assistant",
+                "content": None,
+                "tool_calls": [
+                    {
+                        "id": "call-final",
+                        "name": "final_result",
+                        "arguments": json.dumps(output),
+                    }
+                ],
+            },
+            "sampled": True,
+            "timestamp": 1767323046.0,
+        },
+    ]
+    trace["calls"] = [{**trace["calls"][0], "node": 1}]
+
+    view = convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert view.session.outputs == output
+    assert view.session.tool_call_count == 0
+    assert [node.node_type.value for node in view.nodes] == ["span", "llm_call"]
+    assert view.nodes[1].outputs == output
+
+
+@pytest.mark.parametrize(
+    ("name", "arguments", "content", "add_later_message", "code"),
+    [
+        ("other_result", '{"answer":42}', None, False, "missing_tool_result"),
+        ("final_result", '["not", "an", "object"]', None, False, "invalid_trace"),
+        ("final_result", '{"answer":42}', None, True, "missing_tool_result"),
+        (
+            "final_result",
+            '{"answer":42}',
+            "ordinary tool call",
+            False,
+            "missing_tool_result",
+        ),
+    ],
+)
+def test_convert_verifiers_rejects_terminal_output_near_misses(
+    name: str,
+    arguments: str,
+    content: str | None,
+    add_later_message: bool,
+    code: str,
+) -> None:
+    trace = _verifiers_trace()
+    later_call = trace["calls"][1]
+    trace["nodes"] = [
+        trace["nodes"][0],
+        {
+            "parent": 0,
+            "message": {
+                "role": "assistant",
+                "content": content,
+                "tool_calls": [
+                    {
+                        "id": "call-final",
+                        "name": name,
+                        "arguments": arguments,
+                    }
+                ],
+            },
+            "sampled": True,
+            "timestamp": 1767323046.0,
+        },
+    ]
+    trace["calls"] = [{**trace["calls"][0], "node": 1}]
+    if add_later_message:
+        trace["nodes"].append(
+            {
+                "parent": 1,
+                "message": {"role": "assistant", "content": "later"},
+                "sampled": True,
+                "timestamp": 1767323047.0,
+            }
+        )
+        trace["calls"].append({**later_call, "node": 2})
+
+    with pytest.raises(ExportError) as raised:
+        convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert raised.value.code == code
 
 
 def test_convert_verifiers_preserves_branches_without_linearizing() -> None:

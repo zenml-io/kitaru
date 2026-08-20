@@ -202,12 +202,24 @@ class KitaruData(vf.TaskData):
     kitaru_content_digest: str
 
 
+def _trace_for_scoring(trace: vf.Trace) -> dict[str, Any]:
+    """Return the successful snapshot seen before Rollout.close finalizes ok."""
+    payload = trace.model_dump(mode="json")
+    if (
+        payload.get("is_completed") is True
+        and payload.get("ok") is False
+        and payload.get("errors") == []
+    ):
+        payload["ok"] = True
+    return payload
+
+
 class KitaruTask(vf.Task[KitaruData]):
     NEEDS_CONTAINER = True
 
     @vf.reward(weight=1.0)
     async def kitaru_reward(self, trace: vf.Trace) -> float:
-        reward, metrics = evaluate(trace.model_dump(mode="json"), self.data)
+        reward, metrics = evaluate(_trace_for_scoring(trace), self.data)
         trace.record_metrics(metrics)
         return reward
 
@@ -346,7 +358,7 @@ def evaluate(trace: dict[str, Any], data: Any) -> tuple[float, dict[str, float]]
     task = json.loads(task_path.read_text())
     if task["content_digest"] != data.kitaru_content_digest:
         raise RuntimeError("Kitaru task provenance does not match private scoring data")
-    required_names = tuple(task["required_environment_names"])
+    required_names = tuple(task["bridge_task"]["required_environment_names"])
     missing = sorted(name for name in required_names if not os.environ.get(name))
     if missing:
         raise RuntimeError(
@@ -499,10 +511,14 @@ def _readme(
     plugin_id: str,
     dependency_status: str,
     runtime_requirements: RuntimeRequirements,
+    resolved: ResolvedExport,
 ) -> str:
     requirements = (
         ", ".join(runtime_requirements.all) if runtime_requirements.all else "none"
     )
+    omissions = ", ".join(resolved.content_policy.omit) or "none"
+    source_includes = ", ".join(resolved.source_policy.include) or "none"
+    source_excludes = ", ".join(resolved.source_policy.exclude) or "none"
     return (
         "# Kitaru Verifiers export\n\n"
         "This complete plugin contains one frozen Taskset and one bundled default "
@@ -525,6 +541,11 @@ def _readme(
         "Task-private scoring requirements remain active for every Harness; "
         "bundled-Harness requirements are dropped when another Harness is selected, "
         "whose own requirements are delegated to its package and Verifiers.\n\n"
+        f"Content omissions: {omissions}. Registered environment handling: "
+        f"{resolved.environment_policy.mode}. Explicit source includes: "
+        f"{source_includes}. Explicit source exclusions: {source_excludes}. Current "
+        "resolved attached-secret values and protected local files are excluded; "
+        "runtime values must be supplied through the target environment.\n\n"
         f"`prime-rl.toml` is the exact PrimeRL {PRIME_RL_VERSION} training-source "
         "composition for the same Taskset, bundled Harness, and Docker runtime. Add "
         "trainer-owned model, optimizer, and hardware settings around it. Resume is "
@@ -579,7 +600,7 @@ def _benchmark_digest(
     return _canonical_digest(
         {
             "cohort_version_id": str(resolved.cohort_version.id),
-            "content_policy": {"omit": []},
+            "content_policy": resolved.content_policy.model_dump(mode="json"),
             "evaluator_versions": [
                 {
                     "id": str(evaluator.version.id),
@@ -621,7 +642,7 @@ def _default_harness_digest(
                 "status": dependency_plan.status,
             },
             "environment": dict(sorted(run_spec.env.items())),
-            "environment_handling": "include",
+            "environment_handling": resolved.environment_policy.mode,
             "required_environment_names": sorted(resolved.required_environment_names),
             "source_digest": resolved.source.digest,
             "timeout_seconds": run_spec.timeout_seconds,
@@ -917,7 +938,12 @@ def render_verifiers_v1(
         )
     )
     (root / "README.md").write_text(
-        _readme(provenance.plugin_id, dependency_plan.status, runtime_requirements)
+        _readme(
+            provenance.plugin_id,
+            dependency_plan.status,
+            runtime_requirements,
+            resolved,
+        )
     )
 
     _validate_generated_resources(root)
@@ -941,6 +967,9 @@ def render_verifiers_v1(
         generated_files=file_digests(root),
         required_environment_names=runtime_requirements.all,
         exclusions=resolved.source.excluded,
+        content_policy=resolved.content_policy,
+        environment_policy=resolved.environment_policy,
+        source_policy=resolved.source_policy,
         dependencies=DependencyReceipt(
             status=dependency_plan.status,
             requirement_digest=dependency_plan.requirement_digest,

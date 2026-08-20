@@ -2,7 +2,9 @@
 
 import hashlib
 import json
+import sys
 import tomllib
+import types
 import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -30,10 +32,13 @@ from kitaru.exports.formats.harbor import (
     validate_harbor,
 )
 from kitaru.exports.models import (
+    ContentPolicy,
+    EnvironmentPolicy,
     ExportError,
     MaterializedEvaluator,
     ResolvedExport,
     RewardSelector,
+    SourcePolicy,
 )
 from kitaru.exports.source import inventory_source
 from kitaru.exports.writer import file_digests
@@ -139,6 +144,7 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
         config = tomllib.loads((task / "task.toml").read_text())
         assert config["schema_version"] == "1.3"
         assert config["environment"]["docker_image"].startswith("kitaru-export:")
+        assert (task / "environment/.gitkeep").is_file()
         assert (task / "tests/test.sh").stat().st_mode & 0o111
         task_data = json.loads((task / "inputs/task.json").read_text())
         assert task_data["primary_reward"] == {
@@ -175,6 +181,32 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
     assert "kitaru.exports" not in "".join(
         path.read_text() for path in (output / "agent_image/bridge").glob("*.py")
     )
+
+
+def test_harbor_readme_records_effective_policies(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    resolved = replace(
+        _resolved(source, session_count=1),
+        content_policy=ContentPolicy(omit=("visible_reasoning",)),
+        environment_policy=EnvironmentPolicy(mode="runtime_only"),
+        source_policy=SourcePolicy(include=("agent.py",), exclude=("build/cache",)),
+    )
+
+    output = tmp_path / "bundle"
+    render_harbor(
+        resolved,
+        output,
+        trace_format="atif",
+        trace_path="/workspace/trajectory.json",
+    )
+
+    readme = (output / "README.md").read_text()
+    assert "Content omissions: visible_reasoning." in readme
+    assert "Registered environment handling: runtime_only." in readme
+    assert "Explicit source includes: agent.py." in readme
+    assert "Explicit source exclusions: build/cache." in readme
     evaluator_metadata = json.loads(
         (output / "agent_image/evaluators.json").read_text()
     )
@@ -206,6 +238,35 @@ def test_render_harbor_accepts_empty_staging_directory(tmp_path: Path) -> None:
     )
 
     assert (output / "kitaru-export.json").is_file()
+
+
+def test_generated_agent_imports_without_container_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    output = tmp_path / "bundle"
+    render_harbor(
+        _resolved(source, session_count=1),
+        output,
+        trace_format="atif",
+        trace_path="/workspace/trajectory.json",
+    )
+    harbor = types.ModuleType("harbor")
+    agents = types.ModuleType("harbor.agents")
+    base = types.ModuleType("harbor.agents.base")
+    base.BaseAgent = object
+    monkeypatch.setitem(sys.modules, "harbor", harbor)
+    monkeypatch.setitem(sys.modules, "harbor.agents", agents)
+    monkeypatch.setitem(sys.modules, "harbor.agents.base", base)
+    launcher = output / "agent/kitaru_agent.py"
+    namespace = {"__file__": str(launcher)}
+
+    exec(compile(launcher.read_text(), str(launcher), "exec"), namespace)
+
+    assert namespace["KitaruAgent"].SUPPORTS_ATIF is True
+    assert namespace["_load_runtime"]()["trace_format"] == "atif"
 
 
 def test_harbor_digest_matches_official_algorithm(tmp_path: Path) -> None:
