@@ -240,6 +240,7 @@ class ReplayService:
         replay_id: uuid.UUID,
         tool_name: str,
         cache_key: str,
+        occurrence: int | None,
         actor: AuthContext,
     ) -> ToolLookupResult:
         """Search recorded tool-call history for a cached result.
@@ -251,13 +252,16 @@ class ReplayService:
             replay_id: Id of the replay.
             tool_name: Tool being called.
             cache_key: Call cache key.
+            occurrence: Zero-based match position in baseline order, the
+                newest match when None.
             actor: Caller context.
 
         Raises:
             ReplayAccessDenied: The caller's task token names a task outside
                 this replay's job.
             ReplayNotFound: No replay has this id.
-            ValidationError: The tool's config is not a history config.
+            ValidationError: The tool's config is not a history config, or
+                an occurrence was given for a non-baseline history scope.
 
         Returns:
             Whether a cached result was found, and the result if so.
@@ -270,7 +274,14 @@ class ReplayService:
         )
         if not isinstance(tool_config, HistoryConfig):
             raise ValidationError(f"Tool '{tool_name}' is not configured for history")
-        node = await self._find_history_node(replay, tool_config.scope, cache_key)
+        if occurrence is not None and tool_config.scope is not HistoryScope.BASELINE:
+            raise ValidationError(
+                f"Tool '{tool_name}' history scope '{tool_config.scope}' does "
+                "not support occurrence"
+            )
+        node = await self._find_history_node(
+            replay, tool_config.scope, cache_key, occurrence
+        )
         if node is None:
             return ToolLookupResult(found=False, result=None)
         return ToolLookupResult(found=True, result=node.outputs)
@@ -294,7 +305,11 @@ class ReplayService:
             raise ReplayAccessDenied(replay.id)
 
     async def _find_history_node(
-        self, replay: Replay, scope: HistoryScope, cache_key: str
+        self,
+        replay: Replay,
+        scope: HistoryScope,
+        cache_key: str,
+        occurrence: int | None,
     ) -> SessionNode | None:
         """Search the tool config's history scope for a matching node.
 
@@ -302,11 +317,17 @@ class ReplayService:
             replay: Replay to search history for.
             scope: History scope to search.
             cache_key: Call cache key.
+            occurrence: Zero-based match position in baseline order, the
+                newest match when None.
 
         Returns:
-            Highest-id matching node, or ``None`` on a miss.
+            Matching node, or ``None`` on a miss.
         """
         if scope is HistoryScope.BASELINE:
+            if occurrence is not None:
+                return await self._session_nodes.find_nth_by_cache_key_in_session(
+                    replay.baseline_session_id, cache_key, occurrence
+                )
             return await self._session_nodes.find_latest_by_cache_key_in_session(
                 replay.baseline_session_id, cache_key
             )

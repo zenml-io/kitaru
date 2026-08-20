@@ -130,7 +130,8 @@ class ReplaysResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                replay and 422 for a tool not configured for history.
+                replay and 422 for a tool not configured for history or an
+                occurrence given for a non-baseline history scope.
 
         Returns:
             Whether a cached result was found, and the result if so.

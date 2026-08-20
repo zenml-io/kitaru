@@ -16,7 +16,7 @@ from typing import Any
 import pytest
 import uvicorn
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 EXAMPLE_DIR = Path(__file__).resolve().parents[1]
 TESTS_DIR = REPOSITORY_ROOT / "tests"
 sys.path.insert(0, str(TESTS_DIR))
@@ -154,7 +154,7 @@ async def _require_postgres() -> None:
         return
     message = (
         "PostgreSQL is not reachable on the configured Kitaru test database port. "
-        "Start it with `docker compose -f ../../docker-compose.yml up -d --build` "
+        "Start it with `docker compose -f ../../../docker-compose.yml up -d --build` "
         "from this example directory, then rerun `pnpm test:e2e`."
     )
     if os.environ.get(REQUIRE_POSTGRES_ENVIRONMENT_VARIABLE) == "1":

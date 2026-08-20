@@ -98,6 +98,12 @@ class ToolLookupRequest(RequestModel):
 
     tool_name: str = Field(description="Tool being called.")
     cache_key: str = Field(min_length=64, max_length=64, description="Call cache key.")
+    occurrence: int | None = Field(
+        default=None,
+        ge=0,
+        description="Zero-based match position in baseline order, the newest "
+        "match when unset.",
+    )
 
 
 class ToolLookupResponse(ResponseModel):

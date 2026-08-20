@@ -11,7 +11,7 @@ server) and the SDK reference docs app. The public marketing site and
 - `src/kitaru/client/`: async SDK making REST calls
 - `src/kitaru/server/`: FastAPI server (API, application, domain, adapters layers)
 - `tests/`: pytest suite; see `tests/AGENTS.md` when working there
-- `examples/`: runnable SDK examples
+- `examples/`: runnable SDK examples, grouped as `python/` and `typescript/`
 - `docs/book/`: hand-written GitBook docs; see `docs/book/AGENTS.md`
 - `docs/content/docs/`: generated SDK reference content
 - `docs/app/`, `docs/scripts/`, `docs/worker/`: reference app, generation, and redirect worker code

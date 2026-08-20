@@ -35,7 +35,7 @@ Job scoping does not reserve the task on the server. An already-running broad wo
 Resume an interrupted run by passing the printed state directory:
 
 ```bash
-pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume v2_examples/mastra_support_triage/.state/RUN_ID
+pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume examples/typescript/mastra_support_triage/.state/RUN_ID
 ```
 
 Completed jobs and completed runs are read back instead of executed again. The driver therefore does not deliberately repeat a paid provider call during recovery. This is not a global exactly-once guarantee against a competing broad worker or server-side task retry.
@@ -45,7 +45,7 @@ Every non-idempotent create is recorded before the request. If the server may ha
 If the resource exists, adopt its exact UUID:
 
 ```bash
-pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume v2_examples/mastra_support_triage/.state/RUN_ID --adopt create_agent=RESOURCE_UUID
+pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume examples/typescript/mastra_support_triage/.state/RUN_ID --adopt create_agent=RESOURCE_UUID
 ```
 
 The driver reads the resource back and validates its type, account ownership where the API exposes it, and parent IDs before committing it to the manifest. Valid operation keys are `create_agent`, `create_agent_version`, `create_evaluator`, `upload_evaluator_source`, `create_evaluator_version`, `create_initial_job`, and `create_replay`.
@@ -53,7 +53,7 @@ The driver reads the resource back and validates its type, account ownership whe
 If inspection proves that no resource was created, explicitly accept the duplicate-create risk and retry that exact operation:
 
 ```bash
-pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume v2_examples/mastra_support_triage/.state/RUN_ID --retry create_agent
+pnpm --filter @zenml-io/kitaru-example-mastra-support-triage demo -- --resume examples/typescript/mastra_support_triage/.state/RUN_ID --retry create_agent
 ```
 
 The driver records the explicit retry decision before issuing another create. It rejects recovery for a different operation, a changed request fingerprint, or both actions at once.

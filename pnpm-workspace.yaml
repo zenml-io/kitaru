@@ -1,5 +1,5 @@
 packages:
   - packages/*
   - tests/typescript/fixture
-  - v2_examples/mastra_support_triage
-  - v2_examples/vercel_ai_support_triage
+  - examples/typescript/mastra_support_triage
+  - examples/typescript/vercel_ai_support_triage

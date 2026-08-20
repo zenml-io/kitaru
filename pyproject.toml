@@ -142,7 +142,16 @@ select = [
     "B",    # bugbear
     "SIM",  # simplify
     "RUF",  # ruff-specific rules
+    "D",    # pydocstyle (Google convention, see [tool.ruff.lint.pydocstyle])
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests may omit docstrings (D1xx), but any docstring they do have must still
+# follow the Google formatting rules (D2xx and up).
+"tests/**" = ["D1"]
+# Test doubles whose methods only mirror the real ADK surface; class-level
+# docstrings already say what each fake stands in for.
+"scripts/google_adk_fakes.py" = ["D1"]
 
 [tool.ruff.lint.flake8-bugbear]
 extend-immutable-calls = ["fastapi.Depends"]
@@ -159,9 +168,12 @@ known-first-party = [
 ]
 
 [tool.ty.src]
-include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py"]
-# TODO: Re-enable once the examples are migrated to the v2 SDK.
-exclude = ["examples/**"]
+include = ["src/**/*.py", "scripts/**/*.py", "tests/**/*.py", "examples/**/*.py"]
+# Exclude the Python adapter examples: they import plugin packages (kitaru-langgraph,
+# kitaru-openai-agents) from the separate plugins workspace, which are not installed
+# in the root environment. The TypeScript examples' Python drivers import only kitaru
+# and are checked.
+exclude = ["examples/python/**"]
 
 [tool.ty.environment]
 python-version = "3.11"

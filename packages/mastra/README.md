@@ -12,7 +12,7 @@ pnpm add @zenml-io/kitaru-mastra @mastra/core@1.51.0
 
 - [Mastra adapter documentation](https://docs.zenml.io/kitaru/adapters/mastra)
 - [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
-- [Run the Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/mastra_support_triage)
+- [Run the Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/mastra_support_triage)
 
 ```ts
 import { KitaruAgent } from "@zenml-io/kitaru-mastra";

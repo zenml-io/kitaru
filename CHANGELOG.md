@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 - Added user-facing methods to `KitaruClient` and `KitaruSyncClient`: get agents and experiments by name or id, list sessions and session nodes, replay a session or start an experiment run and wait for the result. The one-method-per-endpoint API client stays reachable as `client.api`.
 
+### Fixed
+
+- Repeated identical tool calls with baseline-scoped history replay their distinct recorded results in baseline order instead of all resolving to the newest match. Replayed calls past the last recorded occurrence follow the configured `on_miss` behavior.
+- The TypeScript adapters (Mastra and Vercel AI SDK) now apply the same baseline occurrence ordering: repeated identical tool calls send a zero-based `occurrence` with each history lookup and advance it only on a found result.
+
+### Changed
+
+- Unified all runnable examples under a single `examples/` tree: the Python adapter examples moved from `examples/integrations/` to `examples/python/`, and the TypeScript examples moved from `v2_examples/` to `examples/typescript/`. The `examples/v2/mcp` configuration example was removed in favor of the MCP setup documentation.
+
 ## [0.22.1]
 
 ### Changed

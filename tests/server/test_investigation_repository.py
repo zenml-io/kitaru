@@ -75,9 +75,12 @@ Setup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each investigation repository implementation, an owner id, an
-    agent id, a factory for further session ids on that agent, and a factory
-    for further agent ids under the same owner."""
+    """Provide each investigation repository implementation and its collaborators.
+
+    Yields the repository, an owner id, an agent id, a factory for further
+    session ids on that agent, and a factory for further agent ids under the
+    same owner.
+    """
     if request.param == "fake":
         investigations = FakeInvestigationRepository()
         sessions = FakeSessionRepository()

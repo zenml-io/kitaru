@@ -11,7 +11,7 @@ from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.replay import ReplayResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 EXAMPLE_DIR = Path(__file__).resolve().parent
 COMPILED_DEMO = EXAMPLE_DIR / "dist" / "demo.js"
 RESULT_PREFIX = "KITARU_DEMO_RESULT "

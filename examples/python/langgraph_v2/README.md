@@ -17,7 +17,7 @@ export KITARU_AGENT_ID="..."
 # Alternatively:
 # export KITARU_AGENT_VERSION_ID="..."
 
-uv run --project plugins python -m examples.integrations.langgraph_v2
+uv run --project plugins python -m examples.python.langgraph_v2
 ```
 
 The script prints:

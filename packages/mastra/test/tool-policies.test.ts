@@ -160,6 +160,7 @@ describe("replay tool policies", () => {
     const lookup = api.calls.find((call) => call.path.endsWith("/tool-lookup"));
     expect(lookup?.body).toEqual({
       cache_key: computeToolCacheKey("normalize", rawInput as never),
+      occurrence: 0,
       tool_name: "normalize",
     });
   });

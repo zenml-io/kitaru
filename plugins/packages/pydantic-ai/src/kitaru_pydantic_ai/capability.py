@@ -66,6 +66,7 @@ from pydantic_ai.tools import RunContext, ToolDefinition
 from kitaru.api_models.v1.replay import ReplayResponse, ToolLookupRequest
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
+    HistoryScope,
     LLMConfig,
     PassthroughConfig,
     ReplayOverride,
@@ -457,6 +458,7 @@ class _RunState:
     started_at: datetime | None = None
     next_index: int = 1
     latest_llm_index: int | None = None
+    history_occurrences: dict[str, int] = field(default_factory=dict)
     buffer: list[SessionNodeCreateRequest] = field(default_factory=list)
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     finished: bool = False
@@ -777,14 +779,22 @@ class _KitaruCapability(AbstractCapability[Any]):
                         policy.type, policy.on_miss, call.tool_name, args, handler
                     )
                 else:
+                    occurrence = (
+                        state.history_occurrences.get(cache_key, 0)
+                        if policy.scope is HistoryScope.BASELINE
+                        else None
+                    )
                     response = await state.client.replays.tool_lookup(
                         state.replay.id,
                         ToolLookupRequest(
                             tool_name=call.tool_name,
                             cache_key=cache_key,
+                            occurrence=occurrence,
                         ),
                     )
                     if response.found:
+                        if occurrence is not None:
+                            state.history_occurrences[cache_key] = occurrence + 1
                         result = response.result
                         mocked_policy = policy.type
                     else:

@@ -8,7 +8,7 @@ From the repository root, sync and use the plugin workspace:
 
 ```bash
 uv sync --project plugins --all-packages
-uv run --project plugins python -m examples.integrations.openai_agents_v2.agent --help
+uv run --project plugins python -m examples.python.openai_agents_v2.agent --help
 ```
 
 The help command imports the adapter and OpenAI SDK, then exits without reading credentials, creating a Kitaru session, or calling a model.
@@ -24,7 +24,7 @@ export KITARU_API_KEY="..."
 export KITARU_AGENT_ID="..."
 # Alternatively, set KITARU_AGENT_VERSION_ID instead of KITARU_AGENT_ID.
 
-uv run --project plugins python -m examples.integrations.openai_agents_v2.agent \
+uv run --project plugins python -m examples.python.openai_agents_v2.agent \
   "Use the order lookup tool for ORD-1007"
 ```
 
