@@ -25,16 +25,16 @@ from kitaru.api_models.v1.device import (
     DeviceUpdateRequest,
     DeviceVerifyRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import authorize, get_device_service
 from kitaru.server.adapters.rest.mapping.devices import (
     device_list_params_to_filter,
     device_to_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.device_service import DeviceService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("")

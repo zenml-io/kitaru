@@ -30,6 +30,7 @@ from conftest import (
     create_cohort_version,
     create_plugin,
     create_session,
+    override_idempotency,
 )
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
 from kitaru.api_models.v1.experiment_run import (
@@ -99,6 +100,7 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
     app.dependency_overrides[get_run_canceler] = lambda: partial(
         _cancel_run, services.experiment_run_service
     )
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

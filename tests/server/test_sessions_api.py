@@ -27,6 +27,7 @@ from conftest import (
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
+    FakeIdempotencyKeyRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -39,6 +40,7 @@ from conftest import (
     create_cohort_version,
     create_session,
     local_settings,
+    override_idempotency,
 )
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -48,6 +50,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize_with_task,
     get_auth_service,
     get_evaluation_service,
+    get_idempotency_key_repository,
     get_session_node_service,
     get_session_service,
     get_tag_service,
@@ -171,6 +174,7 @@ async def client(
     app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -925,6 +929,9 @@ def _build_task_scoped_app(
         repository=evaluation_repository, session_repository=session_repository
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_idempotency_key_repository] = lambda: (
+        FakeIdempotencyKeyRepository()
+    )
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 

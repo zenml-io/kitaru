@@ -25,6 +25,7 @@ from conftest import (
     create_agent,
     create_blob,
     create_plugin,
+    override_idempotency,
 )
 from kitaru.api_models.v1.imports import ImportCreateRequest
 from kitaru.api_models.v1.job import JobResponse
@@ -65,6 +66,7 @@ async def api_client(
     app.dependency_overrides[get_job_service] = lambda: services.job_service
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

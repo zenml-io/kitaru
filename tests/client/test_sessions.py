@@ -27,6 +27,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
+    override_idempotency,
 )
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
@@ -91,6 +92,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     app.dependency_overrides[get_session_node_service] = lambda: node_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

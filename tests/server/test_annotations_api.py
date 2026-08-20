@@ -28,6 +28,7 @@ from conftest import (
     FakeSessionRepository,
     create_agent,
     create_session,
+    override_idempotency,
 )
 from kitaru.api_models.v1.investigation import InvestigationSessionQuestion
 from kitaru.server.adapters.rest.dependencies import (
@@ -113,6 +114,7 @@ async def client(
     app.dependency_overrides[get_annotation_service] = lambda: annotation_service
     app.dependency_overrides[get_investigation_service] = lambda: investigation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

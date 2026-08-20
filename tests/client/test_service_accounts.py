@@ -22,6 +22,7 @@ from conftest import (
     FakeAccountRepository,
     FakePasswordHasher,
     local_settings,
+    override_idempotency,
     recording_asgi_api_client,
 )
 from kitaru.api_models.v1.account import (
@@ -54,6 +55,7 @@ def _build_app() -> FastAPI:
     )
     app.dependency_overrides[get_account_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: ACTOR
+    override_idempotency(app, ACTOR.account)
     return app
 
 

@@ -22,7 +22,6 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionResponse,
     AgentVersionUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_version_service,
@@ -31,12 +30,13 @@ from kitaru.server.adapters.rest.mapping.agent_versions import (
     agent_version_to_response,
     agent_version_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_version_service import (
     AgentVersionService,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("/{agent_version_id}")
