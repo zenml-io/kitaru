@@ -106,6 +106,15 @@ async def test_create_after_duplicate_failure(setup: Setup) -> None:
     assert agent.name == "reviewer"
 
 
+async def test_create_reuses_deleted_agent_name(setup: Setup) -> None:
+    """Accept the name of an agent marked deleted for a new agent."""
+    repository, owner_id, _ = setup
+    deleted = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(deleted.id)
+    agent = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    assert agent.name == "assistant"
+
+
 async def test_get(setup: Setup) -> None:
     """Load a stored agent by id."""
     repository, owner_id, _ = setup
@@ -211,6 +220,46 @@ async def test_update_duplicate_name(setup: Setup) -> None:
         DuplicateAgentName, match="Agent name 'assistant' is already registered"
     ):
         await repository.update(reviewer)
+
+
+async def test_update_reuses_deleted_agent_name(setup: Setup) -> None:
+    """Accept the name of an agent marked deleted when renaming another."""
+    repository, owner_id, _ = setup
+    deleted = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(deleted.id)
+    reviewer = await repository.create(Agent(owner_id=owner_id, name="reviewer"))
+    reviewer.name = "assistant"
+    updated = await repository.update(reviewer)
+    assert updated.name == "assistant"
+
+
+async def test_mark_deleted_hides_agent(setup: Setup) -> None:
+    """Hide a marked agent from get and query."""
+    repository, owner_id, _ = setup
+    created = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(created.id)
+    with pytest.raises(AgentNotFound, match=f"Agent {created.id} was not found"):
+        await repository.get(created.id)
+    agents, next_cursor = await repository.query(AgentFilter())
+    assert next_cursor is None
+    assert agents == []
+
+
+async def test_mark_deleted_already_deleted(setup: Setup) -> None:
+    """Raise for an agent already marked deleted."""
+    repository, owner_id, _ = setup
+    created = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(created.id)
+    with pytest.raises(AgentNotFound, match=f"Agent {created.id} was not found"):
+        await repository.mark_deleted(created.id)
+
+
+async def test_mark_deleted_not_found(setup: Setup) -> None:
+    """Raise for an unknown agent id."""
+    repository, _, _ = setup
+    missing_id = uuid.uuid4()
+    with pytest.raises(AgentNotFound, match=f"Agent {missing_id} was not found"):
+        await repository.mark_deleted(missing_id)
 
 
 async def test_delete(setup: Setup) -> None:

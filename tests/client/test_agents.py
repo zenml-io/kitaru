@@ -15,7 +15,6 @@
 
 import uuid
 from collections.abc import AsyncGenerator
-from functools import partial
 
 import pytest
 
@@ -54,7 +53,6 @@ from kitaru.server.adapters.rest.dependencies import (
     get_agent_version_service,
     get_tag_service,
 )
-from kitaru.server.api.agent_deletion import get_agent_deleter
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -66,13 +64,6 @@ from kitaru.server.application.services.tag_service import TagService
 from kitaru.server.domain.account import Account
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
-
-
-async def _delete_agent(
-    service: AgentService, agent_id: uuid.UUID, actor: AuthContext
-) -> None:
-    """Drive the deletion through one fake-backed agent service."""
-    await service.delete_agent(agent_id, actor=actor)
 
 
 @pytest.fixture
@@ -98,9 +89,6 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
-    app.dependency_overrides[get_agent_deleter] = lambda: partial(
-        _delete_agent, agent_service
-    )
     async with asgi_api_client(app) as client:
         yield client
 
@@ -188,8 +176,8 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
         await api_client.agents.get(created.id)
 
 
-async def test_delete_cascades_versions(api_client: KitaruAPIClient) -> None:
-    """Deleting an agent cascades its versions."""
+async def test_delete_retains_versions(api_client: KitaruAPIClient) -> None:
+    """Keep an agent's versions readable after the agent is deleted."""
     created = await api_client.agents.create(AgentCreateRequest(name="assistant"))
     version = await api_client.agents.create_version(
         created.id, AgentVersionCreateRequest()
@@ -197,8 +185,8 @@ async def test_delete_cascades_versions(api_client: KitaruAPIClient) -> None:
 
     await api_client.agents.delete(created.id)
 
-    with pytest.raises(NotFoundError):
-        await api_client.agent_versions.get(version.id)
+    loaded = await api_client.agent_versions.get(version.id)
+    assert loaded == version
 
 
 async def test_create_version(api_client: KitaruAPIClient) -> None:

@@ -83,7 +83,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         """
         statement = (
             update(AgentORM)
-            .where(AgentORM.id == agent_id)
+            .where(AgentORM.id == agent_id, AgentORM.deleted_at.is_(None))
             .values(latest_version=AgentORM.latest_version + 1)
             .returning(AgentORM.latest_version)
         )

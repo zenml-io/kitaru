@@ -32,7 +32,9 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 
-COHORT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("cohort", ["name"])
+COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "cohort", ["agent_id", "name"]
+)
 COHORT_OWNER_ID_FOREIGN_KEY = foreign_key_name("cohort", ["owner_id"])
 COHORT_AGENT_ID_FOREIGN_KEY = foreign_key_name("cohort", ["agent_id"])
 
@@ -42,7 +44,9 @@ class CohortORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "cohort"
     __table_args__ = (
-        UniqueConstraint("name", name=COHORT_NAME_UNIQUE_CONSTRAINT),
+        UniqueConstraint(
+            "agent_id", "name", name=COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT
+        ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=COHORT_OWNER_ID_FOREIGN_KEY
         ),

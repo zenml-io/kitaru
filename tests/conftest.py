@@ -1727,7 +1727,11 @@ class FakeAgentRepository:
 
     def _check_duplicate_name(self, agent: Agent) -> None:
         for other in self._agents.values():
-            if other.id != agent.id and other.name == agent.name:
+            if (
+                other.id != agent.id
+                and other.deleted_at is None
+                and other.name == agent.name
+            ):
                 raise DuplicateAgentName(agent.name)
 
     def exists(self, agent_id: uuid.UUID) -> bool:
@@ -1756,7 +1760,7 @@ class FakeAgentRepository:
             New version number.
         """
         agent = self._agents.get(agent_id)
-        if agent is None:
+        if agent is None or agent.deleted_at is not None:
             raise AgentNotFound(agent_id)
         agent.latest_version += 1
         return agent.latest_version
@@ -1792,7 +1796,7 @@ class FakeAgentRepository:
             Stored agent.
         """
         agent = self._agents.get(agent_id)
-        if agent is None:
+        if agent is None or agent.deleted_at is not None:
             raise AgentNotFound(agent_id)
         return agent.model_copy()
 
@@ -1805,7 +1809,7 @@ class FakeAgentRepository:
         Returns:
             Page of matching agents and the next cursor.
         """
-        agents = list(self._agents.values())
+        agents = [agent for agent in self._agents.values() if agent.deleted_at is None]
         if agent_filter.expression is not None:
             agents = [
                 agent
@@ -1829,7 +1833,7 @@ class FakeAgentRepository:
             Stored agent with the updated timestamp renewed.
         """
         stored = self._agents.get(agent.id)
-        if stored is None:
+        if stored is None or stored.deleted_at is not None:
             raise AgentNotFound(agent.id)
         self._check_duplicate_name(agent)
         now = _renewed_timestamp(stored.updated)
@@ -1837,8 +1841,39 @@ class FakeAgentRepository:
         self._agents[agent.id] = updated
         return updated.model_copy()
 
+    async def mark_deleted(self, agent_id: uuid.UUID) -> None:
+        """Mark an agent deleted, hiding it from every read.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+        """
+        agent = self._agents.get(agent_id)
+        if agent is None or agent.deleted_at is not None:
+            raise AgentNotFound(agent_id)
+        agent.deleted_at = datetime.now(UTC)
+
+    async def list_marked_deleted(self, cutoff: datetime, limit: int) -> list[Agent]:
+        """List agents marked deleted before a cutoff, up to a limit.
+
+        Args:
+            cutoff: Rows marked deleted before this time are returned.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            Agents marked deleted before the cutoff.
+        """
+        marked = [
+            agent
+            for agent in self._agents.values()
+            if agent.deleted_at is not None and agent.deleted_at < cutoff
+        ]
+        return [agent.model_copy() for agent in marked[:limit]]
+
     async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id, cascading its versions.
+        """Delete an agent by id, marked deleted or not, cascading its versions.
 
         Args:
             agent_id: Id of the agent.
@@ -2407,6 +2442,7 @@ class FakeSessionRepository:
         for other in self._sessions.values():
             if (
                 other.id != session.id
+                and other.agent_id == session.agent_id
                 and other.imported_from == session.imported_from
                 and other.external_id == session.external_id
             ):
@@ -3048,7 +3084,11 @@ class FakeCohortRepository:
 
     def _check_duplicate_name(self, cohort: Cohort) -> None:
         for other in self._cohorts.values():
-            if other.id != cohort.id and other.name == cohort.name:
+            if (
+                other.id != cohort.id
+                and other.agent_id == cohort.agent_id
+                and other.name == cohort.name
+            ):
                 raise DuplicateCohortName(cohort.name)
 
     def increment_latest_version(self, cohort_id: uuid.UUID) -> int:
@@ -4127,7 +4167,11 @@ class FakeExperimentRepository:
 
     def _check_duplicate_name(self, experiment: Experiment) -> None:
         for other in self._experiments.values():
-            if other.id != experiment.id and other.name == experiment.name:
+            if (
+                other.id != experiment.id
+                and other.agent_id == experiment.agent_id
+                and other.name == experiment.name
+            ):
                 raise DuplicateExperimentName(experiment.name)
 
     async def create(self, experiment: Experiment) -> Experiment:
@@ -4418,7 +4462,7 @@ class FakeReplayRepository:
         return stored.model_copy()
 
     async def create_many(self, replays: list[Replay]) -> list[Replay]:
-        """Persist many new replays in one round trip, skipping constraint translation.
+        """Persist many new replays in one round trip.
 
         Args:
             replays: Replays to store.

@@ -24,7 +24,6 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from conftest import db_settings, lifespan_client
-from kitaru.server.api import agent_deletion
 from kitaru.server.database.service import DatabaseService
 
 
@@ -63,6 +62,15 @@ async def test_duplicate_name_conflict(client: httpx.AsyncClient) -> None:
     response = await client.post("/api/v1/agents", json={"name": "assistant"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Agent name 'assistant' is already registered"}
+
+
+async def test_deleted_agent_name_reuse(client: httpx.AsyncClient) -> None:
+    """Accept the name of a deleted agent for a new agent."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
+    assert response.status_code == 201
 
 
 async def test_update_persists_across_requests(client: httpx.AsyncClient) -> None:
@@ -161,8 +169,8 @@ async def test_create_version_with_secrets_round_trips(
     ]
 
 
-async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
-    """Cascade an agent's versions when the agent is deleted."""
+async def test_delete_retains_versions(client: httpx.AsyncClient) -> None:
+    """Keep an agent's versions readable after the agent is deleted."""
     agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
@@ -172,7 +180,8 @@ async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
     assert response.status_code == 204
 
     response = await client.get(f"/api/v1/agent-versions/{version['id']}")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json() == version
 
 
 async def test_delete_missing_agent(client: httpx.AsyncClient) -> None:
@@ -190,12 +199,7 @@ async def _upload_blob(client: httpx.AsyncClient, name: str, content: bytes) -> 
 
 
 async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
-    """Build an agent with a version, a subtree, and an unrelated task.
-
-    Covers every phase of agent deletion: an experiment with a run whose
-    replay pins a cohort version and a session, a cohort, an investigation,
-    five sessions (more than the batch size the test shrinks deletion to),
-    a secret bound to a version, and tags linked to a session and a version.
+    """Build an agent with a version, a subtree, and an import task.
 
     Returns:
         Ids needed to drive the deletion and assert its aftermath.
@@ -375,15 +379,8 @@ async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
     }
 
 
-async def test_delete_agent_cascades_its_full_subtree(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Delete an agent whose subtree spans every deletion phase.
-
-    Shrinking the batch size below the session count forces the session
-    phase to loop over more than one page.
-    """
-    monkeypatch.setattr(agent_deletion, "DELETE_BATCH_SIZE", 2)
+async def test_delete_agent_retains_its_full_subtree() -> None:
+    """Hide only the agent, keeping its full subtree readable."""
     settings = db_settings()
     async with lifespan_client(settings) as client:
         setup = await _setup_agent_subtree(client)
@@ -397,22 +394,20 @@ async def test_delete_agent_cascades_its_full_subtree(
         for session_id in setup["session_ids"]:
             assert (
                 await client.get(f"/api/v1/sessions/{session_id}")
-            ).status_code == 404
+            ).status_code == 200
         for version_id in setup["version_ids"]:
             assert (
                 await client.get(f"/api/v1/agent-versions/{version_id}")
-            ).status_code == 404
+            ).status_code == 200
         assert (
             await client.get(f"/api/v1/cohorts/{setup['cohort_id']}")
-        ).status_code == 404
+        ).status_code == 200
         assert (
             await client.get(f"/api/v1/investigations/{setup['investigation_id']}")
-        ).status_code == 404
+        ).status_code == 200
         assert (
             await client.get(f"/api/v1/experiments/{setup['experiment_id']}")
-        ).status_code == 404
-
-        # Secrets are account-level. Only the version binding cascades.
+        ).status_code == 200
         assert (
             await client.get(f"/api/v1/secrets/{setup['secret_id']}")
         ).status_code == 200
@@ -426,53 +421,128 @@ async def test_delete_agent_cascades_its_full_subtree(
                 f"/api/v1/tags/{setup['session_tag_id']}/links/session/"
                 f"{setup['session_ids'][0]}"
             )
-        ).status_code == 404
+        ).status_code == 204
         assert (
             await client.delete(
                 f"/api/v1/tags/{setup['version_tag_id']}/links/agent_version/"
                 f"{setup['version_ids'][0]}"
             )
-        ).status_code == 404
+        ).status_code == 204
 
         engine = create_async_engine(DatabaseService.generate_database_uri(settings))
         try:
             async with engine.connect() as connection:
-                row = (
+                agent_row = (
+                    await connection.execute(
+                        text("SELECT deleted_at FROM agent WHERE id = :id"),
+                        {"id": setup["agent_id"]},
+                    )
+                ).one_or_none()
+                assert agent_row is not None
+                assert agent_row.deleted_at is not None
+                task_row = (
                     await connection.execute(
                         text("SELECT id FROM task WHERE id = :id"),
                         {"id": setup["task_id"]},
                     )
                 ).one_or_none()
-                assert row is None
+                assert task_row is not None
         finally:
             await engine.dispose()
 
 
-async def test_concurrent_deletes_of_one_agent_both_succeed(
-    monkeypatch: pytest.MonkeyPatch,
+async def test_create_children_of_deleted_agent_not_found(
+    client: httpx.AsyncClient,
 ) -> None:
-    """Race two deletes of the same agent, each skipping rows the other took."""
-    monkeypatch.setattr(agent_deletion, "DELETE_BATCH_SIZE", 2)
+    """Observe HTTP 404 for every create under a deleted agent."""
+    setup = await _setup_agent_subtree(client)
+
+    response = await client.delete(f"/api/v1/agents/{setup['agent_id']}")
+    assert response.status_code == 204
+
+    response = await client.post(
+        "/api/v1/sessions",
+        json={
+            "agent_id": setup["agent_id"],
+            "origin": "recorded",
+            "inputs": {"q": "hi"},
+            "outputs": None,
+        },
+    )
+    assert response.status_code == 404
+    response = await client.post(
+        f"/api/v1/agents/{setup['agent_id']}/versions", json={}
+    )
+    assert response.status_code == 404
+    response = await client.post(
+        "/api/v1/cohorts", json={"name": "cohort-2", "agent_id": setup["agent_id"]}
+    )
+    assert response.status_code == 404
+    response = await client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "exp2",
+            "agent_id": setup["agent_id"],
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert response.status_code == 404
+    response = await client.post(
+        "/api/v1/investigations",
+        json={
+            "agent_id": setup["agent_id"],
+            "name": "other-failures",
+            "sessions": [],
+        },
+    )
+    assert response.status_code == 404
+
+
+async def test_concurrent_deletes_of_one_agent_hide_it() -> None:
+    """Race two deletes of the same agent, each observing 204 or 404."""
     settings = db_settings(DB_POOL_SIZE=2, DB_MAX_OVERFLOW=0)
     async with lifespan_client(settings) as client:
-        setup = await _setup_agent_subtree(client)
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
 
         first, second = await asyncio.gather(
-            client.delete(f"/api/v1/agents/{setup['agent_id']}"),
-            client.delete(f"/api/v1/agents/{setup['agent_id']}"),
+            client.delete(f"/api/v1/agents/{agent['id']}"),
+            client.delete(f"/api/v1/agents/{agent['id']}"),
         )
-        assert first.status_code == 204, first.text
-        assert second.status_code == 204, second.text
-        assert (
-            await client.get(f"/api/v1/agents/{setup['agent_id']}")
-        ).status_code == 404
-        for session_id in setup["session_ids"]:
-            assert (
-                await client.get(f"/api/v1/sessions/{session_id}")
-            ).status_code == 404
+        statuses = {first.status_code, second.status_code}
+        assert statuses <= {204, 404}, (first.text, second.text)
+        assert 204 in statuses
+        assert (await client.get(f"/api/v1/agents/{agent['id']}")).status_code == 404
 
 
-async def test_delete_agent_removes_standalone_replays(
+async def test_concurrent_session_creates_racing_agent_delete() -> None:
+    """Race session creates against the agent delete without server errors."""
+    # Each session create holds a request connection plus a counter-bump
+    # connection, so the pool must fit every racer at once.
+    settings = db_settings(DB_POOL_SIZE=10, DB_MAX_OVERFLOW=0)
+    async with lifespan_client(settings) as client:
+        agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+
+        async def create_session() -> httpx.Response:
+            return await client.post(
+                "/api/v1/sessions",
+                json={
+                    "agent_id": agent["id"],
+                    "origin": "recorded",
+                    "inputs": {"q": "hi"},
+                    "outputs": None,
+                },
+            )
+
+        delete_response, *create_responses = await asyncio.gather(
+            client.delete(f"/api/v1/agents/{agent['id']}"),
+            *(create_session() for _ in range(4)),
+        )
+        assert delete_response.status_code == 204, delete_response.text
+        for response in create_responses:
+            assert response.status_code in (201, 404), response.text
+
+
+async def test_delete_agent_retains_standalone_replays(
     client: httpx.AsyncClient,
 ) -> None:
     """Delete an agent whose session is the baseline of a standalone replay."""
@@ -490,5 +560,6 @@ async def test_delete_agent_removes_standalone_replays(
     response = await client.delete(f"/api/v1/agents/{setup['agent_id']}")
     assert response.status_code == 204, response.text
     assert (await client.get(f"/api/v1/agents/{setup['agent_id']}")).status_code == 404
-    assert (await client.get(f"/api/v1/jobs/{job_id}")).status_code == 404
-    assert (await client.get("/api/v1/replays")).json()["items"] == []
+    assert (await client.get(f"/api/v1/jobs/{job_id}")).status_code == 200
+    replays = (await client.get("/api/v1/replays")).json()["items"]
+    assert job_id in {replay["job_id"] for replay in replays}

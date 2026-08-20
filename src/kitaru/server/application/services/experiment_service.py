@@ -244,9 +244,12 @@ class ExperimentService:
         configs = await self._repository.get_many_replay_configs(
             [experiment.replay_config_id for experiment in experiments]
         )
+        # Skip experiments whose replay config a concurrent delete removed
+        # between the two reads.
         pairs = [
             (experiment, configs[experiment.replay_config_id])
             for experiment in experiments
+            if experiment.replay_config_id in configs
         ]
         return pairs, next_cursor
 

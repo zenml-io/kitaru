@@ -220,7 +220,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent
-         * @description Delete an agent.
+         * @description Delete an agent, hiding it and everything under it.
          *
          *     Clients observe HTTP 204 on success and 404 when no agent has this id.
          *

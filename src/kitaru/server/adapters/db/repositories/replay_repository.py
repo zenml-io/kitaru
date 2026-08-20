@@ -17,8 +17,10 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.server.adapters.db.errors import violated_constraint, violated_key_value
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     compile_filter_expression,
@@ -104,12 +106,13 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         return row.to_domain()
 
     async def create_many(self, replays: list[Replay]) -> list[Replay]:
-        """Persist many new replays in one round trip, skipping constraint translation.
+        """Persist many new replays in one round trip.
 
         Args:
             replays: Replays to store.
 
         Raises:
+            SessionNotFound: No session has one of the baseline session ids.
             IntegrityError: The batch collides on (job_id) or
                 (experiment_run_id, baseline_session_id).
 
@@ -120,7 +123,15 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             return []
         rows = [ReplayORM.from_domain(replay) for replay in replays]
         self._session.add_all(rows)
-        await self._flush()
+        try:
+            await self._flush()
+        except IntegrityError as exc:
+            # The rows flush as one statement, so the driver's detail is the
+            # only pointer to the missing session.
+            constraint = violated_constraint(exc)
+            if constraint == REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY:
+                raise SessionNotFound(uuid.UUID(violated_key_value(exc))) from exc
+            raise
         return [row.to_domain() for row in rows]
 
     async def get(self, replay_id: uuid.UUID) -> Replay:

@@ -149,7 +149,7 @@ class AgentsResource:
         return AgentResponse.model_validate(response.json())
 
     async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent.
+        """Delete an agent, hiding it and everything under it.
 
         Args:
             agent_id: Id of the agent.

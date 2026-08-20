@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Foreign key deletion rules and typed tag_link columns.
+"""Foreign key deletion rules, typed tag_link columns, and agent soft delete.
 
 Revision ID: 005_deletion_rules
 Revises: 004_replay_result_session_id
@@ -22,11 +22,13 @@ Create Date: 2026-08-18
 import sqlalchemy as sa
 from alembic import op
 
+from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT
 from kitaru.server.adapters.db.orm.agent_version import (
     AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.cohort import (
     COHORT_AGENT_ID_FOREIGN_KEY,
+    COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT,
     COHORT_OWNER_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.cohort_version import (
@@ -36,7 +38,10 @@ from kitaru.server.adapters.db.orm.evaluation import (
     EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
     EVALUATION_TASK_ID_FOREIGN_KEY,
 )
-from kitaru.server.adapters.db.orm.experiment import EXPERIMENT_AGENT_ID_FOREIGN_KEY
+from kitaru.server.adapters.db.orm.experiment import (
+    EXPERIMENT_AGENT_ID_FOREIGN_KEY,
+    EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT,
+)
 from kitaru.server.adapters.db.orm.experiment_run import (
     EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY,
 )
@@ -50,6 +55,7 @@ from kitaru.server.adapters.db.orm.orm_utils import index_name, unique_constrain
 from kitaru.server.adapters.db.orm.session import (
     SESSION_AGENT_ID_FOREIGN_KEY,
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
+    SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
 )
 from kitaru.server.adapters.db.orm.tag import (
     TAG_LINK_AGENT_VERSION_ID_FOREIGN_KEY,
@@ -88,6 +94,14 @@ OLD_TAG_LINK_UNIQUE_CONSTRAINT = unique_constraint_name(
 )
 OLD_TAG_LINK_RESOURCE_INDEX = index_name("tag_link", ["resource_type", "resource_id"])
 
+# The old unique constraints replaced below are gone from the ORM, so their
+# names are recomputed the same way the ORM constants used to build them.
+OLD_COHORT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("cohort", ["name"])
+OLD_EXPERIMENT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("experiment", ["name"])
+OLD_SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "session", ["imported_from", "external_id"]
+)
+
 TAG_LINK_RESOURCE_CHECK_SQL = (
     "num_nonnulls(session_id, cohort_id, cohort_version_id, "
     "agent_version_id, experiment_id, experiment_run_id) = 1"
@@ -96,6 +110,20 @@ TAG_LINK_RESOURCE_CHECK_SQL = (
 
 def upgrade() -> None:
     """Upgrade database schema and/or data, creating a new revision."""
+    with op.batch_alter_table("agent", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True)
+        )
+        # The name constraint becomes a partial unique index under the same
+        # name, so soft-deleted agents release their name for reuse.
+        batch_op.drop_constraint(AGENT_NAME_UNIQUE_CONSTRAINT, type_="unique")
+        batch_op.create_index(
+            AGENT_NAME_UNIQUE_CONSTRAINT,
+            ["name"],
+            unique=True,
+            postgresql_where=sa.text("deleted_at IS NULL"),
+        )
+
     with op.batch_alter_table("agent_version", schema=None) as batch_op:
         batch_op.drop_constraint(AGENT_VERSION_AGENT_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
@@ -118,6 +146,10 @@ def upgrade() -> None:
             ["id"],
             ondelete="CASCADE",
         )
+        batch_op.drop_constraint(OLD_COHORT_NAME_UNIQUE_CONSTRAINT, type_="unique")
+        batch_op.create_unique_constraint(
+            COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT, ["agent_id", "name"]
+        )
 
     with op.batch_alter_table("cohort_version", schema=None) as batch_op:
         batch_op.create_foreign_key(
@@ -132,6 +164,10 @@ def upgrade() -> None:
             ["agent_id"],
             ["id"],
             ondelete="CASCADE",
+        )
+        batch_op.drop_constraint(OLD_EXPERIMENT_NAME_UNIQUE_CONSTRAINT, type_="unique")
+        batch_op.create_unique_constraint(
+            EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT, ["agent_id", "name"]
         )
 
     with op.batch_alter_table("investigation", schema=None) as batch_op:
@@ -162,6 +198,13 @@ def upgrade() -> None:
             ["agent_version_id"],
             ["id"],
             ondelete="SET NULL",
+        )
+        batch_op.drop_constraint(
+            OLD_SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT, type_="unique"
+        )
+        batch_op.create_unique_constraint(
+            SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
+            ["imported_from", "external_id", "agent_id"],
         )
 
     with op.batch_alter_table("experiment_run", schema=None) as batch_op:
@@ -250,19 +293,44 @@ def upgrade() -> None:
         )
 
     # tag_link moves from a polymorphic resource_type/resource_id pair to one
-    # typed, foreign-keyed column per TagResourceType. The table is new in
-    # this release, so no data migration is needed.
+    # typed, foreign-keyed column per TagResourceType. Backfill the typed
+    # columns from the released pair, then drop the rows the new foreign
+    # keys cannot hold: links with an unknown resource type and links whose
+    # resource is gone, since the old schema never enforced resource ids.
     with op.batch_alter_table("tag_link", schema=None) as batch_op:
         batch_op.drop_constraint(OLD_TAG_LINK_UNIQUE_CONSTRAINT, type_="unique")
         batch_op.drop_index(OLD_TAG_LINK_RESOURCE_INDEX)
-        batch_op.drop_column("resource_type")
-        batch_op.drop_column("resource_id")
         batch_op.add_column(sa.Column("session_id", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("cohort_id", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("cohort_version_id", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("agent_version_id", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("experiment_id", sa.Uuid(), nullable=True))
         batch_op.add_column(sa.Column("experiment_run_id", sa.Uuid(), nullable=True))
+    for resource_type, column in (
+        ("session", "session_id"),
+        ("cohort", "cohort_id"),
+        ("cohort_version", "cohort_version_id"),
+        ("agent_version", "agent_version_id"),
+        ("experiment", "experiment_id"),
+        ("experiment_run", "experiment_run_id"),
+    ):
+        op.execute(
+            f"UPDATE tag_link SET {column} = resource_id "
+            f"WHERE resource_type = '{resource_type}'"
+        )
+        op.execute(
+            f"DELETE FROM tag_link WHERE {column} IS NOT NULL AND NOT EXISTS "
+            f"(SELECT 1 FROM {resource_type} "
+            f"WHERE {resource_type}.id = tag_link.{column})"
+        )
+    op.execute(
+        "DELETE FROM tag_link WHERE session_id IS NULL AND cohort_id IS NULL "
+        "AND cohort_version_id IS NULL AND agent_version_id IS NULL "
+        "AND experiment_id IS NULL AND experiment_run_id IS NULL"
+    )
+    with op.batch_alter_table("tag_link", schema=None) as batch_op:
+        batch_op.drop_column("resource_type")
+        batch_op.drop_column("resource_id")
         batch_op.create_foreign_key(
             TAG_LINK_SESSION_ID_FOREIGN_KEY,
             "session",
@@ -407,6 +475,14 @@ def downgrade() -> None:
 
     with op.batch_alter_table("session", schema=None) as batch_op:
         batch_op.drop_constraint(
+            SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
+            type_="unique",
+        )
+        batch_op.create_unique_constraint(
+            OLD_SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+            ["imported_from", "external_id"],
+        )
+        batch_op.drop_constraint(
             SESSION_AGENT_VERSION_ID_FOREIGN_KEY, type_="foreignkey"
         )
         batch_op.create_foreign_key(
@@ -427,6 +503,12 @@ def downgrade() -> None:
         )
 
     with op.batch_alter_table("experiment", schema=None) as batch_op:
+        batch_op.drop_constraint(
+            EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT, type_="unique"
+        )
+        batch_op.create_unique_constraint(
+            OLD_EXPERIMENT_NAME_UNIQUE_CONSTRAINT, ["name"]
+        )
         batch_op.drop_constraint(EXPERIMENT_AGENT_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
             EXPERIMENT_AGENT_ID_FOREIGN_KEY, "agent", ["agent_id"], ["id"]
@@ -438,6 +520,8 @@ def downgrade() -> None:
         )
 
     with op.batch_alter_table("cohort", schema=None) as batch_op:
+        batch_op.drop_constraint(COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT, type_="unique")
+        batch_op.create_unique_constraint(OLD_COHORT_NAME_UNIQUE_CONSTRAINT, ["name"])
         batch_op.drop_constraint(COHORT_AGENT_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
             COHORT_AGENT_ID_FOREIGN_KEY, "agent", ["agent_id"], ["id"]
@@ -508,3 +592,8 @@ def downgrade() -> None:
             OLD_TAG_LINK_UNIQUE_CONSTRAINT,
             ["tag_id", "resource_type", "resource_id"],
         )
+
+    with op.batch_alter_table("agent", schema=None) as batch_op:
+        batch_op.drop_index(AGENT_NAME_UNIQUE_CONSTRAINT)
+        batch_op.create_unique_constraint(AGENT_NAME_UNIQUE_CONSTRAINT, ["name"])
+        batch_op.drop_column("deleted_at")

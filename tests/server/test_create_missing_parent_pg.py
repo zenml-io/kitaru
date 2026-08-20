@@ -326,6 +326,21 @@ async def test_replay_missing_baseline_session(setup: Setup) -> None:
         )
 
 
+async def test_replay_create_many_missing_baseline_session(setup: Setup) -> None:
+    """Translate the baseline session foreign key on bulk replay create."""
+    with pytest.raises(SessionNotFound):
+        await SQLReplayRepository(setup.session).create_many(
+            [
+                Replay(
+                    owner_id=setup.owner_id,
+                    job_id=setup.job_id,
+                    replay_config_id=setup.replay_config_id,
+                    baseline_session_id=uuid.uuid4(),
+                )
+            ]
+        )
+
+
 async def test_replay_missing_experiment_run(setup: Setup) -> None:
     """Translate the experiment run foreign key on replay create."""
     with pytest.raises(ExperimentRunNotFound):

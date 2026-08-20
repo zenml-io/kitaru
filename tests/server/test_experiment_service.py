@@ -230,6 +230,24 @@ async def test_create_experiment_unknown_agent(
         await service.create_experiment(command, actor=ACTOR)
 
 
+async def test_create_experiment_deleted_agent(
+    service: ExperimentService,
+    services: ReplayServices,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Raise when the command names a deleted agent."""
+    await _register_evaluator(plugin_repository)
+    await services.agents.mark_deleted(agent_id)
+    command = ExperimentCreate(
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+    )
+    with pytest.raises(AgentNotFound):
+        await service.create_experiment(command, actor=ACTOR)
+
+
 async def test_create_experiment_duplicate_evaluator_version(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
@@ -325,6 +343,37 @@ async def test_list_experiments(
     assert [experiment.name for experiment, _ in pairs] == ["reviewer", "assistant"]
     for _, config in pairs:
         assert config.evaluators[0].evaluator == "accuracy"
+
+
+async def test_list_experiments_skips_concurrently_deleted_config(
+    service: ExperimentService,
+    repository: FakeExperimentRepository,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Skip experiments whose replay config a concurrent delete removed."""
+    await _register_evaluator(plugin_repository)
+    kept, _ = await service.create_experiment(
+        ExperimentCreate(
+            name="kept",
+            agent_id=agent_id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    _, racing_config = await service.create_experiment(
+        ExperimentCreate(
+            name="racing",
+            agent_id=agent_id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    await repository.delete_replay_config(racing_config.id)
+
+    pairs, next_cursor = await service.list_experiments(ExperimentFilter(), actor=ACTOR)
+    assert next_cursor is None
+    assert [experiment.id for experiment, _ in pairs] == [kept.id]
 
 
 async def test_list_experiments_by_agent(

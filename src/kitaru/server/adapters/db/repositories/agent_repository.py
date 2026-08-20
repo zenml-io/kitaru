@@ -15,6 +15,7 @@
 
 import uuid
 from collections.abc import Mapping
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 
@@ -51,6 +52,30 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
             Not-found error.
         """
         return AgentNotFound(entity_id)
+
+    async def _get_row(self, entity_id: uuid.UUID, exclusive: bool = False) -> AgentORM:
+        """Load a row by id, skipping rows marked deleted.
+
+        Args:
+            entity_id: Id of the row.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            Stored row.
+        """
+        statement = select(AgentORM).where(
+            AgentORM.id == entity_id, AgentORM.deleted_at.is_(None)
+        )
+        if exclusive:
+            statement = statement.with_for_update()
+        row = await self._session.scalar(statement)
+        if row is None:
+            raise self._not_found(entity_id)
+        return row
 
     async def create(self, agent: Agent) -> Agent:
         """Persist a new agent.
@@ -94,7 +119,7 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         Returns:
             Page of matching agents and the next cursor.
         """
-        statement = select(AgentORM)
+        statement = select(AgentORM).where(AgentORM.deleted_at.is_(None))
         if agent_filter.expression is not None:
             statement = statement.where(
                 compile_filter_expression(
@@ -128,6 +153,38 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
             {AGENT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateAgentName(agent.name)}
         )
         return row.to_domain()
+
+    async def mark_deleted(self, agent_id: uuid.UUID) -> None:
+        """Mark an agent deleted, hiding it from every read.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+        """
+        row = await self._get_row(agent_id)
+        row.deleted_at = datetime.now(UTC)
+        await self._flush()
+
+    async def list_marked_deleted(self, cutoff: datetime, limit: int) -> list[Agent]:
+        """List agents marked deleted before a cutoff, up to a limit.
+
+        Args:
+            cutoff: Rows marked deleted before this time are returned.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            Agents marked deleted before the cutoff.
+        """
+        statement = (
+            select(AgentORM)
+            .where(AgentORM.deleted_at < cutoff)
+            .order_by(AgentORM.id)
+            .limit(limit)
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return [row.to_domain() for row in rows]
 
     async def delete(self, agent_id: uuid.UUID) -> None:
         """Delete an agent by id.

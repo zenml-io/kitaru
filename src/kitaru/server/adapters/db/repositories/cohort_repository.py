@@ -26,7 +26,7 @@ from kitaru.server.adapters.db.filtering import (
 )
 from kitaru.server.adapters.db.orm.cohort import (
     COHORT_AGENT_ID_FOREIGN_KEY,
-    COHORT_NAME_UNIQUE_CONSTRAINT,
+    COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT,
     CohortORM,
 )
 from kitaru.server.adapters.db.orm.experiment_run import (
@@ -85,7 +85,9 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         await self._add(
             row,
             {
-                COHORT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(cohort.name),
+                COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(
+                    cohort.name
+                ),
                 COHORT_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(cohort.agent_id),
             },
         )
@@ -152,7 +154,11 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         row.metadata_ = cohort.metadata
         row.latest_version = cohort.latest_version
         await self._flush(
-            {COHORT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(cohort.name)}
+            {
+                COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(
+                    cohort.name
+                )
+            }
         )
         return row.to_domain()
 

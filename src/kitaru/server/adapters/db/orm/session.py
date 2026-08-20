@@ -44,8 +44,8 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.session import Session
 
-SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "session", ["imported_from", "external_id"]
+SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "session", ["imported_from", "external_id", "agent_id"]
 )
 SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["agent_id", "number"]
@@ -72,7 +72,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "imported_from",
             "external_id",
-            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+            "agent_id",
+            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
         ),
         UniqueConstraint(
             "agent_id",

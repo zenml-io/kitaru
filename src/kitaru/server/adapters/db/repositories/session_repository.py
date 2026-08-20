@@ -45,7 +45,7 @@ from kitaru.server.adapters.db.orm.replay import (
 from kitaru.server.adapters.db.orm.session import (
     SESSION_AGENT_ID_FOREIGN_KEY,
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
-    SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+    SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
@@ -194,7 +194,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         """
         statement = (
             update(AgentORM)
-            .where(AgentORM.id == agent_id)
+            .where(AgentORM.id == agent_id, AgentORM.deleted_at.is_(None))
             .values(latest_session_number=AgentORM.latest_session_number + 1)
             .returning(AgentORM.latest_session_number)
         )
@@ -223,7 +223,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         """
         row = SessionORM.from_domain(session)
         constraints: dict[str, Callable[[], DomainError]] = {
-            SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
+            SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (
                 self._duplicate_external_id(session)
             ),
             SESSION_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(session.agent_id),
@@ -352,7 +352,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.tool_call_count = session.tool_call_count
         await self._flush(
             {
-                SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
+                SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
                 )
             }

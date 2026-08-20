@@ -36,7 +36,6 @@ from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound, DuplicateAgentName
-from kitaru.server.domain.agent_version import AgentVersionNotFound
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.filtering import FilterCondition
 
@@ -241,10 +240,10 @@ async def test_delete_agent_not_found(service: AgentService) -> None:
         await service.delete_agent(uuid.uuid4(), actor=ACTOR)
 
 
-async def test_delete_agent_cascades_versions(
+async def test_delete_agent_retains_versions(
     service: AgentService, repository: FakeAgentRepository
 ) -> None:
-    """Deleting an agent cascades its versions."""
+    """Keep an agent's versions readable after the agent is deleted."""
     created = await create_agent(repository, ACTOR.account.id)
     version_repository = FakeAgentVersionRepository(repository)
     version = await create_agent_version(
@@ -255,8 +254,8 @@ async def test_delete_agent_cascades_versions(
 
     with pytest.raises(AgentNotFound):
         await service.get_agent(created.id, actor=ACTOR)
-    with pytest.raises(AgentVersionNotFound):
-        await version_repository.get(version.id)
+    loaded = await version_repository.get(version.id)
+    assert loaded == version
 
 
 async def test_create_agent_tracks_agent_created(

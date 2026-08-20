@@ -43,10 +43,13 @@ class ReplayRepository(Protocol):
         ...
 
     async def create_many(self, replays: list[Replay]) -> list[Replay]:
-        """Persist many new replays in one round trip, skipping constraint translation.
+        """Persist many new replays in one round trip.
 
         Args:
             replays: Replays to store.
+
+        Raises:
+            SessionNotFound: No session has one of the baseline session ids.
 
         Returns:
             Stored replays with timestamps set, in the same order.

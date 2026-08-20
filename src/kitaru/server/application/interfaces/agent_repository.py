@@ -14,6 +14,7 @@
 """Agent repository interface."""
 
 import uuid
+from datetime import datetime
 from typing import Protocol
 
 from kitaru.server.application.models.agent import AgentFilter
@@ -77,8 +78,31 @@ class AgentRepository(Protocol):
         """
         ...
 
+    async def mark_deleted(self, agent_id: uuid.UUID) -> None:
+        """Mark an agent deleted, hiding it from every read.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+        """
+        ...
+
+    async def list_marked_deleted(self, cutoff: datetime, limit: int) -> list[Agent]:
+        """List agents marked deleted before a cutoff, up to a limit.
+
+        Args:
+            cutoff: Rows marked deleted before this time are returned.
+            limit: Maximum number of rows to return.
+
+        Returns:
+            Agents marked deleted before the cutoff.
+        """
+        ...
+
     async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id.
+        """Delete an agent by id, marked deleted or not.
 
         Args:
             agent_id: Id of the agent.

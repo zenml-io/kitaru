@@ -720,10 +720,11 @@ async def test_delete_session_restricted_by_replay_baseline(
 async def test_create_session_duplicate_external_id_conflict(
     service: SessionService,
 ) -> None:
-    """Reject a duplicate imported_from and external id pair."""
+    """Reject a duplicate imported_from and external id pair under one agent."""
+    agent_id = uuid.uuid4()
     await service.create_session(
         SessionCreate(
-            agent_id=uuid.uuid4(),
+            agent_id=agent_id,
             origin=SessionOrigin.IMPORTED,
             imported_from="langsmith",
             external_id="run-1",
@@ -733,7 +734,7 @@ async def test_create_session_duplicate_external_id_conflict(
     with pytest.raises(Exception, match="already registered"):
         await service.create_session(
             SessionCreate(
-                agent_id=uuid.uuid4(),
+                agent_id=agent_id,
                 origin=SessionOrigin.IMPORTED,
                 imported_from="langsmith",
                 external_id="run-1",

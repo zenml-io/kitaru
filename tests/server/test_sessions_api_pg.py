@@ -97,6 +97,27 @@ async def test_duplicate_external_id_conflict(
     assert response.status_code == 409
 
 
+async def test_external_id_reuse_after_agent_delete(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Accept a deleted agent's imported_from and external id pair elsewhere."""
+    body = _session_body(
+        agent_id, origin="imported", imported_from="langsmith", external_id="run-1"
+    )
+    response = await client.post("/api/v1/sessions", json=body)
+    assert response.status_code == 201
+    response = await client.delete(f"/api/v1/agents/{agent_id}")
+    assert response.status_code == 204
+    other = (await client.post("/api/v1/agents", json={"name": "other"})).json()
+    body = _session_body(
+        other["id"], origin="imported", imported_from="langsmith", external_id="run-1"
+    )
+    response = await client.post("/api/v1/sessions", json=body)
+    assert response.status_code == 201
+    response = await client.post("/api/v1/sessions", json=body)
+    assert response.status_code == 409
+
+
 async def test_update_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

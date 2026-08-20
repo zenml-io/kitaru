@@ -27,7 +27,7 @@ from kitaru.server.adapters.db.filtering import (
 )
 from kitaru.server.adapters.db.orm.experiment import (
     EXPERIMENT_AGENT_ID_FOREIGN_KEY,
-    EXPERIMENT_NAME_UNIQUE_CONSTRAINT,
+    EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT,
     ExperimentORM,
     ReplayConfigORM,
 )
@@ -90,8 +90,8 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         await self._add(
             row,
             {
-                EXPERIMENT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateExperimentName(
-                    experiment.name
+                EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: (
+                    DuplicateExperimentName(experiment.name)
                 ),
                 EXPERIMENT_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
                     experiment.agent_id
@@ -162,8 +162,8 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         row.replay_config_id = experiment.replay_config_id
         await self._flush(
             {
-                EXPERIMENT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateExperimentName(
-                    experiment.name
+                EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: (
+                    DuplicateExperimentName(experiment.name)
                 )
             }
         )

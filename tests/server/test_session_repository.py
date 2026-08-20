@@ -1699,7 +1699,7 @@ async def test_allocate_session_number_fake() -> None:
 
 
 async def test_allocate_session_number_pg() -> None:
-    """Bump session numbers per agent, and raise for an unknown agent."""
+    """Bump session numbers per agent, and raise for an unknown or deleted agent."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, engine):
@@ -1719,3 +1719,8 @@ async def test_allocate_session_number_pg() -> None:
         missing_agent_id = uuid.uuid4()
         with pytest.raises(AgentNotFound):
             await repository.allocate_session_number(missing_agent_id)
+
+        await agents.mark_deleted(other_agent.id)
+        await session.commit()
+        with pytest.raises(AgentNotFound):
+            await repository.allocate_session_number(other_agent.id)

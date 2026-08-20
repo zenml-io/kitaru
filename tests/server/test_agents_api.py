@@ -16,7 +16,6 @@
 import json
 import uuid
 from collections.abc import AsyncGenerator
-from functools import partial
 
 import httpx
 import pytest
@@ -31,7 +30,6 @@ from kitaru.server.adapters.rest.dependencies import (
     get_agent_service,
     get_agent_version_service,
 )
-from kitaru.server.api.agent_deletion import get_agent_deleter
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
@@ -48,13 +46,6 @@ ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 def agent_repository() -> FakeAgentRepository:
     """Provide the fake agent repository backing the app."""
     return FakeAgentRepository()
-
-
-async def _delete_agent(
-    service: AgentService, agent_id: uuid.UUID, actor: AuthContext
-) -> None:
-    """Drive the deletion through one fake-backed agent service."""
-    await service.delete_agent(agent_id, actor=actor)
 
 
 @pytest.fixture
@@ -77,9 +68,6 @@ async def client(
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
-    app.dependency_overrides[get_agent_deleter] = lambda: partial(
-        _delete_agent, agent_service
-    )
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -108,6 +96,15 @@ async def test_create_agent_duplicate_name(client: httpx.AsyncClient) -> None:
     response = await client.post("/api/v1/agents", json={"name": "assistant"})
     assert response.status_code == 409
     assert response.json() == {"detail": "Agent name 'assistant' is already registered"}
+
+
+async def test_create_agent_reuses_deleted_name(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 201 for the name of a deleted agent."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
+    assert response.status_code == 201
 
 
 async def test_create_agent_invalid_name(client: httpx.AsyncClient) -> None:
@@ -216,8 +213,40 @@ async def test_delete_agent_not_found(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_delete_agent_cascades_versions(client: httpx.AsyncClient) -> None:
-    """Deleting an agent cascades its versions."""
+async def test_delete_agent_twice_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for a second delete of the same agent."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 404
+
+
+async def test_deleted_agent_excluded_from_list(client: httpx.AsyncClient) -> None:
+    """Exclude a deleted agent from the listing."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    await client.post("/api/v1/agents", json={"name": "reviewer"})
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+
+    response = await client.get("/api/v1/agents")
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["reviewer"]
+
+
+async def test_update_deleted_agent_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when updating a deleted agent."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+    response = await client.patch(
+        f"/api/v1/agents/{created['id']}", json={"description": "x"}
+    )
+    assert response.status_code == 404
+
+
+async def test_delete_agent_retains_versions(client: httpx.AsyncClient) -> None:
+    """Keep an agent's versions readable after the agent is deleted."""
     created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     version = (
         await client.post(f"/api/v1/agents/{created['id']}/versions", json={})
@@ -227,7 +256,8 @@ async def test_delete_agent_cascades_versions(client: httpx.AsyncClient) -> None
     assert response.status_code == 204
 
     response = await client.get(f"/api/v1/agent-versions/{version['id']}")
-    assert response.status_code == 404
+    assert response.status_code == 200
+    assert response.json() == version
 
 
 async def test_create_agent_version(client: httpx.AsyncClient) -> None:
@@ -250,6 +280,15 @@ async def test_create_agent_version(client: httpx.AsyncClient) -> None:
 async def test_create_agent_version_missing_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
     response = await client.post(f"/api/v1/agents/{uuid.uuid4()}/versions", json={})
+    assert response.status_code == 404
+
+
+async def test_create_agent_version_deleted_agent(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when the agent is deleted."""
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{agent['id']}")
+    assert response.status_code == 204
+    response = await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
     assert response.status_code == 404
 
 
