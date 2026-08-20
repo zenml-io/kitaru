@@ -34,9 +34,11 @@ class _GetResource:
     def __init__(self, values: dict[Any, Any]) -> None:
         self.values = values
         self.calls: list[Any] = []
+        self.limits: list[int | None] = []
 
-    async def get(self, key: Any) -> Any:
+    async def get(self, key: Any, *, max_bytes: int | None = None) -> Any:
         self.calls.append(key)
+        self.limits.append(max_bytes)
         return self.values[key]
 
 
@@ -45,13 +47,19 @@ class _Sessions:
         self.summaries = summaries
         self.full = full
         self.params: list[Any] = []
+        self.page_limits: list[int | None] = []
+        self.full_limits: list[int | None] = []
 
-    async def iter(self, params: Any) -> Any:
+    async def iter(self, params: Any, *, max_bytes: int | None = None) -> Any:
         self.params.append(params)
+        self.page_limits.append(max_bytes)
         for session in self.summaries:
             yield session
 
-    async def get_with_nodes(self, session_id: uuid.UUID) -> Any:
+    async def get_with_nodes(
+        self, session_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> Any:
+        self.full_limits.append(max_bytes)
         return self.full[session_id]
 
 
@@ -59,12 +67,22 @@ class _Evaluators:
     def __init__(self, evaluator: Any, version: Any) -> None:
         self.evaluator = evaluator
         self.version = version
+        self.page_limits: list[int | None] = []
+        self.version_limits: list[int | None] = []
 
-    async def iter(self, params: Any) -> Any:
+    async def iter(self, params: Any, *, max_bytes: int | None = None) -> Any:
+        self.page_limits.append(max_bytes)
         _ = params
         yield self.evaluator
 
-    async def get_version(self, evaluator_id: uuid.UUID, version: int) -> Any:
+    async def get_version(
+        self,
+        evaluator_id: uuid.UUID,
+        version: int,
+        *,
+        max_bytes: int | None = None,
+    ) -> Any:
+        self.version_limits.append(max_bytes)
         assert evaluator_id == self.evaluator.id
         assert version == self.version.version
         return self.version
@@ -73,8 +91,12 @@ class _Evaluators:
 class _Blobs:
     def __init__(self, content: bytes) -> None:
         self.content = content
+        self.limits: list[int | None] = []
 
-    async def download(self, blob_id: uuid.UUID) -> bytes:
+    async def download(
+        self, blob_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> bytes:
+        self.limits.append(max_bytes)
         _ = blob_id
         return self.content
 
@@ -83,8 +105,16 @@ class _Secrets:
     def __init__(self, values: dict[uuid.UUID, Any]) -> None:
         self.values = values
         self.calls: list[tuple[uuid.UUID, bool]] = []
+        self.limits: list[int | None] = []
 
-    async def get(self, secret_id: uuid.UUID, *, include_values: bool = False) -> Any:
+    async def get(
+        self,
+        secret_id: uuid.UUID,
+        *,
+        include_values: bool = False,
+        max_bytes: int | None = None,
+    ) -> Any:
+        self.limits.append(max_bytes)
         self.calls.append((secret_id, include_values))
         value = self.values[secret_id]
         if isinstance(value, Exception):
@@ -202,6 +232,16 @@ async def test_resolve_export_uses_exact_reads_and_materializes_scripts(
     assert client.cohort_versions.calls == [ids["cohort_version"]]
     assert client.agent_versions.calls == [ids["agent_version"]]
     assert client.secrets.calls == [(ids["secret"], True)]
+    assert client.experiments.limits == [2 * 1024 * 1024]
+    assert client.cohort_versions.limits == [2 * 1024 * 1024]
+    assert client.cohorts.limits == [2 * 1024 * 1024]
+    assert client.agent_versions.limits == [2 * 1024 * 1024]
+    assert client.secrets.limits == [2 * 1024 * 1024]
+    assert client.sessions.page_limits == [16 * 1024 * 1024]
+    assert client.sessions.full_limits == [16 * 1024 * 1024]
+    assert client.evaluators.page_limits == [2 * 1024 * 1024]
+    assert client.evaluators.version_limits == [2 * 1024 * 1024]
+    assert client.blobs.limits == [10 * 1024 * 1024]
     assert resolved.agent_version.run_spec is not None
     assert resolved.agent_version.run_spec.secret_ids == []
     assert resolved.required_environment_names == ("MODEL_API_KEY",)

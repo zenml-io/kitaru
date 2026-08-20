@@ -5,6 +5,7 @@ import hashlib
 import json
 import re
 import uuid
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from types import SimpleNamespace
 from typing import Any, Literal
@@ -17,6 +18,7 @@ from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.session import SessionListParams
+from kitaru.client.exceptions import ResponseTooLargeError
 from kitaru.exports._dependencies import classify_dependencies
 from kitaru.exports._runtime import parse_command_argv, reject_protected_source
 from kitaru.exports._sanitize import EphemeralSanitizer
@@ -36,6 +38,9 @@ from kitaru.exports.models import (
 
 _MAX_TASK_INPUT_BYTES = 32 * 1024
 _MAX_SESSION_FETCHES = 20
+_MAX_RESOURCE_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_SECRET_RESPONSE_BYTES = 2 * 1024 * 1024
+_MAX_SESSION_PAGE_BYTES = V1_EXPORT_BUDGETS.max_session_bytes
 _EXACT_REQUIREMENT = re.compile(
     r"^[A-Za-z0-9][A-Za-z0-9._-]*"
     r"(?:\[[A-Za-z0-9._-]+(?:,[A-Za-z0-9._-]+)*\])?"
@@ -69,6 +74,38 @@ class RemoteExportResolution:
     content_policy: ContentPolicy
     environment_policy: EnvironmentPolicy
     _sanitizer: EphemeralSanitizer
+
+
+async def _call_bounded(
+    method: Any,
+    *args: Any,
+    max_bytes: int,
+    code: str,
+    message: str,
+    **kwargs: Any,
+) -> Any:
+    """Call one SDK resource with a response cap and stable export error."""
+    try:
+        return await method(*args, **kwargs, max_bytes=max_bytes)
+    except ResponseTooLargeError as error:
+        raise ExportError(code, message) from error
+
+
+async def _iterate_bounded(
+    method: Any,
+    *args: Any,
+    max_bytes: int,
+    code: str,
+    message: str,
+    **kwargs: Any,
+) -> AsyncIterator[Any]:
+    """Iterate SDK pages with a response cap and stable export error."""
+    try:
+        iterator = method(*args, **kwargs, max_bytes=max_bytes)
+        async for item in iterator:
+            yield item
+    except ResponseTooLargeError as error:
+        raise ExportError(code, message) from error
 
 
 def _require_matching_agent(actual: uuid.UUID, expected: uuid.UUID, label: str) -> None:
@@ -163,10 +200,18 @@ async def _resolve_attached_secrets(
         )
     ordered_unique_ids = tuple(dict.fromkeys(secret_ids))
     values: list[str] = []
+    total_value_bytes = 0
     environment_names: set[str] = set()
     for secret_id in ordered_unique_ids:
         try:
-            secret = await client.secrets.get(secret_id, include_values=True)
+            secret = await _call_bounded(
+                client.secrets.get,
+                secret_id,
+                include_values=True,
+                max_bytes=_MAX_SECRET_RESPONSE_BYTES,
+                code="protected_values_too_large",
+                message="An attached secret response exceeds the export limit.",
+            )
             secret_values = secret.values
             if not isinstance(secret_values, dict):
                 raise TypeError("secret values are not a mapping")
@@ -175,7 +220,14 @@ async def _resolve_attached_secrets(
                     raise TypeError("secret name is not text")
                 _validate_environment_name(name)
                 environment_names.add(name)
-                values.append(_secret_text(secret_value))
+                value = _secret_text(secret_value)
+                total_value_bytes += len(value.encode("utf-8"))
+                if total_value_bytes > V1_EXPORT_BUDGETS.max_protected_value_bytes:
+                    raise ExportError(
+                        "protected_values_too_large",
+                        "Attached secret values exceed the 1 MiB export limit.",
+                    )
+                values.append(value)
         except ExportError:
             raise
         except Exception:
@@ -269,11 +321,18 @@ async def _resolve_evaluator(
             f"Evaluator {config.evaluator!r} must select an exact version.",
         )
     params = EvaluatorListParams(
-        filter=FilterCondition(field="name", op=FilterOp.EQ, value=config.evaluator)
+        filter=FilterCondition(field="name", op=FilterOp.EQ, value=config.evaluator),
+        size=2,
     )
     matches = [
         evaluator
-        async for evaluator in client.evaluators.iter(params)
+        async for evaluator in _iterate_bounded(
+            client.evaluators.iter,
+            params,
+            max_bytes=_MAX_RESOURCE_RESPONSE_BYTES,
+            code="evaluator_response_too_large",
+            message="Evaluator metadata exceeds the export response limit.",
+        )
         if evaluator.name == config.evaluator
     ]
     if len(matches) != 1:
@@ -282,7 +341,14 @@ async def _resolve_evaluator(
             f"Expected one evaluator named {config.evaluator!r}, found {len(matches)}.",
         )
     evaluator = matches[0]
-    version = await client.evaluators.get_version(evaluator.id, config.version)
+    version = await _call_bounded(
+        client.evaluators.get_version,
+        evaluator.id,
+        config.version,
+        max_bytes=_MAX_RESOURCE_RESPONSE_BYTES,
+        code="evaluator_response_too_large",
+        message="Evaluator version metadata exceeds the export response limit.",
+    )
     if version.evaluator_id != evaluator.id or version.version != config.version:
         raise ExportError(
             "evaluator_version_mismatch",
@@ -292,7 +358,13 @@ async def _resolve_evaluator(
     source = version.source
     script: bytes | None = None
     if isinstance(source, ScriptPluginSource) or source.type == "script":
-        script = await client.blobs.download(source.blob_id)
+        script = await _call_bounded(
+            client.blobs.download,
+            source.blob_id,
+            max_bytes=V1_EXPORT_BUDGETS.max_evaluator_bytes,
+            code="evaluator_too_large",
+            message="An evaluator source blob exceeds the 10 MiB export limit.",
+        )
         if len(script) > V1_EXPORT_BUDGETS.max_evaluator_bytes:
             raise ExportError(
                 "evaluator_too_large",
@@ -395,19 +467,32 @@ async def _resolve_sessions(
     sanitizer: EphemeralSanitizer,
     content_policy: ContentPolicy,
 ) -> tuple[Any, ...]:
+    if cohort_version.session_count > V1_EXPORT_BUDGETS.max_sessions:
+        raise ExportError(
+            "too_many_sessions",
+            "A cohort export may contain at most 1,000 sessions.",
+        )
     params = SessionListParams(
         filter=FilterCondition(
             field="cohort_version_id", op=FilterOp.EQ, value=str(cohort_version_id)
         ),
         sort="id:asc",
     )
-    summaries = [session async for session in client.sessions.iter(params)]
-    session_ids = sorted({session.id for session in summaries}, key=str)
-    if len(session_ids) > V1_EXPORT_BUDGETS.max_sessions:
-        raise ExportError(
-            "too_many_sessions",
-            "A cohort export may contain at most 1,000 sessions.",
-        )
+    member_ids: set[uuid.UUID] = set()
+    async for summary in _iterate_bounded(
+        client.sessions.iter,
+        params,
+        max_bytes=_MAX_SESSION_PAGE_BYTES,
+        code="sessions_too_large",
+        message="A session list page exceeds the 16 MiB export limit.",
+    ):
+        member_ids.add(summary.id)
+        if len(member_ids) > V1_EXPORT_BUDGETS.max_sessions:
+            raise ExportError(
+                "too_many_sessions",
+                "A cohort export may contain at most 1,000 sessions.",
+            )
+    session_ids = sorted(member_ids, key=str)
     if len(session_ids) != cohort_version.session_count:
         raise ExportError(
             "cohort_count_mismatch",
@@ -418,7 +503,13 @@ async def _resolve_sessions(
 
     async def get_session(session_id: uuid.UUID) -> Any:
         async with session_slots:
-            return await client.sessions.get_with_nodes(session_id)
+            return await _call_bounded(
+                client.sessions.get_with_nodes,
+                session_id,
+                max_bytes=V1_EXPORT_BUDGETS.max_session_bytes,
+                code="session_too_large",
+                message="A full session response exceeds the 16 MiB export limit.",
+            )
 
     sessions = list(
         await asyncio.gather(*(get_session(session_id) for session_id in session_ids))
@@ -479,11 +570,35 @@ async def resolve_remote_export(
     selected_content = content_policy or ContentPolicy()
     selected_environment = environment_policy or EnvironmentPolicy()
     experiment, cohort_version, agent_version = await asyncio.gather(
-        client.experiments.get(experiment_id),
-        client.cohort_versions.get(cohort_version_id),
-        client.agent_versions.get(agent_version_id),
+        _call_bounded(
+            client.experiments.get,
+            experiment_id,
+            max_bytes=_MAX_RESOURCE_RESPONSE_BYTES,
+            code="remote_response_too_large",
+            message="Experiment metadata exceeds the export response limit.",
+        ),
+        _call_bounded(
+            client.cohort_versions.get,
+            cohort_version_id,
+            max_bytes=_MAX_RESOURCE_RESPONSE_BYTES,
+            code="remote_response_too_large",
+            message="Cohort version metadata exceeds the export response limit.",
+        ),
+        _call_bounded(
+            client.agent_versions.get,
+            agent_version_id,
+            max_bytes=_MAX_RESOURCE_RESPONSE_BYTES,
+            code="remote_response_too_large",
+            message="Agent version metadata exceeds the export response limit.",
+        ),
     )
-    cohort = await client.cohorts.get(cohort_version.cohort_id)
+    cohort = await _call_bounded(
+        client.cohorts.get,
+        cohort_version.cohort_id,
+        max_bytes=_MAX_RESOURCE_RESPONSE_BYTES,
+        code="remote_response_too_large",
+        message="Cohort metadata exceeds the export response limit.",
+    )
     _require_matching_agent(cohort.agent_id, experiment.agent_id, "Cohort")
     _require_matching_agent(
         agent_version.agent_id, experiment.agent_id, "Agent version"

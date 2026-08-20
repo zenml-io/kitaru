@@ -67,11 +67,14 @@ class CohortsResource:
         )
         return CohortResponse.model_validate(response.json())
 
-    async def get(self, cohort_id: uuid.UUID) -> CohortResponse:
+    async def get(
+        self, cohort_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> CohortResponse:
         """Get a cohort by id.
 
         Args:
             cohort_id: Id of the cohort.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -80,7 +83,11 @@ class CohortsResource:
         Returns:
             Stored cohort.
         """
-        response = await self._client.request("GET", f"/api/v1/cohorts/{cohort_id}")
+        response = await self._client.request(
+            "GET",
+            f"/api/v1/cohorts/{cohort_id}",
+            max_response_bytes=max_bytes,
+        )
         return CohortResponse.model_validate(response.json())
 
     async def list(

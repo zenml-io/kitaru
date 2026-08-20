@@ -82,12 +82,16 @@ class EvaluatorsResource:
         return EvaluatorResponse.model_validate(response.json())
 
     async def list(
-        self, params: EvaluatorListParams | None = None
+        self,
+        params: EvaluatorListParams | None = None,
+        *,
+        max_bytes: int | None = None,
     ) -> Page[EvaluatorResponse]:
         """List evaluators.
 
         Args:
             params: Evaluator list params.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed.
@@ -100,16 +104,21 @@ class EvaluatorsResource:
             "GET",
             "/api/v1/evaluators",
             params=params.model_dump(mode="json", exclude_unset=True),
+            max_response_bytes=max_bytes,
         )
         return Page[EvaluatorResponse].model_validate(response.json())
 
     async def iter(
-        self, params: EvaluatorListParams | None = None
+        self,
+        params: EvaluatorListParams | None = None,
+        *,
+        max_bytes: int | None = None,
     ) -> AsyncIterator[EvaluatorResponse]:
         """Iterate over all evaluators.
 
         Args:
             params: Evaluator list params.
+            max_bytes: Maximum response bytes to read for each page.
 
         Raises:
             APIError: The request failed.
@@ -117,7 +126,10 @@ class EvaluatorsResource:
         Returns:
             Async iterator over every evaluator.
         """
-        async for item in iterate_pages(params or EvaluatorListParams(), self.list):
+        async for item in iterate_pages(
+            params or EvaluatorListParams(),
+            lambda page_params: self.list(page_params, max_bytes=max_bytes),
+        ):
             yield item
 
     async def update(
@@ -223,13 +235,18 @@ class EvaluatorsResource:
             yield item
 
     async def get_version(
-        self, evaluator_id: uuid.UUID, version: int
+        self,
+        evaluator_id: uuid.UUID,
+        version: int,
+        *,
+        max_bytes: int | None = None,
     ) -> EvaluatorVersionResponse:
         """Get an evaluator version by version number.
 
         Args:
             evaluator_id: Id of the evaluator.
             version: Version number.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -239,7 +256,9 @@ class EvaluatorsResource:
             Stored evaluator version.
         """
         response = await self._client.request(
-            "GET", f"/api/v1/evaluators/{evaluator_id}/versions/{version}"
+            "GET",
+            f"/api/v1/evaluators/{evaluator_id}/versions/{version}",
+            max_response_bytes=max_bytes,
         )
         return EvaluatorVersionResponse.model_validate(response.json())
 

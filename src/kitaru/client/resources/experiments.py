@@ -66,11 +66,14 @@ class ExperimentsResource:
         )
         return ExperimentResponse.model_validate(response.json())
 
-    async def get(self, experiment_id: uuid.UUID) -> ExperimentResponse:
+    async def get(
+        self, experiment_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> ExperimentResponse:
         """Get an experiment by id.
 
         Args:
             experiment_id: Id of the experiment.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -80,7 +83,9 @@ class ExperimentsResource:
             Stored experiment.
         """
         response = await self._client.request(
-            "GET", f"/api/v1/experiments/{experiment_id}"
+            "GET",
+            f"/api/v1/experiments/{experiment_id}",
+            max_response_bytes=max_bytes,
         )
         return ExperimentResponse.model_validate(response.json())
 

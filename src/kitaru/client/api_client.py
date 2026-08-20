@@ -38,6 +38,7 @@ from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
     InvalidServerResponseError,
+    ResponseTooLargeError,
     raise_for_response,
 )
 from kitaru.client.resources.accounts import AccountsResource
@@ -69,6 +70,18 @@ from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.users import UsersResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
+
+
+def _get_content_length(response: httpx.Response) -> int | None:
+    """Return one valid non-negative Content-Length value when declared."""
+    value = response.headers.get("Content-Length")
+    if value is None:
+        return None
+    try:
+        length = int(value)
+    except ValueError:
+        return None
+    return length if length >= 0 else None
 
 
 class KitaruAPIClient:
@@ -230,6 +243,7 @@ class KitaruAPIClient:
         content: bytes | AsyncIterable[bytes] | None = None,
         headers: dict[str, str] | None = None,
         authenticate: bool = True,
+        max_response_bytes: int | None = None,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
 
@@ -245,10 +259,15 @@ class KitaruAPIClient:
             headers: Additional request headers.
             authenticate: Whether to send the request through this client's
                 auth flow. The login endpoints send their own credential.
+            max_response_bytes: Maximum decoded response bytes to read. When
+                set, reject an oversized declared length before reading and
+                stop a streaming response as soon as it crosses the limit.
 
         Raises:
             APIError: The response has an error status code.
             InvalidServerResponseError: The response is not an API response.
+            ResponseTooLargeError: The response exceeds max_response_bytes.
+            ValueError: max_response_bytes is not positive.
 
         Returns:
             HTTP response.
@@ -257,17 +276,44 @@ class KitaruAPIClient:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
-        response = await self._http.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            data=data,
-            files=files,
-            content=content,
-            headers=headers,
-            auth=self._auth if authenticate else None,
-        )
+        request_kwargs: dict[str, Any] = {
+            "params": params,
+            "json": json,
+            "data": data,
+            "files": files,
+            "content": content,
+            "headers": headers,
+            "auth": self._auth if authenticate else None,
+        }
+        if max_response_bytes is None:
+            response = await self._http.request(method, path, **request_kwargs)
+        else:
+            if max_response_bytes <= 0:
+                raise ValueError("max_response_bytes must be positive")
+            async with self._http.stream(method, path, **request_kwargs) as streamed:
+                declared_length = _get_content_length(streamed)
+                if declared_length is not None and declared_length > max_response_bytes:
+                    raise ResponseTooLargeError(
+                        max_response_bytes, content_length=declared_length
+                    )
+                body = bytearray()
+                async for chunk in streamed.aiter_bytes():
+                    if len(body) + len(chunk) > max_response_bytes:
+                        raise ResponseTooLargeError(max_response_bytes)
+                    body.extend(chunk)
+                response_headers = [
+                    (name, value)
+                    for name, value in streamed.headers.multi_items()
+                    if name.lower()
+                    not in {"content-encoding", "content-length", "transfer-encoding"}
+                ]
+                response = httpx.Response(
+                    streamed.status_code,
+                    headers=response_headers,
+                    content=bytes(body),
+                    extensions=streamed.extensions,
+                    request=streamed.request,
+                )
         raise_for_response(response)
         # A UI catch-all or proxy answers an unknown path with an HTML page
         # and a success status, usually on a client/server version mismatch.
