@@ -109,6 +109,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 The server follows a layered architecture (API, application, domain, infrastructure adapters). The client SDK and server never import each other and both sit on the shared `api_models` package. The binding conventions, including the new-resource checklist, live in scoped `AGENTS.md` files: `src/kitaru/AGENTS.md`, the per-layer files under `src/kitaru/server/`, `src/kitaru/api_models/AGENTS.md`, `src/kitaru/client/AGENTS.md`, and `tests/AGENTS.md`.
 
+For adapter, importer, specialized UI API, docs, CI, and release work, load the matching Kitaru repo skill under `.claude/skills/`. The same logical skills live under `.agents/skills/` for Codex; keep host-neutral guidance synchronized and diverge only for a documented host-specific reason.
+
 ## Code style
 
 - **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
