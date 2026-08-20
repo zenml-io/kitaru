@@ -19,8 +19,10 @@ server) and the SDK reference docs app. The public marketing site and
 - `docker/`: Dockerfiles
 - `design/`: gitignored design notes; never commit anything from this directory
 
-For docs routing, CI/release details, and task-specific runbooks, load the
-Kitaru repo skills under `.agents/skills/`.
+For adapter, importer, specialized UI API, docs, CI, and release work, load the
+matching Kitaru repo skill under `.agents/skills/`. Keep each logical repo skill
+available under the same name in `.claude/skills/`; share host-neutral guidance
+and diverge only for a documented host-specific reason.
 
 ## Core Commands
 
