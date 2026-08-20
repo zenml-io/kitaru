@@ -113,6 +113,12 @@ The durable result is not a predetermined passing demo. It is an auditable claim
 
 You can now turn the same cohort, candidate, and pinned evaluator into a complete Verifiers 0.3 project. Set the result name and field to the result you calibrated in step 3; the example evaluator above returns `terminal_action_consistency:passed`.
 
+Install the Verifiers exporter in the template environment:
+
+```bash
+uv add kitaru-verifiers-exporter
+```
+
 ```bash
 PRIMARY_REWARD="${BEHAVIOR_EVALUATOR%@*}:terminal_action_consistency:passed"
 

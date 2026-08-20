@@ -7,6 +7,15 @@ icon: box-archive
 
 Use `kitaru experiment export` to take a reviewed benchmark from Kitaru into Harbor or Verifiers. One export combines an immutable cohort version, an exact agent version and its local source, and every evaluator version pinned by the experiment.
 
+Install the exporter for the target you use in the same project environment as Kitaru:
+
+```bash
+uv add kitaru-harbor-exporter       # Harbor
+uv add kitaru-verifiers-exporter    # Verifiers and PrimeRL
+```
+
+The command discovers the installed package automatically. Harbor and Verifiers exporters are separate packages, so you can install and upgrade either one without adding the other target to Kitaru core.
+
 Choose the target that matches what you want to do next:
 
 * **Harbor:** build a Harbor 0.20 project with one task per cohort session, then run it with Harbor's normal dataset and agent workflow.
@@ -169,7 +178,7 @@ Kitaru reads and retains one stable source snapshot for the export and records i
 
 ## Read the assurance and provenance receipt
 
-The receipt and `kitaru-export.json` separate three levels of evidence:
+The receipt and `kitaru-export.json` identify the exporter distribution, exporter version, Kitaru exporter-contract version, and target runtime version. This keeps an artifact attributable after it leaves the machine that created it. They also separate three levels of evidence:
 
 | Level | What it proves |
 | --- | --- |
@@ -234,6 +243,8 @@ The standard-mode MCP server exposes the same policies through `kitaru_experimen
 ```
 
 For Harbor, set `format` to `harbor` and add `trace_format` and `trace_path`. Remove `dry_run` only after reviewing the receipt.
+
+Install the selected exporter in the same project environment that starts `uv run kitaru-mcp`. If MCP reports that an exporter is missing or incompatible, add or upgrade that package there and restart the MCP process. Kitaru never installs exporter packages automatically.
 
 ## Supported v1 boundary
 

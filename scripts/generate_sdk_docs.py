@@ -123,6 +123,44 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.task": ModuleSpec(
         symbols=frozenset({"get_task_id", "get_task_inputs"}),
     ),
+    "kitaru.exports": ModuleSpec(
+        reexports={
+            "EXPORTER_CONTRACT_VERSION": "kitaru.exports.plugin",
+            "EXPORTER_ENTRY_POINT_GROUP": "kitaru.exports.plugin",
+            "V1_EXPORT_BUDGETS": "kitaru.exports.models",
+            "ArtifactProvenance": "kitaru.exports.models",
+            "DependencyPlan": "kitaru.exports.models",
+            "DependencyReceipt": "kitaru.exports.models",
+            "ExperimentExporter": "kitaru.exports.plugin",
+            "ExportError": "kitaru.exports.models",
+            "ExportManifest": "kitaru.exports.models",
+            "ExporterContext": "kitaru.exports.plugin",
+            "ExporterMetadata": "kitaru.exports.plugin",
+            "ExporterOptions": "kitaru.exports.plugin",
+            "ExporterProvenance": "kitaru.exports.models",
+            "ResolvedExport": "kitaru.exports.models",
+            "RuntimeBridgeReceipt": "kitaru.exports.models",
+            "RuntimeRequirements": "kitaru.exports.models",
+            "TaskProvenance": "kitaru.exports.models",
+            "ValidationReceipt": "kitaru.exports.models",
+        },
+    ),
+    "kitaru.exports.render_support": ModuleSpec(
+        reexports={
+            "canonical_json_bytes": "kitaru.exports.writer",
+            "copy_source": "kitaru.exports.source",
+            "directory_digest": "kitaru.exports.writer",
+            "file_digest": "kitaru.exports.writer",
+            "file_digests": "kitaru.exports.writer",
+            "get_runtime_bridge_version": "kitaru.exports._bridge",
+            "materialize_runtime_bridge": "kitaru.exports._bridge",
+            "normalize_environment_names": "kitaru.exports.config",
+            "validate_generated_resources": "kitaru.exports.formats._validation",
+            "validate_kitaru_requirement": "kitaru.exports.formats._validation",
+            "validate_runtime_bridge": "kitaru.exports.formats._validation",
+            "write_canonical_json": "kitaru.exports.writer",
+        },
+    ),
     # Container entries: kitaru.api_models and kitaru.api_models.v1 define no
     # developer-facing symbols themselves, but the attach step in
     # build_public_api requires every published module's parent to be
