@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from kitaru.exports.config import ExportRequest
 from kitaru.exports.models import ExportError, get_export_error_kind
 from kitaru.exports.operation import ExportOperationStateMachine, export_experiment
+from kitaru.exports.plugin import resolve_exporter
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.exports import (
@@ -71,6 +72,22 @@ def _map_export_error(error: ExportError) -> MCPToolError:
         "destination_conflict": "Choose a new destination path.",
         "archive_conflict": "Choose a destination whose ZIP path does not exist.",
         "missing_source_include": "Check source_policy.include against source_root.",
+        "exporter_not_installed": (
+            "Install the named exporter in the same project environment that runs "
+            "`uv run kitaru-mcp`, then restart that MCP subprocess."
+        ),
+        "exporter_ambiguous": (
+            "Remove the duplicate exporter from the project environment, then "
+            "restart the MCP subprocess."
+        ),
+        "exporter_incompatible": (
+            "Upgrade Kitaru and the named exporter together in the same project "
+            "environment, then restart the MCP subprocess."
+        ),
+        "exporter_load_failed": (
+            "Reinstall or upgrade the named exporter in the same project "
+            "environment, then restart the MCP subprocess."
+        ),
     }.get(error.code)
     return MCPToolError(
         get_export_error_kind(error),
@@ -94,6 +111,10 @@ async def handle_experiment_export(
             "Experiment export requires KITARU_MCP_WORKSPACE_ROOTS.",
             recovery="Set KITARU_MCP_WORKSPACE_ROOTS to allowed absolute directories.",
         )
+    try:
+        exporter = resolve_exporter(request.format)
+    except ExportError as error:
+        raise _map_export_error(error) from error
     source_root = _resolve_source(request.source_root, roots)
     destination = _resolve_destination(request.destination, roots)
     try:
@@ -117,6 +138,7 @@ async def handle_experiment_export(
                 archive=request.archive,
                 dry_run=request.dry_run,
             ),
+            exporter=exporter,
             **export_kwargs,
         )
     except ExportError as error:

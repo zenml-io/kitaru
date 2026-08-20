@@ -22,10 +22,6 @@ from kitaru.exports.models import (
 
 ExportFormat = Literal["harbor", "verifiers-v1"]
 TraceFormat = Literal["atif", "kitaru"]
-EXPORT_TARGET_VERSIONS: dict[ExportFormat, str] = {
-    "harbor": "0.20.0",
-    "verifiers-v1": "0.3.0",
-}
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 

@@ -19,8 +19,10 @@ from kitaru.exports.models import (
     ContentCategory,
     ContentPolicy,
     EnvironmentPolicy,
+    ExporterProvenance,
     ExportError,
     ExportManifest,
+    RewardSelector,
     RuntimeRequirements,
     SourcePolicy,
     TaskProvenance,
@@ -31,6 +33,12 @@ from kitaru.exports.operation import (
     ExportOperationState,
     ExportOperationStateMachine,
     export_experiment,
+)
+from kitaru.exports.plugin import (
+    ExporterContext,
+    ExporterMetadata,
+    ExporterOptions,
+    LoadedExporter,
 )
 
 
@@ -46,6 +54,63 @@ def _request(tmp_path: Path, **changes: Any) -> ExportRequest:
     }
     values.update(changes)
     return ExportRequest(**values)
+
+
+class FakeExporter:
+    """Record operation calls through the public exporter contract."""
+
+    def __init__(self, metadata: ExporterMetadata) -> None:
+        self.metadata = metadata
+        self.preflight_calls: list[tuple[Any, ExporterOptions, ExporterContext]] = []
+        self.render_calls: list[tuple[Any, Path, ExporterOptions, ExporterContext]] = []
+        self.manifest: ExportManifest | None = None
+        self.embedded_manifest: ExportManifest | None = None
+
+    def preflight(
+        self,
+        resolved: Any,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> None:
+        self.preflight_calls.append((resolved, options, context))
+        context.checkpoint()
+
+    def render(
+        self,
+        resolved: Any,
+        staging_root: Path,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> ExportManifest:
+        self.render_calls.append((resolved, staging_root, options, context))
+        context.checkpoint()
+        assert self.manifest is not None
+        (staging_root / "README.md").write_text("ready\n")
+        (staging_root / "kitaru-export.json").write_text(
+            (self.embedded_manifest or self.manifest).model_dump_json()
+        )
+        return self.manifest
+
+
+def _loaded_exporter(
+    *, format: str = "verifiers-v1", target_version: str = "0.3.0"
+) -> tuple[LoadedExporter, FakeExporter]:
+    distribution_name = (
+        "kitaru-harbor-exporter" if format == "harbor" else "kitaru-verifiers-exporter"
+    )
+    metadata = ExporterMetadata(
+        contract_version=1,
+        distribution_name=distribution_name,
+        distribution_version="1.2.3",
+        format=format,
+        target_version=target_version,
+    )
+    implementation = FakeExporter(metadata)
+    return LoadedExporter(
+        implementation=implementation, metadata=metadata
+    ), implementation
 
 
 def test_request_defaults_to_complete_content_and_included_environment(
@@ -145,6 +210,13 @@ def test_manifest_serializes_assurance_and_provenance_deterministically() -> Non
     manifest = ExportManifest(
         format="verifiers-v1",
         target_version="0.3.0",
+        exporter=ExporterProvenance(
+            contract_version=1,
+            distribution_name="kitaru-verifiers-exporter",
+            distribution_version="1.2.3",
+            format="verifiers-v1",
+            target_version="0.3.0",
+        ),
         experiment_id=experiment_id,
         cohort_version_id=cohort_version_id,
         agent_version_id=agent_version_id,
@@ -222,7 +294,7 @@ def test_harbor_requires_an_explicit_trace_contract(tmp_path: Path) -> None:
         )
 
 
-async def test_dry_run_resolves_without_calling_a_renderer(
+async def test_dry_run_calls_plugin_preflight_without_rendering(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     resolved = type(
@@ -246,21 +318,13 @@ async def test_dry_run_resolves_without_calling_a_renderer(
         assert actual_remote is remote
         return resolved
 
-    preflighted: list[Any] = []
-
-    def fake_preflight(actual_resolved: Any, **_kwargs: Any) -> None:
-        preflighted.append(actual_resolved)
-
     monkeypatch.setattr(
         "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
     )
     monkeypatch.setattr(
         "kitaru.exports.operation.finalize_remote_export", fake_finalize
     )
-    monkeypatch.setattr(
-        "kitaru.exports.operation.preflight_verifiers_v1_export",
-        fake_preflight,
-    )
+    loaded, exporter = _loaded_exporter()
     destination = tmp_path / "out"
     receipt = await export_experiment(
         object(),
@@ -276,6 +340,7 @@ async def test_dry_run_resolves_without_calling_a_renderer(
             environment_policy=EnvironmentPolicy(mode="runtime_only"),
             dry_run=True,
         ),
+        exporter=loaded,
     )
     assert receipt.dry_run is True
     assert receipt.session_count == 1
@@ -285,8 +350,40 @@ async def test_dry_run_resolves_without_calling_a_renderer(
     assert receipt.assurance.preflight.status == "passed"
     assert receipt.assurance.structural_validation.status == "not_performed"
     assert receipt.assurance.release_compatibility.status == "not_performed"
-    assert preflighted == [resolved]
+    assert [call[0] for call in exporter.preflight_calls] == [resolved]
+    assert exporter.render_calls == []
+    assert receipt.exporter == loaded.provenance
+    assert receipt.target_version == loaded.metadata.target_version
     assert not destination.exists()
+
+
+async def test_missing_exporter_fails_before_remote_or_source_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    touched: list[str] = []
+
+    async def fail_remote(*_args: Any, **_kwargs: Any) -> Any:
+        touched.append("remote")
+        raise AssertionError("remote resolution ran")
+
+    def fail_source(*_args: Any, **_kwargs: Any) -> Any:
+        touched.append("source")
+        raise AssertionError("source inventory ran")
+
+    monkeypatch.setattr("kitaru.exports.operation.resolve_remote_export", fail_remote)
+    monkeypatch.setattr("kitaru.exports.operation.inventory_source", fail_source)
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_exporter",
+        lambda _format: (_ for _ in ()).throw(
+            ExportError("exporter_not_installed", "Install the exporter.")
+        ),
+    )
+
+    with pytest.raises(ExportError) as raised:
+        await export_experiment(object(), _request(tmp_path))
+
+    assert raised.value.code == "exporter_not_installed"
+    assert touched == []
 
 
 async def test_remote_denial_happens_before_local_source_access(
@@ -307,6 +404,7 @@ async def test_remote_denial_happens_before_local_source_access(
         await export_experiment(
             object(),
             _request(tmp_path, source_root=tmp_path / "unreadable-source"),
+            exporter=_loaded_exporter()[0],
         )
 
 
@@ -326,6 +424,7 @@ async def test_dry_run_rejects_an_existing_destination(tmp_path: Path) -> None:
                 primary_reward="quality:correctness:score",
                 dry_run=True,
             ),
+            exporter=_loaded_exporter()[0],
         )
 
 
@@ -343,6 +442,16 @@ async def test_operation_publishes_renderer_output(
             "experiment": type("Item", (), {"id": experiment_id})(),
             "cohort_version": type("Item", (), {"id": cohort_version_id})(),
             "agent_version": type("Item", (), {"id": agent_version_id})(),
+            "reward": type(
+                "Reward",
+                (),
+                {
+                    "evaluator": "quality",
+                    "result": "correctness",
+                    "field": "score",
+                },
+            )(),
+            "source": type("Source", (), {"digest": "0" * 64})(),
             "sessions": (object(),),
             "evaluators": (
                 type(
@@ -363,21 +472,21 @@ async def test_operation_publishes_renderer_output(
         assert actual_remote is remote
         return resolved
 
-    def fake_render(_resolved: Any, root: Path, **_kwargs: Any) -> ExportManifest:
-        (root / "README.md").write_text("ready\n")
-        return ExportManifest(
-            format="verifiers-v1",
-            target_version="0.3.0",
-            experiment_id=experiment_id,
-            cohort_version_id=cohort_version_id,
-            agent_version_id=agent_version_id,
-            evaluator_version_ids=(evaluator_version_id,),
-            primary_reward="quality:correctness:score",
-            source_digest="0" * 64,
-            validation=ValidationReceipt(
-                level="structural", status="passed", target_version="0.3.0"
-            ),
-        )
+    loaded, exporter = _loaded_exporter()
+    exporter.manifest = ExportManifest(
+        format="verifiers-v1",
+        target_version="0.3.0",
+        exporter=loaded.provenance,
+        experiment_id=experiment_id,
+        cohort_version_id=cohort_version_id,
+        agent_version_id=agent_version_id,
+        evaluator_version_ids=(evaluator_version_id,),
+        primary_reward="quality:correctness:score",
+        source_digest="0" * 64,
+        validation=ValidationReceipt(
+            level="structural", status="passed", target_version="0.3.0"
+        ),
+    )
 
     monkeypatch.setattr(
         "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
@@ -385,11 +494,6 @@ async def test_operation_publishes_renderer_output(
     monkeypatch.setattr(
         "kitaru.exports.operation.finalize_remote_export", fake_finalize
     )
-    monkeypatch.setattr(
-        "kitaru.exports.operation.preflight_verifiers_v1_export",
-        lambda *_args, **_kwargs: None,
-    )
-    monkeypatch.setattr("kitaru.exports.operation.render_verifiers_v1", fake_render)
     destination = tmp_path / "bundle"
     receipt = await export_experiment(
         object(),
@@ -402,9 +506,121 @@ async def test_operation_publishes_renderer_output(
             destination=destination,
             primary_reward="quality:correctness:score",
         ),
+        exporter=loaded,
     )
     assert (destination / "README.md").read_text() == "ready\n"
     assert receipt.validation_level == "structural"
+    assert receipt.exporter == loaded.provenance
+    assert len(exporter.preflight_calls) == 1
+    assert len(exporter.render_calls) == 1
+
+
+async def test_operation_rejects_manifest_identity_before_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    request = _request(tmp_path, destination=tmp_path / "bundle")
+    resolved = type(
+        "Resolved",
+        (),
+        {
+            "experiment": type("Item", (), {"id": request.experiment_id})(),
+            "cohort_version": type("Item", (), {"id": request.cohort_version_id})(),
+            "agent_version": type("Item", (), {"id": request.agent_version_id})(),
+            "reward": RewardSelector.parse(request.primary_reward),
+            "source": type("Source", (), {"digest": "0" * 64})(),
+            "sessions": (),
+            "evaluators": (),
+        },
+    )()
+
+    async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> object:
+        return object()
+
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.finalize_remote_export",
+        lambda *_args, **_kwargs: resolved,
+    )
+    loaded, exporter = _loaded_exporter()
+    exporter.manifest = ExportManifest(
+        format="verifiers-v1",
+        target_version="0.3.0",
+        exporter=ExporterProvenance(
+            contract_version=1,
+            distribution_name="counterfeit-exporter",
+            distribution_version="1.2.3",
+            format="verifiers-v1",
+            target_version="0.3.0",
+        ),
+        experiment_id=request.experiment_id,
+        cohort_version_id=request.cohort_version_id,
+        agent_version_id=request.agent_version_id,
+        evaluator_version_ids=(),
+        primary_reward=request.primary_reward,
+        source_digest="0" * 64,
+        validation=ValidationReceipt(
+            level="structural", status="passed", target_version="0.3.0"
+        ),
+    )
+
+    with pytest.raises(ExportError) as raised:
+        await export_experiment(object(), request, exporter=loaded)
+
+    assert raised.value.code == "exporter_invalid_result"
+    assert not request.destination.exists()
+
+
+async def test_operation_revocation_during_plugin_preflight_prevents_publication(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operation = ExportOperationStateMachine()
+    preflight_started = threading.Event()
+    release_preflight = threading.Event()
+    loaded, exporter = _loaded_exporter()
+
+    def blocked_preflight(
+        _resolved: Any,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> None:
+        assert options.required_environment_names == ()
+        preflight_started.set()
+        assert release_preflight.wait(timeout=5)
+        context.checkpoint()
+        raise AssertionError("revoked preflight continued")
+
+    exporter.preflight = blocked_preflight  # type: ignore[method-assign]
+
+    async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> object:
+        return object()
+
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.finalize_remote_export",
+        lambda *_args, **_kwargs: object(),
+    )
+    destination = tmp_path / "bundle"
+    task = asyncio.create_task(
+        export_experiment(
+            object(),
+            _request(tmp_path, destination=destination),
+            operation=operation,
+            exporter=loaded,
+        )
+    )
+    assert await asyncio.to_thread(preflight_started.wait, 5)
+    assert operation.request_revocation() is True
+    release_preflight.set()
+
+    with pytest.raises(ExportOperationRevoked):
+        await task
+    assert operation.state is ExportOperationState.CANCELLED
+    assert not destination.exists()
 
 
 async def test_operation_revocation_during_source_inventory_joins_without_publishing(
@@ -436,6 +652,7 @@ async def test_operation_revocation_during_source_inventory_joins_without_publis
             object(),
             _request(tmp_path, destination=destination),
             operation=operation,
+            exporter=_loaded_exporter()[0],
         )
     )
     assert await asyncio.to_thread(inventory_started.wait, 5)

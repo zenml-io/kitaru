@@ -9,7 +9,9 @@ from typing import Any, cast
 import pytest
 from pydantic import ValidationError
 
+from kitaru.exports.models import ExportError
 from kitaru.exports.operation import ExportOperationStateMachine, ExportReceipt
+from kitaru.exports.plugin import ExporterMetadata, LoadedExporter
 from kitaru.mcp import registry
 from kitaru.mcp.errors import MCPToolError, map_exception
 from kitaru.mcp.lifecycle import MCPServerState
@@ -35,11 +37,25 @@ def _request(source: Path, destination: Path) -> ExperimentExportRequest:
     )
 
 
-async def test_export_rejects_source_outside_workspace(tmp_path: Path) -> None:
+def _loaded_exporter() -> LoadedExporter:
+    metadata = ExporterMetadata(
+        contract_version=1,
+        distribution_name="kitaru-verifiers-exporter",
+        distribution_version="1.2.3",
+        format="verifiers-v1",
+        target_version="0.3.0",
+    )
+    return LoadedExporter(implementation=cast(Any, object()), metadata=metadata)
+
+
+async def test_export_rejects_source_outside_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     root = tmp_path / "workspace"
     root.mkdir()
     outside = tmp_path / "outside"
     outside.mkdir()
+    monkeypatch.setattr(exports, "resolve_exporter", lambda _format: _loaded_exporter())
     state = MCPServerState(MCPSettings(workspace_roots=(root,)), cast(Any, object()))
     with pytest.raises(MCPToolError, match="outside"):
         await exports.handle_experiment_export(
@@ -54,8 +70,12 @@ async def test_export_uses_exact_ids_and_workspace_paths(
     source = root / "source"
     source.mkdir(parents=True)
     seen = []
+    loaded = _loaded_exporter()
 
-    async def fake_export(_client: Any, request: Any) -> ExportReceipt:
+    async def fake_export(
+        _client: Any, request: Any, *, exporter: LoadedExporter
+    ) -> ExportReceipt:
+        assert exporter is loaded
         seen.append(request)
         return ExportReceipt(
             format=request.format,
@@ -68,8 +88,10 @@ async def test_export_uses_exact_ids_and_workspace_paths(
             evaluator_count=1,
             source_digest="0" * 64,
             destination=str(request.destination),
+            exporter=loaded.provenance,
         )
 
+    monkeypatch.setattr(exports, "resolve_exporter", lambda _format: loaded)
     monkeypatch.setattr(exports, "export_experiment", fake_export)
     state = MCPServerState(MCPSettings(workspace_roots=(root,)), cast(Any, object()))
     request = _request(source, root / "bundle")
@@ -82,11 +104,12 @@ async def test_export_uses_exact_ids_and_workspace_paths(
 
 
 async def test_export_rejects_destination_with_parent_outside_workspace(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     root = tmp_path / "workspace"
     source = root / "source"
     source.mkdir(parents=True)
+    monkeypatch.setattr(exports, "resolve_exporter", lambda _format: _loaded_exporter())
     state = MCPServerState(MCPSettings(workspace_roots=(root,)), cast(Any, object()))
 
     with pytest.raises(MCPToolError, match="destination parent") as raised:
@@ -117,10 +140,20 @@ async def test_export_registry_maps_malformed_receipt_to_internal_error(
     root = tmp_path / "workspace"
     source = root / "source"
     source.mkdir(parents=True)
+    loaded = _loaded_exporter()
 
-    async def fake_export(_client: Any, _request: Any) -> dict[str, str]:
+    async def fake_export(
+        _client: Any,
+        _request: Any,
+        *,
+        exporter: LoadedExporter,
+        operation: ExportOperationStateMachine,
+    ) -> dict[str, str]:
+        assert exporter is loaded
+        assert operation.state.value == "staging"
         return {"format": "verifiers-v1"}
 
+    monkeypatch.setattr(exports, "resolve_exporter", lambda _format: loaded)
     monkeypatch.setattr(exports, "export_experiment", fake_export)
 
     class RoutingState:
@@ -143,6 +176,33 @@ async def test_export_registry_maps_malformed_receipt_to_internal_error(
     assert result.is_error is True
     assert result.structured_content is not None
     assert result.structured_content["error"]["code"] == "internal_error"
+
+
+async def test_export_maps_missing_plugin_before_local_path_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "workspace"
+    root.mkdir()
+
+    def reject(_format: str) -> LoadedExporter:
+        raise ExportError(
+            "exporter_not_installed",
+            "Export format verifiers-v1 requires kitaru-verifiers-exporter.",
+        )
+
+    monkeypatch.setattr(exports, "resolve_exporter", reject)
+    state = MCPServerState(MCPSettings(workspace_roots=(root,)), cast(Any, object()))
+
+    with pytest.raises(MCPToolError) as raised:
+        await exports.handle_experiment_export(
+            state,
+            _request(root / "does-not-exist", root / "bundle"),
+        )
+
+    assert raised.value.code == "invalid_configuration"
+    assert raised.value.details == {"export_code": "exporter_not_installed"}
+    assert "same project environment" in raised.value.recovery
+    assert "restart" in raised.value.recovery
 
 
 async def test_export_registry_path_does_not_use_generic_execution() -> None:

@@ -10584,6 +10584,9 @@
               "title": "Experiment Id",
               "type": "string"
             },
+            "exporter": {
+              "$ref": "#/$defs/ExporterProvenance"
+            },
             "format": {
               "enum": [
                 "harbor",
@@ -10681,7 +10684,8 @@
             "task_count",
             "evaluator_count",
             "source_digest",
-            "destination"
+            "destination",
+            "exporter"
           ],
           "title": "ExperimentExportReceipt",
           "type": "object"
@@ -10729,6 +10733,56 @@
             "message"
           ],
           "title": "ExportWarning",
+          "type": "object"
+        },
+        "ExporterProvenance": {
+          "additionalProperties": false,
+          "description": "Identify the installed exporter that generated an artifact.",
+          "properties": {
+            "contract_version": {
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Contract Version",
+              "type": "integer"
+            },
+            "distribution_name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$",
+              "title": "Distribution Name",
+              "type": "string"
+            },
+            "distribution_version": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\x00]+$",
+              "title": "Distribution Version",
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "harbor",
+                "verifiers-v1"
+              ],
+              "title": "Format",
+              "type": "string"
+            },
+            "target_version": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\x00]+$",
+              "title": "Target Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "contract_version",
+            "distribution_name",
+            "distribution_version",
+            "format",
+            "target_version"
+          ],
+          "title": "ExporterProvenance",
           "type": "object"
         },
         "RuntimeRequirements": {

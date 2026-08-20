@@ -21,6 +21,7 @@ from kitaru.exports.models import (
     get_export_error_kind,
 )
 from kitaru.exports.operation import ExportReceipt, export_experiment
+from kitaru.exports.plugin import resolve_exporter
 
 
 def _map_export_error(error: ExportError) -> CLIError:
@@ -28,6 +29,17 @@ def _map_export_error(error: ExportError) -> CLIError:
         "destination_conflict": "Choose a new destination path.",
         "archive_conflict": "Choose a destination whose ZIP path does not exist.",
         "missing_source_include": "Check --include-source against the source root.",
+        "exporter_not_installed": (
+            "Install the named package in the Python environment running this "
+            "command, then retry."
+        ),
+        "exporter_ambiguous": "Remove the duplicate exporter package, then retry.",
+        "exporter_incompatible": (
+            "Upgrade Kitaru and the named exporter package together, then retry."
+        ),
+        "exporter_load_failed": (
+            "Reinstall or upgrade the named exporter package, then retry."
+        ),
     }.get(error.code)
     return CLIError(
         get_export_error_kind(error),
@@ -58,6 +70,10 @@ async def export_experiment_command(
     dry_run: bool,
 ) -> CommandResult:
     """Resolve friendly CLI references and run one shared export operation."""
+    try:
+        exporter = resolve_exporter(format)
+    except ExportError as error:
+        raise _map_export_error(error) from error
     resolved_experiment = await resolve_asset(
         client.experiments, experiment, "Experiment"
     )
@@ -95,6 +111,7 @@ async def export_experiment_command(
         receipt = await export_experiment(
             client,
             request,
+            exporter=exporter,
         )
     except ExportError as error:
         raise _map_export_error(error) from error

@@ -13,12 +13,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from kitaru.exports.config import EXPORT_TARGET_VERSIONS, ExportFormat, ExportRequest
-from kitaru.exports.formats.harbor import preflight_harbor_export, render_harbor
-from kitaru.exports.formats.verifiers_v1 import (
-    preflight_verifiers_v1_export,
-    render_verifiers_v1,
-)
+from kitaru.exports.config import ExportFormat, ExportRequest
 from kitaru.exports.models import (
     ArtifactProvenance,
     BoundedPathSummary,
@@ -26,13 +21,21 @@ from kitaru.exports.models import (
     DependencyReceipt,
     EnvironmentPolicy,
     ExportAssurance,
+    ExporterProvenance,
     ExportError,
     ExportManifest,
     ExportWarning,
+    ResolvedExport,
     RewardSelector,
     RuntimeRequirements,
     SourcePolicy,
     TaskProvenance,
+)
+from kitaru.exports.plugin import (
+    ExporterContext,
+    ExporterOptions,
+    LoadedExporter,
+    resolve_exporter,
 )
 from kitaru.exports.resolve import finalize_remote_export, resolve_remote_export
 from kitaru.exports.source import inventory_source
@@ -62,6 +65,7 @@ class ExportReceipt(BaseModel):
     bundle_digest: str | None = None
     validation_level: str | None = None
     target_version: str | None = None
+    exporter: ExporterProvenance
     content_policy: ContentPolicy = Field(default_factory=ContentPolicy)
     environment_policy: EnvironmentPolicy = Field(default_factory=EnvironmentPolicy)
     source_policy: SourcePolicy = Field(default_factory=SourcePolicy)
@@ -203,15 +207,76 @@ def _preflight_destination(request: ExportRequest) -> None:
         raise ExportError("archive_conflict", f"Archive exists: {archive_path}")
 
 
+def _get_exporter_options(request: ExportRequest) -> ExporterOptions:
+    return ExporterOptions(
+        required_environment_names=request.required_environment_names,
+        trace_format=request.trace_format,
+        trace_path=request.trace_path,
+    )
+
+
+def _validate_exporter_manifest(
+    manifest_data: object,
+    *,
+    root: Path,
+    exporter: LoadedExporter,
+    resolved: ResolvedExport,
+) -> ExportManifest:
+    try:
+        manifest = ExportManifest.model_validate(manifest_data)
+        embedded = ExportManifest.model_validate_json(
+            (root / "kitaru-export.json").read_text()
+        )
+    except (OSError, ValueError, TypeError) as error:
+        raise ExportError(
+            "exporter_invalid_result",
+            "The exporter returned an invalid artifact manifest.",
+        ) from error
+    expected_reward = (
+        f"{resolved.reward.evaluator}:{resolved.reward.result}:{resolved.reward.field}"
+    )
+    if (
+        manifest != embedded
+        or manifest.exporter != exporter.provenance
+        or manifest.format != exporter.metadata.format
+        or manifest.target_version != exporter.metadata.target_version
+        or manifest.validation.target_version != exporter.metadata.target_version
+        or manifest.experiment_id != resolved.experiment.id
+        or manifest.cohort_version_id != resolved.cohort_version.id
+        or manifest.agent_version_id != resolved.agent_version.id
+        or manifest.primary_reward != expected_reward
+        or manifest.source_digest != resolved.source.digest
+    ):
+        raise ExportError(
+            "exporter_invalid_result",
+            "The exporter manifest does not match the selected exporter or resolved "
+            "export inputs.",
+        )
+    return manifest
+
+
 async def export_experiment(
     client: Any,
     request: ExportRequest,
     *,
     operation: ExportOperationStateMachine | None = None,
+    exporter: LoadedExporter | None = None,
 ) -> ExportReceipt:
     """Resolve an export and optionally publish its deterministic local artifact."""
     state = operation or ExportOperationStateMachine()
     try:
+        state.checkpoint()
+        selected_exporter = exporter or resolve_exporter(request.format)
+        if selected_exporter.metadata.format != request.format:
+            raise ExportError(
+                "exporter_incompatible",
+                "The supplied exporter does not provide the requested format.",
+            )
+        exporter_options = _get_exporter_options(request)
+        exporter_context = ExporterContext(
+            exporter=selected_exporter.provenance,
+            cancellation_checkpoint=state.checkpoint,
+        )
         state.checkpoint()
         _preflight_destination(request)
         remote = await resolve_remote_export(
@@ -245,22 +310,15 @@ async def export_experiment(
             source_policy=request.source_policy,
         )
         state.checkpoint()
-        if request.format == "harbor":
-            assert request.trace_format is not None
-            assert request.trace_path is not None
-            preflight_harbor_export(
-                resolved,
-                trace_format=request.trace_format,
-                trace_path=request.trace_path,
-                required_environment_names=request.required_environment_names,
-            )
-        else:
-            preflight_verifiers_v1_export(
-                resolved,
-                required_environment_names=request.required_environment_names,
-            )
+        await asyncio.to_thread(
+            selected_exporter.implementation.preflight,
+            resolved,
+            options=exporter_options,
+            context=exporter_context,
+        )
+        state.checkpoint()
         if request.dry_run:
-            target_version = EXPORT_TARGET_VERSIONS[request.format]
+            target_version = selected_exporter.metadata.target_version
             receipt = ExportReceipt(
                 format=request.format,
                 dry_run=True,
@@ -273,6 +331,7 @@ async def export_experiment(
                 source_digest=source.digest,
                 destination=str(request.destination.expanduser().absolute()),
                 target_version=target_version,
+                exporter=selected_exporter.provenance,
                 content_policy=request.content_policy,
                 environment_policy=request.environment_policy,
                 source_policy=request.source_policy,
@@ -288,22 +347,18 @@ async def export_experiment(
         def render(root: Path) -> None:
             nonlocal manifest
             state.checkpoint()
-            if request.format == "harbor":
-                assert request.trace_format is not None
-                assert request.trace_path is not None
-                manifest = render_harbor(
-                    resolved,
-                    root,
-                    trace_format=request.trace_format,
-                    trace_path=request.trace_path,
-                    required_environment_names=request.required_environment_names,
-                )
-            else:
-                manifest = render_verifiers_v1(
-                    resolved,
-                    root,
-                    required_environment_names=request.required_environment_names,
-                )
+            rendered_manifest = selected_exporter.implementation.render(
+                resolved,
+                root,
+                options=exporter_options,
+                context=exporter_context,
+            )
+            manifest = _validate_exporter_manifest(
+                rendered_manifest,
+                root=root,
+                exporter=selected_exporter,
+                resolved=resolved,
+            )
             state.checkpoint()
 
         staged = await asyncio.to_thread(
@@ -337,6 +392,7 @@ async def export_experiment(
             bundle_digest=published.digest,
             validation_level=manifest.validation.level,
             target_version=manifest.target_version,
+            exporter=manifest.exporter,
             content_policy=request.content_policy,
             environment_policy=request.environment_policy,
             source_policy=request.source_policy,

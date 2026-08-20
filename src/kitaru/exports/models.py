@@ -75,6 +75,24 @@ class ExportWarning(BaseModel):
     message: str = Field(min_length=1)
 
 
+class ExporterProvenance(BaseModel):
+    """Identify the installed exporter that generated an artifact."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    contract_version: int = Field(ge=1, le=1_000)
+    distribution_name: str = Field(
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$",
+    )
+    distribution_version: str = Field(
+        min_length=1, max_length=128, pattern=r"^[^\r\n\x00]+$"
+    )
+    format: Literal["harbor", "verifiers-v1"]
+    target_version: str = Field(min_length=1, max_length=128, pattern=r"^[^\r\n\x00]+$")
+
+
 class ContentPolicy(BaseModel):
     """Select the allowlisted optional experimental content to omit."""
 
@@ -234,6 +252,15 @@ class ExportError(Exception):
 
 def get_export_error_kind(error: ExportError) -> str:
     """Map a private export failure to the shared public error kinds."""
+    if error.code in {
+        "exporter_not_installed",
+        "exporter_ambiguous",
+        "exporter_incompatible",
+        "exporter_load_failed",
+    }:
+        return "invalid_configuration"
+    if error.code == "exporter_invalid_result":
+        return "internal_error"
     if error.code in {"destination_conflict", "archive_conflict"}:
         return "conflict"
     if error.code.endswith("not_found"):
@@ -572,6 +599,7 @@ class ExportManifest(BaseModel):
     schema_version: Literal[1] = 1
     format: Literal["harbor", "verifiers-v1"]
     target_version: str
+    exporter: ExporterProvenance
     experiment_id: uuid.UUID
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID

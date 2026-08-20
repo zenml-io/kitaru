@@ -4,7 +4,7 @@
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -16,10 +16,23 @@ from kitaru.exports.models import (
     DependencyReceipt,
     EnvironmentPolicy,
     ExportAssurance,
+    ExportError,
     RuntimeRequirements,
     SourcePolicy,
 )
 from kitaru.exports.operation import ExportReceipt
+from kitaru.exports.plugin import ExporterMetadata, LoadedExporter
+
+
+def _loaded_exporter() -> LoadedExporter:
+    metadata = ExporterMetadata(
+        contract_version=1,
+        distribution_name="kitaru-verifiers-exporter",
+        distribution_version="1.2.3",
+        format="verifiers-v1",
+        target_version="0.3.0",
+    )
+    return LoadedExporter(implementation=cast(Any, object()), metadata=metadata)
 
 
 async def test_cli_resolves_references_before_shared_operation(
@@ -29,8 +42,15 @@ async def test_cli_resolves_references_before_shared_operation(
     cohort_version_id = uuid.uuid4()
     agent_version_id = uuid.uuid4()
     seen = []
+    events: list[str] = []
+    loaded = _loaded_exporter()
+
+    def resolve_exporter(_format: str) -> LoadedExporter:
+        events.append("exporter")
+        return loaded
 
     async def resolve_asset(*_args: Any) -> Any:
+        events.append("experiment")
         return SimpleNamespace(id=experiment_id)
 
     async def get_cohort_version(*_args: Any) -> Any:
@@ -39,7 +59,10 @@ async def test_cli_resolves_references_before_shared_operation(
     async def get_agent_version(*_args: Any) -> Any:
         return object(), SimpleNamespace(id=agent_version_id)
 
-    async def export(_client: Any, request: Any) -> ExportReceipt:
+    async def export(
+        _client: Any, request: Any, *, exporter: LoadedExporter
+    ) -> ExportReceipt:
+        assert exporter is loaded
         seen.append(request)
         return ExportReceipt(
             format=request.format,
@@ -52,8 +75,10 @@ async def test_cli_resolves_references_before_shared_operation(
             evaluator_count=1,
             source_digest="0" * 64,
             destination=str(request.destination),
+            exporter=loaded.provenance,
         )
 
+    monkeypatch.setattr(experiment_exports, "resolve_exporter", resolve_exporter)
     monkeypatch.setattr(experiment_exports, "resolve_asset", resolve_asset)
     monkeypatch.setattr(experiment_exports, "get_cohort_version", get_cohort_version)
     monkeypatch.setattr(experiment_exports, "get_agent_version", get_agent_version)
@@ -78,6 +103,7 @@ async def test_cli_resolves_references_before_shared_operation(
         dry_run=True,
     )
     assert seen[0].cohort_version_id == cohort_version_id
+    assert events[:2] == ["exporter", "experiment"]
     assert seen[0].agent_version_id == agent_version_id
     assert seen[0].content_policy == ContentPolicy(
         omit=("visible_reasoning", "usage_and_cost")
@@ -93,6 +119,7 @@ async def test_cli_returns_complete_rich_receipt(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     identifier = uuid.uuid4()
+    loaded = _loaded_exporter()
 
     async def resolve_asset(*_args: Any) -> Any:
         return SimpleNamespace(id=identifier)
@@ -100,7 +127,10 @@ async def test_cli_returns_complete_rich_receipt(
     async def resolve_version(*_args: Any) -> Any:
         return object(), SimpleNamespace(id=identifier)
 
-    async def export(_client: Any, request: Any) -> ExportReceipt:
+    async def export(
+        _client: Any, request: Any, *, exporter: LoadedExporter
+    ) -> ExportReceipt:
+        assert exporter is loaded
         return ExportReceipt(
             format=request.format,
             dry_run=False,
@@ -114,6 +144,7 @@ async def test_cli_returns_complete_rich_receipt(
             destination=str(request.destination),
             bundle_digest="1" * 64,
             target_version="0.3.0",
+            exporter=loaded.provenance,
             content_policy=request.content_policy,
             environment_policy=request.environment_policy,
             source_policy=request.source_policy,
@@ -137,6 +168,7 @@ async def test_cli_returns_complete_rich_receipt(
         )
 
     monkeypatch.setattr(experiment_exports, "resolve_asset", resolve_asset)
+    monkeypatch.setattr(experiment_exports, "resolve_exporter", lambda _format: loaded)
     monkeypatch.setattr(experiment_exports, "get_cohort_version", resolve_version)
     monkeypatch.setattr(experiment_exports, "get_agent_version", resolve_version)
     monkeypatch.setattr(experiment_exports, "export_experiment", export)
@@ -182,6 +214,7 @@ async def test_cli_treats_malformed_export_receipt_as_internal_error(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     identifier = uuid.uuid4()
+    loaded = _loaded_exporter()
 
     async def resolve_asset(*_args: Any) -> Any:
         return SimpleNamespace(id=identifier)
@@ -189,10 +222,12 @@ async def test_cli_treats_malformed_export_receipt_as_internal_error(
     async def resolve_version(*_args: Any) -> Any:
         return object(), SimpleNamespace(id=identifier)
 
-    async def export(_client: Any, _request: Any) -> Any:
+    async def export(_client: Any, _request: Any, *, exporter: LoadedExporter) -> Any:
+        assert exporter is loaded
         return {"format": "verifiers-v1"}
 
     monkeypatch.setattr(experiment_exports, "resolve_asset", resolve_asset)
+    monkeypatch.setattr(experiment_exports, "resolve_exporter", lambda _format: loaded)
     monkeypatch.setattr(experiment_exports, "get_cohort_version", resolve_version)
     monkeypatch.setattr(experiment_exports, "get_agent_version", resolve_version)
     monkeypatch.setattr(experiment_exports, "export_experiment", export)
@@ -220,3 +255,50 @@ async def test_cli_treats_malformed_export_receipt_as_internal_error(
 
     assert raised.value.kind == "internal_error"
     assert "validation" not in raised.value.message.lower()
+
+
+async def test_cli_maps_missing_exporter_before_reference_resolution(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    references_touched = False
+
+    async def resolve_asset(*_args: Any) -> Any:
+        nonlocal references_touched
+        references_touched = True
+        raise AssertionError("reference resolution ran")
+
+    def reject(_format: str) -> LoadedExporter:
+        raise ExportError(
+            "exporter_not_installed",
+            "Export format verifiers-v1 requires kitaru-verifiers-exporter. "
+            "Install it with `uv add kitaru-verifiers-exporter`.",
+        )
+
+    monkeypatch.setattr(experiment_exports, "resolve_asset", resolve_asset)
+    monkeypatch.setattr(experiment_exports, "resolve_exporter", reject)
+
+    with pytest.raises(CLIError) as raised:
+        await experiment_exports.export_experiment_command(
+            SimpleNamespace(experiments=object()),
+            "experiment",
+            cohort_version="cohort@1",
+            agent="agent@1",
+            format="verifiers-v1",
+            source_root=tmp_path,
+            destination=tmp_path / "bundle",
+            primary_reward="quality:correctness:score",
+            required_env=None,
+            omit_content=None,
+            environment_mode="include",
+            include_source=None,
+            exclude_source=None,
+            trace_format=None,
+            trace_path=None,
+            archive=False,
+            dry_run=True,
+        )
+
+    assert raised.value.kind == "invalid_configuration"
+    assert raised.value.details == {"export_code": "exporter_not_installed"}
+    assert "Python environment running this command" in raised.value.hint
+    assert references_touched is False
