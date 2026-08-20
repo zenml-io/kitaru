@@ -21,7 +21,7 @@ import yaml
 
 from kitaru.cli.skill_discovery import get_kitaru_skill_status
 
-REPO_ROOT = Path(__file__).parents[1]
+REPO_ROOT = Path(__file__).parents[2]
 
 # Host-neutral skills should stay byte-identical. Add a name here only when a
 # documented host capability requires different Claude Code instructions.
