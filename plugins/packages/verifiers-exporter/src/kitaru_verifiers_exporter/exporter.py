@@ -68,6 +68,10 @@ _PLUGIN_PREFIX_LENGTH = 24
 _RUNTIME_TEMPLATE_VERSION = 1
 _PYTHON_RUNTIME_IMAGE = "python:3.12-slim"
 _DISTRIBUTION_NAME = "kitaru-verifiers-exporter"
+_AGENT_RUNTIME_ROOT = "/workspace/kitaru-agent"
+_UV_RUN_OPTIONS_WITH_VALUE = frozenset(
+    {"--directory", "--package", "--project", "--python"}
+)
 
 _TASK_DATA_KEYS = {
     "idx",
@@ -420,7 +424,7 @@ def evaluate(trace: dict[str, Any], data: Any) -> tuple[float, dict[str, float]]
 
 
 def _dependency_setup(plan: DependencyPlan) -> list[list[str]]:
-    root = "/workspace/kitaru-agent"
+    root = _AGENT_RUNTIME_ROOT
     if plan.manifests == ("pyproject.toml", "uv.lock") and plan.status == "locked":
         return [
             ["uv", "sync", "--project", root, "--frozen", "--no-dev", "--no-editable"]
@@ -443,6 +447,28 @@ def _dependency_setup(plan: DependencyPlan) -> list[list[str]]:
         "invalid_dependency_plan",
         "The agent dependency plan is not a supported locked or declared shape.",
     )
+
+
+def _pin_uv_project(command_argv: tuple[str, ...]) -> list[str]:
+    argv = list(command_argv)
+    if len(argv) < 2 or Path(argv[0]).name != "uv" or argv[1] != "run":
+        return argv
+
+    project_index: int | None = None
+    index = 2
+    while index < len(argv) and argv[index].startswith("-"):
+        option = argv[index]
+        if option == "--no-project":
+            return argv
+        if option == "--project":
+            project_index = index + 1
+        index += 2 if option in _UV_RUN_OPTIONS_WITH_VALUE else 1
+
+    if project_index is None:
+        argv[2:2] = ["--project", _AGENT_RUNTIME_ROOT]
+    else:
+        argv[project_index] = _AGENT_RUNTIME_ROOT
+    return argv
 
 
 def _eval_toml(
@@ -803,7 +829,7 @@ def _write_runtime(
         module / "runtime.json",
         {
             "agent_source": "agent_source",
-            "command_argv": list(resolved.command_argv),
+            "command_argv": _pin_uv_project(resolved.command_argv),
             "environment": dict(sorted(run_spec.env.items())),
             "executable_paths": [
                 file.path for file in resolved.source.files if file.mode == 0o755

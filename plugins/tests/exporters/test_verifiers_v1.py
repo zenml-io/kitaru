@@ -591,6 +591,47 @@ def test_harness_uses_shell_free_argv_and_container_dependency_setup(
     assert ' / "scoring"' not in plugin.split("async def setup", 1)[1]
 
 
+def test_harness_pins_uv_run_to_the_classified_root_project(tmp_path: Path) -> None:
+    source_root = tmp_path / "source"
+    resolved = _resolved(source_root)
+    nested = source_root / "nested"
+    nested.mkdir()
+    (nested / "agent.py").write_text("print('nested agent')\n")
+    (nested / "pyproject.toml").write_text(
+        '[project]\nname = "nested-agent"\nversion = "1.0.0"\n'
+        'dependencies = ["nested-only==1.0.0"]\n'
+    )
+    source = inventory_source(source_root)
+    assert resolved.agent_version.run_spec is not None
+    run_spec = resolved.agent_version.run_spec.model_copy(
+        update={"working_dir": "nested"}
+    )
+    resolved = replace(
+        resolved,
+        agent_version=resolved.agent_version.model_copy(update={"run_spec": run_spec}),
+        source=source,
+        command_argv=("uv", "run", "python", "agent.py"),
+        dependency_plan=classify_dependencies(source),
+    )
+
+    root = tmp_path / "bundle"
+    render_verifiers_v1(resolved, root)
+    _, module = _module(root)
+    runtime = json.loads((module / "runtime.json").read_text())
+
+    assert resolved.dependency_plan is not None
+    assert resolved.dependency_plan.requirements == ()
+    assert runtime["working_directory"] == "nested"
+    assert runtime["command_argv"] == [
+        "uv",
+        "run",
+        "--project",
+        "/workspace/kitaru-agent",
+        "python",
+        "agent.py",
+    ]
+
+
 def test_generated_bridge_is_self_contained_and_all_is_exact(tmp_path: Path) -> None:
     root = tmp_path / "bundle"
     render_verifiers_v1(_resolved(tmp_path / "source"), root)
@@ -625,7 +666,8 @@ def test_structural_validation_does_not_import_exported_code(
     render_verifiers_v1(_resolved(tmp_path / "source"), root)
     _, module = _module(root)
     generated_package = module.name
-    generated_root = root.resolve()
+    generated_root = str(root.resolve())
+    generated_root_prefix = f"{generated_root}/"
     original_import = builtins.__import__
 
     def reject_generated_import(
@@ -645,9 +687,10 @@ def test_structural_validation_does_not_import_exported_code(
             or (isinstance(value, str) and value.startswith(f"{generated_package}."))
             for value in (package, module_name)
         )
-        generated_file = isinstance(module_file, str) and Path(
-            module_file
-        ).resolve().is_relative_to(generated_root)
+        generated_file = isinstance(module_file, str) and (
+            module_file == generated_root
+            or module_file.startswith(generated_root_prefix)
+        )
         if generated_module or generated_file:
             raise AssertionError("structural validation imported generated code")
         return original_import(name, globals, locals, fromlist, level)

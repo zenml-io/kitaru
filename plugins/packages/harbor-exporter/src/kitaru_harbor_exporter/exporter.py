@@ -43,6 +43,10 @@ _UV_VERSION = "0.12.1"
 _IMAGE_PREFIX = "kitaru-export"
 _SUPPORTED_TRACES = {"atif", "kitaru"}
 _DISTRIBUTION_NAME = "kitaru-harbor-exporter"
+_AGENT_RUNTIME_ROOT = "/workspace"
+_UV_RUN_OPTIONS_WITH_VALUE = frozenset(
+    {"--directory", "--package", "--project", "--python"}
+)
 
 
 def _get_distribution_version() -> str:
@@ -197,6 +201,28 @@ def _dependency_install(plan: DependencyPlan) -> str:
     )
 
 
+def _pin_uv_project(command_argv: tuple[str, ...]) -> list[str]:
+    argv = list(command_argv)
+    if len(argv) < 2 or Path(argv[0]).name != "uv" or argv[1] != "run":
+        return argv
+
+    project_index: int | None = None
+    index = 2
+    while index < len(argv) and argv[index].startswith("-"):
+        option = argv[index]
+        if option == "--no-project":
+            return argv
+        if option == "--project":
+            project_index = index + 1
+        index += 2 if option in _UV_RUN_OPTIONS_WITH_VALUE else 1
+
+    if project_index is None:
+        argv[2:2] = ["--project", _AGENT_RUNTIME_ROOT]
+    else:
+        argv[project_index] = _AGENT_RUNTIME_ROOT
+    return argv
+
+
 def _dockerfile(plan: DependencyPlan) -> str:
     dependency_install = _dependency_install(plan)
     return f"""# syntax=docker/dockerfile:1
@@ -272,15 +298,19 @@ class KitaruAgent(BaseAgent):
             raise RuntimeError(
                 f"Exported agent failed with exit code {result.return_code}"
             )
+        trace_path = runtime["trace_path"]
         destination = "/logs/agent/" + runtime["trace_log_name"]
-        copied = await environment.exec(
-            "mkdir -p /logs/agent && cp -- "
-            + shlex.quote(runtime["trace_path"])
-            + " "
-            + shlex.quote(destination),
-            timeout_sec=30,
-        )
-        if copied.return_code != 0:
+        if trace_path == destination:
+            publish_command = "test -f " + shlex.quote(destination)
+        else:
+            publish_command = (
+                "mkdir -p /logs/agent && cp -- "
+                + shlex.quote(trace_path)
+                + " "
+                + shlex.quote(destination)
+            )
+        published = await environment.exec(publish_command, timeout_sec=30)
+        if published.return_code != 0:
             raise RuntimeError("Exported agent did not produce its declared trace")
 
     def populate_context_post_run(self, context) -> None:
@@ -543,7 +573,7 @@ def _render_harbor(
         agent_image / "agent-runtime.json",
         {
             "agent_timeout_seconds": run_spec.timeout_seconds,
-            "command_argv": list(resolved.command_argv),
+            "command_argv": _pin_uv_project(resolved.command_argv),
             "environment": run_spec.env,
             "required_environment_names": list(required_environment_names),
             "trace_format": trace_format,

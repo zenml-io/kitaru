@@ -391,6 +391,64 @@ def test_generated_agent_imports_without_container_files(
     assert namespace["_load_runtime"]()["trace_format"] == "atif"
 
 
+@pytest.mark.parametrize(
+    ("trace_format", "trace_path"),
+    [
+        ("atif", "/logs/agent/trajectory.json"),
+        ("kitaru", "/logs/agent/kitaru-session.json"),
+    ],
+)
+async def test_generated_agent_keeps_canonical_trace_in_place(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    trace_format: str,
+    trace_path: str,
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    output = tmp_path / "bundle"
+    render_harbor(
+        _resolved(source, session_count=1),
+        output,
+        trace_format=trace_format,
+        trace_path=trace_path,
+    )
+
+    class FakeBaseAgent:
+        def __init__(self) -> None:
+            self.extra_env: dict[str, str] = {}
+
+    harbor = types.ModuleType("harbor")
+    agents = types.ModuleType("harbor.agents")
+    base = types.ModuleType("harbor.agents.base")
+    base_module: Any = base
+    base_module.BaseAgent = FakeBaseAgent
+    monkeypatch.setitem(sys.modules, "harbor", harbor)
+    monkeypatch.setitem(sys.modules, "harbor.agents", agents)
+    monkeypatch.setitem(sys.modules, "harbor.agents.base", base)
+    launcher = output / "agent/kitaru_agent.py"
+    namespace: dict[str, Any] = {"__file__": str(launcher)}
+    exec(compile(launcher.read_text(), str(launcher), "exec"), namespace)
+
+    class Result:
+        return_code = 0
+
+    class Environment:
+        def __init__(self) -> None:
+            self.commands: list[str] = []
+
+        async def exec(self, command: str, **_: Any) -> Result:
+            self.commands.append(command)
+            return Result()
+
+    environment = Environment()
+    await namespace["KitaruAgent"]().run("{}", environment, None)
+
+    assert environment.commands[-1] == f"test -f {trace_path}"
+    assert "cp --" not in environment.commands[-1]
+
+
 def test_harbor_digest_matches_official_algorithm(tmp_path: Path) -> None:
     (tmp_path / "task.toml").write_text("task")
     (tmp_path / "instruction.md").write_text("instruction")
@@ -551,6 +609,63 @@ members = ["packages/*"]
         "uv sync --project /workspace"
         in (output / "agent_image/Dockerfile").read_text()
     )
+
+
+@pytest.mark.parametrize(
+    ("command_argv", "expected_argv"),
+    [
+        (
+            ("uv", "run", "python", "agent.py"),
+            ["uv", "run", "--project", "/workspace", "python", "agent.py"],
+        ),
+        (
+            ("uv", "run", "--project", "nested", "python", "agent.py"),
+            ["uv", "run", "--project", "/workspace", "python", "agent.py"],
+        ),
+        (
+            ("uv", "run", "--no-project", "python", "agent.py"),
+            ["uv", "run", "--no-project", "python", "agent.py"],
+        ),
+    ],
+)
+def test_harbor_pins_uv_run_to_the_classified_root_project(
+    tmp_path: Path,
+    command_argv: tuple[str, ...],
+    expected_argv: list[str],
+) -> None:
+    source = tmp_path / "source"
+    nested = source / "nested"
+    nested.mkdir(parents=True)
+    (source / "pyproject.toml").write_text(
+        '[project]\nname = "root-agent"\nversion = "1.0.0"\n'
+    )
+    (nested / "pyproject.toml").write_text(
+        '[project]\nname = "nested-agent"\nversion = "1.0.0"\n'
+        'dependencies = ["nested-only==1.0.0"]\n'
+    )
+    (nested / "agent.py").write_text("print('nested agent')\n")
+    resolved = _resolved(source, session_count=1)
+    run_spec = resolved.agent_version.run_spec
+    assert run_spec is not None
+    resolved = replace(
+        resolved,
+        agent_version=resolved.agent_version.model_copy(
+            update={"run_spec": run_spec.model_copy(update={"working_dir": "nested"})}
+        ),
+        command_argv=command_argv,
+    )
+    output = tmp_path / "bundle"
+
+    render_harbor(
+        resolved,
+        output,
+        trace_format="atif",
+        trace_path="/workspace/trajectory.json",
+    )
+
+    runtime = json.loads((output / "agent_image/agent-runtime.json").read_text())
+    assert runtime["working_directory"] == "/workspace/nested"
+    assert runtime["command_argv"] == expected_argv
 
 
 def test_harbor_keeps_command_argv_and_trace_path_as_inert_json(tmp_path: Path) -> None:
