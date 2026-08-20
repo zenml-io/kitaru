@@ -1,1 +1,1 @@
-"""Target-format renderers for experiment exports."""
+"""Shared validation support for installed experiment exporters."""
