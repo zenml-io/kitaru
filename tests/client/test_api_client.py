@@ -235,6 +235,33 @@ async def test_fresh_idempotency_key_per_request() -> None:
     assert len(keys) == 2
 
 
+async def test_idempotency_key_stamped_only_for_post() -> None:
+    """Stamp the idempotency key for POST, not other methods."""
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(200, json={})
+
+    client = mock_api_client(handler)
+    await client.request("GET", "/api/v1/accounts")
+    await client.request("PUT", "/api/v1/accounts/1")
+    await client.request("DELETE", "/api/v1/accounts/1")
+    await client.request("POST", "/api/v1/users", json={"name": "alice"})
+    await client.request("PATCH", "/api/v1/users/1", json={"name": "alice"})
+    methods = {
+        request.method: IDEMPOTENCY_KEY_HEADER in request.headers
+        for request in requests
+    }
+    assert methods == {
+        "GET": False,
+        "PUT": False,
+        "DELETE": False,
+        "POST": True,
+        "PATCH": False,
+    }
+
+
 async def test_no_retry_for_streaming_request_body() -> None:
     """Send a request with a non-replayable body exactly once."""
     requests: list[httpx.Request] = []

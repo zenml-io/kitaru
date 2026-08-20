@@ -17,7 +17,7 @@ The server is a single FastAPI service backed by Postgres. It stores every resou
 
 Between them sits the **job/task** layer. Commands like "replay this session," "import this export," or "evaluate these sessions" create a job holding one or more tasks; every job carries its kind (`session_run`, `import`, `evaluation`, `replay`), so `kitaru job` listings filter cleanly. Workers claim tasks scoped by _task_ kind (`agent`, `evaluator`, `importer`, a different axis than job kinds) or by label, heartbeat while running them, and report results. Crashed workers lose their claim; the server requeues or fails the task, so no replay is ever silently stranded. `kitaru job watch <id>` follows any of it live.
 
-Writes are safe to retry: the client stamps every create request with an idempotency key and reuses it across retries, and the server stores the outcome: a replay or evaluation request that times out on the wire and gets retried never becomes two replays.
+Writes are safe to retry: the client stamps every POST request with an `Idempotency-Key` header, held stable across the transport's own retries, and the server stores the first committed response for that key, scoped to your account. A replay or evaluation request that times out on the wire and gets retried never becomes two replays: the retry gets the original response back, marked with an `Idempotent-Replayed: true` header instead of running again. Reusing a key with a different request body is rejected with 422. A failed request stores nothing, so a retry after an error re-executes normally. Stored keys expire after `KITARU_SERVER_IDEMPOTENCY_KEY_RETENTION_SECONDS` (15 minutes by default) and are cleared by the same sweep loop that requeues tasks.
 
 ## How replay works
 
@@ -38,7 +38,7 @@ Auth is deliberately simple: [API keys](../deploy/authentication.md) (`KITKEY_` 
 
 ## Where Kitaru sits in your stack
 
-Kitaru is a debugger with a memory, sitting **beside** your observability stack, not replacing it. Langfuse, LangSmith, Braintrust, and Logfire remain your system of record for traces; Kitaru holds runnable copies of the runs you care about and the machinery to re-execute and evaluate them. The [import path](../getting-started/import-your-traces.md) is that bridge.
+Kitaru is a debugger with a memory, sitting **beside** your observability stack, not replacing it. Langfuse, LangSmith, Braintrust, Logfire, and Arize Phoenix remain your system of record for traces; Kitaru holds runnable copies of the runs you care about and the machinery to re-execute and evaluate them. The [import path](../getting-started/import-your-traces.md) is that bridge.
 
 On the other side, Kitaru deliberately does **not** run your production agent. Your agent runs wherever it runs today; the adapter records it. Durable execution of agents in production is [ZenML](https://docs.zenml.io)'s job: ZenML runs agents durably; Kitaru replays and improves them.
 

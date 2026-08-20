@@ -40,7 +40,6 @@ from kitaru.server.adapters.auth.auth_service import (
     AuthService,
     IssuedToken,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     get_app_settings,
     get_auth_service,
@@ -50,6 +49,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.adapters.rest.mapping.devices import (
     device_to_authorization_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.device import DeviceFingerprint
 from kitaru.server.application.services.device_service import DeviceService
@@ -61,7 +61,7 @@ from kitaru.server.domain.device import (
     InvalidDeviceCode,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 class TokenGrantError(Exception):

@@ -25,7 +25,6 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
 )
 from kitaru.api_models.v1.job import JobResponse
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_run_service,
@@ -36,13 +35,14 @@ from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_to_response,
 )
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.run_cancellation import RunCanceler, get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("")

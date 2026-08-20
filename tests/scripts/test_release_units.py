@@ -28,6 +28,7 @@ EXPECTED_UNITS = {
     "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
+    "phoenix-importer": "kitaru-phoenix-importer",
     "pydantic-ai": "kitaru-pydantic-ai",
 }
 
@@ -38,6 +39,7 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-langfuse-importer",
     "kitaru-logfire-importer",
     "kitaru-langsmith-importer",
+    "kitaru-phoenix-importer",
 }
 
 
@@ -449,7 +451,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 10 release units."),
+        (["validate"], "Validated 11 release units."),
     ],
 )
 def test_cli_text_commands_succeed(

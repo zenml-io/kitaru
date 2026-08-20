@@ -177,6 +177,25 @@ def test_groups_conversation_traces_as_ordered_turns() -> None:
     assert session.metadata["source_trace_count"] == 2
 
 
+def test_keeps_same_named_sessions_from_projects_separate() -> None:
+    """Use project identity as part of the grouping key."""
+    parsed = parse(
+        jsonl(
+            row("root-1", trace_id="trace-1", project_id="project-1"),
+            row("root-2", trace_id="trace-2", project_id="project-2"),
+        )
+    )
+
+    assert [
+        session.external_id
+        for session in parsed
+        if isinstance(session, ImportedSession)
+    ] == [
+        "project-1:conversation-1",
+        "project-2:conversation-1",
+    ]
+
+
 def test_parses_streaming_query_api_ndjson() -> None:
     """Read schema, batched rows, and terminal messages from Query API v2."""
     payload = b"\n".join(

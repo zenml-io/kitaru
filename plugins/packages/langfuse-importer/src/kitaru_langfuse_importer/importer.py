@@ -773,6 +773,14 @@ def _events_to_traces(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Apply legacy ingestion events into trace rows."""
     traces: dict[str, dict[str, Any]] = {}
     observations: dict[tuple[str, str], dict[str, Any]] = {}
+    observation_trace_ids: dict[str, set[str]] = defaultdict(set)
+    for event in records:
+        body = dict(event["body"])
+        observation_id = _first(body, "id", "observationId")
+        trace_id = _first(body, "traceId", "trace_id")
+        if observation_id not in (None, "") and trace_id not in (None, ""):
+            observation_trace_ids[str(observation_id)].add(str(trace_id))
+
     for event in records:
         event_type = str(event.get("type", "")).lower()
         body = dict(event["body"])
@@ -787,13 +795,9 @@ def _events_to_traces(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         observation_id = str(_first(body, "id", "observationId") or "")
         trace_id = str(_first(body, "traceId", "trace_id") or "")
         if observation_id and not trace_id:
-            matches = [
-                candidate_trace_id
-                for candidate_trace_id, candidate_id in observations
-                if candidate_id == observation_id
-            ]
+            matches = observation_trace_ids.get(observation_id, set())
             if len(matches) == 1:
-                trace_id = matches[0]
+                trace_id = next(iter(matches))
         if not observation_id or not trace_id:
             raise InvalidImport(
                 "A Langfuse observation event lacks an id or resolvable trace id"
@@ -897,21 +901,22 @@ def _node_status(record: dict[str, Any]) -> NodeStatus:
 def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     """Map Langfuse usage data."""
     usage = _dict(_first(record, "usageDetails", "usage_details"))
+    input_usage = _first_nonempty(record, "inputUsage", "input_usage")
+    if input_usage is None:
+        input_usage = _first_nonempty(usage, "input", "input_tokens")
+    output_usage = _first_nonempty(record, "outputUsage", "output_usage")
+    if output_usage is None:
+        output_usage = _first_nonempty(usage, "output", "output_tokens")
     counts = (
+        _integer(input_usage),
+        _integer(output_usage),
         _integer(
-            _first(record, "inputUsage", "input_usage")
-            or usage.get("input")
-            or usage.get("input_tokens")
-        ),
-        _integer(
-            _first(record, "outputUsage", "output_usage")
-            or usage.get("output")
-            or usage.get("output_tokens")
-        ),
-        _integer(
-            usage.get("input_cached_tokens")
-            or usage.get("cache_read_tokens")
-            or usage.get("cached_input_tokens")
+            _first_nonempty(
+                usage,
+                "input_cached_tokens",
+                "cache_read_tokens",
+                "cached_input_tokens",
+            )
         ),
         _integer(usage.get("reasoning_tokens")),
     )

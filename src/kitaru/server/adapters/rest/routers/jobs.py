@@ -21,7 +21,6 @@ from fastapi import APIRouter, Depends, Query, status
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.job import JobListParams, JobResponse, JobTasksListParams
 from kitaru.api_models.v1.task import TaskResponse
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_worker,
@@ -33,10 +32,11 @@ from kitaru.server.adapters.rest.mapping.jobs import (
     job_to_response,
 )
 from kitaru.server.adapters.rest.mapping.tasks import task_to_response
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.job_service import JobService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("")

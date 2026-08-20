@@ -42,8 +42,8 @@ This file covers repository, ORM, and transaction mechanics.
   the application-layer Protocol, and take the session in the constructor.
 - Repositories never call `commit()`. Write methods end with `flush()` so the
   SQL runs and constraint violations surface inside the repository method.
-  The request session commits at the REST boundary, through `CommitRoute`
-  (`adapters/rest/commit_route.py`) after the route handler succeeds and
+  The request session commits at the REST boundary, through `KitaruAPIRoute`
+  (`adapters/rest/route.py`) after the route handler succeeds and
   before the response is returned. Any exception skips the commit and
   pending writes roll back when the session closes.
 - `query` methods build a filtered, unordered `Select` and pass it to the

@@ -697,6 +697,67 @@ def test_imports_legacy_ingestion_events() -> None:
     assert parsed[0].nodes[0].outputs == {"answer": "hi"}
 
 
+def test_imports_out_of_order_legacy_ingestion_updates() -> None:
+    """Resolve an update when its create event appears later in the upload."""
+    parsed = sessions(
+        jsonl(
+            {
+                "type": "span-update",
+                "body": {
+                    "id": "root",
+                    "endTime": "2026-07-24T10:00:01Z",
+                    "output": {"answer": "hi"},
+                },
+            },
+            {
+                "type": "trace-create",
+                "body": {
+                    "id": "trace-1",
+                    "sessionId": "conversation-1",
+                    "projectId": "project-1",
+                },
+            },
+            {
+                "type": "span-create",
+                "body": {
+                    "id": "root",
+                    "traceId": "trace-1",
+                    "name": "agent",
+                    "startTime": "2026-07-24T10:00:00Z",
+                },
+            },
+        )
+    )
+
+    assert parsed[0].nodes[0].outputs == {"answer": "hi"}
+
+
+def test_preserves_explicit_zero_token_usage() -> None:
+    """Prefer an explicit zero over a later alias with a nonzero value."""
+    session = sessions(
+        jsonl(
+            observation(
+                "generation",
+                "trace-1",
+                observation_type="GENERATION",
+                usageDetails={
+                    "input": 0,
+                    "input_tokens": 7,
+                    "output": 0,
+                    "output_tokens": 5,
+                    "input_cached_tokens": 0,
+                    "cache_read_tokens": 3,
+                },
+            )
+        )
+    )[0]
+
+    assert session.nodes[0].tokens is not None
+    assert session.nodes[0].tokens.input_tokens == 0
+    assert session.nodes[0].tokens.output_tokens == 0
+    assert session.nodes[0].tokens.cached_input_tokens == 0
+
+
 def test_reports_one_invalid_group_without_losing_valid_sessions() -> None:
     """Isolate semantic errors by grouped source session."""
     content = jsonl(

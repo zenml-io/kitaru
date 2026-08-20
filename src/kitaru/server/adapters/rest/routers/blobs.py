@@ -20,7 +20,6 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, File, Response, UploadFile, status
 
 from kitaru.api_models.v1.blob import BlobResponse
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -28,10 +27,11 @@ from kitaru.server.adapters.rest.dependencies import (
     get_blob_service,
 )
 from kitaru.server.adapters.rest.mapping.blobs import blob_to_response
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 _UPLOAD_CHUNK_BYTES = 1024 * 1024
 

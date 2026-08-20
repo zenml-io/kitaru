@@ -22,6 +22,7 @@ members = [
     "kitaru-langsmith-importer",
     "kitaru-logfire-importer",
     "kitaru-openai-agents",
+    "kitaru-phoenix-importer",
     "kitaru-pydantic-ai",
 ]
 
@@ -1027,7 +1028,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langfuse-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1075,7 +1076,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-logfire-importer"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "packages/logfire-importer" }
 dependencies = [
     { name = "kitaru" },
@@ -1098,6 +1099,17 @@ requires-dist = [
     { name = "kitaru", editable = "../" },
     { name = "openai-agents", specifier = ">=0.19.3,<0.20" },
 ]
+
+[[package]]
+name = "kitaru-phoenix-importer"
+version = "0.1.0"
+source = { editable = "packages/phoenix-importer" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-pydantic-ai"

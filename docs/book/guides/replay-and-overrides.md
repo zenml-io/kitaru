@@ -32,7 +32,7 @@ kitaru replay get <replay-id> --output json
 
 Use `kitaru job get <job-id> --tasks` for task errors and `kitaru job cancel <job-id>` to request cancellation. `kitaru replay list --output json` lists both standalone and experiment-created replays.
 
-{% hint style="warning" %} Replay creation is not idempotent. An ambiguous network failure can mean the server created the replay and job even though the CLI did not receive the response. Check `kitaru replay list` before retrying, or the retry may create a duplicate replay and job. Omitting `--tool-policy` uses the server default and may execute live tools. {% endhint %}
+{% hint style="warning" %} The SDK's automatic retries (timeouts, dropped connections, 5xx) are safe: they reuse the same idempotency key, so a retried create settles as at most one replay. Manually re-running `kitaru replay create` after an ambiguous failure is not, since each invocation mints its own key. Check `kitaru replay list` before retrying by hand, or the manual retry may create a duplicate replay and job. Omitting `--tool-policy` uses the server default and may execute live tools. {% endhint %}
 
 ## The three-session discipline
 
