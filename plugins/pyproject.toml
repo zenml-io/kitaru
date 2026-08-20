@@ -7,6 +7,7 @@ members = ["packages/*"]
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
 kitaru-harbor-exporter = { workspace = true }
+kitaru-verifiers-exporter = { workspace = true }
 kitaru-langgraph = { workspace = true }
 kitaru-openai-agents = { workspace = true }
 kitaru-pydantic-ai = { workspace = true }
@@ -15,6 +16,7 @@ kitaru-pydantic-ai = { workspace = true }
 dev = [
     "kitaru[server]",
     "kitaru-harbor-exporter",
+    "kitaru-verifiers-exporter",
     "kitaru-langgraph[deepagents]",
     "kitaru-openai-agents",
     "kitaru-pydantic-ai[openai]",
@@ -40,6 +42,7 @@ known-first-party = [
     "kitaru",
     "kitaru_evaluator",
     "kitaru_harbor_exporter",
+    "kitaru_verifiers_exporter",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",
     "kitaru_langfuse_importer",

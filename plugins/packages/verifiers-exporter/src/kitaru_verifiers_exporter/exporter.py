@@ -15,6 +15,7 @@
 
 import ast
 import hashlib
+import importlib.metadata
 import json
 import shutil
 import tomllib
@@ -25,21 +26,15 @@ from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
-from kitaru.exports._bridge import (
-    get_runtime_bridge_version,
-    materialize_runtime_bridge,
-)
-from kitaru.exports.config import normalize_environment_names
-from kitaru.exports.formats._validation import (
-    validate_generated_resources,
-    validate_kitaru_requirement,
-    validate_runtime_bridge,
-)
-from kitaru.exports.models import (
+from kitaru.exports import (
+    EXPORTER_CONTRACT_VERSION,
     V1_EXPORT_BUDGETS,
     ArtifactProvenance,
     DependencyPlan,
     DependencyReceipt,
+    ExporterContext,
+    ExporterMetadata,
+    ExporterOptions,
     ExportError,
     ExportManifest,
     ResolvedExport,
@@ -48,10 +43,16 @@ from kitaru.exports.models import (
     TaskProvenance,
     ValidationReceipt,
 )
-from kitaru.exports.source import copy_source
-from kitaru.exports.writer import (
+from kitaru.exports.render_support import (
     canonical_json_bytes,
+    copy_source,
     file_digests,
+    get_runtime_bridge_version,
+    materialize_runtime_bridge,
+    normalize_environment_names,
+    validate_generated_resources,
+    validate_kitaru_requirement,
+    validate_runtime_bridge,
     write_canonical_json,
 )
 
@@ -66,6 +67,7 @@ _UV_VERSION = "0.12.1"
 _PLUGIN_PREFIX_LENGTH = 24
 _RUNTIME_TEMPLATE_VERSION = 1
 _PYTHON_RUNTIME_IMAGE = "python:3.12-slim"
+_DISTRIBUTION_NAME = "kitaru-verifiers-exporter"
 
 _TASK_DATA_KEYS = {
     "idx",
@@ -77,6 +79,13 @@ _TASK_DATA_KEYS = {
 }
 
 
+def _get_distribution_version() -> str:
+    try:
+        return importlib.metadata.version(_DISTRIBUTION_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return "0.1.0"
+
+
 def _canonical_digest(value: Any) -> str:
     return hashlib.sha256(canonical_json_bytes(value)).hexdigest()
 
@@ -86,10 +95,15 @@ def _quote_toml(value: str) -> str:
 
 
 def _evaluator_requirements(
-    resolved: ResolvedExport, *, kitaru_version: str
+    resolved: ResolvedExport,
+    *,
+    kitaru_version: str,
+    context: ExporterContext | None = None,
 ) -> tuple[str, ...]:
     requirements: dict[str, str] = {}
     for evaluator in sorted(resolved.evaluators, key=lambda item: item.name):
+        if context is not None:
+            context.checkpoint()
         source = evaluator.version.source
         if isinstance(source, PackagePluginSource):
             if any(character in source.requirement for character in "\r\n\0"):
@@ -557,13 +571,16 @@ def _session_content(session: Any) -> tuple[dict[str, Any], str]:
 
 def _task_rows(
     resolved: ResolvedExport,
+    *,
+    context: ExporterContext,
 ) -> tuple[list[dict[str, Any]], list[tuple[Any, dict[str, Any], str]]]:
     rows: list[dict[str, Any]] = []
     private: list[tuple[Any, dict[str, Any], str]] = []
     for index, session in enumerate(
         sorted(resolved.sessions, key=lambda item: str(item.session.id))
     ):
-        context, content_digest = _session_content(session)
+        context.checkpoint()
+        private_context, content_digest = _session_content(session)
         session_id = str(session.session.id)
         inputs = session.session.inputs
         rows.append(
@@ -582,7 +599,7 @@ def _task_rows(
                 ),
             }
         )
-        private.append((session, context, content_digest))
+        private.append((session, private_context, content_digest))
     return rows, private
 
 
@@ -692,7 +709,9 @@ def _artifact_provenance(
     )
 
 
-def _write_evaluators(module: Path, resolved: ResolvedExport) -> None:
+def _write_evaluators(
+    module: Path, resolved: ResolvedExport, *, context: ExporterContext
+) -> None:
     evaluator_root = module / "scoring" / "evaluators"
     evaluator_root.mkdir(parents=True)
     records: list[dict[str, Any]] = []
@@ -700,6 +719,7 @@ def _write_evaluators(module: Path, resolved: ResolvedExport) -> None:
     for index, evaluator in enumerate(
         sorted(resolved.evaluators, key=lambda item: item.name)
     ):
+        context.checkpoint()
         script_path: str | None = None
         if isinstance(evaluator.version.source, ScriptPluginSource):
             if evaluator.script is None:
@@ -738,6 +758,8 @@ def _write_tasks(
     rows: list[dict[str, Any]],
     private: list[tuple[Any, dict[str, Any], str]],
     task_private_requirements: tuple[str, ...],
+    *,
+    context: ExporterContext,
 ) -> tuple[TaskProvenance, ...]:
     (module / "tasks.jsonl").write_bytes(
         b"".join(canonical_json_bytes(row) for row in rows)
@@ -746,13 +768,14 @@ def _write_tasks(
     private_root.mkdir(parents=True)
     selector = resolved.reward
     provenance: list[TaskProvenance] = []
-    for session, context, content_digest in private:
+    for session, private_context, content_digest in private:
+        context.checkpoint()
         session_id = str(session.session.id)
         write_canonical_json(
             private_root / f"{session_id}.json",
             {
                 "bridge_task": {
-                    "context": context,
+                    "context": private_context,
                     "primary_reward": {
                         "evaluator": selector.evaluator,
                         "field": selector.field,
@@ -793,12 +816,14 @@ def _write_runtime(
     )
 
 
-def preflight_verifiers_v1_export(
+def _preflight_verifiers_v1_export(
     resolved: ResolvedExport,
     *,
     required_environment_names: tuple[str, ...] = (),
+    context: ExporterContext,
 ) -> tuple[tuple[str, ...], tuple[str, ...], str]:
     """Validate Verifiers-specific inputs without writing an artifact."""
+    context.checkpoint()
     if resolved.agent_version.run_spec is None:
         raise ExportError("missing_run_spec", "Agent version has no run specification.")
     if not resolved.command_argv:
@@ -831,30 +856,34 @@ def preflight_verifiers_v1_export(
         ) from error
     runtime_version = get_runtime_bridge_version()
     for requirement in dependency_plan.requirements:
+        context.checkpoint()
         if requirement.project == "kitaru":
             validate_kitaru_requirement(
                 requirement.requirement,
                 runtime_version,
                 subject="A declared Kitaru",
             )
-    _evaluator_requirements(resolved, kitaru_version=runtime_version)
+    _evaluator_requirements(resolved, kitaru_version=runtime_version, context=context)
+    context.checkpoint()
     return task_private_requirements, bundled_requirements, runtime_version
 
 
-def render_verifiers_v1(
+def _render_verifiers_v1(
     resolved: ResolvedExport,
     root: Path,
     *,
     required_environment_names: tuple[str, ...] = (),
+    context: ExporterContext,
 ) -> ExportManifest:
     """Render one installable Verifiers 0.3.0 Taskset and bundled Harness."""
     (
         task_private_requirements,
         bundled_requirements,
         runtime_version,
-    ) = preflight_verifiers_v1_export(
+    ) = _preflight_verifiers_v1_export(
         resolved,
         required_environment_names=required_environment_names,
+        context=context,
     )
     if root.exists() and (not root.is_dir() or next(root.iterdir(), None) is not None):
         raise ExportError(
@@ -866,10 +895,11 @@ def render_verifiers_v1(
     assert dependency_plan is not None
 
     root.mkdir(parents=True, exist_ok=True)
+    context.checkpoint()
     bridge_staging = root / ".bridge-staging"
     bridge = materialize_runtime_bridge(bridge_staging)
     assert bridge.originating_kitaru_version == runtime_version
-    rows, private = _task_rows(resolved)
+    rows, private = _task_rows(resolved, context=context)
     provenance = _artifact_provenance(
         _benchmark_digest(resolved, private, task_private_requirements),
         _default_harness_digest(resolved, dependency_plan),
@@ -882,15 +912,20 @@ def render_verifiers_v1(
     (module / "__init__.py").write_text(_render_init_module())
     (module / "plugin.py").write_text(_render_plugin_module())
     (module / "scoring.py").write_text(_scoring_module(provenance.module_name))
-    copy_source(resolved.source, module / "agent_source")
+    copy_source(
+        resolved.source,
+        module / "agent_source",
+        cancellation_checkpoint=context.checkpoint,
+    )
     _write_runtime(module, resolved, dependency_plan)
-    _write_evaluators(module, resolved)
+    _write_evaluators(module, resolved, context=context)
     task_provenance = _write_tasks(
         module,
         resolved,
         rows,
         private,
         task_private_requirements,
+        context=context,
     )
     write_canonical_json(
         module / "scoring" / "requirements.json", list(task_private_requirements)
@@ -938,6 +973,7 @@ def render_verifiers_v1(
     manifest = ExportManifest(
         format="verifiers-v1",
         target_version=VERIFIERS_VERSION,
+        exporter=context.exporter,
         experiment_id=resolved.experiment.id,
         cohort_version_id=resolved.cohort_version.id,
         agent_version_id=resolved.agent_version.id,
@@ -949,7 +985,7 @@ def render_verifiers_v1(
             f"{resolved.reward.evaluator}:{resolved.reward.result}:{resolved.reward.field}"
         ),
         source_digest=resolved.source.digest,
-        generated_files=file_digests(root),
+        generated_files=file_digests(root, cancellation_checkpoint=context.checkpoint),
         required_environment_names=runtime_requirements.all,
         exclusions=resolved.source.excluded,
         content_policy=resolved.content_policy,
@@ -966,7 +1002,8 @@ def render_verifiers_v1(
         validation=validation,
     )
     write_canonical_json(root / "kitaru-export.json", manifest.model_dump(mode="json"))
-    validate_verifiers_v1(root)
+    validate_verifiers_v1(root, context=context)
+    context.checkpoint()
     return manifest
 
 
@@ -992,9 +1029,13 @@ def _exported_names(module: Path) -> list[str]:
     raise ValueError("generated module has no static __all__")
 
 
-def validate_verifiers_v1(root: Path) -> ValidationReceipt:
+def validate_verifiers_v1(
+    root: Path, *, context: ExporterContext | None = None
+) -> ValidationReceipt:
     """Validate generated structure and boundaries without importing plugin code."""
     try:
+        if context is not None:
+            context.checkpoint()
         manifest_data = json.loads((root / "kitaru-export.json").read_text())
         manifest = ExportManifest.model_validate(manifest_data)
         provenance = manifest.provenance
@@ -1085,6 +1126,8 @@ def validate_verifiers_v1(root: Path) -> ValidationReceipt:
         session_ids: list[str] = []
         task_provenance: list[TaskProvenance] = []
         for index, row in enumerate(rows):
+            if context is not None:
+                context.checkpoint()
             if set(row) != _TASK_DATA_KEYS or row["idx"] != index:
                 raise ValueError(
                     "TaskData fields or indices violate the public contract"
@@ -1144,6 +1187,8 @@ def validate_verifiers_v1(root: Path) -> ValidationReceipt:
             module / "scoring.py",
             *(module / "bridge").glob("*.py"),
         ):
+            if context is not None:
+                context.checkpoint()
             source = path.read_text()
             if "kitaru.exports" in source:
                 raise ValueError(
@@ -1156,7 +1201,12 @@ def validate_verifiers_v1(root: Path) -> ValidationReceipt:
             error_code="invalid_verifiers_bundle",
         )
         recorded = manifest_data.get("generated_files")
-        actual = file_digests(root)
+        actual = file_digests(
+            root,
+            cancellation_checkpoint=(
+                context.checkpoint if context is not None else None
+            ),
+        )
         actual.pop("kitaru-export.json", None)
         if not isinstance(recorded, dict) or recorded != actual:
             raise ValueError("generated file digests do not match")
@@ -1178,3 +1228,50 @@ def validate_verifiers_v1(root: Path) -> ValidationReceipt:
     return ValidationReceipt(
         level="structural", status="passed", target_version=VERIFIERS_VERSION
     )
+
+
+class VerifiersExporter:
+    """Generate structurally validated Verifiers 0.3.0 artifacts."""
+
+    metadata = ExporterMetadata(
+        contract_version=EXPORTER_CONTRACT_VERSION,
+        distribution_name=_DISTRIBUTION_NAME,
+        distribution_version=_get_distribution_version(),
+        format="verifiers-v1",
+        target_version=VERIFIERS_VERSION,
+    )
+
+    def preflight(
+        self,
+        resolved: ResolvedExport,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> None:
+        """Validate Verifiers-specific inputs without writing an artifact."""
+        _preflight_verifiers_v1_export(
+            resolved,
+            required_environment_names=options.required_environment_names,
+            context=context,
+        )
+
+    def render(
+        self,
+        resolved: ResolvedExport,
+        staging_root: Path,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> ExportManifest:
+        """Render a Verifiers artifact in the supplied core-owned staging root."""
+        return _render_verifiers_v1(
+            resolved,
+            staging_root,
+            required_environment_names=options.required_environment_names,
+            context=context,
+        )
+
+
+def create_exporter() -> VerifiersExporter:
+    """Create the installed Verifiers exporter implementation."""
+    return VerifiersExporter()

@@ -26,14 +26,13 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
-from kitaru.exports._dependencies import classify_dependencies
-from kitaru.exports.formats import verifiers_v1
-from kitaru.exports.formats.verifiers_v1 import (
-    PRIME_RL_VERSION,
-    VERIFIERS_VERSION,
-    render_verifiers_v1,
-    validate_verifiers_v1,
+from kitaru.exports import (
+    ExporterContext,
+    ExporterOptions,
+    ExporterProvenance,
+    ExportManifest,
 )
+from kitaru.exports._dependencies import classify_dependencies
 from kitaru.exports.models import (
     ContentPolicy,
     EnvironmentPolicy,
@@ -44,6 +43,42 @@ from kitaru.exports.models import (
     SourcePolicy,
 )
 from kitaru.exports.source import inventory_source
+from kitaru_verifiers_exporter import (
+    PRIME_RL_VERSION,
+    VERIFIERS_VERSION,
+    VerifiersExporter,
+    create_exporter,
+    validate_verifiers_v1,
+)
+from kitaru_verifiers_exporter import exporter as verifiers_v1
+
+_EXPORTER = VerifiersExporter()
+
+
+def _get_context(checkpoint: Any = lambda: None) -> ExporterContext:
+    return ExporterContext(
+        exporter=ExporterProvenance.model_validate(_EXPORTER.metadata.model_dump()),
+        cancellation_checkpoint=checkpoint,
+    )
+
+
+def render_verifiers_v1(
+    resolved: ResolvedExport,
+    destination: Path,
+    *,
+    required_environment_names: tuple[str, ...] = (),
+    context: ExporterContext | None = None,
+) -> ExportManifest:
+    """Invoke the Verifiers renderer through the installed exporter contract."""
+    return _EXPORTER.render(
+        resolved,
+        destination,
+        options=ExporterOptions(
+            required_environment_names=required_environment_names,
+        ),
+        context=context or _get_context(),
+    )
+
 
 _PUBLIC_TASK_KEYS = {
     "idx",
@@ -171,6 +206,7 @@ def test_render_writes_one_complete_collision_safe_plugin(tmp_path: Path) -> Non
     provenance = manifest["provenance"]
 
     assert result.target_version == VERIFIERS_VERSION
+    assert manifest["exporter"] == _EXPORTER.metadata.model_dump(mode="json")
     assert provenance["plugin_id"] == provenance["module_name"]
     assert provenance["plugin_id"].startswith("kitaru_verifiers_")
     assert provenance["distribution_name"].startswith("kitaru-verifiers-")
@@ -185,6 +221,51 @@ def test_render_writes_one_complete_collision_safe_plugin(tmp_path: Path) -> Non
     assert (module / "agent_source/agent.py").read_text() == "print('agent')\n"
     assert (module / "bridge/runtime.py").is_file()
     assert (module / "scoring/evaluators/evaluator-0.py").is_file()
+
+
+def test_verifiers_exporter_factory_reports_installed_contract() -> None:
+    exporter = create_exporter()
+
+    assert isinstance(exporter, VerifiersExporter)
+    assert exporter.metadata.contract_version == 1
+    assert exporter.metadata.distribution_name == "kitaru-verifiers-exporter"
+    assert exporter.metadata.distribution_version == "0.1.0"
+    assert exporter.metadata.format == "verifiers-v1"
+    assert exporter.metadata.target_version == VERIFIERS_VERSION
+
+
+def test_verifiers_exporter_honors_cancellation_before_writing(
+    tmp_path: Path,
+) -> None:
+    def cancel() -> None:
+        raise RuntimeError("cancelled")
+
+    destination = tmp_path / "bundle"
+    with pytest.raises(RuntimeError, match="cancelled"):
+        render_verifiers_v1(
+            _resolved(tmp_path / "source"),
+            destination,
+            context=_get_context(cancel),
+        )
+
+    assert not destination.exists()
+
+
+def test_verifiers_exporter_cancels_inside_task_loop(tmp_path: Path) -> None:
+    calls = 0
+
+    def cancel_during_render() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 8:
+            raise RuntimeError("cancelled during render")
+
+    with pytest.raises(RuntimeError, match="cancelled during render"):
+        render_verifiers_v1(
+            _resolved(tmp_path / "source", session_count=20),
+            tmp_path / "bundle",
+            context=_get_context(cancel_during_render),
+        )
 
 
 def test_verifiers_readme_records_effective_policies(tmp_path: Path) -> None:

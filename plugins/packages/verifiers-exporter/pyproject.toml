@@ -1,0 +1,21 @@
+[project]
+name = "kitaru-verifiers-exporter"
+version = "0.1.0"
+description = "Export Kitaru experiments as Verifiers benchmarks."
+readme = "README.md"
+license = "Apache-2.0"
+requires-python = ">=3.11"
+dependencies = ["kitaru>=0.22.1"]
+
+[project.entry-points."kitaru.exporters.v1"]
+verifiers-v1 = "kitaru_verifiers_exporter:create_exporter"
+
+[build-system]
+requires = ["hatchling==1.32.0"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/kitaru_verifiers_exporter"]
+
+[tool.kitaru.artifact]
+import-module = "kitaru_verifiers_exporter"
