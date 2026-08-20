@@ -6,10 +6,196 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from pydantic import ValidationError
 
 from kitaru.exports.config import ExportRequest
-from kitaru.exports.models import ExportError, ExportManifest, ValidationReceipt
-from kitaru.exports.operation import export_experiment
+from kitaru.exports.models import (
+    CONTENT_CATEGORIES,
+    V1_EXPORT_BUDGETS,
+    ArtifactProvenance,
+    BoundedPathSummary,
+    ContentCategory,
+    ContentPolicy,
+    EnvironmentPolicy,
+    ExportError,
+    ExportManifest,
+    RuntimeRequirements,
+    SourcePolicy,
+    TaskProvenance,
+    ValidationReceipt,
+)
+from kitaru.exports.operation import (
+    ExportOperationState,
+    ExportOperationStateMachine,
+    export_experiment,
+)
+
+
+def _request(tmp_path: Path, **changes: Any) -> ExportRequest:
+    values: dict[str, Any] = {
+        "experiment_id": uuid.uuid4(),
+        "cohort_version_id": uuid.uuid4(),
+        "agent_version_id": uuid.uuid4(),
+        "format": "verifiers-v1",
+        "source_root": tmp_path,
+        "destination": tmp_path / "out",
+        "primary_reward": "quality:correctness:score",
+    }
+    values.update(changes)
+    return ExportRequest(**values)
+
+
+def test_request_defaults_to_complete_content_and_included_environment(
+    tmp_path: Path,
+) -> None:
+    request = _request(tmp_path)
+
+    assert request.content_policy == ContentPolicy()
+    assert request.environment_policy == EnvironmentPolicy()
+    assert request.source_policy == SourcePolicy()
+    assert request.policy_warnings == ()
+    assert "components" not in ExportRequest.model_fields
+    serialized = request.model_dump(mode="json")
+    assert serialized == ExportRequest.model_validate(serialized).model_dump(
+        mode="json"
+    )
+
+
+def test_request_accepts_runtime_only_environment_handling(tmp_path: Path) -> None:
+    request = _request(
+        tmp_path,
+        environment_policy=EnvironmentPolicy(mode="runtime_only"),
+    )
+
+    assert request.environment_policy.mode == "runtime_only"
+
+    with pytest.raises(ValidationError):
+        EnvironmentPolicy.model_validate({"mode": "automatic_redaction"})
+
+
+@pytest.mark.parametrize("category", CONTENT_CATEGORIES)
+def test_content_policy_accepts_each_optional_omission(
+    category: ContentCategory,
+) -> None:
+    policy = ContentPolicy(omit=(category,))
+
+    assert policy.omit == (category,)
+    assert policy.is_included(category) is False
+
+
+def test_content_policy_canonicalizes_combined_omissions() -> None:
+    policy = ContentPolicy(omit=tuple(reversed(CONTENT_CATEGORIES)))
+
+    assert policy.omit == CONTENT_CATEGORIES
+    assert len(policy.warnings) == 1
+    assert policy.warnings[0].code == "content_policy_changes_evaluation"
+
+
+def test_policy_rejects_required_content_and_contradictory_source_rules() -> None:
+    with pytest.raises(ValidationError):
+        ContentPolicy.model_validate({"omit": ["task_inputs"]})
+
+    with pytest.raises(ValidationError, match="both included and excluded"):
+        SourcePolicy(include=("dist/main.js",), exclude=("dist/main.js",))
+
+
+def test_source_policy_enforces_the_utf8_path_budget() -> None:
+    SourcePolicy(include=("x" * V1_EXPORT_BUDGETS.max_relative_path_bytes,))
+
+    with pytest.raises(ValidationError, match="1,024 UTF-8 bytes"):
+        SourcePolicy(include=("x" * (V1_EXPORT_BUDGETS.max_relative_path_bytes + 1),))
+
+
+def test_v1_budgets_and_receipt_path_summary_boundaries() -> None:
+    assert V1_EXPORT_BUDGETS.max_sessions == 1_000
+    assert V1_EXPORT_BUDGETS.max_session_bytes == 16 * 1024 * 1024
+    assert V1_EXPORT_BUDGETS.max_total_session_bytes == 256 * 1024 * 1024
+    assert V1_EXPORT_BUDGETS.max_receipt_path_samples == 100
+    assert V1_EXPORT_BUDGETS.max_receipt_path_characters == 512
+    assert V1_EXPORT_BUDGETS.max_artifact_bytes == 2 * 1024 * 1024 * 1024
+
+    paths = tuple(f"excluded/{index:03d}/{'x' * 600}" for index in range(101))
+    summary = BoundedPathSummary.from_paths(reversed(paths))
+
+    assert summary.total_count == 101
+    assert len(summary.samples) == 100
+    assert all(len(path) <= 512 for path in summary.samples)
+    assert summary.truncated is True
+    assert summary == BoundedPathSummary.from_paths(paths)
+
+
+def test_manifest_serializes_assurance_and_provenance_deterministically() -> None:
+    experiment_id = uuid.uuid4()
+    cohort_version_id = uuid.uuid4()
+    agent_version_id = uuid.uuid4()
+    evaluator_version_id = uuid.uuid4()
+    session_id = uuid.uuid4()
+    provenance = ArtifactProvenance(
+        artifact_digest="a" * 64,
+        benchmark_digest="b" * 64,
+        default_harness_digest="c" * 64,
+        runtime_bundle_digest="d" * 64,
+        plugin_id="kitaru-export-aabbccdd",
+        distribution_name="kitaru-export-aabbccdd",
+        module_name="kitaru_export_aabbccdd",
+    )
+    manifest = ExportManifest(
+        format="verifiers-v1",
+        target_version="0.3.0",
+        experiment_id=experiment_id,
+        cohort_version_id=cohort_version_id,
+        agent_version_id=agent_version_id,
+        evaluator_version_ids=(evaluator_version_id,),
+        primary_reward="quality:correctness:score",
+        source_digest="0" * 64,
+        content_policy=ContentPolicy(omit=("visible_reasoning",)),
+        provenance=provenance,
+        runtime_requirements=RuntimeRequirements(
+            task_private=("SCORING_TOKEN",),
+            bundled_harness=("AGENT_TOKEN",),
+        ),
+        task_provenance=(
+            TaskProvenance(session_id=session_id, content_digest="e" * 64),
+        ),
+        validation=ValidationReceipt(
+            level="structural", status="passed", target_version="0.3.0"
+        ),
+    )
+
+    serialized = manifest.model_dump(mode="json")
+    assert serialized == ExportManifest.model_validate(serialized).model_dump(
+        mode="json"
+    )
+    assert serialized["assurance"]["preflight"]["status"] == "passed"
+    assert serialized["assurance"]["structural_validation"]["status"] == "passed"
+    assert serialized["assurance"]["release_compatibility"]["status"] == "not_performed"
+    assert serialized["warnings"][0]["code"] == "content_policy_changes_evaluation"
+    assert serialized["runtime_requirements"]["all"] == [
+        "AGENT_TOKEN",
+        "SCORING_TOKEN",
+    ]
+
+
+def test_operation_state_machine_accepts_only_valid_transitions() -> None:
+    operation = ExportOperationStateMachine()
+
+    assert operation.try_start_commit() is True
+    assert operation.state is ExportOperationState.COMMITTING
+    assert operation.request_revocation() is False
+    operation.mark_completed()
+    assert operation.state is ExportOperationState.COMPLETED
+
+    with pytest.raises(ExportError, match="completed -> failed"):
+        operation.mark_failed()
+
+
+def test_operation_state_machine_acknowledges_revocation_before_cancellation() -> None:
+    operation = ExportOperationStateMachine()
+
+    assert operation.request_revocation() is True
+    assert operation.try_start_commit() is False
+    operation.mark_cancelled()
+    assert operation.state is ExportOperationState.CANCELLED
 
 
 def test_harbor_requires_an_explicit_trace_contract(tmp_path: Path) -> None:
@@ -55,11 +241,19 @@ async def test_dry_run_resolves_without_calling_a_renderer(
             source_root=tmp_path,
             destination=destination,
             primary_reward="quality:correctness:score",
+            content_policy=ContentPolicy(omit=("visible_reasoning",)),
+            environment_policy=EnvironmentPolicy(mode="runtime_only"),
             dry_run=True,
         ),
     )
     assert receipt.dry_run is True
     assert receipt.session_count == 1
+    assert receipt.environment_policy.mode == "runtime_only"
+    assert receipt.warnings[0].code == "content_policy_changes_evaluation"
+    assert receipt.assurance is not None
+    assert receipt.assurance.preflight.status == "passed"
+    assert receipt.assurance.structural_validation.status == "not_performed"
+    assert receipt.assurance.release_compatibility.status == "not_performed"
     assert not destination.exists()
 
 

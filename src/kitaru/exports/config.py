@@ -11,10 +11,21 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from kitaru.exports.models import ExportError, RewardSelector
+from kitaru.exports.models import (
+    ContentPolicy,
+    EnvironmentPolicy,
+    ExportError,
+    ExportWarning,
+    RewardSelector,
+    SourcePolicy,
+)
 
 ExportFormat = Literal["harbor", "verifiers-v1"]
 TraceFormat = Literal["atif", "kitaru"]
+EXPORT_TARGET_VERSIONS: dict[ExportFormat, str] = {
+    "harbor": "0.20.0",
+    "verifiers-v1": "0.3.0",
+}
 _ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -41,10 +52,18 @@ class ExportRequest(BaseModel):
     destination: Path
     primary_reward: str
     required_environment_names: tuple[str, ...] = Field(default=(), max_length=100)
+    content_policy: ContentPolicy = Field(default_factory=ContentPolicy)
+    environment_policy: EnvironmentPolicy = Field(default_factory=EnvironmentPolicy)
+    source_policy: SourcePolicy = Field(default_factory=SourcePolicy)
     trace_format: TraceFormat | None = None
     trace_path: str | None = None
     archive: bool = False
     dry_run: bool = False
+
+    @property
+    def policy_warnings(self) -> tuple[ExportWarning, ...]:
+        """Return warnings required by the effective request policies."""
+        return self.content_policy.warnings
 
     @field_validator("primary_reward")
     @classmethod
