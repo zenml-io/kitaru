@@ -13,7 +13,11 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from kitaru.exports.config import ExportFormat, ExportRequest
+from kitaru.exports.config import (
+    ExportFormat,
+    ExportRequest,
+    normalize_environment_names,
+)
 from kitaru.exports.models import (
     ArtifactProvenance,
     BoundedPathSummary,
@@ -221,6 +225,7 @@ def _validate_exporter_manifest(
     root: Path,
     exporter: LoadedExporter,
     resolved: ResolvedExport,
+    options: ExporterOptions,
 ) -> ExportManifest:
     try:
         manifest = ExportManifest.model_validate(manifest_data)
@@ -235,6 +240,22 @@ def _validate_exporter_manifest(
     expected_reward = (
         f"{resolved.reward.evaluator}:{resolved.reward.result}:{resolved.reward.field}"
     )
+    expected_evaluator_version_ids = tuple(
+        evaluator.version.id
+        for evaluator in sorted(resolved.evaluators, key=lambda item: item.name)
+    )
+    expected_environment_names = normalize_environment_names(
+        {
+            *resolved.required_environment_names,
+            *options.required_environment_names,
+        }
+    )
+    expected_assurance = (
+        ExportAssurance.for_artifact(manifest.validation)
+        if manifest.validation.level == "structural"
+        and manifest.validation.status == "passed"
+        else None
+    )
     if (
         manifest != embedded
         or manifest.exporter != exporter.provenance
@@ -244,8 +265,17 @@ def _validate_exporter_manifest(
         or manifest.experiment_id != resolved.experiment.id
         or manifest.cohort_version_id != resolved.cohort_version.id
         or manifest.agent_version_id != resolved.agent_version.id
+        or manifest.evaluator_version_ids != expected_evaluator_version_ids
         or manifest.primary_reward != expected_reward
         or manifest.source_digest != resolved.source.digest
+        or manifest.required_environment_names != expected_environment_names
+        or manifest.exclusions != resolved.source.excluded
+        or manifest.content_policy != resolved.content_policy
+        or manifest.environment_policy != resolved.environment_policy
+        or manifest.source_policy != resolved.source_policy
+        or manifest.validation.level != "structural"
+        or manifest.validation.status != "passed"
+        or manifest.assurance != expected_assurance
     ):
         raise ExportError(
             "exporter_invalid_result",
@@ -358,6 +388,7 @@ async def export_experiment(
                 root=root,
                 exporter=selected_exporter,
                 resolved=resolved,
+                options=exporter_options,
             )
             state.checkpoint()
 

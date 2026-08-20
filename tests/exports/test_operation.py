@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from kitaru.exports.config import ExportRequest
+from kitaru.exports.config import ExportFormat, ExportRequest
 from kitaru.exports.models import (
     CONTENT_CATEGORIES,
     V1_EXPORT_BUDGETS,
@@ -19,6 +19,7 @@ from kitaru.exports.models import (
     ContentCategory,
     ContentPolicy,
     EnvironmentPolicy,
+    ExportAssurance,
     ExporterProvenance,
     ExportError,
     ExportManifest,
@@ -95,7 +96,7 @@ class FakeExporter:
 
 
 def _loaded_exporter(
-    *, format: str = "verifiers-v1", target_version: str = "0.3.0"
+    *, format: ExportFormat = "verifiers-v1", target_version: str = "0.3.0"
 ) -> tuple[LoadedExporter, FakeExporter]:
     distribution_name = (
         "kitaru-harbor-exporter" if format == "harbor" else "kitaru-verifiers-exporter"
@@ -451,15 +452,22 @@ async def test_operation_publishes_renderer_output(
                     "field": "score",
                 },
             )(),
-            "source": type("Source", (), {"digest": "0" * 64})(),
+            "source": type("Source", (), {"digest": "0" * 64, "excluded": ()})(),
             "sessions": (object(),),
             "evaluators": (
                 type(
                     "Evaluator",
                     (),
-                    {"version": type("Version", (), {"id": evaluator_version_id})()},
+                    {
+                        "name": "quality",
+                        "version": type("Version", (), {"id": evaluator_version_id})(),
+                    },
                 )(),
             ),
+            "required_environment_names": (),
+            "content_policy": ContentPolicy(),
+            "environment_policy": EnvironmentPolicy(),
+            "source_policy": SourcePolicy(),
         },
     )()
 
@@ -527,9 +535,13 @@ async def test_operation_rejects_manifest_identity_before_publication(
             "cohort_version": type("Item", (), {"id": request.cohort_version_id})(),
             "agent_version": type("Item", (), {"id": request.agent_version_id})(),
             "reward": RewardSelector.parse(request.primary_reward),
-            "source": type("Source", (), {"digest": "0" * 64})(),
+            "source": type("Source", (), {"digest": "0" * 64, "excluded": ()})(),
             "sessions": (),
             "evaluators": (),
+            "required_environment_names": (),
+            "content_policy": ContentPolicy(),
+            "environment_policy": EnvironmentPolicy(),
+            "source_policy": SourcePolicy(),
         },
     )()
 
@@ -572,6 +584,160 @@ async def test_operation_rejects_manifest_identity_before_publication(
     assert not request.destination.exists()
 
 
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "evaluator_order",
+        "content_policy",
+        "environment_policy",
+        "source_policy",
+        "source_exclusions",
+        "required_environment_names",
+        "validation_level",
+        "validation_status",
+        "assurance",
+    ],
+)
+async def test_operation_rejects_manifest_claims_before_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    (tmp_path / "src").mkdir()
+    (tmp_path / "src" / "agent.py").write_text("print('ready')\n")
+    (tmp_path / "build").mkdir()
+    (tmp_path / "build" / "artifact.txt").write_text("ignored\n")
+    request = _request(
+        tmp_path,
+        destination=tmp_path / "bundle",
+        required_environment_names=("REQUESTED_TOKEN",),
+        content_policy=ContentPolicy(omit=("visible_reasoning",)),
+        environment_policy=EnvironmentPolicy(mode="runtime_only"),
+        source_policy=SourcePolicy(include=("src/agent.py",), exclude=("build",)),
+    )
+    alpha_evaluator_id = uuid.uuid4()
+    beta_evaluator_id = uuid.uuid4()
+    resolved = type(
+        "Resolved",
+        (),
+        {
+            "experiment": type("Item", (), {"id": request.experiment_id})(),
+            "cohort_version": type("Item", (), {"id": request.cohort_version_id})(),
+            "agent_version": type("Item", (), {"id": request.agent_version_id})(),
+            "reward": RewardSelector.parse(request.primary_reward),
+            "source": type(
+                "Source",
+                (),
+                {"digest": "0" * 64, "excluded": ("ignored.log",)},
+            )(),
+            "sessions": (),
+            "evaluators": (
+                type(
+                    "Evaluator",
+                    (),
+                    {
+                        "name": "beta",
+                        "version": type("Version", (), {"id": beta_evaluator_id})(),
+                    },
+                )(),
+                type(
+                    "Evaluator",
+                    (),
+                    {
+                        "name": "alpha",
+                        "version": type("Version", (), {"id": alpha_evaluator_id})(),
+                    },
+                )(),
+            ),
+            "required_environment_names": ("ATTACHED_TOKEN",),
+            "content_policy": request.content_policy,
+            "environment_policy": request.environment_policy,
+            "source_policy": request.source_policy,
+        },
+    )()
+
+    async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> object:
+        return object()
+
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.finalize_remote_export",
+        lambda *_args, **_kwargs: resolved,
+    )
+    loaded, exporter = _loaded_exporter()
+    manifest = ExportManifest(
+        format="verifiers-v1",
+        target_version="0.3.0",
+        exporter=loaded.provenance,
+        experiment_id=request.experiment_id,
+        cohort_version_id=request.cohort_version_id,
+        agent_version_id=request.agent_version_id,
+        evaluator_version_ids=(alpha_evaluator_id, beta_evaluator_id),
+        primary_reward=request.primary_reward,
+        source_digest="0" * 64,
+        required_environment_names=("ATTACHED_TOKEN", "REQUESTED_TOKEN"),
+        exclusions=("ignored.log",),
+        content_policy=request.content_policy,
+        environment_policy=request.environment_policy,
+        source_policy=request.source_policy,
+        validation=ValidationReceipt(
+            level="structural", status="passed", target_version="0.3.0"
+        ),
+    )
+    if mutation == "evaluator_order":
+        manifest = manifest.model_copy(
+            update={"evaluator_version_ids": (beta_evaluator_id, alpha_evaluator_id)}
+        )
+    elif mutation == "content_policy":
+        manifest = manifest.model_copy(update={"content_policy": ContentPolicy()})
+    elif mutation == "environment_policy":
+        manifest = manifest.model_copy(
+            update={"environment_policy": EnvironmentPolicy()}
+        )
+    elif mutation == "source_policy":
+        manifest = manifest.model_copy(update={"source_policy": SourcePolicy()})
+    elif mutation == "source_exclusions":
+        manifest = manifest.model_copy(update={"exclusions": ()})
+    elif mutation == "required_environment_names":
+        manifest = manifest.model_copy(
+            update={"required_environment_names": ("REQUESTED_TOKEN",)}
+        )
+    elif mutation == "validation_level":
+        manifest = manifest.model_copy(
+            update={
+                "validation": ValidationReceipt(
+                    level="preflight", status="passed", target_version="0.3.0"
+                ),
+                "assurance": ExportAssurance.preflight_only("0.3.0"),
+            }
+        )
+    elif mutation == "validation_status":
+        validation = ValidationReceipt(
+            level="structural", status="failed", target_version="0.3.0"
+        )
+        manifest = manifest.model_copy(
+            update={
+                "validation": validation,
+                "assurance": ExportAssurance.for_artifact(validation),
+            }
+        )
+    else:
+        assert mutation == "assurance"
+        manifest = manifest.model_copy(
+            update={"assurance": ExportAssurance.preflight_only("0.3.0")}
+        )
+    exporter.manifest = manifest
+    exporter.embedded_manifest = manifest
+
+    with pytest.raises(ExportError) as raised:
+        await export_experiment(object(), request, exporter=loaded)
+
+    assert raised.value.code == "exporter_invalid_result"
+    assert not request.destination.exists()
+
+
 async def test_operation_revocation_during_plugin_preflight_prevents_publication(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -592,7 +758,7 @@ async def test_operation_revocation_during_plugin_preflight_prevents_publication
         context.checkpoint()
         raise AssertionError("revoked preflight continued")
 
-    exporter.preflight = blocked_preflight  # type: ignore[method-assign]
+    exporter.preflight = blocked_preflight  # type: ignore[method-assign]  # ty: ignore[invalid-assignment]
 
     async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> object:
         return object()

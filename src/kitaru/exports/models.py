@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
+from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from kitaru.api_models.v1.agent_version import AgentVersionResponse
@@ -91,6 +92,16 @@ class ExporterProvenance(BaseModel):
     )
     format: Literal["harbor", "verifiers-v1"]
     target_version: str = Field(min_length=1, max_length=128, pattern=r"^[^\r\n\x00]+$")
+
+    @field_validator("distribution_version", "target_version")
+    @classmethod
+    def _normalize_versions(cls, value: str) -> str:
+        try:
+            return str(Version(value))
+        except InvalidVersion:
+            raise ValueError(
+                "exporter versions must be valid package versions"
+            ) from None
 
 
 class ContentPolicy(BaseModel):

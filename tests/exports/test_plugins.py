@@ -139,6 +139,17 @@ def test_resolve_exporter_rejects_ambiguous_providers_without_loading() -> None:
     assert first.load_count == second.load_count == 0
 
 
+def test_resolve_exporter_rejects_unmaintained_provider_without_loading() -> None:
+    provider = _entry_point(distribution_name="other-harbor-exporter")
+
+    with pytest.raises(ExportError) as raised:
+        resolve_exporter("harbor", entry_points=(provider,))
+
+    assert raised.value.code == "exporter_incompatible"
+    assert "other-harbor-exporter==1.2.3" in raised.value.message
+    assert provider.load_count == 0
+
+
 @pytest.mark.parametrize(
     ("loaded", "load_error"),
     [
@@ -202,3 +213,48 @@ def test_malicious_distribution_metadata_cannot_create_unbounded_errors() -> Non
     assert raised.value.code == "exporter_load_failed"
     assert "secret" not in raised.value.message
     assert len(raised.value.message) < 256
+
+
+@pytest.mark.parametrize(
+    ("changes", "secret"),
+    [
+        ({"distribution_name": "kitaru-harbor-exporter\x1b[31msecret"}, "secret"),
+        ({"distribution_version": "1.2.3\x1b]8;;https://secret\a"}, "secret"),
+        ({"group": "kitaru.exporters.v2\x1b]8;;https://secret\a"}, "secret"),
+    ],
+)
+def test_terminal_control_metadata_is_not_echoed(
+    changes: dict[str, str], secret: str
+) -> None:
+    provider = _entry_point(**changes)
+
+    with pytest.raises(ExportError) as raised:
+        resolve_exporter("harbor", entry_points=(provider,))
+
+    assert secret not in raised.value.message
+    assert "\x1b" not in raised.value.message
+    assert provider.load_count == 0
+
+
+def test_terminal_control_kitaru_version_is_not_echoed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider = _entry_point(group="kitaru.exporters.v2")
+    monkeypatch.setattr(
+        "kitaru.exports.plugin.importlib.metadata.version",
+        lambda _name: "1.2.3\x1b]8;;https://secret\a",
+    )
+
+    with pytest.raises(ExportError) as raised:
+        resolve_exporter("harbor", entry_points=(provider,))
+
+    assert "secret" not in raised.value.message
+    assert "\x1b" not in raised.value.message
+    assert "Kitaru unknown" in raised.value.message
+    assert provider.load_count == 0
+
+
+@pytest.mark.parametrize("field", ["distribution_version", "target_version"])
+def test_exporter_metadata_rejects_terminal_control_versions(field: str) -> None:
+    with pytest.raises(ValueError, match="exporter versions must be valid"):
+        _metadata(**{field: "1.2.3\x1b]8;;https://secret\a"})

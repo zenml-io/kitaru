@@ -1,13 +1,15 @@
 """Public contract and installed discovery for experiment exporters."""
 
 import importlib.metadata
+import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from packaging.utils import canonicalize_name
+from packaging.utils import InvalidName, canonicalize_name
+from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.exports.config import ExportFormat, TraceFormat
@@ -27,6 +29,7 @@ EXPECTED_EXPORTER_DISTRIBUTIONS: dict[ExportFormat, str] = {
     "harbor": "kitaru-harbor-exporter",
     "verifiers-v1": "kitaru-verifiers-exporter",
 }
+_EXPORTER_GROUP_PATTERN = re.compile(r"^kitaru\.exporters\.v[1-9][0-9]*$")
 
 
 class ExporterMetadata(ExporterProvenance):
@@ -115,20 +118,22 @@ def _get_distribution_identity(entry_point: Any) -> tuple[str, str]:
             "The installed exporter has invalid distribution metadata. Reinstall "
             "its package and try again.",
         )
-    name = canonicalize_name(raw_name)
-    if (
-        not name
-        or len(name) > 128
-        or len(raw_version) > 128
-        or not raw_version
-        or any(character in raw_version for character in "\r\n\0")
-    ):
+    try:
+        name = canonicalize_name(raw_name, validate=True)
+        version = str(Version(raw_version))
+    except (InvalidName, InvalidVersion):
+        raise ExportError(
+            "exporter_load_failed",
+            "The installed exporter has invalid distribution metadata. Reinstall "
+            "its package and try again.",
+        ) from None
+    if len(name) > 128 or len(version) > 128:
         raise ExportError(
             "exporter_load_failed",
             "The installed exporter has invalid distribution metadata. Reinstall "
             "its package and try again.",
         )
-    return name, raw_version
+    return name, version
 
 
 @cache
@@ -149,17 +154,24 @@ def _describe_entry_point(entry_point: Any) -> str:
     return f"{name}=={version}"
 
 
-def _describe_group(group: str) -> str:
-    if len(group) > 128 or any(character in group for character in "\r\n\0"):
+def _describe_group(group: Any) -> str:
+    if not isinstance(group, str) or _EXPORTER_GROUP_PATTERN.fullmatch(group) is None:
         return "unknown exporter contract"
     return group
 
 
 def _get_kitaru_version() -> str:
     try:
-        return importlib.metadata.version("kitaru")
+        raw_version = importlib.metadata.version("kitaru")
     except importlib.metadata.PackageNotFoundError:
         return "unknown"
+    if not isinstance(raw_version, str):
+        return "unknown"
+    try:
+        version = str(Version(raw_version))
+    except InvalidVersion:
+        return "unknown"
+    return version if len(version) <= 128 else "unknown"
 
 
 def _validate_loaded_exporter(
@@ -188,7 +200,8 @@ def _validate_loaded_exporter(
     expected_name = EXPECTED_EXPORTER_DISTRIBUTIONS[format]
     compatible = (
         metadata.contract_version == EXPORTER_CONTRACT_VERSION
-        and canonicalize_name(metadata.distribution_name) == distribution_name
+        and canonicalize_name(metadata.distribution_name, validate=True)
+        == distribution_name
         and metadata.distribution_version == distribution_version
         and metadata.format == format
         and distribution_name == canonicalize_name(expected_name)
@@ -268,6 +281,15 @@ def resolve_exporter(
             "the duplicate exporter packages before retrying.",
         )
     selected = compatible[0]
+    distribution_name, distribution_version = _get_distribution_identity(selected)
+    if distribution_name != canonicalize_name(expected_distribution, validate=True):
+        raise ExportError(
+            "exporter_incompatible",
+            f"{distribution_name}=={distribution_version} is not compatible with "
+            f"Kitaru {_get_kitaru_version()} exporter contract "
+            f"v{EXPORTER_CONTRACT_VERSION} for {format}. Upgrade kitaru and "
+            f"{expected_distribution} together.",
+        )
     try:
         loaded = selected.load()
     except Exception as error:
