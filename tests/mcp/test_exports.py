@@ -201,6 +201,7 @@ async def test_export_maps_missing_plugin_before_local_path_access(
 
     assert raised.value.code == "invalid_configuration"
     assert raised.value.details == {"export_code": "exporter_not_installed"}
+    assert raised.value.recovery is not None
     assert "same project environment" in raised.value.recovery
     assert "restart" in raised.value.recovery
 

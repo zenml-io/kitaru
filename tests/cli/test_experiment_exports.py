@@ -300,5 +300,6 @@ async def test_cli_maps_missing_exporter_before_reference_resolution(
 
     assert raised.value.kind == "invalid_configuration"
     assert raised.value.details == {"export_code": "exporter_not_installed"}
+    assert raised.value.hint is not None
     assert "Python environment running this command" in raised.value.hint
     assert references_touched is False
