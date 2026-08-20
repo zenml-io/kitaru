@@ -6,6 +6,10 @@ from typing import Any, cast
 
 import pytest
 
+from kitaru.exports.operation import (
+    ExportOperationRevoked,
+    ExportOperationStateMachine,
+)
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.settings import MCPSettings
 
@@ -85,3 +89,118 @@ async def test_handler_timeout_includes_concurrency_queue_time() -> None:
             await state.execute(must_not_run)
     finally:
         state.semaphore.release()
+
+
+async def test_export_timeout_revokes_and_joins_worker() -> None:
+    state = _get_state(FakeClient(), handler_timeout=0.01)
+    started = asyncio.Event()
+    joined = False
+
+    async def export(operation: ExportOperationStateMachine) -> None:
+        nonlocal joined
+        started.set()
+        await asyncio.to_thread(operation.wait_for_revocation, 5)
+        try:
+            operation.checkpoint()
+        except ExportOperationRevoked:
+            operation.mark_cancelled()
+            joined = True
+            raise
+
+    with pytest.raises(TimeoutError):
+        await state.execute_export(export)
+
+    assert started.is_set()
+    assert joined is True
+    assert state.active_export_count == 0
+
+
+async def test_export_caller_cancellation_joins_worker_before_returning() -> None:
+    state = _get_state(FakeClient(), handler_timeout=10)
+    started = asyncio.Event()
+    joined = False
+
+    async def export(operation: ExportOperationStateMachine) -> None:
+        nonlocal joined
+        started.set()
+        await asyncio.to_thread(operation.wait_for_revocation, 5)
+        try:
+            operation.checkpoint()
+        except ExportOperationRevoked:
+            operation.mark_cancelled()
+            joined = True
+            raise
+
+    task = asyncio.create_task(state.execute_export(export))
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert joined is True
+    assert state.active_export_count == 0
+
+
+async def test_export_cancellation_after_commit_authority_returns_actual_result() -> (
+    None
+):
+    state = _get_state(FakeClient(), handler_timeout=10)
+    commit_started = asyncio.Event()
+    release_commit = asyncio.Event()
+
+    async def export(operation: ExportOperationStateMachine) -> str:
+        assert operation.try_start_commit() is True
+        commit_started.set()
+        await release_commit.wait()
+        operation.mark_completed()
+        return "published"
+
+    task = asyncio.create_task(state.execute_export(export))
+    await commit_started.wait()
+    task.cancel()
+    release_commit.set()
+
+    assert await task == "published"
+    assert state.active_export_count == 0
+
+
+async def test_export_timeout_after_commit_authority_returns_actual_result() -> None:
+    state = _get_state(FakeClient(), handler_timeout=0.01)
+    release_commit = asyncio.Event()
+
+    async def export(operation: ExportOperationStateMachine) -> str:
+        assert operation.try_start_commit() is True
+        asyncio.get_running_loop().call_later(0.02, release_commit.set)
+        await release_commit.wait()
+        operation.mark_completed()
+        return "published"
+
+    assert await state.execute_export(export) == "published"
+    assert state.active_export_count == 0
+
+
+async def test_close_revokes_and_joins_active_exports_before_client_close() -> None:
+    client = FakeClient()
+    state = _get_state(client, handler_timeout=10)
+    started = asyncio.Event()
+    joined = False
+
+    async def export(operation: ExportOperationStateMachine) -> None:
+        nonlocal joined
+        started.set()
+        await asyncio.to_thread(operation.wait_for_revocation, 5)
+        try:
+            operation.checkpoint()
+        except ExportOperationRevoked:
+            operation.mark_cancelled()
+            joined = True
+            raise
+
+    task = asyncio.create_task(state.execute_export(export))
+    await started.wait()
+    await state.close()
+
+    assert joined is True
+    assert client.close_count == 1
+    with pytest.raises(ExportOperationRevoked):
+        await task

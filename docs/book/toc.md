@@ -33,6 +33,7 @@
 - [Replay a failure and fork it](guides/replay-and-overrides.md)
 - [Build a regression suite from production](guides/regression-suite.md)
 - [Write an evaluator](guides/write-an-evaluator.md)
+- [Export an experiment for Harbor or Verifiers](guides/exporting-experiments.md)
 - [Deterministic evaluations](guides/deterministic-evaluations.md)
 - [Tool policies](guides/tool-policies.md)
 - [Track cost and model usage](guides/llm-calls.md)

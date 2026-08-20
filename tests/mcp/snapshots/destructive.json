@@ -10155,6 +10155,852 @@
   },
   {
     "annotations": {
+      "destructiveHint": false,
+      "idempotentHint": false,
+      "openWorldHint": true,
+      "readOnlyHint": false
+    },
+    "description": "Export through the installed Harbor or Verifiers exporter package.",
+    "inputSchema": {
+      "$defs": {
+        "ContentPolicy": {
+          "additionalProperties": false,
+          "description": "Select the allowlisted optional experimental content to omit.",
+          "properties": {
+            "omit": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "session_outputs",
+                  "model_payloads",
+                  "tool_payloads",
+                  "subagent_payloads",
+                  "span_payloads",
+                  "visible_reasoning",
+                  "metadata",
+                  "diagnostic_details",
+                  "usage_and_cost"
+                ],
+                "type": "string"
+              },
+              "title": "Omit",
+              "type": "array"
+            }
+          },
+          "title": "ContentPolicy",
+          "type": "object"
+        },
+        "EnvironmentPolicy": {
+          "additionalProperties": false,
+          "description": "Select how registered environment values enter an artifact.",
+          "properties": {
+            "mode": {
+              "default": "include",
+              "enum": [
+                "include",
+                "runtime_only"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          "title": "EnvironmentPolicy",
+          "type": "object"
+        },
+        "ExperimentExportRequest": {
+          "additionalProperties": false,
+          "description": "Export exact Kitaru resources and a local source tree.",
+          "properties": {
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "archive": {
+              "default": false,
+              "title": "Archive",
+              "type": "boolean"
+            },
+            "cohort_version_id": {
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "content_policy": {
+              "$ref": "#/$defs/ContentPolicy"
+            },
+            "destination": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "title": "Destination",
+              "type": "string"
+            },
+            "dry_run": {
+              "default": false,
+              "title": "Dry Run",
+              "type": "boolean"
+            },
+            "environment_policy": {
+              "$ref": "#/$defs/EnvironmentPolicy"
+            },
+            "experiment_id": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "harbor",
+                "verifiers-v1"
+              ],
+              "title": "Format",
+              "type": "string"
+            },
+            "primary_reward": {
+              "description": "EVALUATOR:RESULT:score or EVALUATOR:RESULT:passed.",
+              "pattern": "^[^:]+:[^:]+:(score|passed)$",
+              "title": "Primary Reward",
+              "type": "string"
+            },
+            "required_environment_names": {
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Required Environment Names",
+              "type": "array"
+            },
+            "source_policy": {
+              "$ref": "#/$defs/SourcePolicy"
+            },
+            "source_root": {
+              "maxLength": 4096,
+              "minLength": 1,
+              "title": "Source Root",
+              "type": "string"
+            },
+            "trace_format": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "atif",
+                    "kitaru"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Trace Format"
+            },
+            "trace_path": {
+              "anyOf": [
+                {
+                  "maxLength": 1024,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Trace Path"
+            }
+          },
+          "required": [
+            "experiment_id",
+            "cohort_version_id",
+            "agent_version_id",
+            "format",
+            "source_root",
+            "destination",
+            "primary_reward"
+          ],
+          "title": "ExperimentExportRequest",
+          "type": "object"
+        },
+        "SourcePolicy": {
+          "additionalProperties": false,
+          "description": "Select explicit source-path overrides for one export.",
+          "properties": {
+            "exclude": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Exclude",
+              "type": "array"
+            },
+            "include": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Include",
+              "type": "array"
+            }
+          },
+          "title": "SourcePolicy",
+          "type": "object"
+        }
+      },
+      "properties": {
+        "request": {
+          "$ref": "#/$defs/ExperimentExportRequest"
+        }
+      },
+      "required": [
+        "request"
+      ],
+      "title": "experiment_export_toolArguments",
+      "type": "object"
+    },
+    "name": "kitaru_experiment_export",
+    "outputSchema": {
+      "$defs": {
+        "ArtifactProvenance": {
+          "additionalProperties": false,
+          "description": "Record deterministic component identities and native package names.",
+          "properties": {
+            "artifact_digest": {
+              "title": "Artifact Digest",
+              "type": "string"
+            },
+            "benchmark_digest": {
+              "title": "Benchmark Digest",
+              "type": "string"
+            },
+            "default_harness_digest": {
+              "title": "Default Harness Digest",
+              "type": "string"
+            },
+            "distribution_name": {
+              "title": "Distribution Name",
+              "type": "string"
+            },
+            "module_name": {
+              "title": "Module Name",
+              "type": "string"
+            },
+            "plugin_id": {
+              "title": "Plugin Id",
+              "type": "string"
+            },
+            "runtime_bundle_digest": {
+              "title": "Runtime Bundle Digest",
+              "type": "string"
+            }
+          },
+          "required": [
+            "artifact_digest",
+            "benchmark_digest",
+            "default_harness_digest",
+            "runtime_bundle_digest",
+            "plugin_id",
+            "distribution_name",
+            "module_name"
+          ],
+          "title": "ArtifactProvenance",
+          "type": "object"
+        },
+        "BoundedPathSummary": {
+          "additionalProperties": false,
+          "description": "Summarize path decisions without allowing an unbounded receipt.",
+          "properties": {
+            "samples": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 100,
+              "title": "Samples",
+              "type": "array"
+            },
+            "total_count": {
+              "minimum": 0,
+              "title": "Total Count",
+              "type": "integer"
+            },
+            "truncated": {
+              "title": "Truncated",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "total_count",
+            "truncated"
+          ],
+          "title": "BoundedPathSummary",
+          "type": "object"
+        },
+        "ContentPolicy": {
+          "additionalProperties": false,
+          "description": "Select the allowlisted optional experimental content to omit.",
+          "properties": {
+            "omit": {
+              "default": [],
+              "items": {
+                "enum": [
+                  "session_outputs",
+                  "model_payloads",
+                  "tool_payloads",
+                  "subagent_payloads",
+                  "span_payloads",
+                  "visible_reasoning",
+                  "metadata",
+                  "diagnostic_details",
+                  "usage_and_cost"
+                ],
+                "type": "string"
+              },
+              "title": "Omit",
+              "type": "array"
+            }
+          },
+          "title": "ContentPolicy",
+          "type": "object"
+        },
+        "DependencyReceipt": {
+          "additionalProperties": false,
+          "description": "Record the dependency reproducibility proved during export.",
+          "properties": {
+            "requirement_digest": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Requirement Digest"
+            },
+            "status": {
+              "default": "not_assessed",
+              "enum": [
+                "locked",
+                "declared",
+                "not_assessed"
+              ],
+              "title": "Status",
+              "type": "string"
+            }
+          },
+          "title": "DependencyReceipt",
+          "type": "object"
+        },
+        "EnvironmentPolicy": {
+          "additionalProperties": false,
+          "description": "Select how registered environment values enter an artifact.",
+          "properties": {
+            "mode": {
+              "default": "include",
+              "enum": [
+                "include",
+                "runtime_only"
+              ],
+              "title": "Mode",
+              "type": "string"
+            }
+          },
+          "title": "EnvironmentPolicy",
+          "type": "object"
+        },
+        "ExperimentExportReceipt": {
+          "additionalProperties": false,
+          "description": "Receipt for a local export preflight or publication.",
+          "properties": {
+            "agent_version_id": {
+              "format": "uuid",
+              "title": "Agent Version Id",
+              "type": "string"
+            },
+            "archive_path": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Archive Path"
+            },
+            "assurance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ExportAssurance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "bundle_digest": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Bundle Digest"
+            },
+            "cohort_version_id": {
+              "format": "uuid",
+              "title": "Cohort Version Id",
+              "type": "string"
+            },
+            "content_policy": {
+              "$ref": "#/$defs/ContentPolicy"
+            },
+            "dependencies": {
+              "$ref": "#/$defs/DependencyReceipt"
+            },
+            "destination": {
+              "title": "Destination",
+              "type": "string"
+            },
+            "dry_run": {
+              "title": "Dry Run",
+              "type": "boolean"
+            },
+            "environment_policy": {
+              "$ref": "#/$defs/EnvironmentPolicy"
+            },
+            "evaluator_count": {
+              "title": "Evaluator Count",
+              "type": "integer"
+            },
+            "experiment_id": {
+              "format": "uuid",
+              "title": "Experiment Id",
+              "type": "string"
+            },
+            "exporter": {
+              "$ref": "#/$defs/ExporterProvenance"
+            },
+            "format": {
+              "enum": [
+                "harbor",
+                "verifiers-v1"
+              ],
+              "title": "Format",
+              "type": "string"
+            },
+            "operation": {
+              "const": "experiment_export",
+              "default": "experiment_export",
+              "title": "Operation",
+              "type": "string"
+            },
+            "provenance": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ArtifactProvenance"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "runtime_requirements": {
+              "$ref": "#/$defs/RuntimeRequirements"
+            },
+            "session_count": {
+              "title": "Session Count",
+              "type": "integer"
+            },
+            "source_digest": {
+              "title": "Source Digest",
+              "type": "string"
+            },
+            "source_exclusions": {
+              "$ref": "#/$defs/BoundedPathSummary"
+            },
+            "source_policy": {
+              "$ref": "#/$defs/SourcePolicy"
+            },
+            "target_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Target Version"
+            },
+            "task_count": {
+              "title": "Task Count",
+              "type": "integer"
+            },
+            "task_provenance": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/TaskProvenance"
+              },
+              "title": "Task Provenance",
+              "type": "array"
+            },
+            "validation_level": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Validation Level"
+            },
+            "warnings": {
+              "default": [],
+              "items": {
+                "$ref": "#/$defs/ExportWarning"
+              },
+              "title": "Warnings",
+              "type": "array"
+            }
+          },
+          "required": [
+            "format",
+            "dry_run",
+            "experiment_id",
+            "cohort_version_id",
+            "agent_version_id",
+            "session_count",
+            "task_count",
+            "evaluator_count",
+            "source_digest",
+            "destination",
+            "exporter"
+          ],
+          "title": "ExperimentExportReceipt",
+          "type": "object"
+        },
+        "ExportAssurance": {
+          "additionalProperties": false,
+          "description": "Separate request, artifact, and release-level export assurance.",
+          "properties": {
+            "preflight": {
+              "$ref": "#/$defs/ValidationReceipt"
+            },
+            "release_compatibility": {
+              "$ref": "#/$defs/ValidationReceipt"
+            },
+            "structural_validation": {
+              "$ref": "#/$defs/ValidationReceipt"
+            }
+          },
+          "required": [
+            "preflight",
+            "structural_validation",
+            "release_compatibility"
+          ],
+          "title": "ExportAssurance",
+          "type": "object"
+        },
+        "ExportWarning": {
+          "additionalProperties": false,
+          "description": "Record one stable, user-actionable export warning.",
+          "properties": {
+            "code": {
+              "minLength": 1,
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "title": "Code",
+              "type": "string"
+            },
+            "message": {
+              "minLength": 1,
+              "title": "Message",
+              "type": "string"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ExportWarning",
+          "type": "object"
+        },
+        "ExporterProvenance": {
+          "additionalProperties": false,
+          "description": "Identify the installed exporter that generated an artifact.",
+          "properties": {
+            "contract_version": {
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Contract Version",
+              "type": "integer"
+            },
+            "distribution_name": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9])?$",
+              "title": "Distribution Name",
+              "type": "string"
+            },
+            "distribution_version": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\x00]+$",
+              "title": "Distribution Version",
+              "type": "string"
+            },
+            "format": {
+              "enum": [
+                "harbor",
+                "verifiers-v1"
+              ],
+              "title": "Format",
+              "type": "string"
+            },
+            "target_version": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[^\\r\\n\\x00]+$",
+              "title": "Target Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "contract_version",
+            "distribution_name",
+            "distribution_version",
+            "format",
+            "target_version"
+          ],
+          "title": "ExporterProvenance",
+          "type": "object"
+        },
+        "RuntimeRequirements": {
+          "additionalProperties": false,
+          "description": "Separate Task-private and bundled-Harness runtime requirements.",
+          "properties": {
+            "all": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "All",
+              "type": "array"
+            },
+            "bundled_harness": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Bundled Harness",
+              "type": "array"
+            },
+            "task_private": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Task Private",
+              "type": "array"
+            }
+          },
+          "title": "RuntimeRequirements",
+          "type": "object"
+        },
+        "SourcePolicy": {
+          "additionalProperties": false,
+          "description": "Select explicit source-path overrides for one export.",
+          "properties": {
+            "exclude": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Exclude",
+              "type": "array"
+            },
+            "include": {
+              "default": [],
+              "items": {
+                "type": "string"
+              },
+              "title": "Include",
+              "type": "array"
+            }
+          },
+          "title": "SourcePolicy",
+          "type": "object"
+        },
+        "TaskProvenance": {
+          "additionalProperties": false,
+          "description": "Identify one immutable exported task and its source content.",
+          "properties": {
+            "content_digest": {
+              "title": "Content Digest",
+              "type": "string"
+            },
+            "session_id": {
+              "format": "uuid",
+              "title": "Session Id",
+              "type": "string"
+            }
+          },
+          "required": [
+            "session_id",
+            "content_digest"
+          ],
+          "title": "TaskProvenance",
+          "type": "object"
+        },
+        "ToolError": {
+          "additionalProperties": false,
+          "description": "Stable, bounded error returned by a tool handler.",
+          "properties": {
+            "code": {
+              "title": "Code",
+              "type": "string"
+            },
+            "details": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Details"
+            },
+            "message": {
+              "title": "Message",
+              "type": "string"
+            },
+            "recovery": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "title": "Recovery"
+            },
+            "retryable": {
+              "default": false,
+              "title": "Retryable",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "code",
+            "message"
+          ],
+          "title": "ToolError",
+          "type": "object"
+        },
+        "ValidationReceipt": {
+          "additionalProperties": false,
+          "description": "Record how far an exported artifact was validated.",
+          "properties": {
+            "level": {
+              "enum": [
+                "preflight",
+                "structural",
+                "executable",
+                "release"
+              ],
+              "title": "Level",
+              "type": "string"
+            },
+            "status": {
+              "enum": [
+                "passed",
+                "failed",
+                "not_performed"
+              ],
+              "title": "Status",
+              "type": "string"
+            },
+            "target_version": {
+              "title": "Target Version",
+              "type": "string"
+            }
+          },
+          "required": [
+            "level",
+            "status",
+            "target_version"
+          ],
+          "title": "ValidationReceipt",
+          "type": "object"
+        }
+      },
+      "additionalProperties": false,
+      "description": "Typed experiment export result.",
+      "properties": {
+        "data": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExperimentExportReceipt"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolError"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        },
+        "schema_version": {
+          "const": "1",
+          "default": "1",
+          "title": "Schema Version",
+          "type": "string"
+        },
+        "warnings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "ExperimentExportResult",
+      "type": "object"
+    }
+  },
+  {
+    "annotations": {
       "destructiveHint": true,
       "idempotentHint": false,
       "openWorldHint": true,

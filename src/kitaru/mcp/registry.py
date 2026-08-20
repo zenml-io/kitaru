@@ -36,6 +36,10 @@ from kitaru.mcp.models.common import (
     WorkflowStartResult,
 )
 from kitaru.mcp.models.evaluators import EvaluatorsManageRequest
+from kitaru.mcp.models.exports import (
+    ExperimentExportRequest,
+    ExperimentExportResult,
+)
 from kitaru.mcp.models.management import CohortsManageRequest, ExperimentsManageRequest
 from kitaru.mcp.models.registry import RegistryReadRequest
 from kitaru.mcp.models.review import ReviewManageRequest, ReviewReadRequest
@@ -52,6 +56,7 @@ from kitaru.mcp.tools.cohorts import handle_cohorts_manage
 from kitaru.mcp.tools.destructive import handle_delete, handle_workflow_cancel
 from kitaru.mcp.tools.evaluators import handle_evaluators_manage
 from kitaru.mcp.tools.experiments import handle_experiments_manage
+from kitaru.mcp.tools.exports import handle_experiment_export
 from kitaru.mcp.tools.registry import handle_registry_read
 from kitaru.mcp.tools.review import handle_review_manage, handle_review_read
 from kitaru.mcp.tools.workflow_start import handle_workflow_start
@@ -176,6 +181,22 @@ async def evaluators_manage_tool(
     )
 
 
+async def experiment_export_tool(
+    request: ExperimentExportRequest, context: Context
+) -> ExperimentExportResult:
+    """Export through the installed Harbor or Verifiers exporter package."""
+    return cast(
+        ExperimentExportResult,
+        await _invoke(
+            context,
+            request,
+            ExperimentExportResult,
+            handle_experiment_export,
+            export_operation=True,
+        ),
+    )
+
+
 async def workflow_cancel_tool(
     request: WorkflowCancelRequest, context: Context
 ) -> WorkflowCancelResult:
@@ -198,10 +219,19 @@ async def _invoke(
     request: object,
     result_type: type[ToolResult],
     handler: ToolHandler,
+    *,
+    export_operation: bool = False,
 ) -> CallToolResult:
     state = cast(MCPServerState, context.request_context.lifespan_context)
     try:
-        data = await state.execute(lambda: handler(state, request))
+        if export_operation:
+            data = await state.execute_export(
+                lambda operation: cast(Any, handler)(
+                    state, request, operation=operation
+                )
+            )
+        else:
+            data = await state.execute(lambda: handler(state, request))
         if isinstance(data, ToolSuccessPayload):
             json_data = redact_data(data.data)
             envelope = success_result(
@@ -283,6 +313,13 @@ TOOL_SPECS = (
         evaluators_manage_tool.__doc__ or "",
         _annotations(read_only=False, destructive=False, idempotent=False),
         evaluators_manage_tool,
+    ),
+    ToolSpec(
+        "kitaru_experiment_export",
+        CapabilityMode.STANDARD,
+        experiment_export_tool.__doc__ or "",
+        _annotations(read_only=False, destructive=False, idempotent=False),
+        experiment_export_tool,
     ),
     ToolSpec(
         "kitaru_workflow_cancel",

@@ -59,6 +59,7 @@ Tools are gated by a **capability mode**, either `read-only` (the default), `sta
 | `kitaru_review_manage` | standard | Manage investigations and annotations; create or rename tags and link them to resources |
 | `kitaru_workflow_start` | standard | Start a session evaluation or experiment run, return immediately |
 | `kitaru_evaluators_manage` | standard | Create or update evaluators from an existing blob or pinned package |
+| `kitaru_experiment_export` | standard | Export a frozen experiment — cohort version, agent version, local source, pinned evaluators — as a Harbor dataset or Verifiers v1 environment |
 | `kitaru_workflow_cancel` | destructive | Cancel a job or experiment run |
 | `kitaru_delete` | destructive | Delete a cohort, experiment, investigation, annotation, evaluator, version, run, or tag; unlink an exact tag-resource tuple |
 
@@ -69,6 +70,8 @@ Tag operations follow the same split. In `read-only`, `kitaru_registry_read` can
 Worker inspection is read-only by design. Use `kitaru_registry_read` with `kind: "worker"` to list workers, or `operation: "get_worker"` with an exact worker UUID. The returned `live` and `last_seen_at` fields report recent heartbeat observations; they do not guarantee that a worker will claim a particular task. Worker registration, task assignment, credentials, and lifecycle control remain outside MCP.
 
 `kitaru_review_manage` accepts `pending`, `in_progress`, or `completed` when updating an investigation. This does not bypass server transition rules: for example, the server can still reject moving a completed investigation back to pending. A linked session's verdict remains a separate field and does not accept `pending`.
+
+`kitaru_experiment_export` is the one tool that touches your disk, so it stays fenced. It only runs when `KITARU_MCP_WORKSPACE_ROOTS` lists the absolute directories it may read and write, separated by the platform path separator; both `source_root` and `destination` must sit inside those roots, and it refuses to replace an existing destination or archive. A dry run resolves the experiment and inventories the local source without writing anything. See [Export an experiment for Harbor or Verifiers](../guides/exporting-experiments.md).
 
 ## Install the agent skills
 

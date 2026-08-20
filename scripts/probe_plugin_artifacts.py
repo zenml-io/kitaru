@@ -8,6 +8,8 @@ import importlib.metadata
 import uuid
 from typing import cast
 
+from kitaru.exports.config import ExportFormat
+from kitaru.exports.plugin import resolve_exporter
 from kitaru.server.api import bootstrap
 from kitaru.server.api.bootstrap import (
     DEFAULT_PLUGIN_DEFINITIONS,
@@ -80,7 +82,11 @@ class _MemoryPluginRepository:
             raise PluginVersionNotFound(plugin_id, version) from error
 
 
-async def _probe(expected_requirements: set[str], import_modules: set[str]) -> None:
+async def _probe(
+    expected_requirements: set[str],
+    import_modules: set[str],
+    exporter_formats: set[str],
+) -> None:
     for requirement in expected_requirements:
         distribution, separator, expected_version = requirement.partition("==")
         if not separator:
@@ -96,6 +102,11 @@ async def _probe(expected_requirements: set[str], import_modules: set[str]) -> N
         module = importlib.import_module(module_name)
         if not getattr(module, "__all__", None):
             raise RuntimeError(f"Standalone package {module_name!r} has no public API")
+
+    for format_name in exporter_formats:
+        exporter = resolve_exporter(cast(ExportFormat, format_name))
+        if exporter.metadata.format != format_name:
+            raise RuntimeError(f"Exporter {format_name!r} reported the wrong format")
 
     definitions = tuple(
         definition
@@ -163,8 +174,21 @@ def main() -> int:
         default=[],
         help="Standalone package module that must import from the installed wheel.",
     )
+    parser.add_argument(
+        "--exporter",
+        action="append",
+        choices=("harbor", "verifiers-v1"),
+        default=[],
+        help="Installed exporter format that must resolve through its entry point.",
+    )
     arguments = parser.parse_args()
-    asyncio.run(_probe(set(arguments.requirement), set(arguments.module)))
+    asyncio.run(
+        _probe(
+            set(arguments.requirement),
+            set(arguments.module),
+            set(arguments.exporter),
+        )
+    )
     print("Installed plugin artifact probe passed")
     return 0
 

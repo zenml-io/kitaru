@@ -238,6 +238,22 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert "not_found" in session_get_errors
     assert "conflict" not in session_list_errors | session_get_errors
 
+    [experiment_export] = describe_schema(("experiment", "export"))
+    export_parameters = {
+        parameter["name"] for parameter in experiment_export["parameters"]
+    }
+    assert {
+        "--omit-content",
+        "--environment-mode",
+        "--include-source",
+        "--exclude-source",
+    } <= export_parameters
+    assert not any(
+        component in parameter
+        for parameter in export_parameters
+        for component in ("taskset-only", "harness-only", "evaluator-only", "append")
+    )
+
     evaluation_commands = {
         item["command"]: item for item in describe_schema(("evaluation",))
     }
@@ -320,6 +336,7 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
     assert set(commands) == {
         "experiment.create",
         "experiment.delete",
+        "experiment.export",
         "experiment.get",
         "experiment.list",
         "experiment.run.cancel",
@@ -370,6 +387,15 @@ def test_experiment_schema_describes_crud_and_run_lifecycle() -> None:
         "--force"
     ]
     assert force["type"] == "boolean"
+
+    export = commands["experiment.export"]
+    assert export["side_effects"]["reads_local_file"] is True
+    assert export["side_effects"]["writes_local_file"] is True
+    export_parameters = {
+        parameter["name"]: parameter for parameter in export["parameters"]
+    }
+    assert export_parameters["--primary-reward"]["required"] is True
+    assert export_parameters["--dry-run"]["required"] is False
 
     start = commands["experiment.run.start"]
     assert start["read_only"] is False

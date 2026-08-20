@@ -63,22 +63,35 @@ class SecretsResource:
 
     @overload
     async def get(
-        self, secret_id: uuid.UUID, include_values: Literal[True]
+        self,
+        secret_id: uuid.UUID,
+        include_values: Literal[True],
+        *,
+        max_bytes: int | None = None,
     ) -> SecretWithValuesResponse: ...
 
     @overload
     async def get(
-        self, secret_id: uuid.UUID, include_values: Literal[False] = False
+        self,
+        secret_id: uuid.UUID,
+        include_values: Literal[False] = False,
+        *,
+        max_bytes: int | None = None,
     ) -> SecretResponse: ...
 
     async def get(
-        self, secret_id: uuid.UUID, include_values: bool = False
+        self,
+        secret_id: uuid.UUID,
+        include_values: bool = False,
+        *,
+        max_bytes: int | None = None,
     ) -> SecretResponse | SecretWithValuesResponse:
         """Get a secret by id.
 
         Args:
             secret_id: Id of the secret.
             include_values: Whether to include the secret values.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -91,6 +104,7 @@ class SecretsResource:
             "GET",
             f"/api/v1/secrets/{secret_id}",
             params={"include_values": include_values},
+            max_response_bytes=max_bytes,
         )
         if include_values:
             return SecretWithValuesResponse.model_validate(response.json())

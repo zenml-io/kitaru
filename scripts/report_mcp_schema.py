@@ -18,8 +18,8 @@ SNAPSHOT_DIRECTORY = Path(__file__).parents[1] / "tests" / "mcp" / "snapshots"
 METRICS_PATH = SNAPSHOT_DIRECTORY / "metrics.json"
 EXPECTED_TOOL_COUNTS = {
     CapabilityMode.READ_ONLY: 3,
-    CapabilityMode.STANDARD: 9,
-    CapabilityMode.DESTRUCTIVE: 11,
+    CapabilityMode.STANDARD: 10,
+    CapabilityMode.DESTRUCTIVE: 12,
 }
 MAX_TOOLS = 12
 MAX_TOOL_SCHEMA_BYTES = 33 * 1024

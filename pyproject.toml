@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.22.2"
+version = "0.23.0"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
@@ -42,6 +42,7 @@ keywords = [
 dependencies = [
     "pydantic>=2,<3",
     "httpx>=0.27,<1",
+    "packaging>=24.0",
 ]
 
 [project.optional-dependencies]
@@ -183,6 +184,14 @@ root = [".", "src", "scripts", "tests"]
 # not PyPI, so it is absent from most environments that run ty.
 [[tool.ty.overrides]]
 include = ["scripts/generate_sdk_docs.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
+# Exact exporter target packages are installed only inside isolated smoke
+# environments, not in Kitaru's core development environment.
+[[tool.ty.overrides]]
+include = ["scripts/smoke_export_artifacts.py"]
 
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"

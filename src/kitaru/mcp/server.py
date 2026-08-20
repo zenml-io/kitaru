@@ -9,6 +9,7 @@ import logging
 import sys
 from collections.abc import AsyncIterator, Callable, Sequence
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from mcp.server import MCPServer
 from pydantic import ValidationError
@@ -122,6 +123,13 @@ def _parse_arguments(argv: Sequence[str] | None) -> dict[str, object]:
     parser.add_argument("--handler-timeout", type=float, dest="handler_timeout")
     parser.add_argument("--pool-size", type=int, dest="pool_size")
     parser.add_argument("--max-concurrency", type=int, dest="max_concurrency")
+    parser.add_argument(
+        "--workspace-root",
+        action="append",
+        type=Path,
+        dest="workspace_roots",
+        help="Allow experiment exports below this absolute directory; repeatable.",
+    )
     parser.add_argument("--debug", action="store_true", default=None)
     namespace = parser.parse_args(list(argv or ()))
     return {key: value for key, value in vars(namespace).items() if value is not None}

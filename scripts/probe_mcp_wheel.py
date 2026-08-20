@@ -37,6 +37,7 @@ EXPECTED_TOOLS = {
         "kitaru_review_manage",
         "kitaru_workflow_start",
         "kitaru_evaluators_manage",
+        "kitaru_experiment_export",
     ],
     "destructive": [
         "kitaru_registry_read",
@@ -48,6 +49,7 @@ EXPECTED_TOOLS = {
         "kitaru_review_manage",
         "kitaru_workflow_start",
         "kitaru_evaluators_manage",
+        "kitaru_experiment_export",
         "kitaru_workflow_cancel",
         "kitaru_delete",
     ],

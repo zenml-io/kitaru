@@ -77,11 +77,14 @@ class BlobsResource:
         response = await self._client.request("GET", f"/api/v1/blobs/{blob_id}")
         return BlobResponse.model_validate(response.json())
 
-    async def download(self, blob_id: uuid.UUID) -> bytes:
+    async def download(
+        self, blob_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> bytes:
         """Download a blob's content by id.
 
         Args:
             blob_id: Id of the blob.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing blob.
@@ -89,7 +92,11 @@ class BlobsResource:
         Returns:
             Blob content.
         """
-        response = await self._client.request("GET", f"/api/v1/blobs/{blob_id}/content")
+        response = await self._client.request(
+            "GET",
+            f"/api/v1/blobs/{blob_id}/content",
+            max_response_bytes=max_bytes,
+        )
         return response.content
 
     async def delete(self, blob_id: uuid.UUID) -> None:

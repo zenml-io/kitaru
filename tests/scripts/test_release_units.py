@@ -22,6 +22,7 @@ EXPECTED_UNITS = {
     "kitaru": "kitaru",
     "braintrust-importer": "kitaru-braintrust-importer",
     "evaluator": "kitaru-evaluator",
+    "harbor-exporter": "kitaru-harbor-exporter",
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
     "langgraph": "kitaru-langgraph",
@@ -30,6 +31,7 @@ EXPECTED_UNITS = {
     "openai-agents": "kitaru-openai-agents",
     "phoenix-importer": "kitaru-phoenix-importer",
     "pydantic-ai": "kitaru-pydantic-ai",
+    "verifiers-exporter": "kitaru-verifiers-exporter",
 }
 
 EXPECTED_DEFAULT_DISTRIBUTIONS = {
@@ -65,7 +67,7 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
+def test_inventory_describes_exactly_the_thirteen_python_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -84,6 +86,38 @@ def test_inventory_versions_and_tags_match_project_manifests() -> None:
         resolved = parse_package_tag(unit.tag, inventory)
         assert resolved == unit
         assert unit.tag == f"python/{unit.distribution}/v{unit.version}"
+
+
+def test_inventory_rejects_exporter_without_core_contract_floor(
+    release_repo: Path,
+) -> None:
+    manifest_path = (
+        release_repo / "plugins" / "packages" / "harbor-exporter" / "pyproject.toml"
+    )
+    manifest_path.write_text(
+        manifest_path.read_text().replace("kitaru>=0.23.0", "kitaru>=0.22.2")
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match=r"harbor-exporter: exporter contract requires kitaru>=0\.23\.0",
+    ):
+        load_inventory(repo_root=release_repo)
+
+
+def test_inventory_rejects_exporter_against_older_core_candidate(
+    release_repo: Path,
+) -> None:
+    manifest_path = release_repo / "pyproject.toml"
+    manifest_path.write_text(
+        manifest_path.read_text().replace('version = "0.23.0"', 'version = "0.22.2"')
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match=r"harbor-exporter: repository Kitaru 0\.22\.2 does not satisfy",
+    ):
+        load_inventory(repo_root=release_repo)
 
 
 @pytest.mark.parametrize("version", ["0.22.0rc1", "0.22.0", "1.0.dev1"])
@@ -314,7 +348,7 @@ def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     assert all(unit.distribution in text_output for unit in inventory.units)
 
 
-def test_plugin_matrix_is_generated_from_the_nine_plugin_units() -> None:
+def test_plugin_matrix_is_generated_from_the_twelve_plugin_units() -> None:
     matrix = build_plugin_matrix(load_inventory())
 
     assert matrix == {
@@ -431,9 +465,12 @@ def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
         assert inventory.common_checks <= unit.required_checks
         if unit.slug == "kitaru":
             assert "cli-artifact-contract" in unit.required_checks
+            assert "export-artifact-contract" in unit.required_checks
             assert "mcp-wheel-contract" in unit.required_checks
         else:
             assert f"plugin package ({unit.slug})" in unit.required_checks
+            if unit.slug in {"harbor-exporter", "verifiers-exporter"}:
+                assert "export-artifact-contract" in unit.required_checks
 
 
 def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
@@ -451,7 +488,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 11 release units."),
+        (["validate"], "Validated 13 release units."),
     ],
 )
 def test_cli_text_commands_succeed(

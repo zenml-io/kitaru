@@ -127,6 +127,28 @@ def _artifact_import_module(project: Path) -> str | None:
     return value
 
 
+def _artifact_exporter_format(project: Path) -> str | None:
+    """Read the single exporter format declared by a package, if any."""
+    pyproject = project / "pyproject.toml"
+    try:
+        document = tomllib.loads(pyproject.read_text())
+    except (FileNotFoundError, tomllib.TOMLDecodeError) as error:
+        raise SmokeFailure(f"Invalid plugin project metadata: {pyproject}") from error
+    entry_points = (
+        document.get("project", {})
+        .get("entry-points", {})
+        .get("kitaru.exporters.v1", {})
+    )
+    if not entry_points:
+        return None
+    if not isinstance(entry_points, dict) or len(entry_points) != 1:
+        raise SmokeFailure(f"Invalid exporter entry points in {pyproject}")
+    format_name, factory = next(iter(entry_points.items()))
+    if not isinstance(format_name, str) or not isinstance(factory, str):
+        raise SmokeFailure(f"Invalid exporter entry point in {pyproject}")
+    return format_name
+
+
 def _read_default_requirements(path: Path) -> dict[str, str]:
     """Map normalized distribution names to exact default requirements."""
     requirements: dict[str, str] = {}
@@ -237,6 +259,7 @@ def _smoke_candidate_wheels(
     plugin_wheels: list[Path],
     requirements: list[str],
     import_modules: list[str],
+    exporter_formats: list[str],
     environment: dict[str, str],
 ) -> None:
     """Install candidate wheels and probe their configured entrypoints."""
@@ -308,6 +331,8 @@ def _smoke_candidate_wheels(
         command.extend(("--requirement", requirement))
     for import_module in import_modules:
         command.extend(("--module", import_module))
+    for format_name in exporter_formats:
+        command.extend(("--exporter", format_name))
     _expect_success(
         "probe installed plugin artifacts",
         _run(command, environment=environment, cwd=root),
@@ -368,10 +393,12 @@ def main() -> int:
             plugin_wheels: list[Path] = []
             requirements: list[str] = []
             import_modules: list[str] = []
+            exporter_formats: list[str] = []
             for project in projects:
                 name, version = _project_metadata(project)
                 requirement = defaults.get(_canonicalize_name(name))
                 import_module = _artifact_import_module(project)
+                exporter_format = _artifact_exporter_format(project)
                 if requirement is None and import_module is None:
                     raise SmokeFailure(
                         f"{name} has neither a default pin nor an artifact import"
@@ -389,6 +416,8 @@ def main() -> int:
                     requirements.append(requirement)
                 if import_module is not None:
                     import_modules.append(import_module)
+                if exporter_format is not None:
+                    exporter_formats.append(exporter_format)
             _smoke_candidate_wheels(
                 uv,
                 repository,
@@ -397,6 +426,7 @@ def main() -> int:
                 plugin_wheels,
                 requirements,
                 import_modules,
+                exporter_formats,
                 environment,
             )
             _remove_generated_ignore(candidate_directory)

@@ -4,7 +4,7 @@ This guide explains how to test and publish the plugin distributions in `plugins
 
 ## Understand the package model
 
-Each adapter and importer is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. Adapter distributions are installed directly in agent environments and are not registered in the server's default plugin catalog.
+Each adapter, importer, and exporter is an independent Python distribution. All built-in evaluators share the `kitaru-evaluator` distribution. Adapter and exporter distributions are installed directly in the environments that use them and are not registered in the server's default plugin catalog.
 
 The default catalog lives in `src/kitaru/server/api/bootstrap.py`. Server startup stores one package source for each definition. The source contains an exact requirement and a `module:callable` entrypoint. The server does not install or import the plugin package.
 
@@ -254,6 +254,7 @@ Use the package directory and distribution name from this table:
 |---|---|---|
 | `braintrust-importer` | `kitaru-braintrust-importer` | `braintrust-importer-vX.Y.Z` |
 | `evaluator` | `kitaru-evaluator` | `evaluator-vX.Y.Z` |
+| `harbor-exporter` | `kitaru-harbor-exporter` | `python/kitaru-harbor-exporter/vX.Y.Z` |
 | `jsonl-importer` | `kitaru-jsonl-importer` | `jsonl-importer-vX.Y.Z` |
 | `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |
 | `langgraph` | `kitaru-langgraph` | `langgraph-vX.Y.Z` |
@@ -262,6 +263,7 @@ Use the package directory and distribution name from this table:
 | `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `openai-agents-vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `pydantic-ai-vX.Y.Z` |
+| `verifiers-exporter` | `kitaru-verifiers-exporter` | `python/kitaru-verifiers-exporter/vX.Y.Z` |
 
 Release only the distribution that contains the change. A change to any built-in evaluator releases the shared `kitaru-evaluator` distribution.
 

@@ -15,6 +15,7 @@
 
 import copy
 import os
+import zlib
 from collections.abc import AsyncIterable
 from types import TracebackType
 from typing import Any
@@ -38,6 +39,7 @@ from kitaru.client.config import get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
     InvalidServerResponseError,
+    ResponseTooLargeError,
     raise_for_response,
 )
 from kitaru.client.resources.accounts import AccountsResource
@@ -69,6 +71,126 @@ from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.users import UsersResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.transport import build_async_client
+
+_RAW_RESPONSE_CHUNK_BYTES = 64 * 1024
+_SUPPORTED_CONTENT_ENCODINGS = frozenset({"deflate", "gzip", "x-gzip"})
+
+
+def _get_content_length(response: httpx.Response) -> int | None:
+    """Return one valid non-negative Content-Length value when declared."""
+    value = response.headers.get("Content-Length")
+    if value is None:
+        return None
+    try:
+        length = int(value)
+    except ValueError:
+        return None
+    return length if length >= 0 else None
+
+
+def _get_content_encoding(response: httpx.Response) -> str | None:
+    """Return one supported compression applied to a response body."""
+    encodings = [
+        encoding.strip().lower()
+        for value in response.headers.get_list("Content-Encoding")
+        for encoding in value.split(",")
+        if encoding.strip().lower() != "identity"
+    ]
+    if not encodings:
+        return None
+    if len(encodings) != 1 or encodings[0] not in _SUPPORTED_CONTENT_ENCODINGS:
+        raise InvalidServerResponseError(
+            "The server used a Content-Encoding that cannot be decoded within "
+            "a bounded response"
+        )
+    return encodings[0]
+
+
+def _has_zlib_header(data: bytes) -> bool:
+    """Return whether two bytes form a valid zlib stream header."""
+    compression, flags = data[:2]
+    return (
+        compression & 0x0F == zlib.DEFLATED
+        and compression >> 4 <= 7
+        and (compression << 8 | flags) % 31 == 0
+    )
+
+
+class _BoundedContentDecoder:
+    """Incrementally decode one compressed response without exceeding a cap."""
+
+    def __init__(self, encoding: str) -> None:
+        self._supports_concatenated_members = encoding in {"gzip", "x-gzip"}
+        self._pending = bytearray()
+        self._decompressor: Any | None = (
+            None if encoding == "deflate" else zlib.decompressobj(zlib.MAX_WBITS | 16)
+        )
+
+    def decode(self, data: bytes, *, remaining: int, limit: int) -> bytes:
+        """Decode one wire chunk within the remaining response budget."""
+        if self._decompressor is None:
+            self._pending.extend(data)
+            if len(self._pending) < 2:
+                return b""
+            compressed = bytes(self._pending)
+            self._pending.clear()
+            window_bits = (
+                zlib.MAX_WBITS if _has_zlib_header(compressed) else -zlib.MAX_WBITS
+            )
+            self._decompressor = zlib.decompressobj(window_bits)
+            data = compressed
+        return self._decode_bounded(data, remaining=remaining, limit=limit)
+
+    def flush(self, *, remaining: int, limit: int) -> bytes:
+        """Finish decoding within the remaining response budget."""
+        if self._decompressor is None:
+            compressed = bytes(self._pending)
+            self._pending.clear()
+            self._decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
+            decoded = self._decode_bounded(compressed, remaining=remaining, limit=limit)
+        else:
+            decoded = b""
+        decoded_tail = bytearray(decoded)
+        while True:
+            available = remaining - len(decoded_tail)
+            try:
+                chunk = self._decompressor.decompress(b"", available + 1)
+            except zlib.error as error:
+                raise httpx.DecodingError("Invalid compressed response body") from error
+            if len(chunk) > available:
+                raise ResponseTooLargeError(limit)
+            if not chunk:
+                if not self._decompressor.eof:
+                    raise httpx.DecodingError("Truncated compressed response body")
+                return bytes(decoded_tail)
+            decoded_tail.extend(chunk)
+
+    def _decode_bounded(self, data: bytes, *, remaining: int, limit: int) -> bytes:
+        assert self._decompressor is not None
+        decoded = bytearray()
+        pending = data
+        while pending:
+            available = remaining - len(decoded)
+            try:
+                chunk = self._decompressor.decompress(pending, available + 1)
+            except zlib.error as error:
+                raise httpx.DecodingError("Invalid compressed response body") from error
+            if len(chunk) > available:
+                raise ResponseTooLargeError(limit)
+            decoded.extend(chunk)
+            if self._supports_concatenated_members and self._decompressor.eof:
+                unused = self._decompressor.unused_data
+                if unused:
+                    self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+                    pending = unused
+                    continue
+            unconsumed = self._decompressor.unconsumed_tail
+            if not unconsumed:
+                break
+            if unconsumed == pending and not chunk:
+                raise httpx.DecodingError("Invalid compressed response body")
+            pending = unconsumed
+        return bytes(decoded)
 
 
 class KitaruAPIClient:
@@ -230,6 +352,7 @@ class KitaruAPIClient:
         content: bytes | AsyncIterable[bytes] | None = None,
         headers: dict[str, str] | None = None,
         authenticate: bool = True,
+        max_response_bytes: int | None = None,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
 
@@ -245,10 +368,16 @@ class KitaruAPIClient:
             headers: Additional request headers.
             authenticate: Whether to send the request through this client's
                 auth flow. The login endpoints send their own credential.
+            max_response_bytes: Maximum decoded response bytes to read. When
+                set, reject an oversized declared length for an unencoded
+                response before reading and stop a streaming response as soon
+                as its decoded body crosses the limit.
 
         Raises:
             APIError: The response has an error status code.
             InvalidServerResponseError: The response is not an API response.
+            ResponseTooLargeError: The response exceeds max_response_bytes.
+            ValueError: max_response_bytes is not positive.
 
         Returns:
             HTTP response.
@@ -257,17 +386,68 @@ class KitaruAPIClient:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
-        response = await self._http.request(
-            method,
-            path,
-            params=params,
-            json=json,
-            data=data,
-            files=files,
-            content=content,
-            headers=headers,
-            auth=self._auth if authenticate else None,
-        )
+        request_kwargs: dict[str, Any] = {
+            "params": params,
+            "json": json,
+            "data": data,
+            "files": files,
+            "content": content,
+            "headers": headers,
+            "auth": self._auth if authenticate else None,
+        }
+        if max_response_bytes is None:
+            response = await self._http.request(method, path, **request_kwargs)
+        else:
+            if max_response_bytes <= 0:
+                raise ValueError("max_response_bytes must be positive")
+            async with self._http.stream(method, path, **request_kwargs) as streamed:
+                encoding = _get_content_encoding(streamed)
+                declared_length = (
+                    _get_content_length(streamed) if encoding is None else None
+                )
+                if declared_length is not None and declared_length > max_response_bytes:
+                    raise ResponseTooLargeError(
+                        max_response_bytes, content_length=declared_length
+                    )
+                body = bytearray()
+                decoder = (
+                    _BoundedContentDecoder(encoding) if encoding is not None else None
+                )
+                raw_chunk_size = min(_RAW_RESPONSE_CHUNK_BYTES, max_response_bytes + 1)
+                async for chunk in streamed.aiter_raw(chunk_size=raw_chunk_size):
+                    remaining = max_response_bytes - len(body)
+                    decoded = (
+                        decoder.decode(
+                            chunk,
+                            remaining=remaining,
+                            limit=max_response_bytes,
+                        )
+                        if decoder is not None
+                        else chunk
+                    )
+                    if len(decoded) > remaining:
+                        raise ResponseTooLargeError(max_response_bytes)
+                    body.extend(decoded)
+                if decoder is not None:
+                    body.extend(
+                        decoder.flush(
+                            remaining=max_response_bytes - len(body),
+                            limit=max_response_bytes,
+                        )
+                    )
+                response_headers = [
+                    (name, value)
+                    for name, value in streamed.headers.multi_items()
+                    if name.lower()
+                    not in {"content-encoding", "content-length", "transfer-encoding"}
+                ]
+                response = httpx.Response(
+                    streamed.status_code,
+                    headers=response_headers,
+                    content=bytes(body),
+                    extensions=streamed.extensions,
+                    request=streamed.request,
+                )
         raise_for_response(response)
         # A UI catch-all or proxy answers an unknown path with an HTML page
         # and a success status, usually on a client/server version mismatch.

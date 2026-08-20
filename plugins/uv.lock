@@ -16,6 +16,7 @@ exclude-newer-span = "P3D"
 members = [
     "kitaru-braintrust-importer",
     "kitaru-evaluator",
+    "kitaru-harbor-exporter",
     "kitaru-jsonl-importer",
     "kitaru-langfuse-importer",
     "kitaru-langgraph",
@@ -24,14 +25,17 @@ members = [
     "kitaru-openai-agents",
     "kitaru-phoenix-importer",
     "kitaru-pydantic-ai",
+    "kitaru-verifiers-exporter",
 ]
 
 [manifest.dependency-groups]
 dev = [
     { name = "kitaru", extras = ["server"], editable = "../" },
+    { name = "kitaru-harbor-exporter", editable = "packages/harbor-exporter" },
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
+    { name = "kitaru-verifiers-exporter", editable = "packages/verifiers-exporter" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
     { name = "ruff", specifier = ">=0.11" },
@@ -924,10 +928,11 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.1"
+version = "0.23.0"
 source = { editable = "../" }
 dependencies = [
     { name = "httpx" },
+    { name = "packaging" },
     { name = "pydantic" },
 ]
 
@@ -964,6 +969,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.44" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'mcp'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
@@ -1008,6 +1014,17 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 name = "kitaru-evaluator"
 version = "0.1.0"
 source = { editable = "packages/evaluator" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
+
+[[package]]
+name = "kitaru-harbor-exporter"
+version = "0.1.0"
+source = { editable = "packages/harbor-exporter" }
 dependencies = [
     { name = "kitaru" },
 ]
@@ -1134,6 +1151,17 @@ requires-dist = [
     { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'openai'", specifier = ">=2.14.1,<2.23" },
 ]
 provides-extras = ["openai"]
+
+[[package]]
+name = "kitaru-verifiers-exporter"
+version = "0.1.0"
+source = { editable = "packages/verifiers-exporter" }
+dependencies = [
+    { name = "kitaru" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "langchain"

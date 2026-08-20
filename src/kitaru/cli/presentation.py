@@ -437,6 +437,15 @@ _VIEWS: dict[str, HumanView] = {
     "experiment.get": _build_view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
     "experiment.create": _build_view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
     "experiment.update": _build_view("Experiment", _ASSET_FIELDS, _ASSET_SECTIONS),
+    "experiment.export": _build_view(
+        "Experiment export",
+        (
+            HumanField("format", "Format"),
+            HumanField("destination", "Destination"),
+            HumanField("session_count", "Sessions"),
+            HumanField("dry_run", "Dry run"),
+        ),
+    ),
     "experiment.run.list": _build_view(
         "Experiment runs",
         (

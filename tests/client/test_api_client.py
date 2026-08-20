@@ -13,6 +13,9 @@
 #  permissions and limitations under the License.
 """Retry and idempotency tests for the API client."""
 
+import gzip
+import uuid
+import zlib
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
@@ -24,6 +27,7 @@ from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
     InvalidServerResponseError,
     NotFoundError,
+    ResponseTooLargeError,
     ServerError,
 )
 from kitaru.transport import IDEMPOTENCY_KEY_HEADER, RetryTransport
@@ -50,6 +54,19 @@ def mock_api_client(
         headers=client._http.headers,
     )
     return client
+
+
+class TrackingStream(httpx.AsyncByteStream):
+    """Yield scripted chunks while recording how far a response was read."""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        self.chunks = chunks
+        self.yielded = 0
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        for chunk in self.chunks:
+            self.yielded += 1
+            yield chunk
 
 
 async def test_retries_transport_error() -> None:
@@ -114,6 +131,231 @@ async def test_html_success_response_raises_a_typed_error() -> None:
     with pytest.raises(InvalidServerResponseError) as exc_info:
         await client.request("GET", "/api/v1/info")
     assert "GET /api/v1/info" in str(exc_info.value)
+
+
+async def test_bounded_response_rejects_declared_length_before_reading() -> None:
+    """Reject an oversized Content-Length without consuming the body."""
+    stream = TrackingStream([b"not read"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Length": "100"},
+            stream=stream,
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(ResponseTooLargeError) as exc_info:
+        await client.experiments.get(uuid.uuid4(), max_bytes=10)
+
+    assert exc_info.value.max_bytes == 10
+    assert exc_info.value.content_length == 100
+    assert stream.yielded == 0
+
+
+async def test_bounded_response_ignores_encoded_declared_length() -> None:
+    """Bound an encoded response by decoded bytes, not its declared length."""
+    decoded = b"ok"
+    encoded = gzip.compress(decoded)
+    stream = TrackingStream([encoded])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Length": str(len(encoded)),
+            },
+            stream=stream,
+        )
+
+    assert len(encoded) > len(decoded)
+    client = mock_api_client(handler)
+    response = await client.request(
+        "GET", "/api/v1/info", max_response_bytes=len(decoded)
+    )
+
+    assert response.content == decoded
+    assert stream.yielded == 1
+
+
+async def test_bounded_response_caps_decompression_before_materializing_chunk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reject a compressed expansion without using HTTPX's unbounded decoder."""
+    decoded = b"x" * (1024 * 1024)
+    encoded = gzip.compress(decoded)
+    stream = TrackingStream([encoded])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip"},
+            stream=stream,
+        )
+
+    async def reject_unbounded_decoder(
+        response: httpx.Response, chunk_size: int | None = None
+    ) -> AsyncIterator[bytes]:
+        raise AssertionError("bounded responses must not use aiter_bytes")
+        yield b""  # pragma: no cover
+
+    monkeypatch.setattr(httpx.Response, "aiter_bytes", reject_unbounded_decoder)
+    assert len(encoded) < 4096
+    client = mock_api_client(handler)
+
+    with pytest.raises(ResponseTooLargeError) as exc_info:
+        await client.request("GET", "/api/v1/info", max_response_bytes=4096)
+
+    assert exc_info.value.max_bytes == 4096
+    assert stream.yielded == 1
+
+
+async def test_bounded_response_stops_chunked_body_at_limit() -> None:
+    """Stop a response with no declared length at the first oversized chunk."""
+    stream = TrackingStream([b"1234", b"56", b"not read"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, stream=stream)
+
+    client = mock_api_client(handler)
+    with pytest.raises(ResponseTooLargeError) as exc_info:
+        await client.blobs.download(uuid.uuid4(), max_bytes=5)
+
+    assert exc_info.value.max_bytes == 5
+    assert exc_info.value.content_length is None
+    assert stream.yielded == 2
+
+
+async def test_bounded_response_returns_decoded_json() -> None:
+    """Return decoded content without asking HTTPX to decompress it twice."""
+    content = gzip.compress(b'{"ok":true}')
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Length": str(len(content)),
+                "Content-Type": "application/json",
+            },
+            stream=TrackingStream([content]),
+        )
+
+    client = mock_api_client(handler)
+    response = await client.request("GET", "/api/v1/info", max_response_bytes=100)
+
+    assert response.json() == {"ok": True}
+    assert "Content-Encoding" not in response.headers
+    assert response.headers["Content-Length"] == str(len(b'{"ok":true}'))
+
+
+async def test_bounded_response_decodes_concatenated_gzip_members() -> None:
+    """Decode every gzip member within one cumulative response limit."""
+    decoded = b'{"ok":true}'
+    content = gzip.compress(b'{"ok":') + gzip.compress(b"true}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Type": "application/json",
+            },
+            stream=TrackingStream([content]),
+        )
+
+    client = mock_api_client(handler)
+    response = await client.request(
+        "GET", "/api/v1/info", max_response_bytes=len(decoded)
+    )
+
+    assert response.content == decoded
+    assert response.json() == {"ok": True}
+
+
+async def test_bounded_response_caps_output_across_gzip_members() -> None:
+    """Apply one decoded-byte limit across every member in a gzip response."""
+    content = gzip.compress(b"1234") + gzip.compress(b"5678")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip"},
+            stream=TrackingStream([content]),
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(ResponseTooLargeError) as exc_info:
+        await client.request("GET", "/api/v1/info", max_response_bytes=6)
+
+    assert exc_info.value.max_bytes == 6
+
+
+async def test_bounded_response_rejects_truncated_compressed_body() -> None:
+    """Reject compressed content that never reaches its stream end marker."""
+    content = gzip.compress(b'{"ok":true}')[:-8]
+    stream = TrackingStream([content])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip"},
+            stream=stream,
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(httpx.DecodingError, match="Truncated compressed response"):
+        await client.request("GET", "/api/v1/info", max_response_bytes=100)
+
+    assert stream.yielded == 1
+
+
+@pytest.mark.parametrize("raw", [False, True])
+async def test_bounded_response_decodes_deflate(raw: bool) -> None:
+    """Decode zlib-wrapped and raw deflate responses within the limit."""
+    decoded = b'{"ok":true}'
+    if raw:
+        compressor = zlib.compressobj(wbits=-zlib.MAX_WBITS)
+        encoded = compressor.compress(decoded) + compressor.flush()
+    else:
+        encoded = zlib.compress(decoded)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Encoding": "Deflate",
+                "Content-Type": "application/json",
+            },
+            stream=TrackingStream([encoded]),
+        )
+
+    client = mock_api_client(handler)
+    response = await client.request(
+        "GET", "/api/v1/info", max_response_bytes=len(decoded)
+    )
+
+    assert response.json() == {"ok": True}
+    assert "Content-Encoding" not in response.headers
+
+
+async def test_bounded_response_rejects_unsupported_encoding_before_reading() -> None:
+    """Fail closed when a response encoding has no bounded decoder."""
+    stream = TrackingStream([b"not read"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "br"},
+            stream=stream,
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(InvalidServerResponseError):
+        await client.request("GET", "/api/v1/info", max_response_bytes=100)
+
+    assert stream.yielded == 0
 
 
 async def test_raises_after_retries_exhausted() -> None:

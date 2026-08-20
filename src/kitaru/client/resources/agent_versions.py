@@ -36,11 +36,14 @@ class AgentVersionsResource:
         """
         self._client = client
 
-    async def get(self, agent_version_id: uuid.UUID) -> AgentVersionResponse:
+    async def get(
+        self, agent_version_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> AgentVersionResponse:
         """Get an agent version by id.
 
         Args:
             agent_version_id: Id of the agent version.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing agent
@@ -50,7 +53,9 @@ class AgentVersionsResource:
             Stored agent version.
         """
         response = await self._client.request(
-            "GET", f"/api/v1/agent-versions/{agent_version_id}"
+            "GET",
+            f"/api/v1/agent-versions/{agent_version_id}",
+            max_response_bytes=max_bytes,
         )
         return AgentVersionResponse.model_validate(response.json())
 

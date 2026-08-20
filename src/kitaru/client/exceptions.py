@@ -74,6 +74,24 @@ class InvalidServerResponseError(KitaruClientError):
     """Invalid server response error."""
 
 
+class ResponseTooLargeError(KitaruClientError):
+    """Response exceeded a caller-selected byte limit."""
+
+    def __init__(self, max_bytes: int, content_length: int | None = None) -> None:
+        """Initialize the error.
+
+        Args:
+            max_bytes: Maximum response bytes accepted by the caller.
+            content_length: Declared response size when the server supplied one.
+        """
+        detail = f"Response exceeds the {max_bytes}-byte limit"
+        if content_length is not None:
+            detail = f"{detail} (declared {content_length} bytes)"
+        super().__init__(detail)
+        self.max_bytes = max_bytes
+        self.content_length = content_length
+
+
 _STATUS_ERRORS: dict[int, type[APIError]] = {
     401: AuthenticationError,
     403: AuthorizationError,

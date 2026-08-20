@@ -85,13 +85,16 @@ class SessionsResource:
         response = await self._client.request("GET", f"/api/v1/sessions/{session_id}")
         return SessionResponse.model_validate(response.json())
 
-    async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
+    async def get_with_nodes(
+        self, session_id: uuid.UUID, *, max_bytes: int | None = None
+    ) -> SessionWithNodesResponse:
         """Get a session together with every one of its nodes.
 
         The node list is not paginated, so one call carries a whole session.
 
         Args:
             session_id: Id of the session.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -101,7 +104,9 @@ class SessionsResource:
             Session with every node, ordered by index.
         """
         response = await self._client.request(
-            "GET", f"/api/v1/sessions/{session_id}/full"
+            "GET",
+            f"/api/v1/sessions/{session_id}/full",
+            max_response_bytes=max_bytes,
         )
         return SessionWithNodesResponse.model_validate(response.json())
 
@@ -160,11 +165,14 @@ class SessionsResource:
     async def list(
         self,
         params: SessionListParams | None = None,
+        *,
+        max_bytes: int | None = None,
     ) -> Page[SessionResponse]:
         """List sessions.
 
         Args:
             params: Session list params.
+            max_bytes: Maximum response bytes to read.
 
         Raises:
             APIError: The request failed.
@@ -177,17 +185,21 @@ class SessionsResource:
             "GET",
             "/api/v1/sessions",
             params=params.model_dump(mode="json", exclude_unset=True),
+            max_response_bytes=max_bytes,
         )
         return Page[SessionResponse].model_validate(response.json())
 
     async def iter(
         self,
         params: SessionListParams | None = None,
+        *,
+        max_bytes: int | None = None,
     ) -> AsyncIterator[SessionResponse]:
         """Iterate over all sessions.
 
         Args:
             params: Session list params.
+            max_bytes: Maximum response bytes to read for each page.
 
         Raises:
             APIError: The request failed.
@@ -195,7 +207,10 @@ class SessionsResource:
         Returns:
             Async iterator over every session.
         """
-        async for item in iterate_pages(params or SessionListParams(), self.list):
+        async for item in iterate_pages(
+            params or SessionListParams(),
+            lambda page_params: self.list(page_params, max_bytes=max_bytes),
+        ):
             yield item
 
     async def update(

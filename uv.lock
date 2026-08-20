@@ -7,7 +7,7 @@ resolution-markers = [
 ]
 
 [options]
-exclude-newer = "2026-08-17T13:35:55.994919Z"
+exclude-newer = "0001-01-01T00:00:00Z" # This has no effect and is included for backwards compatibility when using relative exclude-newer values.
 exclude-newer-span = "P3D"
 
 [[package]]
@@ -907,10 +907,11 @@ wheels = [
 
 [[package]]
 name = "kitaru"
-version = "0.22.2"
+version = "0.23.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "packaging" },
     { name = "pydantic" },
 ]
 
@@ -984,6 +985,7 @@ requires-dist = [
     { name = "opentelemetry-instrumentation-logging", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-sqlalchemy", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-sdk", marker = "extra == 'otel'", specifier = ">=1.44" },
+    { name = "packaging", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'cli'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'mcp'", specifier = ">=24.0" },
     { name = "packaging", marker = "extra == 'server'", specifier = ">=24.0" },
