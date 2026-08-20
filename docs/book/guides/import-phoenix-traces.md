@@ -50,7 +50,7 @@ kitaru session import phoenix-traces.jsonl \
   --wait
 ```
 
-Use `--media-type application/json` for a CLI JSON object or array. `kitaru/phoenix` is a built-in importer registered at server startup, so there is no importer code to register.
+Use `--media-type application/json` for a CLI JSON object or array. On Kitaru 0.22.2 and later, `kitaru/phoenix` is a built-in importer registered at server startup, so there is no importer code to register. Older servers do not have it in their catalog; upgrade the server before importing.
 
 List the imported sessions:
 
