@@ -27,6 +27,7 @@ default-catalog = false
 tag-prefix = "python/kitaru/v"
 checks = [
     "cli-artifact-contract",
+    "export-artifact-contract",
     "mcp-wheel-contract",
     "test (py311-cli)",
     "test (py312-cli)",
@@ -57,6 +58,16 @@ version-source = "plugins/packages/evaluator/pyproject.toml"
 default-catalog = true
 tag-prefix = "python/kitaru-evaluator/v"
 checks = ["plugin package (evaluator)"]
+
+[[units]]
+slug = "harbor-exporter"
+path = "plugins/packages/harbor-exporter"
+distribution = "kitaru-harbor-exporter"
+registry = "pypi"
+version-source = "plugins/packages/harbor-exporter/pyproject.toml"
+default-catalog = false
+tag-prefix = "python/kitaru-harbor-exporter/v"
+checks = ["plugin package (harbor-exporter)", "export-artifact-contract"]
 
 [[units]]
 slug = "jsonl-importer"
@@ -137,3 +148,13 @@ version-source = "plugins/packages/pydantic-ai/pyproject.toml"
 default-catalog = false
 tag-prefix = "python/kitaru-pydantic-ai/v"
 checks = ["plugin package (pydantic-ai)"]
+
+[[units]]
+slug = "verifiers-exporter"
+path = "plugins/packages/verifiers-exporter"
+distribution = "kitaru-verifiers-exporter"
+registry = "pypi"
+version-source = "plugins/packages/verifiers-exporter/pyproject.toml"
+default-catalog = false
+tag-prefix = "python/kitaru-verifiers-exporter/v"
+checks = ["plugin package (verifiers-exporter)", "export-artifact-contract"]

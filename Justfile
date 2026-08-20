@@ -104,7 +104,7 @@ cli-artifact-smoke:
 plugin-artifact-smoke:
     uv run --no-sync python scripts/smoke_plugin_artifacts.py
 
-# Verify exporter projects against exact target packages and provider-free runtimes
+# Verify installed exporter wheels against exact targets and provider-free runtimes
 export-artifact-smoke *ARGS:
     uv run --no-project --python 3.12 python scripts/smoke_export_artifacts.py {{ ARGS }}
 

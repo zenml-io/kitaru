@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import hashlib
 import importlib.metadata
+import importlib.util
 import json
 import os
 import shutil
@@ -179,6 +180,50 @@ def _assert_distribution_source(name: str, expected: str) -> None:
         raise SmokeFailure(f"{name} was not installed from {expected}")
 
 
+def _assert_exporters_absent() -> None:
+    """Require target consumer environments to omit generator plugins."""
+    for distribution, module in (
+        ("kitaru-harbor-exporter", "kitaru_harbor_exporter"),
+        ("kitaru-verifiers-exporter", "kitaru_verifiers_exporter"),
+    ):
+        try:
+            importlib.metadata.version(distribution)
+        except importlib.metadata.PackageNotFoundError:
+            pass
+        else:
+            raise SmokeFailure(f"target environment contains {distribution}")
+        if importlib.util.find_spec(module) is not None:
+            raise SmokeFailure(f"target environment can import {module}")
+
+
+def _verify_installed_exporters(expected: set[str]) -> None:
+    """Verify installed discovery and exact missing-plugin behavior."""
+    from kitaru.exports.models import ExportError
+    from kitaru.exports.plugin import resolve_exporter
+
+    for format_name, distribution in (
+        ("harbor", "kitaru-harbor-exporter"),
+        ("verifiers-v1", "kitaru-verifiers-exporter"),
+    ):
+        if format_name in expected:
+            loaded = resolve_exporter(format_name)  # type: ignore[arg-type]
+            if loaded.metadata.distribution_name != distribution:
+                raise SmokeFailure(f"{format_name} resolved the wrong distribution")
+            continue
+        try:
+            resolve_exporter(format_name)  # type: ignore[arg-type]
+        except ExportError as error:
+            if (
+                error.code != "exporter_not_installed"
+                or distribution not in error.message
+            ):
+                raise SmokeFailure(
+                    f"{format_name} did not return its exact missing-package error"
+                ) from error
+        else:
+            raise SmokeFailure(f"{format_name} unexpectedly resolved")
+
+
 def _fixture_agent_source() -> str:
     return textwrap.dedent(
         '''
@@ -306,6 +351,8 @@ def _generate_artifacts(
     root: Path,
     *,
     candidate_wheel: Path | None = None,
+    harbor_exporter_wheel: Path | None = None,
+    verifiers_exporter_wheel: Path | None = None,
     template_source: Path | None = None,
 ) -> None:
     from kitaru.api_models.v1.agent_version import AgentVersionResponse, RunSpec
@@ -320,17 +367,31 @@ def _generate_artifacts(
     )
     from kitaru.api_models.v1.session_node import SessionWithNodesResponse
     from kitaru.exports._dependencies import classify_dependencies
-    from kitaru.exports.formats.harbor import render_harbor
-    from kitaru.exports.formats.verifiers_v1 import render_verifiers_v1
     from kitaru.exports.models import (
         MaterializedEvaluator,
         ResolvedExport,
         RewardSelector,
     )
+    from kitaru.exports.plugin import (
+        ExporterContext,
+        ExporterOptions,
+        resolve_exporter,
+    )
     from kitaru.exports.source import inventory_source
 
     now = datetime(2026, 1, 1, tzinfo=UTC)
     evaluator_script = _fixture_evaluator_source()
+
+    if candidate_wheel is not None:
+        _assert_distribution_source("kitaru", candidate_wheel.name)
+    if harbor_exporter_wheel is not None:
+        _assert_distribution_source(
+            "kitaru-harbor-exporter", harbor_exporter_wheel.name
+        )
+    if verifiers_exporter_wheel is not None:
+        _assert_distribution_source(
+            "kitaru-verifiers-exporter", verifiers_exporter_wheel.name
+        )
 
     def resolved(source_root: Path, agent_version: int) -> Any:
         source_root.mkdir(parents=True)
@@ -405,14 +466,42 @@ def _generate_artifacts(
 
     first = resolved(root / "source-first", 30)
     second = resolved(root / "source-second", 31)
-    render_harbor(
+    harbor = resolve_exporter("harbor")
+    harbor_context = ExporterContext(
+        exporter=harbor.provenance, cancellation_checkpoint=lambda: None
+    )
+    harbor_options = ExporterOptions(
+        trace_format="atif", trace_path="/workspace/trajectory.json"
+    )
+    harbor.implementation.preflight(
+        first, options=harbor_options, context=harbor_context
+    )
+    harbor.implementation.render(
         first,
         root / "harbor",
-        trace_format="atif",
-        trace_path="/workspace/trajectory.json",
+        options=harbor_options,
+        context=harbor_context,
     )
-    render_verifiers_v1(first, root / "verifiers-first")
-    render_verifiers_v1(second, root / "verifiers-second")
+    verifiers = resolve_exporter("verifiers-v1")
+    verifiers_context = ExporterContext(
+        exporter=verifiers.provenance, cancellation_checkpoint=lambda: None
+    )
+    verifiers_options = ExporterOptions()
+    for resolved_export, destination in (
+        (first, root / "verifiers-first"),
+        (second, root / "verifiers-second"),
+    ):
+        verifiers.implementation.preflight(
+            resolved_export,
+            options=verifiers_options,
+            context=verifiers_context,
+        )
+        verifiers.implementation.render(
+            resolved_export,
+            destination,
+            options=verifiers_options,
+            context=verifiers_context,
+        )
     if template_source is not None:
         if candidate_wheel is None:
             raise SmokeFailure("template generation requires the candidate wheel")
@@ -477,7 +566,15 @@ def _generate_artifacts(
             command_argv=("python", "-m", "returns_agent.agent"),
             dependency_plan=classify_dependencies(inventory_source(template_root)),
         )
-        render_verifiers_v1(template, root / "verifiers-template")
+        verifiers.implementation.preflight(
+            template, options=verifiers_options, context=verifiers_context
+        )
+        verifiers.implementation.render(
+            template,
+            root / "verifiers-template",
+            options=verifiers_options,
+            context=verifiers_context,
+        )
 
 
 def _verify_harbor(root: Path, candidate_wheel: Path, runtime: bool) -> None:
@@ -490,6 +587,7 @@ def _verify_harbor(root: Path, candidate_wheel: Path, runtime: bool) -> None:
 
     if importlib.metadata.version("harbor") != HARBOR_VERSION:
         raise SmokeFailure("wrong Harbor version installed")
+    _assert_exporters_absent()
     _assert_distribution_source("kitaru", candidate_wheel.name)
     manifest = DatasetManifest.from_toml_file(root / "dataset/dataset.toml")
     task_directories = sorted((root / "dataset").glob("task-*"))
@@ -850,6 +948,7 @@ def _verify_verifiers(
         raise SmokeFailure("wrong Verifiers version installed")
     if importlib.metadata.version("prime-rl") != PRIME_RL_VERSION:
         raise SmokeFailure("wrong PrimeRL version installed")
+    _assert_exporters_absent()
     _assert_distribution_source("kitaru", candidate_wheel.name)
     _assert_distribution_source("prime-rl", f"v{PRIME_RL_VERSION}.tar.gz")
     _assert_distribution_source("prime-rl-configs", f"v{PRIME_RL_VERSION}.tar.gz")
@@ -1025,10 +1124,51 @@ def _main(runtime: bool, template_source: Path | None) -> None:
         candidate = _build_wheel(
             uv, repository, root / "candidate-wheel", build_environment
         )
+        harbor_exporter = _build_wheel(
+            uv,
+            repository / "plugins/packages/harbor-exporter",
+            root / "harbor-exporter-wheel",
+            build_environment,
+        )
+        verifiers_exporter = _build_wheel(
+            uv,
+            repository / "plugins/packages/verifiers-exporter",
+            root / "verifiers-exporter-wheel",
+            build_environment,
+        )
         _assert_core_metadata(repository, candidate)
 
+        core_python, core_environment = _create_environment(
+            uv, root / "core-only", [candidate]
+        )
+        _run(
+            [core_python, __file__, "--verify-installed-exporters"],
+            cwd=repository,
+            environment=core_environment,
+        )
+        for format_name, exporter_wheel in (
+            ("harbor", harbor_exporter),
+            ("verifiers-v1", verifiers_exporter),
+        ):
+            one_python, one_environment = _create_environment(
+                uv, root / f"one-{format_name}", [candidate, exporter_wheel]
+            )
+            _run(
+                [
+                    one_python,
+                    __file__,
+                    "--verify-installed-exporters",
+                    "--installed-exporter",
+                    format_name,
+                ],
+                cwd=repository,
+                environment=one_environment,
+            )
+
         generator_python, generator_environment = _create_environment(
-            uv, root / "generator", [candidate]
+            uv,
+            root / "generator",
+            [candidate, harbor_exporter, verifiers_exporter],
         )
         artifacts = root / "artifacts"
         _run(
@@ -1039,6 +1179,10 @@ def _main(runtime: bool, template_source: Path | None) -> None:
                 artifacts,
                 "--candidate-wheel",
                 candidate,
+                "--harbor-exporter-wheel",
+                harbor_exporter,
+                "--verifiers-exporter-wheel",
+                verifiers_exporter,
                 *(
                     ["--template-source", template_source]
                     if template_source is not None
@@ -1171,7 +1315,16 @@ def main() -> int:
     parser.add_argument("--generate", type=Path)
     parser.add_argument("--verify-harbor", type=Path)
     parser.add_argument("--verify-verifiers", nargs=2, type=Path)
+    parser.add_argument("--verify-installed-exporters", action="store_true")
+    parser.add_argument(
+        "--installed-exporter",
+        action="append",
+        default=[],
+        choices=("harbor", "verifiers-v1"),
+    )
     parser.add_argument("--candidate-wheel", type=Path)
+    parser.add_argument("--harbor-exporter-wheel", type=Path)
+    parser.add_argument("--verifiers-exporter-wheel", type=Path)
     parser.add_argument("--template-artifact", type=Path)
     parser.add_argument("--template-source", type=Path)
     arguments = parser.parse_args()
@@ -1179,8 +1332,13 @@ def main() -> int:
         _generate_artifacts(
             arguments.generate,
             candidate_wheel=arguments.candidate_wheel,
+            harbor_exporter_wheel=arguments.harbor_exporter_wheel,
+            verifiers_exporter_wheel=arguments.verifiers_exporter_wheel,
             template_source=arguments.template_source,
         )
+        return 0
+    if arguments.verify_installed_exporters:
+        _verify_installed_exporters(set(arguments.installed_exporter))
         return 0
     if arguments.verify_harbor is not None:
         if arguments.candidate_wheel is None:

@@ -426,7 +426,7 @@ jobs:
         run: |
           sudo systemctl start docker
           docker info
-      - name: Test generated Harbor, Verifiers, and PrimeRL contracts
+      - name: Build and install candidate exporter wheels, then test exact targets
         run: >-
           uv run --no-project --python 3.12 python scripts/smoke_export_artifacts.py
           --template-source kitaru-template
