@@ -3,13 +3,16 @@
 
 import uuid
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
 
-from kitaru.exports.operation import ExportReceipt
+from kitaru.exports.operation import ExportOperationStateMachine, ExportReceipt
+from kitaru.mcp import registry
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
+from kitaru.mcp.models.common import ToolResult
 from kitaru.mcp.models.exports import ExperimentExportRequest
 from kitaru.mcp.settings import MCPSettings
 from kitaru.mcp.tools import exports
@@ -68,3 +71,38 @@ async def test_export_uses_exact_ids_and_workspace_paths(
     receipt = await exports.handle_experiment_export(state, request)
     assert seen[0].experiment_id == request.experiment_id
     assert receipt.operation == "experiment_export"
+
+
+async def test_export_registry_path_does_not_use_generic_execution() -> None:
+    calls: list[str] = []
+
+    class RoutingState:
+        async def execute(self, _operation: Any) -> object:
+            raise AssertionError("export used generic MCP execution")
+
+        async def execute_export(self, operation: Any) -> object:
+            calls.append("export")
+            return await operation(ExportOperationStateMachine())
+
+    async def handler(
+        _state: Any,
+        _request: object,
+        *,
+        operation: ExportOperationStateMachine,
+    ) -> dict[str, str]:
+        assert operation.state.value == "staging"
+        return {"result": "ok"}
+
+    context = SimpleNamespace(
+        request_context=SimpleNamespace(lifespan_context=RoutingState())
+    )
+    result = await registry._invoke(
+        cast(Any, context),
+        object(),
+        ToolResult,
+        cast(Any, handler),
+        export_operation=True,
+    )
+
+    assert calls == ["export"]
+    assert result.is_error is False

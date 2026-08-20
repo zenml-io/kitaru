@@ -4,7 +4,9 @@ import errno
 import hashlib
 import os
 import stat
-from collections.abc import Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
@@ -56,6 +58,36 @@ _PROTECTED_FILENAMES = frozenset(
 _PRIVATE_KEY_PREFIXES = ("id_dsa", "id_ecdsa", "id_ed25519", "id_rsa")
 _PRIVATE_KEY_SUFFIXES = (".key", ".p12", ".pem", ".pfx")
 _COPY_BUFFER_BYTES = 1024 * 1024
+CancellationCheckpoint = Callable[[], None]
+_ACTIVE_CANCELLATION_CHECKPOINT: ContextVar[CancellationCheckpoint | None] = ContextVar(
+    "kitaru_export_source_cancellation_checkpoint", default=None
+)
+
+
+def _noop_checkpoint() -> None:
+    return None
+
+
+def _get_checkpoint(
+    cancellation_checkpoint: CancellationCheckpoint | None,
+) -> CancellationCheckpoint:
+    return (
+        cancellation_checkpoint
+        or _ACTIVE_CANCELLATION_CHECKPOINT.get()
+        or _noop_checkpoint
+    )
+
+
+@contextmanager
+def export_cancellation_scope(
+    cancellation_checkpoint: CancellationCheckpoint | None,
+) -> Iterator[None]:
+    """Make one checkpoint available to nested source-copy calls."""
+    token = _ACTIVE_CANCELLATION_CHECKPOINT.set(cancellation_checkpoint)
+    try:
+        yield
+    finally:
+        _ACTIVE_CANCELLATION_CHECKPOINT.reset(token)
 
 
 @dataclass(frozen=True)
@@ -114,12 +146,20 @@ def _open_source_file(path: Path) -> BinaryIO:
     return os.fdopen(descriptor, "rb")
 
 
-def _read_opened_file(source: BinaryIO, *, max_bytes: int) -> bytes:
+def _read_opened_file(
+    source: BinaryIO,
+    *,
+    max_bytes: int,
+    cancellation_checkpoint: CancellationCheckpoint | None = None,
+) -> bytes:
+    checkpoint = _get_checkpoint(cancellation_checkpoint)
     content = bytearray()
     while chunk := source.read(min(_COPY_BUFFER_BYTES, max_bytes + 1 - len(content))):
+        checkpoint()
         content.extend(chunk)
         if len(content) > max_bytes:
             break
+    checkpoint()
     return bytes(content)
 
 
@@ -142,7 +182,11 @@ def _validate_regular_file(value: os.stat_result, relative: str) -> None:
 
 
 def _snapshot_file(
-    path: Path, relative: str, *, max_file_bytes: int
+    path: Path,
+    relative: str,
+    *,
+    max_file_bytes: int,
+    cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> tuple[SourceFile, bytes]:
     try:
         path_before = path.stat(follow_symlinks=False)
@@ -160,7 +204,11 @@ def _snapshot_file(
                     "source_changed",
                     f"Source file changed during export: {relative}",
                 )
-            content = _read_opened_file(source, max_bytes=max_file_bytes)
+            token = _ACTIVE_CANCELLATION_CHECKPOINT.set(cancellation_checkpoint)
+            try:
+                content = _read_opened_file(source, max_bytes=max_file_bytes)
+            finally:
+                _ACTIVE_CANCELLATION_CHECKPOINT.reset(token)
             handle_after = os.fstat(source.fileno())
     except ExportError:
         raise
@@ -243,8 +291,11 @@ def inventory_source(
     max_total_bytes: int = DEFAULT_MAX_TOTAL_BYTES,
     max_files: int = DEFAULT_MAX_FILES,
     max_path_bytes: int = DEFAULT_MAX_PATH_BYTES,
+    cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> SourceInventory:
     """Acquire one bounded immutable source snapshot without following links."""
+    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint()
     try:
         requested_root = root.expanduser().absolute()
         current = Path(requested_root.anchor)
@@ -286,6 +337,7 @@ def inventory_source(
     )
     staging_parent: PurePosixPath | None = None
     staging_prefix: str | None = None
+    reservation_name: str | None = None
     if destination is not None:
         absolute_destination = destination.expanduser()
         if not absolute_destination.is_absolute():
@@ -299,6 +351,7 @@ def inventory_source(
         else:
             staging_parent = PurePosixPath(staging_parent_path.as_posix())
             staging_prefix = f".{absolute_destination.name}.kitaru-"
+            reservation_name = f".{absolute_destination.name}.kitaru-reservation"
 
     files: list[SourceFile] = []
     contents: dict[str, bytes] = {}
@@ -322,17 +375,22 @@ def inventory_source(
     def is_reserved(path: PurePosixPath) -> bool:
         if any(_path_is_at_or_below(path, item) for item in reserved):
             return True
-        if staging_parent is None or staging_prefix is None:
+        if staging_parent is None or staging_prefix is None or reservation_name is None:
             return False
         parent = path.parent if path.parent.parts else PurePosixPath(".")
         return (
             parent == staging_parent
             and path.name.startswith(staging_prefix)
-            and (path.name.endswith(".tmp") or path.name.endswith(".tmp.zip"))
-        )
+            and (
+                path.name.endswith(".tmp")
+                or path.name.endswith(".tmp.zip")
+                or path.name.endswith(".tmp.owner")
+            )
+        ) or (parent == staging_parent and path.name == reservation_name)
 
     def walk(directory: Path, relative_directory: PurePosixPath) -> None:
         nonlocal file_count, total_size
+        checkpoint()
         try:
             with os.scandir(directory) as iterator:
                 entries = sorted(iterator, key=lambda item: item.name)
@@ -343,6 +401,7 @@ def inventory_source(
                 f"Cannot read source directory {relative}: {error}",
             ) from error
         for entry in entries:
+            checkpoint()
             path = Path(entry.path)
             relative_path = relative_directory / entry.name
             relative = relative_path.as_posix()
@@ -418,6 +477,7 @@ def inventory_source(
                 path,
                 relative,
                 max_file_bytes=max_file_bytes,
+                cancellation_checkpoint=cancellation_checkpoint,
             )
             total_size += item.size
             if total_size > max_total_bytes:
@@ -443,6 +503,7 @@ def inventory_source(
     files.sort(key=lambda item: item.path)
     inventory_hash = hashlib.sha256()
     for item in files:
+        checkpoint()
         inventory_hash.update(item.path.encode("utf-8"))
         inventory_hash.update(b"\0")
         inventory_hash.update(item.sha256.encode("ascii"))
@@ -451,6 +512,7 @@ def inventory_source(
         inventory_hash.update(b"\0")
         inventory_hash.update(f"{item.mode:o}".encode("ascii"))
         inventory_hash.update(b"\0\n")
+    checkpoint()
     return _SnapshotSourceInventory(
         root=resolved_root,
         files=tuple(files),
@@ -472,10 +534,18 @@ def source_file_bytes(inventory: SourceInventory, path: str) -> bytes:
     )
 
 
-def copy_source(inventory: SourceInventory, destination: Path) -> None:
+def copy_source(
+    inventory: SourceInventory,
+    destination: Path,
+    *,
+    cancellation_checkpoint: CancellationCheckpoint | None = None,
+) -> None:
     """Copy retained source bytes without reopening source paths."""
+    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint()
     destination.mkdir(parents=True, exist_ok=False)
     for item in inventory.files:
+        checkpoint()
         target = destination / item.path
         target.parent.mkdir(parents=True, exist_ok=True)
         try:
@@ -488,3 +558,4 @@ def copy_source(inventory: SourceInventory, destination: Path) -> None:
                 "source_copy_failed",
                 f"Cannot copy snapshotted source file {item.path}: {error}",
             ) from error
+    checkpoint()

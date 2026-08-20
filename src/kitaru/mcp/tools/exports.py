@@ -7,7 +7,7 @@ from pathlib import Path
 
 from kitaru.exports.config import ExportRequest
 from kitaru.exports.models import ExportError, get_export_error_kind
-from kitaru.exports.operation import export_experiment
+from kitaru.exports.operation import ExportOperationStateMachine, export_experiment
 from kitaru.mcp.errors import MCPToolError
 from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.exports import (
@@ -68,7 +68,10 @@ def _map_export_error(error: ExportError) -> MCPToolError:
 
 
 async def handle_experiment_export(
-    state: MCPServerState, request: ExperimentExportRequest
+    state: MCPServerState,
+    request: ExperimentExportRequest,
+    *,
+    operation: ExportOperationStateMachine | None = None,
 ) -> ExperimentExportReceipt:
     """Run one exact-ID local export inside configured workspace roots."""
     roots = state.settings.workspace_roots
@@ -81,6 +84,7 @@ async def handle_experiment_export(
     source_root = _resolve_source(request.source_root, roots)
     destination = _resolve_destination(request.destination, roots)
     try:
+        export_kwargs = {"operation": operation} if operation is not None else {}
         receipt = await export_experiment(
             state.client,
             ExportRequest(
@@ -97,6 +101,7 @@ async def handle_experiment_export(
                 archive=request.archive,
                 dry_run=request.dry_run,
             ),
+            **export_kwargs,
         )
     except ExportError as error:
         raise _map_export_error(error) from error

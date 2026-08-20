@@ -188,7 +188,11 @@ async def experiment_export_tool(
     return cast(
         ExperimentExportResult,
         await _invoke(
-            context, request, ExperimentExportResult, handle_experiment_export
+            context,
+            request,
+            ExperimentExportResult,
+            handle_experiment_export,
+            export_operation=True,
         ),
     )
 
@@ -215,10 +219,19 @@ async def _invoke(
     request: object,
     result_type: type[ToolResult],
     handler: ToolHandler,
+    *,
+    export_operation: bool = False,
 ) -> CallToolResult:
     state = cast(MCPServerState, context.request_context.lifespan_context)
     try:
-        data = await state.execute(lambda: handler(state, request))
+        if export_operation:
+            data = await state.execute_export(
+                lambda operation: cast(Any, handler)(
+                    state, request, operation=operation
+                )
+            )
+        else:
+            data = await state.execute(lambda: handler(state, request))
         if isinstance(data, ToolSuccessPayload):
             json_data = redact_data(data.data)
             envelope = success_result(

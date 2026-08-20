@@ -1,6 +1,8 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Shared export operation contracts."""
 
+import asyncio
+import threading
 import uuid
 from pathlib import Path
 from typing import Any
@@ -25,6 +27,7 @@ from kitaru.exports.models import (
     ValidationReceipt,
 )
 from kitaru.exports.operation import (
+    ExportOperationRevoked,
     ExportOperationState,
     ExportOperationStateMachine,
     export_experiment,
@@ -196,6 +199,14 @@ def test_operation_state_machine_acknowledges_revocation_before_cancellation() -
     assert operation.try_start_commit() is False
     operation.mark_cancelled()
     assert operation.state is ExportOperationState.CANCELLED
+
+
+def test_operation_checkpoint_rejects_work_after_revocation() -> None:
+    operation = ExportOperationStateMachine()
+
+    assert operation.request_revocation() is True
+    with pytest.raises(ExportOperationRevoked):
+        operation.checkpoint()
 
 
 def test_harbor_requires_an_explicit_trace_contract(tmp_path: Path) -> None:
@@ -380,3 +391,45 @@ async def test_operation_publishes_renderer_output(
     )
     assert (destination / "README.md").read_text() == "ready\n"
     assert receipt.validation_level == "structural"
+
+
+async def test_operation_revocation_during_source_inventory_joins_without_publishing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    operation = ExportOperationStateMachine()
+    inventory_started = threading.Event()
+    release_inventory = threading.Event()
+    remote = object()
+
+    async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> Any:
+        return remote
+
+    def blocked_inventory(
+        *_args: Any, cancellation_checkpoint: Any, **_kwargs: Any
+    ) -> Any:
+        inventory_started.set()
+        assert release_inventory.wait(timeout=5)
+        cancellation_checkpoint()
+        raise AssertionError("revoked inventory continued")
+
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
+    )
+    monkeypatch.setattr("kitaru.exports.operation.inventory_source", blocked_inventory)
+    destination = tmp_path / "bundle"
+    task = asyncio.create_task(
+        export_experiment(
+            object(),
+            _request(tmp_path, destination=destination),
+            operation=operation,
+        )
+    )
+    assert await asyncio.to_thread(inventory_started.wait, 5)
+    assert operation.request_revocation() is True
+    release_inventory.set()
+
+    with pytest.raises(ExportOperationRevoked):
+        await task
+    assert task.done()
+    assert operation.state is ExportOperationState.CANCELLED
+    assert not destination.exists()
