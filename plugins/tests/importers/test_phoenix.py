@@ -32,7 +32,7 @@ def span(
     trace_id: str = "trace-1",
     parent_id: str | None = None,
     span_kind: str = "UNKNOWN",
-    start_time: str = "2026-08-20T06:30:00Z",
+    start_time: str | None = "2026-08-20T06:30:00Z",
     attributes: dict[str, Any] | None = None,
     status_code: str = "UNSET",
     status_message: str = "",
@@ -153,9 +153,12 @@ def test_maps_native_openinference_llm_attributes() -> None:
             "llm",
             span_kind="LLM",
             attributes={
-                "llm.input_messages": [{"message.role": "user"}],
-                "llm.output_messages": [{"message.role": "assistant"}],
+                "llm.input_messages.0.message.role": "user",
+                "llm.input_messages.0.message.content": "Hello",
+                "llm.output_messages.0.message.role": "assistant",
+                "llm.output_messages.0.message.content": "Hi",
                 "llm.invocation_parameters": '{"temperature": 0.2}',
+                "gen_ai.request.model": "gemini-flash",
                 "llm.model_name": "gemini-3.5-flash-lite",
                 "llm.provider": "google",
                 "llm.system": "vertexai",
@@ -172,8 +175,11 @@ def test_maps_native_openinference_llm_attributes() -> None:
 
     assert isinstance(session, ImportedSession)
     [node] = session.nodes
+    assert node.requested_model == "gemini-flash"
     assert node.model == "gemini-3.5-flash-lite"
     assert node.model_provider == "google"
+    assert node.inputs == [{"message.role": "user", "message.content": "Hello"}]
+    assert node.outputs == [{"message.role": "assistant", "message.content": "Hi"}]
     assert node.tokens is not None
     assert node.tokens.input_tokens == 12
     assert node.tokens.output_tokens == 5
@@ -211,6 +217,32 @@ def test_parses_cli_trace_envelopes_and_preserves_annotations() -> None:
     assert first.metadata["phoenix.annotations"] == [{"name": "quality", "score": 0.9}]
     assert first.metadata["phoenix.notes"] == ["reviewed"]
     assert len(first.nodes) == 1
+
+
+def test_merges_metadata_when_a_trace_spans_cli_envelopes() -> None:
+    """Retain metadata from every envelope contributing to one trace."""
+    payload = jsonl(
+        {
+            "traceId": "trace-1",
+            "spans": [span("root")],
+            "annotations": [{"name": "quality", "score": 0.9}],
+        },
+        {
+            "traceId": "trace-1",
+            "spans": [span("child", parent_id="root")],
+            "annotations": [{"name": "safety", "score": 1.0}],
+            "notes": ["reviewed"],
+        },
+    )
+
+    [session] = parse(payload)
+
+    assert isinstance(session, ImportedSession)
+    assert session.metadata["phoenix.annotations"] == [
+        {"name": "quality", "score": 0.9},
+        {"name": "safety", "score": 1.0},
+    ]
+    assert session.metadata["phoenix.notes"] == ["reviewed"]
 
 
 def test_uses_root_status_after_recovered_child_failure() -> None:
@@ -270,12 +302,37 @@ def test_keeps_missing_parents_as_roots_with_warning() -> None:
     assert "references missing parent" in session.metadata["normalization_warnings"][0]
 
 
+def test_prefers_true_root_over_earlier_orphan() -> None:
+    """Use the null-parent span for session fields in a partial export."""
+    content = jsonl(
+        span(
+            "orphan",
+            parent_id="not-exported",
+            start_time=None,
+            status_code="OK",
+        ),
+        span(
+            "root",
+            status_code="ERROR",
+            status_message="boom",
+            start_time="2026-08-20T06:30:01Z",
+        ),
+    )
+
+    [session] = parse(content)
+
+    assert isinstance(session, ImportedSession)
+    assert session.name == "root"
+    assert session.status is SessionStatus.FAILED
+    assert session.error == "boom"
+
+
 def test_isolates_invalid_trace_graphs() -> None:
     """Report one invalid trace without discarding another valid trace."""
     payload = jsonl(
+        span("root", trace_id="valid"),
         span("a", trace_id="broken", parent_id="b"),
         span("b", trace_id="broken", parent_id="a"),
-        span("root", trace_id="valid"),
     )
 
     parsed = parse(payload)
@@ -287,6 +344,7 @@ def test_isolates_invalid_trace_graphs() -> None:
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
     assert failure.external_id == "broken"
     assert failure.error == "The imported span graph contains a parent cycle"
+    assert failure.line == 2
 
 
 def test_isolates_duplicate_span_ids() -> None:
@@ -306,6 +364,103 @@ def test_isolates_duplicate_span_ids() -> None:
     [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
     assert failure.external_id == "broken"
     assert failure.error == "The import contains duplicate span ids"
+
+
+def test_isolates_a_malformed_jsonl_line() -> None:
+    """Import valid traces around a malformed JSONL record."""
+    payload = b"\n".join(
+        (
+            json.dumps(span("first", trace_id="first")).encode(),
+            b'{"truncated":',
+            json.dumps(span("second", trace_id="second")).encode(),
+        )
+    )
+
+    parsed = parse(payload)
+
+    assert {
+        item.external_id for item in parsed if isinstance(item, ImportedSession)
+    } == {"first", "second"}
+    [failure] = [item for item in parsed if isinstance(item, ImportFailure)]
+    assert failure.line == 2
+    assert failure.error == "Line 2 is not valid JSON"
+
+
+def test_accepts_a_utf8_bom() -> None:
+    """Accept JSONL re-saved by editors that add a UTF-8 BOM."""
+    [session] = parse(b"\xef\xbb\xbf" + jsonl(span("root")))
+
+    assert isinstance(session, ImportedSession)
+
+
+def test_prefers_structured_llm_messages_to_output_value() -> None:
+    """Keep the assistant message instead of an opaque output stub."""
+    [session] = parse(
+        jsonl(
+            span(
+                "llm",
+                span_kind="LLM",
+                attributes={
+                    "output.value": '{"id":"message-1","model":"model-1"}',
+                    "gen_ai.output.messages": (
+                        '[{"role":"assistant","parts":[{"type":"text",'
+                        '"content":"Useful answer"}]}]'
+                    ),
+                },
+            )
+        )
+    )
+
+    assert isinstance(session, ImportedSession)
+    assert session.nodes[0].outputs == [
+        {
+            "role": "assistant",
+            "parts": [{"type": "text", "content": "Useful answer"}],
+        }
+    ]
+
+
+def test_does_not_use_tool_schema_as_call_arguments() -> None:
+    """Do not mistake OpenInference tool parameters for invocation input."""
+    [session] = parse(
+        jsonl(
+            span(
+                "tool",
+                span_kind="TOOL",
+                attributes={
+                    "tool.name": "lookup",
+                    "tool.parameters": {
+                        "type": "object",
+                        "properties": {"query": {"type": "string"}},
+                    },
+                },
+            )
+        )
+    )
+
+    assert isinstance(session, ImportedSession)
+    assert session.nodes[0].inputs is None
+
+
+def test_maps_legacy_genai_token_names() -> None:
+    """Accept the older OpenTelemetry GenAI token attribute names."""
+    [session] = parse(
+        jsonl(
+            span(
+                "llm",
+                span_kind="LLM",
+                attributes={
+                    "gen_ai.usage.prompt_tokens": 10,
+                    "gen_ai.usage.completion_tokens": 4,
+                },
+            )
+        )
+    )
+
+    assert isinstance(session, ImportedSession)
+    assert session.nodes[0].tokens is not None
+    assert session.nodes[0].tokens.input_tokens == 10
+    assert session.nodes[0].tokens.output_tokens == 4
 
 
 @pytest.mark.parametrize(

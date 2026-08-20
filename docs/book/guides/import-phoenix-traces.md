@@ -96,6 +96,7 @@ A span whose parent is absent from the file remains importable as a root node. T
 
 - The importer reads files. It does not connect to the Phoenix API or manage Phoenix credentials.
 - It supports Phoenix's native JSON and JSONL trace shapes, not arbitrary OTLP JSON envelopes. Export JSONL from the Phoenix UI or JSON with the Phoenix CLI.
+- It does not accept JSONL produced by serializing `get_spans_dataframe()`. That table uses flattened top-level column names rather than the UI and CLI span objects.
 - It does not import Phoenix datasets, experiments, evaluators, or project configuration. Trace and span annotations included in the export are retained as metadata, but do not become Kitaru evaluations.
 - Replay still needs the registered agent code that produced the trace. No trace export contains runnable agent code.
 

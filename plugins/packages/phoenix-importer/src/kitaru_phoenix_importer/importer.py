@@ -95,12 +95,37 @@ def _attribute(attributes: dict[str, Any], *keys: str) -> Any:
     return None
 
 
-def _parse_values(content: bytes) -> list[dict[str, Any]]:
+def _indexed_messages(
+    attributes: dict[str, Any], key: str
+) -> list[dict[str, Any]] | None:
+    """Collect Phoenix's indexed OpenInference message attributes."""
+    messages: dict[int, dict[str, Any]] = defaultdict(dict)
+    prefix = f"{key}."
+    for attribute_key, value in attributes.items():
+        if not attribute_key.startswith(prefix):
+            continue
+        index, separator, field = attribute_key.removeprefix(prefix).partition(".")
+        if separator and index.isdigit():
+            messages[int(index)][field] = _decode_json(value)
+    return [messages[index] for index in sorted(messages)] or None
+
+
+def _llm_messages(attributes: dict[str, Any], direction: str) -> Any:
+    """Return structured GenAI or indexed OpenInference messages."""
+    messages = _attribute(attributes, f"gen_ai.{direction}.messages")
+    if messages is not None:
+        return messages
+    return _indexed_messages(attributes, f"llm.{direction}_messages")
+
+
+def _parse_values(
+    content: bytes,
+) -> tuple[list[tuple[int, dict[str, Any]]], list[ImportFailure]]:
     """Parse Phoenix UI or CLI JSON and JSONL values."""
     if len(content) > MAX_UPLOAD_BYTES:
         raise InvalidImport("Phoenix import exceeds the 50 MiB upload limit")
     try:
-        text = content.decode("utf-8")
+        text = content.decode("utf-8-sig")
     except UnicodeDecodeError as exc:
         raise InvalidImport("Import file must be UTF-8 JSON or JSONL") from exc
     if not text.strip():
@@ -109,22 +134,45 @@ def _parse_values(content: bytes) -> list[dict[str, Any]]:
     try:
         decoded = json.loads(text)
     except json.JSONDecodeError:
-        values: list[Any] = []
+        values: list[tuple[int, dict[str, Any]]] = []
+        failures: list[ImportFailure] = []
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
-                values.append(json.loads(line))
-            except json.JSONDecodeError as exc:
-                raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
+                value = json.loads(line)
+            except json.JSONDecodeError:
+                failures.append(
+                    ImportFailure(
+                        line=line_number,
+                        error=f"Line {line_number} is not valid JSON",
+                    )
+                )
+                continue
+            if not isinstance(value, dict):
+                failures.append(
+                    ImportFailure(
+                        line=line_number,
+                        error="Every Phoenix record must be a JSON object",
+                    )
+                )
+                continue
+            values.append((line_number, value))
+        if not values:
+            raise InvalidImport(failures[0].error) from None
     else:
-        values = decoded if isinstance(decoded, list) else [decoded]
+        decoded_values = decoded if isinstance(decoded, list) else [decoded]
+        if not decoded_values:
+            raise InvalidImport("Import file contains no JSON records")
+        if not all(isinstance(value, dict) for value in decoded_values):
+            raise InvalidImport("Every Phoenix record must be a JSON object")
+        values = [
+            (record_number, value)
+            for record_number, value in enumerate(decoded_values, start=1)
+        ]
+        failures = []
 
-    if not values:
-        raise InvalidImport("Import file contains no JSON records")
-    if not all(isinstance(value, dict) for value in values):
-        raise InvalidImport("Every Phoenix record must be a JSON object")
-    return values
+    return values, failures
 
 
 def _trace_id(span: dict[str, Any]) -> str | None:
@@ -154,15 +202,19 @@ def _parent_id(span: dict[str, Any]) -> str | None:
 
 
 def _expand_values(
-    values: list[dict[str, Any]],
+    values: list[tuple[int, dict[str, Any]]],
 ) -> tuple[
-    dict[str, list[dict[str, Any]]], dict[str, dict[str, Any]], list[ImportFailure]
+    dict[str, list[dict[str, Any]]],
+    dict[str, dict[str, Any]],
+    dict[str, int],
+    list[ImportFailure],
 ]:
     """Expand CLI trace envelopes and group flat spans by trace id."""
     traces: dict[str, list[dict[str, Any]]] = defaultdict(list)
     trace_metadata: dict[str, dict[str, Any]] = {}
+    trace_lines: dict[str, int] = {}
     failures: list[ImportFailure] = []
-    for line_number, value in enumerate(values, start=1):
+    for line_number, value in values:
         if "spans" in value:
             spans = value.get("spans")
             envelope_trace_id = value.get("traceId") or value.get("trace_id")
@@ -194,11 +246,19 @@ def _expand_values(
                 continue
             trace_id = str(envelope_trace_id)
             traces[trace_id].extend(spans)
-            trace_metadata[trace_id] = {
-                key: value[key]
-                for key in ("annotations", "notes")
-                if value.get(key) not in (None, [], "")
-            }
+            trace_lines.setdefault(trace_id, line_number)
+            metadata = trace_metadata.setdefault(trace_id, {})
+            for key in ("annotations", "notes"):
+                new_value = value.get(key)
+                if new_value in (None, [], ""):
+                    continue
+                existing = metadata.get(key)
+                if isinstance(existing, list) and isinstance(new_value, list):
+                    existing.extend(new_value)
+                elif key not in metadata:
+                    metadata[key] = (
+                        list(new_value) if isinstance(new_value, list) else new_value
+                    )
             continue
 
         trace_id = _trace_id(value)
@@ -212,7 +272,8 @@ def _expand_values(
             )
             continue
         traces[trace_id].append(value)
-    return traces, trace_metadata, failures
+        trace_lines.setdefault(trace_id, line_number)
+    return traces, trace_metadata, trace_lines, failures
 
 
 def _node_type(
@@ -266,6 +327,7 @@ def _tokens(attributes: dict[str, Any]) -> TokenUsage | None:
             _attribute(
                 attributes,
                 "gen_ai.usage.input_tokens",
+                "gen_ai.usage.prompt_tokens",
                 "llm.token_count.prompt",
                 "llm.usage.prompt_tokens",
             )
@@ -274,6 +336,7 @@ def _tokens(attributes: dict[str, Any]) -> TokenUsage | None:
             _attribute(
                 attributes,
                 "gen_ai.usage.output_tokens",
+                "gen_ai.usage.completion_tokens",
                 "llm.token_count.completion",
                 "llm.usage.completion_tokens",
             )
@@ -363,6 +426,11 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
     raw_attributes = _attributes(span)
     node_type, tool_name = _node_type(span, raw_attributes)
     status = _node_status(span)
+    if node_type is NodeType.LLM_CALL:
+        input_messages = _llm_messages(raw_attributes, "input")
+        output_messages = _llm_messages(raw_attributes, "output")
+    else:
+        input_messages = output_messages = None
     attributes: dict[str, Any] = {"phoenix.attributes": raw_attributes}
     if span.get("events") not in (None, []):
         attributes["phoenix.events"] = span["events"]
@@ -385,27 +453,30 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
             ),
             started_at=_datetime(span.get("start_time")),
             ended_at=_datetime(span.get("end_time")),
-            inputs=_attribute(
-                raw_attributes,
-                "input.value",
-                "gen_ai.input.messages",
-                "llm.input_messages",
-                "gen_ai.prompt",
-                "gen_ai.tool.call.arguments",
-                "tool.parameters",
-                "gcp.vertex.agent.tool_call_args",
-                "gcp.vertex.agent.llm_request",
+            inputs=(
+                input_messages
+                if node_type is NodeType.LLM_CALL and input_messages is not None
+                else _attribute(
+                    raw_attributes,
+                    "input.value",
+                    "gen_ai.prompt",
+                    "gen_ai.tool.call.arguments",
+                    "gcp.vertex.agent.tool_call_args",
+                    "gcp.vertex.agent.llm_request",
+                )
             ),
-            outputs=_attribute(
-                raw_attributes,
-                "output.value",
-                "gen_ai.output.messages",
-                "llm.output_messages",
-                "gen_ai.completion",
-                "gen_ai.tool.call.result",
-                "tool.result",
-                "gcp.vertex.agent.tool_response",
-                "gcp.vertex.agent.llm_response",
+            outputs=(
+                output_messages
+                if node_type is NodeType.LLM_CALL and output_messages is not None
+                else _attribute(
+                    raw_attributes,
+                    "output.value",
+                    "gen_ai.completion",
+                    "gen_ai.tool.call.result",
+                    "tool.result",
+                    "gcp.vertex.agent.tool_response",
+                    "gcp.vertex.agent.llm_response",
+                )
             ),
             requested_model=(
                 str(value)
@@ -418,8 +489,8 @@ def _node(span: dict[str, Any], trace_id: str) -> tuple[ImportedNode, str | None
                     value := _attribute(
                         raw_attributes,
                         "gen_ai.response.model",
-                        "gen_ai.request.model",
                         "llm.model_name",
+                        "gen_ai.request.model",
                     )
                 )
                 else None
@@ -480,7 +551,9 @@ class PhoenixTraceImporter:
     ) -> Iterator[ImportedSession | ImportFailure]:
         """Parse Phoenix traces into one Kitaru session per trace."""
         del params
-        traces, trace_metadata, failures = _expand_values(_parse_values(content))
+        values, failures = _parse_values(content)
+        traces, trace_metadata, trace_lines, expansion_failures = _expand_values(values)
+        failures.extend(expansion_failures)
         for trace_id, spans in sorted(traces.items()):
             try:
                 yield self._parse_trace(
@@ -488,7 +561,7 @@ class PhoenixTraceImporter:
                 )
             except InvalidImport as exc:
                 yield ImportFailure(
-                    line=len(failures) + 1,
+                    line=trace_lines[trace_id],
                     external_id=trace_id,
                     error=str(exc),
                 )
@@ -527,7 +600,12 @@ class PhoenixTraceImporter:
             for index, (_, parent_id) in enumerate(nodes_with_parents)
             if parent_id is None or parent_id not in node_ids
         ]
-        root_index = root_indexes[0] if root_indexes else 0
+        true_root_indexes = [
+            index
+            for index, (_, parent_id) in enumerate(nodes_with_parents)
+            if parent_id is None
+        ]
+        root_index = (true_root_indexes or root_indexes or [0])[0]
         root = ordered[root_index]
         root_node = nodes_with_parents[root_index][0]
         warnings: list[str] = []
