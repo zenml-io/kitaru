@@ -88,6 +88,38 @@ def test_inventory_versions_and_tags_match_project_manifests() -> None:
         assert unit.tag == f"python/{unit.distribution}/v{unit.version}"
 
 
+def test_inventory_rejects_exporter_without_core_contract_floor(
+    release_repo: Path,
+) -> None:
+    manifest_path = (
+        release_repo / "plugins" / "packages" / "harbor-exporter" / "pyproject.toml"
+    )
+    manifest_path.write_text(
+        manifest_path.read_text().replace("kitaru>=0.23.0", "kitaru>=0.22.2")
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match=r"harbor-exporter: exporter contract requires kitaru>=0\.23\.0",
+    ):
+        load_inventory(repo_root=release_repo)
+
+
+def test_inventory_rejects_exporter_against_older_core_candidate(
+    release_repo: Path,
+) -> None:
+    manifest_path = release_repo / "pyproject.toml"
+    manifest_path.write_text(
+        manifest_path.read_text().replace('version = "0.23.0"', 'version = "0.22.2"')
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match=r"harbor-exporter: repository Kitaru 0\.22\.2 does not satisfy",
+    ):
+        load_inventory(repo_root=release_repo)
+
+
 @pytest.mark.parametrize("version", ["0.22.0rc1", "0.22.0", "1.0.dev1"])
 def test_canonical_python_versions_are_accepted(version: str) -> None:
     assert validate_version(version) == version

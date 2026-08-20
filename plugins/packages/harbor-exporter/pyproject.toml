@@ -5,7 +5,7 @@ description = "Export Kitaru experiments as Harbor task datasets."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
-dependencies = ["kitaru>=0.22.1"]
+dependencies = ["kitaru>=0.23.0"]
 
 [project.entry-points."kitaru.exporters.v1"]
 harbor = "kitaru_harbor_exporter:create_exporter"

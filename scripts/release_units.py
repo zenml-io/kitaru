@@ -19,6 +19,9 @@ PACKAGE_TAG_PATTERN = re.compile(
     r"python/(?P<distribution>[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)/v(?P<version>[^/]+)"
 )
 SLUG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+EXPORTER_CONTRACT_MINIMUM_KITARU_VERSIONS = {
+    "kitaru.exporters.v1": Version("0.23.0"),
+}
 
 
 class ReleaseInventoryError(ValueError):
@@ -245,6 +248,66 @@ def _validate_plugin_coverage(repo_root: Path, units: tuple[ReleaseUnit, ...]) -
         )
 
 
+def _validate_exporter_core_compatibility(
+    repo_root: Path, units: tuple[ReleaseUnit, ...]
+) -> None:
+    """Require exporter releases to depend on a compatible core candidate."""
+    core_version = Version(
+        next(unit.version for unit in units if unit.slug == "kitaru")
+    )
+    for unit in units:
+        if unit.slug == "kitaru":
+            continue
+        manifest = _read_toml(repo_root / unit.version_source)
+        project = manifest.get("project")
+        if not isinstance(project, dict):
+            continue
+        entry_points = project.get("entry-points", {})
+        if not isinstance(entry_points, dict):
+            continue
+        contract_versions = [
+            minimum
+            for group, minimum in EXPORTER_CONTRACT_MINIMUM_KITARU_VERSIONS.items()
+            if group in entry_points
+        ]
+        if not contract_versions:
+            continue
+        dependencies = project.get("dependencies")
+        if not isinstance(dependencies, list) or not all(
+            isinstance(dependency, str) for dependency in dependencies
+        ):
+            raise ReleaseInventoryError(
+                f"{unit.slug}: dependencies must be a list of requirements"
+            )
+        kitaru_requirements = [
+            requirement
+            for dependency in dependencies
+            if canonicalize_name(
+                (requirement := _parse_requirement(dependency, unit.slug)).name
+            )
+            == "kitaru"
+        ]
+        if len(kitaru_requirements) != 1:
+            raise ReleaseInventoryError(
+                f"{unit.slug}: exporter must declare one Kitaru dependency"
+            )
+        requirement = kitaru_requirements[0]
+        minimum = max(contract_versions)
+        has_exact_floor = any(
+            specifier.operator == ">=" and Version(specifier.version) == minimum
+            for specifier in requirement.specifier
+        )
+        if not has_exact_floor:
+            raise ReleaseInventoryError(
+                f"{unit.slug}: exporter contract requires kitaru>={minimum}"
+            )
+        if core_version not in requirement.specifier:
+            raise ReleaseInventoryError(
+                f"{unit.slug}: repository Kitaru {core_version} does not satisfy "
+                f"{requirement}"
+            )
+
+
 def _validate_default_catalog(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
     inventory_defaults = {
         canonicalize_name(unit.distribution) for unit in units if unit.default_catalog
@@ -372,6 +435,7 @@ def load_inventory(
     if len(root_units) != 1 or root_units[0].slug != "kitaru":
         raise ReleaseInventoryError("inventory must contain one root kitaru unit")
     _validate_plugin_coverage(root, resolved_units)
+    _validate_exporter_core_compatibility(root, resolved_units)
     _validate_default_catalog(root, resolved_units)
     return ReleaseInventory(
         schema_version=schema_version,
