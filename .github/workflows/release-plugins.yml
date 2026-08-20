@@ -81,6 +81,15 @@ jobs:
           fi
       - name: Build plugin
         run: uv build --project "$PROJECT_DIR" --out-dir package-dist
+      - name: Validate distribution metadata
+        run: |
+          set -euo pipefail
+          wheel=$(find package-dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          python scripts/smoke_plugin_artifacts.py \
+            --validate-wheel "$wheel" \
+            --distribution "$DISTRIBUTION" \
+            --version "$VERSION"
       - name: Test installed distribution
         run: |
           set -euo pipefail

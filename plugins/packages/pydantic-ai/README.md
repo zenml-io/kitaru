@@ -54,3 +54,13 @@ agent = KitaruAgent(pydantic_agent, cost_calculator=calculate_cost)
 ```
 
 Set `estimate_costs=False` when cost estimation should be disabled. This does not disable a supplied `cost_calculator`.
+
+See the [PydanticAI adapter guide](https://docs.zenml.io/kitaru/adapters/pydantic-ai) for the recording lifecycle, replay overrides, tool policies, payload handling, and failure behavior.
+
+## Links
+
+- [Kitaru documentation](https://docs.zenml.io/kitaru)
+- [Source code](https://github.com/zenml-io/kitaru)
+- [Issue tracker](https://github.com/zenml-io/kitaru/issues)
+
+Licensed under Apache-2.0.

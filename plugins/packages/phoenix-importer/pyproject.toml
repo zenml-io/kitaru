@@ -2,9 +2,34 @@
 name = "kitaru-phoenix-importer"
 version = "0.1.0"
 description = "Arize Phoenix trace importer for Kitaru."
+readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+    { name = "ZenML GmbH", email = "info@zenml.io" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = ["ai-agents", "arize-phoenix", "kitaru", "observability", "traces"]
 dependencies = ["kitaru>=0.22.0"]
+
+[project.urls]
+Homepage = "https://kitaru.ai"
+Documentation = "https://docs.zenml.io/kitaru/getting-started/import-your-traces"
+Repository = "https://github.com/zenml-io/kitaru"
+Issues = "https://github.com/zenml-io/kitaru/issues"
+Changelog = "https://github.com/zenml-io/kitaru/blob/develop/plugins/packages/phoenix-importer/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling==1.32.0"]
