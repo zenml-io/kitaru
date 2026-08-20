@@ -260,8 +260,9 @@ class KitaruAPIClient:
             authenticate: Whether to send the request through this client's
                 auth flow. The login endpoints send their own credential.
             max_response_bytes: Maximum decoded response bytes to read. When
-                set, reject an oversized declared length before reading and
-                stop a streaming response as soon as it crosses the limit.
+                set, reject an oversized declared length for an unencoded
+                response before reading and stop a streaming response as soon
+                as its decoded body crosses the limit.
 
         Raises:
             APIError: The response has an error status code.
@@ -291,7 +292,11 @@ class KitaruAPIClient:
             if max_response_bytes <= 0:
                 raise ValueError("max_response_bytes must be positive")
             async with self._http.stream(method, path, **request_kwargs) as streamed:
-                declared_length = _get_content_length(streamed)
+                declared_length = (
+                    _get_content_length(streamed)
+                    if "Content-Encoding" not in streamed.headers
+                    else None
+                )
                 if declared_length is not None and declared_length > max_response_bytes:
                     raise ResponseTooLargeError(
                         max_response_bytes, content_length=declared_length

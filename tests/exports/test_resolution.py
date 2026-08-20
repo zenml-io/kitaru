@@ -250,6 +250,36 @@ async def test_resolve_export_uses_exact_reads_and_materializes_scripts(
     assert resolved.command_argv == ("python", "agent.py")
 
 
+@pytest.mark.parametrize(
+    ("working_dir", "expected"),
+    [
+        (r"src\agent", "src/agent"),
+        ("missing/../src", "src"),
+    ],
+)
+async def test_resolve_export_normalizes_working_directory(
+    tmp_path: Path, working_dir: str, expected: str
+) -> None:
+    _write_source(tmp_path)
+    (tmp_path / "src" / "agent").mkdir(parents=True)
+    (tmp_path / "src" / "agent" / "main.py").write_text("print('ok')\n")
+    client, ids = _client()
+    run_spec = client.agent_versions.values[ids["agent_version"]].run_spec
+    run_spec.working_dir = working_dir
+
+    resolved = await resolve_export(
+        client,
+        experiment_id=ids["experiment"],
+        cohort_version_id=ids["cohort_version"],
+        agent_version_id=ids["agent_version"],
+        reward=RewardSelector.parse("quality:correctness:score"),
+        source=inventory_source(tmp_path),
+    )
+
+    assert resolved.agent_version.run_spec is not None
+    assert resolved.agent_version.run_spec.working_dir == expected
+
+
 async def test_resolve_export_sanitizes_nested_exact_values_and_freezes_environment(
     tmp_path: Path,
 ) -> None:

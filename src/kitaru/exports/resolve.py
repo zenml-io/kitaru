@@ -258,6 +258,14 @@ def _replace_run_environment(run_spec: Any, environment: dict[str, str]) -> Any:
     return copied
 
 
+def _replace_working_directory(run_spec: Any, working_dir: str) -> Any:
+    if isinstance(run_spec, BaseModel):
+        return run_spec.model_copy(update={"working_dir": working_dir}, deep=True)
+    copied = SimpleNamespace(**vars(run_spec))
+    copied.working_dir = working_dir
+    return copied
+
+
 def _sanitize_agent_version(
     agent_version: Any,
     *,
@@ -714,7 +722,8 @@ def finalize_remote_export(
     reject_protected_source(source, sanitizer=remote._sanitizer)
     _validate_dependency_conflicts(remote, dependency_plan)
 
-    working_dir = remote.agent_version.run_spec.working_dir
+    resolved_agent_version = remote.agent_version
+    working_dir = resolved_agent_version.run_spec.working_dir
     if working_dir:
         remote._sanitizer.reject_text(
             working_dir,
@@ -734,11 +743,17 @@ def finalize_remote_export(
                 "invalid_working_directory",
                 "Agent working directory does not exist in the source snapshot.",
             )
+        normalized_run_spec = _replace_working_directory(
+            resolved_agent_version.run_spec, normalized
+        )
+        resolved_agent_version = _replace_run_spec(
+            resolved_agent_version, normalized_run_spec
+        )
 
     return ResolvedExport(
         experiment=remote.experiment,
         cohort_version=remote.cohort_version,
-        agent_version=remote.agent_version,
+        agent_version=resolved_agent_version,
         sessions=remote.sessions,
         evaluators=remote.evaluators,
         reward=remote.reward,

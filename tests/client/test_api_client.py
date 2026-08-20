@@ -152,6 +152,32 @@ async def test_bounded_response_rejects_declared_length_before_reading() -> None
     assert stream.yielded == 0
 
 
+async def test_bounded_response_ignores_encoded_declared_length() -> None:
+    """Bound an encoded response by decoded bytes, not its declared length."""
+    decoded = b"ok"
+    encoded = gzip.compress(decoded)
+    stream = TrackingStream([encoded])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Length": str(len(encoded)),
+            },
+            stream=stream,
+        )
+
+    assert len(encoded) > len(decoded)
+    client = mock_api_client(handler)
+    response = await client.request(
+        "GET", "/api/v1/info", max_response_bytes=len(decoded)
+    )
+
+    assert response.content == decoded
+    assert stream.yielded == 1
+
+
 async def test_bounded_response_stops_chunked_body_at_limit() -> None:
     """Stop a response with no declared length at the first oversized chunk."""
     stream = TrackingStream([b"1234", b"56", b"not read"])
