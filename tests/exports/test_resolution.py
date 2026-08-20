@@ -1,5 +1,6 @@
 """Tests for private experiment export resolution."""
 
+import pickle
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -7,13 +8,21 @@ from typing import Any
 
 import pytest
 
-from kitaru.exports.models import ExportError, RewardSelector
-from kitaru.exports.resolve import resolve_export
+from kitaru.exports.models import EnvironmentPolicy, ExportError, RewardSelector
+from kitaru.exports.resolve import resolve_export, resolve_remote_export
 from kitaru.exports.source import inventory_source
 
 
 def _id() -> uuid.UUID:
     return uuid.uuid4()
+
+
+def _write_source(root: Path) -> None:
+    (root / "agent.py").write_text("print('ok')\n")
+    (root / "pyproject.toml").write_text(
+        '[project]\nname = "fixture-agent"\nversion = "1.0.0"\n'
+        'requires-python = ">=3.11"\ndependencies = []\n'
+    )
 
 
 class _GetResource:
@@ -65,6 +74,19 @@ class _Blobs:
         return self.content
 
 
+class _Secrets:
+    def __init__(self, values: dict[uuid.UUID, Any]) -> None:
+        self.values = values
+        self.calls: list[tuple[uuid.UUID, bool]] = []
+
+    async def get(self, secret_id: uuid.UUID, *, include_values: bool = False) -> Any:
+        self.calls.append((secret_id, include_values))
+        value = self.values[secret_id]
+        if isinstance(value, Exception):
+            raise value
+        return value
+
+
 def _client(
     *, inputs: Any = None, override: Any = None, policy_type: str = "passthrough"
 ) -> tuple[Any, dict[str, uuid.UUID]]:
@@ -80,6 +102,7 @@ def _client(
             "evaluator",
             "evaluator_version",
             "blob",
+            "secret",
         )
     }
     experiment = SimpleNamespace(
@@ -106,7 +129,7 @@ def _client(
             command="python agent.py",
             working_dir=None,
             env={"MODEL": "test"},
-            secret_ids=[_id()],
+            secret_ids=[ids["secret"]],
             timeout_seconds=60,
         ),
     )
@@ -115,6 +138,7 @@ def _client(
         id=ids["session"],
         agent_id=ids["agent"],
         inputs={"prompt": "hello"} if inputs is None else inputs,
+        outputs="safe output",
     )
     full = SimpleNamespace(session=full_session, nodes=[])
     evaluator = SimpleNamespace(id=ids["evaluator"], name="quality")
@@ -134,6 +158,19 @@ def _client(
         sessions=_Sessions([summary], {ids["session"]: full}),
         evaluators=_Evaluators(evaluator, version),
         blobs=_Blobs(b"def evaluate(session): return []\n"),
+        secrets=_Secrets(
+            {
+                ids["secret"]: SimpleNamespace(
+                    id=ids["secret"],
+                    name="provider-credential",
+                    values={
+                        "MODEL_API_KEY": SimpleNamespace(
+                            get_secret_value=lambda: "sentinel-secret-value"
+                        )
+                    },
+                )
+            }
+        ),
     )
     return client, ids
 
@@ -141,7 +178,7 @@ def _client(
 async def test_resolve_export_uses_exact_reads_and_materializes_scripts(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "agent.py").write_text("print('ok')\n")
+    _write_source(tmp_path)
     client, ids = _client()
 
     resolved = await resolve_export(
@@ -159,6 +196,359 @@ async def test_resolve_export_uses_exact_reads_and_materializes_scripts(
     assert client.experiments.calls == [ids["experiment"]]
     assert client.cohort_versions.calls == [ids["cohort_version"]]
     assert client.agent_versions.calls == [ids["agent_version"]]
+    assert client.secrets.calls == [(ids["secret"], True)]
+    assert resolved.agent_version.run_spec is not None
+    assert resolved.agent_version.run_spec.secret_ids == []
+    assert resolved.required_environment_names == ("MODEL_API_KEY",)
+    assert resolved.command_argv == ("python", "agent.py")
+
+
+async def test_resolve_export_sanitizes_nested_exact_values_and_freezes_environment(
+    tmp_path: Path,
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client(inputs={"nested": ["prefix sentinel-secret-value suffix"]})
+    client.agent_versions.values[ids["agent_version"]].run_spec.env = {
+        "MODE": "test",
+        "MODEL_API_KEY": "stale configuration",
+    }
+
+    resolved = await resolve_export(
+        client,
+        experiment_id=ids["experiment"],
+        cohort_version_id=ids["cohort_version"],
+        agent_version_id=ids["agent_version"],
+        reward=RewardSelector.parse("quality:correctness:score"),
+        source=inventory_source(tmp_path),
+    )
+
+    assert resolved.sessions[0].session.inputs == {
+        "nested": ["prefix [REDACTED] suffix"]
+    }
+    assert resolved.agent_version.run_spec is not None
+    assert resolved.agent_version.run_spec.env == {"MODE": "test"}
+    assert resolved.required_environment_names == ("MODEL_API_KEY",)
+    assert "sentinel-secret-value" not in repr(resolved)
+    assert "provider-credential" not in repr(resolved)
+
+
+async def test_resolve_export_runtime_only_moves_registered_environment_to_requirements(
+    tmp_path: Path,
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+
+    resolved = await resolve_export(
+        client,
+        experiment_id=ids["experiment"],
+        cohort_version_id=ids["cohort_version"],
+        agent_version_id=ids["agent_version"],
+        reward=RewardSelector.parse("quality:correctness:score"),
+        source=inventory_source(tmp_path),
+        environment_policy=EnvironmentPolicy(mode="runtime_only"),
+    )
+
+    assert resolved.agent_version.run_spec is not None
+    assert resolved.agent_version.run_spec.env == {}
+    assert resolved.required_environment_names == ("MODEL", "MODEL_API_KEY")
+    assert {
+        requirement.name: requirement.source
+        for requirement in resolved.runtime_environment
+    } == {
+        "MODEL": "registered_environment",
+        "MODEL_API_KEY": "attached_secret",
+    }
+
+
+async def test_remote_resolution_is_source_free_and_ephemeral() -> None:
+    client, ids = _client(inputs={"token": "sentinel-secret-value"})
+
+    remote = await resolve_remote_export(
+        client,
+        experiment_id=ids["experiment"],
+        cohort_version_id=ids["cohort_version"],
+        agent_version_id=ids["agent_version"],
+        reward=RewardSelector.parse("quality:correctness:score"),
+    )
+
+    assert remote.sessions[0].session.inputs == {"token": "[REDACTED]"}
+    assert "sentinel-secret-value" not in repr(remote)
+    assert "provider-credential" not in repr(remote)
+    with pytest.raises(TypeError, match="cannot be serialized"):
+        pickle.dumps(remote)
+
+
+@pytest.mark.parametrize("value", ["", "short"])
+async def test_resolve_export_rejects_secret_values_that_cannot_be_matched_safely(
+    tmp_path: Path, value: str
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+    secret = client.secrets.values[ids["secret"]]
+    secret.values["MODEL_API_KEY"] = SimpleNamespace(get_secret_value=lambda: value)
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "unsafe_secret_value"
+    if value:
+        assert value not in raised.value.message
+
+
+async def test_resolve_export_hides_secret_identity_when_authorization_fails(
+    tmp_path: Path,
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+    client.secrets.values[ids["secret"]] = PermissionError("denied provider-credential")
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "secret_resolution_failed"
+    assert "provider-credential" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    ("command", "code"),
+    [
+        ("python agent.py && echo unsafe", "unsupported_run_command"),
+        ("python -c 'print(1)'", "unsupported_run_command"),
+        ("python agent.py sentinel-secret-value", "protected_value_in_command"),
+    ],
+)
+async def test_resolve_export_rejects_unsafe_run_commands(
+    tmp_path: Path, command: str, code: str
+) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    client.agent_versions.values[ids["agent_version"]].run_spec.command = command
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == code
+    assert "sentinel-secret-value" not in str(raised.value)
+
+
+async def test_resolve_export_deduplicates_secret_reads_but_preserves_requirements(
+    tmp_path: Path,
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+    run_spec = client.agent_versions.values[ids["agent_version"]].run_spec
+    run_spec.secret_ids = [ids["secret"], ids["secret"]]
+
+    resolved = await resolve_export(
+        client,
+        experiment_id=ids["experiment"],
+        cohort_version_id=ids["cohort_version"],
+        agent_version_id=ids["agent_version"],
+        reward=RewardSelector.parse("quality:correctness:score"),
+        source=inventory_source(tmp_path),
+    )
+
+    assert client.secrets.calls == [(ids["secret"], True)]
+    assert resolved.required_environment_names == ("MODEL_API_KEY",)
+
+
+async def test_resolve_export_enforces_attached_secret_budgets(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    run_spec = client.agent_versions.values[ids["agent_version"]].run_spec
+    run_spec.secret_ids = [ids["secret"]] * 101
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+    assert raised.value.code == "too_many_attached_secrets"
+
+    client, ids = _client()
+    secret = client.secrets.values[ids["secret"]]
+    oversized = "x" * (1024 * 1024 + 1)
+    secret.values["MODEL_API_KEY"] = SimpleNamespace(get_secret_value=lambda: oversized)
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+    assert raised.value.code == "protected_values_too_large"
+
+
+async def test_resolve_export_rejects_reserved_runtime_names(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    secret = client.secrets.values[ids["secret"]]
+    secret.values = {
+        "KITARU_TASK_INPUTS": SimpleNamespace(
+            get_secret_value=lambda: "sentinel-secret-value"
+        )
+    }
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "reserved_environment_name"
+
+
+@pytest.mark.parametrize(
+    ("path", "content", "code"),
+    [
+        ("sentinel-secret-value.py", "print('ok')\n", "protected_value_in_path"),
+        ("agent.py", "TOKEN = 'sentinel-secret-value'\n", "protected_value_in_source"),
+    ],
+)
+async def test_resolve_export_fails_closed_for_protected_source_material(
+    tmp_path: Path, path: str, content: str, code: str
+) -> None:
+    (tmp_path / path).write_text(content)
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="agent"\nversion="1"\ndependencies=[]\n'
+    )
+    client, ids = _client()
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == code
+    assert "sentinel-secret-value" not in str(raised.value)
+
+
+async def test_resolve_export_rejects_protected_dependency_and_evaluator_material(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\nname="agent"\nversion="1"\n'
+        'dependencies=["sentinel-secret-value==1"]\n'
+    )
+    client, ids = _client()
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+    assert raised.value.code == "protected_value_in_dependency"
+    assert "sentinel-secret-value" not in str(raised.value)
+
+    _write_source(tmp_path)
+    client, ids = _client()
+    client.blobs.content = b"TOKEN = 'sentinel-secret-value'\n"
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+    assert raised.value.code == "protected_value_in_evaluator"
+    assert "sentinel-secret-value" not in str(raised.value)
+
+
+async def test_resolve_export_rejects_duplicate_evaluator_names(tmp_path: Path) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    duplicate = SimpleNamespace(
+        evaluator="quality", version=3, params={"threshold": 0.9}
+    )
+    client.experiments.values[ids["experiment"]].evaluators.append(duplicate)
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "duplicate_evaluator_name"
+
+
+async def test_resolve_export_enforces_session_and_evaluator_blob_budgets(
+    tmp_path: Path,
+) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    full = client.sessions.full[ids["session"]]
+    full.session.outputs = "x" * (16 * 1024 * 1024)
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+    assert raised.value.code == "session_too_large"
+
+    client, ids = _client()
+    client.blobs.content = b"x" * (10 * 1024 * 1024 + 1)
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+    assert raised.value.code == "evaluator_too_large"
 
 
 @pytest.mark.parametrize(
@@ -251,7 +641,7 @@ async def test_resolve_export_requires_pinned_evaluator(tmp_path: Path) -> None:
 async def test_resolve_export_materializes_exact_package_requirement(
     tmp_path: Path,
 ) -> None:
-    (tmp_path / "agent.py").write_text("print('ok')\n")
+    _write_source(tmp_path)
     client, ids = _client()
     version = client.evaluators.version
     version.source = SimpleNamespace(

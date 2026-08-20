@@ -20,12 +20,12 @@ from kitaru.task.plugins import (
     load_source_ref,
 )
 
+from ._sanitize import EphemeralSanitizer
 from .models import (
     ExportError,
     MaterializedEvaluator,
     RewardSelector,
 )
-from .trace import redact_secret_values
 
 _LABEL = "Evaluator"
 LoadedEvaluator = Callable[..., EvaluatorReturn]
@@ -155,19 +155,19 @@ def evaluate_session(
     all_results: dict[str, tuple[EvaluationResult, ...]] = {}
     metrics: dict[str, float] = {}
     reward: float | None = None
-    secrets = tuple(secret_values)
+    sanitizer = EphemeralSanitizer(list(secret_values))
     for materialized, evaluator in evaluators:
         try:
             raw_results = call_evaluator(
                 materialized.name, evaluator, session, materialized.params
             )
         except EvaluationError as error:
-            message = redact_secret_values(str(error), secrets)
+            message = sanitizer.sanitize(str(error))
             raise ExportError("evaluator_failed", str(message)) from error
 
         redacted_results = tuple(
             EvaluationResult.model_validate(
-                redact_secret_values(result.model_dump(mode="python"), secrets)
+                sanitizer.sanitize(result.model_dump(mode="python"))
             )
             for result in raw_results
         )

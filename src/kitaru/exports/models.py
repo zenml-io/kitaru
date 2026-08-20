@@ -307,6 +307,35 @@ class SourceInventory:
 
 
 @dataclass(frozen=True)
+class DependencyRequirement:
+    """Record one normalized agent-runtime dependency declaration."""
+
+    project: str
+    requirement: str
+    requirement_digest: str
+    source_path: str | None = None
+
+
+@dataclass(frozen=True)
+class DependencyPlan:
+    """Record the exact dependency inputs and their reproducibility status."""
+
+    status: Literal["locked", "declared"]
+    manifests: tuple[str, ...]
+    requirements: tuple[DependencyRequirement, ...]
+    requirement_digest: str
+
+
+@dataclass(frozen=True)
+class RuntimeEnvironmentRequirement:
+    """Record why one environment variable must be supplied at runtime."""
+
+    name: str
+    owner: Literal["agent"]
+    source: Literal["attached_secret", "registered_environment"]
+
+
+@dataclass(frozen=True)
 class MaterializedEvaluator:
     """Record one exact evaluator version and its exportable source."""
 
@@ -328,6 +357,10 @@ class ResolvedExport:
     evaluators: tuple[MaterializedEvaluator, ...]
     reward: RewardSelector
     source: SourceInventory
+    command_argv: tuple[str, ...] = ()
+    required_environment_names: tuple[str, ...] = ()
+    runtime_environment: tuple[RuntimeEnvironmentRequirement, ...] = ()
+    dependency_plan: DependencyPlan | None = None
 
 
 class ValidationReceipt(BaseModel):

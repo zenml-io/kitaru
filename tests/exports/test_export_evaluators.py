@@ -197,3 +197,17 @@ def test_evaluate_session_redacts_results() -> None:
     )
 
     assert outcome.results["quality"][0].explanation == "used token [REDACTED]"
+
+
+def test_evaluate_session_rejects_short_secret_values() -> None:
+    materialized = _materialized_script()
+
+    with pytest.raises(ExportError) as raised:
+        evaluate_session(
+            [(materialized, lambda session, **params: _passed_result())],
+            RewardSelector.parse("quality:correctness:score"),
+            _session(),
+            secret_values=["short"],
+        )
+
+    assert raised.value.code == "unsafe_secret_value"

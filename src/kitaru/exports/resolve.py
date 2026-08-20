@@ -5,17 +5,30 @@ import hashlib
 import json
 import re
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from types import SimpleNamespace
+from typing import Any, Literal
+
+from packaging.requirements import Requirement
+from packaging.utils import canonicalize_name
+from pydantic import BaseModel
 
 from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.session import SessionListParams
+from kitaru.exports._dependencies import classify_dependencies
+from kitaru.exports._runtime import parse_command_argv, reject_protected_source
+from kitaru.exports._sanitize import EphemeralSanitizer
 from kitaru.exports.models import (
+    V1_EXPORT_BUDGETS,
+    DependencyPlan,
+    EnvironmentPolicy,
     ExportError,
     MaterializedEvaluator,
     ResolvedExport,
     RewardSelector,
+    RuntimeEnvironmentRequirement,
     SourceInventory,
 )
 
@@ -26,6 +39,32 @@ _EXACT_REQUIREMENT = re.compile(
     r"(?:\[[A-Za-z0-9._-]+(?:,[A-Za-z0-9._-]+)*\])?"
     r"==[A-Za-z0-9][A-Za-z0-9.!+_-]*$"
 )
+_ENVIRONMENT_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_RESERVED_ENVIRONMENT_NAMES = frozenset(
+    {
+        "KITARU_EXTERNAL_EVALUATION",
+        "KITARU_MCP_URLS",
+        "KITARU_TASK_INPUTS",
+        "KITARU_TRACE_PATH",
+        "PYTHONPATH",
+    }
+)
+
+
+@dataclass(frozen=True)
+class RemoteExportResolution:
+    """Hold sanitized remote state until local source preflight completes."""
+
+    experiment: Any
+    cohort_version: Any
+    agent_version: Any
+    sessions: tuple[Any, ...]
+    evaluators: tuple[MaterializedEvaluator, ...]
+    reward: RewardSelector
+    command_argv: tuple[str, ...]
+    required_environment_names: tuple[str, ...]
+    runtime_environment: tuple[RuntimeEnvironmentRequirement, ...]
+    _sanitizer: EphemeralSanitizer
 
 
 def _require_matching_agent(actual: uuid.UUID, expected: uuid.UUID, label: str) -> None:
@@ -52,7 +91,174 @@ def _validate_package_requirement(value: str) -> str:
     return value
 
 
-async def _resolve_evaluator(client: Any, config: Any) -> MaterializedEvaluator:
+def _json_ready(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, SimpleNamespace):
+        return {key: _json_ready(item) for key, item in vars(value).items()}
+    if isinstance(value, dict):
+        return {str(key): _json_ready(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_ready(item) for item in value]
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    return value
+
+
+def _serialized_size(value: Any, *, code: str, message: str) -> int:
+    try:
+        return len(
+            json.dumps(
+                _json_ready(value),
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+    except (TypeError, ValueError) as error:
+        raise ExportError(code, message) from error
+
+
+def _secret_text(value: Any) -> str:
+    getter = getattr(value, "get_secret_value", None)
+    if not callable(getter):
+        raise ExportError(
+            "secret_resolution_failed",
+            "An attached secret could not be resolved safely.",
+        )
+    resolved = getter()
+    if not isinstance(resolved, str):
+        raise ExportError(
+            "secret_resolution_failed",
+            "An attached secret could not be resolved safely.",
+        )
+    return resolved
+
+
+def _validate_environment_name(name: str) -> None:
+    if _ENVIRONMENT_NAME.fullmatch(name) is None:
+        raise ExportError(
+            "invalid_environment_name",
+            "Attached and registered environment names must be valid identifiers.",
+        )
+    if name in _RESERVED_ENVIRONMENT_NAMES:
+        raise ExportError(
+            "reserved_environment_name",
+            "A registered runtime value uses a target-reserved environment name.",
+        )
+
+
+async def _resolve_attached_secrets(
+    client: Any, secret_ids: list[uuid.UUID]
+) -> tuple[EphemeralSanitizer, tuple[str, ...]]:
+    if len(secret_ids) > V1_EXPORT_BUDGETS.max_attached_secrets:
+        raise ExportError(
+            "too_many_attached_secrets",
+            "An agent version may attach at most 100 secrets for export.",
+        )
+    ordered_unique_ids = tuple(dict.fromkeys(secret_ids))
+    values: list[str] = []
+    environment_names: set[str] = set()
+    for secret_id in ordered_unique_ids:
+        try:
+            secret = await client.secrets.get(secret_id, include_values=True)
+            secret_values = secret.values
+            if not isinstance(secret_values, dict):
+                raise TypeError("secret values are not a mapping")
+            for name, secret_value in secret_values.items():
+                if not isinstance(name, str):
+                    raise TypeError("secret name is not text")
+                _validate_environment_name(name)
+                environment_names.add(name)
+                values.append(_secret_text(secret_value))
+        except ExportError:
+            raise
+        except Exception:
+            raise ExportError(
+                "secret_resolution_failed",
+                "An attached secret could not be authorized and resolved safely.",
+            ) from None
+    return EphemeralSanitizer(values), tuple(sorted(environment_names))
+
+
+def _replace_run_spec(agent_version: Any, run_spec: Any) -> Any:
+    if isinstance(agent_version, BaseModel):
+        return agent_version.model_copy(update={"run_spec": run_spec}, deep=True)
+    copied = SimpleNamespace(**vars(agent_version))
+    copied.run_spec = run_spec
+    return copied
+
+
+def _replace_run_environment(run_spec: Any, environment: dict[str, str]) -> Any:
+    updates = {"env": environment, "secret_ids": []}
+    if isinstance(run_spec, BaseModel):
+        return run_spec.model_copy(update=updates, deep=True)
+    copied = SimpleNamespace(**vars(run_spec))
+    copied.env = dict(environment)
+    copied.secret_ids = []
+    return copied
+
+
+def _sanitize_agent_version(
+    agent_version: Any,
+    *,
+    sanitizer: EphemeralSanitizer,
+    environment_policy: EnvironmentPolicy,
+    secret_environment_names: tuple[str, ...],
+) -> tuple[Any, tuple[RuntimeEnvironmentRequirement, ...]]:
+    sanitized_agent = sanitizer.sanitize(agent_version)
+    run_spec = sanitized_agent.run_spec
+    registered = dict(run_spec.env)
+    for name, value in registered.items():
+        _validate_environment_name(name)
+        sanitizer.reject_text(
+            value,
+            code="protected_value_in_environment",
+            message=(
+                "Protected runtime material appears in a registered environment "
+                "value; export cannot infer safe ownership."
+            ),
+        )
+    secret_names = set(secret_environment_names)
+    if environment_policy.mode == "include":
+        included = {
+            name: value
+            for name, value in registered.items()
+            if name not in secret_names
+        }
+    else:
+        included = {}
+
+    sources: dict[str, Literal["attached_secret", "registered_environment"]] = {
+        name: "attached_secret" for name in secret_environment_names
+    }
+    if environment_policy.mode == "runtime_only":
+        for name in registered:
+            sources.setdefault(name, "registered_environment")
+    requirements = tuple(
+        RuntimeEnvironmentRequirement(
+            name=name,
+            owner="agent",
+            source=source,
+        )
+        for name, source in sorted(sources.items())
+    )
+    sanitized_run_spec = _replace_run_environment(run_spec, included)
+    return _replace_run_spec(sanitized_agent, sanitized_run_spec), requirements
+
+
+async def _resolve_evaluator(
+    client: Any,
+    config: Any,
+    *,
+    sanitizer: EphemeralSanitizer,
+) -> MaterializedEvaluator:
+    sanitizer.reject_text(
+        config.evaluator,
+        code="protected_value_in_evaluator",
+        message="Protected runtime material appears in an evaluator identifier.",
+    )
     if config.version is None:
         raise ExportError(
             "unpinned_evaluator",
@@ -83,8 +289,26 @@ async def _resolve_evaluator(client: Any, config: Any) -> MaterializedEvaluator:
     script: bytes | None = None
     if isinstance(source, ScriptPluginSource) or source.type == "script":
         script = await client.blobs.download(source.blob_id)
+        if len(script) > V1_EXPORT_BUDGETS.max_evaluator_bytes:
+            raise ExportError(
+                "evaluator_too_large",
+                "An evaluator source blob exceeds the 10 MiB export limit.",
+            )
+        sanitizer.reject_bytes(
+            script,
+            code="protected_value_in_evaluator",
+            message=(
+                "Protected runtime material appears in evaluator source; export "
+                "cannot rewrite executable material safely."
+            ),
+        )
         source_digest = hashlib.sha256(script).hexdigest()
     elif isinstance(source, PackagePluginSource) or source.type == "package":
+        sanitizer.reject_text(
+            source.requirement,
+            code="protected_value_in_dependency",
+            message="Protected runtime material appears in evaluator dependencies.",
+        )
         requirement = _validate_package_requirement(source.requirement)
         source_digest = hashlib.sha256(requirement.encode("utf-8")).hexdigest()
     else:
@@ -94,72 +318,21 @@ async def _resolve_evaluator(client: Any, config: Any) -> MaterializedEvaluator:
         )
     return MaterializedEvaluator(
         name=config.evaluator,
-        version=version,
-        params=dict(config.params),
+        version=sanitizer.sanitize(version),
+        params=sanitizer.sanitize(dict(config.params)),
         script=script,
         source_sha256=source_digest,
     )
 
 
-async def resolve_export(
+async def _resolve_sessions(
     client: Any,
     *,
-    experiment_id: uuid.UUID,
+    experiment: Any,
+    cohort_version: Any,
     cohort_version_id: uuid.UUID,
-    agent_version_id: uuid.UUID,
-    reward: RewardSelector,
-    source: SourceInventory,
-) -> ResolvedExport:
-    """Resolve and validate all remote inputs without changing Kitaru state.
-
-    Args:
-        client: Existing Kitaru API client.
-        experiment_id: Exact experiment id.
-        cohort_version_id: Exact immutable cohort version id.
-        agent_version_id: Exact agent version id.
-        reward: Explicit primary reward selection.
-        source: Validated local source inventory.
-
-    Raises:
-        ExportError: The selected objects cannot be exported faithfully.
-
-    Returns:
-        Frozen renderer input.
-    """
-    experiment, cohort_version, agent_version = await asyncio.gather(
-        client.experiments.get(experiment_id),
-        client.cohort_versions.get(cohort_version_id),
-        client.agent_versions.get(agent_version_id),
-    )
-    cohort = await client.cohorts.get(cohort_version.cohort_id)
-    _require_matching_agent(cohort.agent_id, experiment.agent_id, "Cohort")
-    _require_matching_agent(
-        agent_version.agent_id, experiment.agent_id, "Agent version"
-    )
-    if agent_version.run_spec is None:
-        raise ExportError("missing_run_spec", "Agent version has no run specification.")
-    if experiment.override is not None:
-        raise ExportError(
-            "unsupported_override", "Export v1 does not support replay overrides."
-        )
-    _validate_tool_policy(experiment.tool_policy)
-
-    working_dir = agent_version.run_spec.working_dir
-    if working_dir:
-        candidate = (source.root / working_dir).resolve(strict=False)
-        try:
-            candidate.relative_to(source.root)
-        except ValueError as error:
-            raise ExportError(
-                "invalid_working_directory",
-                "Agent working directory escapes the source root.",
-            ) from error
-        if not candidate.is_dir():
-            raise ExportError(
-                "invalid_working_directory",
-                "Agent working directory does not exist in the source root.",
-            )
-
+    sanitizer: EphemeralSanitizer,
+) -> tuple[Any, ...]:
     params = SessionListParams(
         filter=FilterCondition(
             field="cohort_version_id", op=FilterOp.EQ, value=str(cohort_version_id)
@@ -168,6 +341,11 @@ async def resolve_export(
     )
     summaries = [session async for session in client.sessions.iter(params)]
     session_ids = sorted({session.id for session in summaries}, key=str)
+    if len(session_ids) > V1_EXPORT_BUDGETS.max_sessions:
+        raise ExportError(
+            "too_many_sessions",
+            "A cohort export may contain at most 1,000 sessions.",
+        )
     if len(session_ids) != cohort_version.session_count:
         raise ExportError(
             "cohort_count_mismatch",
@@ -189,39 +367,234 @@ async def resolve_export(
             "cohort_session_mismatch",
             "Full session responses did not match the cohort membership.",
         )
+    total_bytes = 0
+    sanitized_sessions: list[Any] = []
     for full in sessions:
         session = full.session
         _require_matching_agent(session.agent_id, experiment.agent_id, "Session")
-        try:
-            input_size = len(json.dumps(session.inputs).encode("utf-8"))
-        except (TypeError, ValueError) as error:
-            raise ExportError(
-                "invalid_task_inputs", f"Session {session.id} inputs are not JSON."
-            ) from error
+        input_size = _serialized_size(
+            session.inputs,
+            code="invalid_task_inputs",
+            message=f"Session {session.id} inputs are not JSON.",
+        )
         if input_size > _MAX_TASK_INPUT_BYTES:
             raise ExportError(
                 "inputs_too_large",
                 f"Session {session.id} inputs exceed {_MAX_TASK_INPUT_BYTES} bytes.",
             )
+        session_bytes = _serialized_size(
+            full,
+            code="invalid_session",
+            message=f"Session {session.id} is not serializable.",
+        )
+        if session_bytes > V1_EXPORT_BUDGETS.max_session_bytes:
+            raise ExportError(
+                "session_too_large",
+                "A serialized session exceeds the 16 MiB export limit.",
+            )
+        total_bytes += session_bytes
+        if total_bytes > V1_EXPORT_BUDGETS.max_total_session_bytes:
+            raise ExportError(
+                "sessions_too_large",
+                "Serialized sessions exceed the 256 MiB aggregate export limit.",
+            )
+        sanitized_sessions.append(sanitizer.sanitize(full))
+    return tuple(sanitized_sessions)
+
+
+async def resolve_remote_export(
+    client: Any,
+    *,
+    experiment_id: uuid.UUID,
+    cohort_version_id: uuid.UUID,
+    agent_version_id: uuid.UUID,
+    reward: RewardSelector,
+    environment_policy: EnvironmentPolicy | None = None,
+) -> RemoteExportResolution:
+    """Authorize, sanitize, and freeze remote state before local source access."""
+    policy = environment_policy or EnvironmentPolicy()
+    experiment, cohort_version, agent_version = await asyncio.gather(
+        client.experiments.get(experiment_id),
+        client.cohort_versions.get(cohort_version_id),
+        client.agent_versions.get(agent_version_id),
+    )
+    cohort = await client.cohorts.get(cohort_version.cohort_id)
+    _require_matching_agent(cohort.agent_id, experiment.agent_id, "Cohort")
+    _require_matching_agent(
+        agent_version.agent_id, experiment.agent_id, "Agent version"
+    )
+    if agent_version.run_spec is None:
+        raise ExportError("missing_run_spec", "Agent version has no run specification.")
+    if experiment.override is not None:
+        raise ExportError(
+            "unsupported_override", "Export v1 does not support replay overrides."
+        )
+    _validate_tool_policy(experiment.tool_policy)
+
+    sanitizer, secret_names = await _resolve_attached_secrets(
+        client, list(agent_version.run_spec.secret_ids)
+    )
+    command_argv = parse_command_argv(
+        agent_version.run_spec.command,
+        sanitizer=sanitizer,
+    )
+    sanitized_agent_version, runtime_environment = _sanitize_agent_version(
+        agent_version,
+        sanitizer=sanitizer,
+        environment_policy=policy,
+        secret_environment_names=secret_names,
+    )
+    sessions = await _resolve_sessions(
+        client,
+        experiment=experiment,
+        cohort_version=cohort_version,
+        cohort_version_id=cohort_version_id,
+        sanitizer=sanitizer,
+    )
 
     evaluator_configs = list(experiment.evaluators)
-    if sum(config.evaluator == reward.evaluator for config in evaluator_configs) != 1:
+    evaluator_names = [config.evaluator for config in evaluator_configs]
+    if len(set(evaluator_names)) != len(evaluator_names):
+        raise ExportError(
+            "duplicate_evaluator_name",
+            "Export v1 requires unique evaluator names.",
+        )
+    if evaluator_names.count(reward.evaluator) != 1:
         raise ExportError(
             "invalid_reward_selector",
             f"Primary reward evaluator {reward.evaluator!r} is not selected "
             "exactly once.",
         )
-    evaluators = tuple(
-        await asyncio.gather(
-            *(_resolve_evaluator(client, config) for config in evaluator_configs)
+    evaluators: list[MaterializedEvaluator] = []
+    total_evaluator_bytes = 0
+    for config in evaluator_configs:
+        evaluator = await _resolve_evaluator(
+            client,
+            config,
+            sanitizer=sanitizer,
         )
-    )
-    return ResolvedExport(
-        experiment=experiment,
-        cohort_version=cohort_version,
-        agent_version=agent_version,
-        sessions=tuple(sessions),
-        evaluators=evaluators,
+        if evaluator.script is not None:
+            total_evaluator_bytes += len(evaluator.script)
+            if total_evaluator_bytes > V1_EXPORT_BUDGETS.max_total_evaluator_bytes:
+                raise ExportError(
+                    "evaluators_too_large",
+                    "Evaluator source blobs exceed the 100 MiB aggregate export limit.",
+                )
+        evaluators.append(evaluator)
+
+    return RemoteExportResolution(
+        experiment=sanitizer.sanitize(experiment),
+        cohort_version=sanitizer.sanitize(cohort_version),
+        agent_version=sanitized_agent_version,
+        sessions=sessions,
+        evaluators=tuple(evaluators),
         reward=reward,
-        source=source,
+        command_argv=command_argv,
+        required_environment_names=tuple(
+            requirement.name for requirement in runtime_environment
+        ),
+        runtime_environment=runtime_environment,
+        _sanitizer=sanitizer,
     )
+
+
+def _validate_dependency_conflicts(
+    remote: RemoteExportResolution, plan: DependencyPlan
+) -> None:
+    requirements: dict[str, str] = {
+        item.project: " ".join(item.requirement.split()) for item in plan.requirements
+    }
+    for evaluator in remote.evaluators:
+        source = evaluator.version.source
+        if not (isinstance(source, PackagePluginSource) or source.type == "package"):
+            continue
+        requirement = _validate_package_requirement(source.requirement)
+        project = canonicalize_name(Requirement(requirement).name)
+        normalized = " ".join(requirement.split())
+        previous = requirements.get(project)
+        if previous is not None and previous != normalized:
+            raise ExportError(
+                "dependency_conflict",
+                "Agent and evaluator environments declare conflicting requirements.",
+            )
+        requirements[project] = normalized
+
+
+def finalize_remote_export(
+    remote: RemoteExportResolution,
+    *,
+    source: SourceInventory,
+) -> ResolvedExport:
+    """Combine sanitized remote state with one validated local source snapshot."""
+    dependency_plan = classify_dependencies(source, sanitizer=remote._sanitizer)
+    reject_protected_source(source, sanitizer=remote._sanitizer)
+    _validate_dependency_conflicts(remote, dependency_plan)
+
+    working_dir = remote.agent_version.run_spec.working_dir
+    if working_dir:
+        remote._sanitizer.reject_text(
+            working_dir,
+            code="protected_value_in_path",
+            message="Protected runtime material appears in the agent working path.",
+        )
+        candidate = (source.root / working_dir).resolve(strict=False)
+        try:
+            candidate.relative_to(source.root)
+        except ValueError as error:
+            raise ExportError(
+                "invalid_working_directory",
+                "Agent working directory escapes the source root.",
+            ) from error
+        if not candidate.is_dir():
+            raise ExportError(
+                "invalid_working_directory",
+                "Agent working directory does not exist in the source root.",
+            )
+
+    return ResolvedExport(
+        experiment=remote.experiment,
+        cohort_version=remote.cohort_version,
+        agent_version=remote.agent_version,
+        sessions=remote.sessions,
+        evaluators=remote.evaluators,
+        reward=remote.reward,
+        source=source,
+        command_argv=remote.command_argv,
+        required_environment_names=remote.required_environment_names,
+        runtime_environment=remote.runtime_environment,
+        dependency_plan=dependency_plan,
+    )
+
+
+async def resolve_export(
+    client: Any,
+    *,
+    experiment_id: uuid.UUID,
+    cohort_version_id: uuid.UUID,
+    agent_version_id: uuid.UUID,
+    reward: RewardSelector,
+    source: SourceInventory,
+    environment_policy: EnvironmentPolicy | None = None,
+) -> ResolvedExport:
+    """Resolve remote inputs first, then validate one local source inventory.
+
+    This compatibility wrapper leaves existing callers unchanged. Callers that
+    must prove no local source access before authorization can call
+    :func:`resolve_remote_export`, acquire the source snapshot, and then call
+    :func:`finalize_remote_export`.
+
+    Raises:
+        ExportError: The selected objects cannot be exported faithfully.
+
+    Returns:
+        Frozen renderer input containing no attached-secret values.
+    """
+    remote = await resolve_remote_export(
+        client,
+        experiment_id=experiment_id,
+        cohort_version_id=cohort_version_id,
+        agent_version_id=agent_version_id,
+        reward=reward,
+        environment_policy=environment_policy,
+    )
+    return finalize_remote_export(remote, source=source)
