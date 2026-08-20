@@ -217,6 +217,7 @@ async def export_experiment(
             cohort_version_id=request.cohort_version_id,
             agent_version_id=request.agent_version_id,
             reward=RewardSelector.parse(request.primary_reward),
+            content_policy=request.content_policy,
             environment_policy=request.environment_policy,
         )
         state.checkpoint()
@@ -234,7 +235,9 @@ async def export_experiment(
             cancellation_checkpoint=state.checkpoint,
         )
         state.checkpoint()
-        resolved = finalize_remote_export(remote, source=source)
+        resolved = finalize_remote_export(
+            remote, source=source, source_policy=request.source_policy
+        )
         state.checkpoint()
         if request.dry_run:
             target_version = EXPORT_TARGET_VERSIONS[request.format]

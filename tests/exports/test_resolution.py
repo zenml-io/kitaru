@@ -8,7 +8,12 @@ from typing import Any
 
 import pytest
 
-from kitaru.exports.models import EnvironmentPolicy, ExportError, RewardSelector
+from kitaru.exports.models import (
+    ContentPolicy,
+    EnvironmentPolicy,
+    ExportError,
+    RewardSelector,
+)
 from kitaru.exports.resolve import resolve_export, resolve_remote_export
 from kitaru.exports.source import inventory_source
 
@@ -258,6 +263,109 @@ async def test_resolve_export_runtime_only_moves_registered_environment_to_requi
         "MODEL": "registered_environment",
         "MODEL_API_KEY": "attached_secret",
     }
+
+
+async def test_resolve_export_applies_selected_content_omissions(
+    tmp_path: Path,
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+    full = client.sessions.full[ids["session"]]
+    full.session.metadata = {"private": "session metadata"}
+    full.session.error = "session diagnostic"
+    full.session.external_id = "external-session"
+    full.session.cost = "1.25"
+    full.session.tokens = {"input_tokens": 12}
+
+    def node(node_type: str) -> SimpleNamespace:
+        return SimpleNamespace(
+            id=_id(),
+            session_id=ids["session"],
+            index=0,
+            parent_index=None,
+            secondary_parent_indexes=[],
+            node_type=node_type,
+            status="completed",
+            name=node_type,
+            inputs={"request": node_type},
+            outputs={"response": node_type},
+            input_text_selector="/request",
+            output_text_selector="/response",
+            system_prompt_selector="/system",
+            reasoning="visible chain",
+            model_params={"temperature": 0},
+            attributes={"span": "payload"},
+            metadata={"private": "node metadata"},
+            error="node diagnostic",
+            external_id="external-node",
+            trace_id="trace-id",
+            cache_key="cache-key",
+            cost="0.25",
+            tokens={"output_tokens": 4},
+        )
+
+    full.nodes = [
+        node("llm_call"),
+        node("tool_call"),
+        node("subagent_call"),
+        node("span"),
+    ]
+    policy = ContentPolicy(
+        omit=(
+            "session_outputs",
+            "model_payloads",
+            "tool_payloads",
+            "subagent_payloads",
+            "span_payloads",
+            "visible_reasoning",
+            "metadata",
+            "diagnostic_details",
+            "usage_and_cost",
+        )
+    )
+
+    resolved = await resolve_export(
+        client,
+        experiment_id=ids["experiment"],
+        cohort_version_id=ids["cohort_version"],
+        agent_version_id=ids["agent_version"],
+        reward=RewardSelector.parse("quality:correctness:score"),
+        source=inventory_source(tmp_path),
+        content_policy=policy,
+    )
+
+    [filtered] = resolved.sessions
+    assert filtered.session.id == ids["session"]
+    assert filtered.session.inputs == {"prompt": "hello"}
+    assert filtered.session.outputs is None
+    assert filtered.session.metadata == {}
+    assert filtered.session.error is None
+    assert filtered.session.external_id is None
+    assert filtered.session.cost is None
+    assert filtered.session.tokens is None
+    assert [item.node_type for item in filtered.nodes] == [
+        "llm_call",
+        "tool_call",
+        "subagent_call",
+        "span",
+    ]
+    for item in filtered.nodes:
+        assert item.inputs is None
+        assert item.outputs is None
+        assert item.input_text_selector is None
+        assert item.output_text_selector is None
+        assert item.reasoning is None
+        assert item.metadata == {}
+        assert item.error is None
+        assert item.external_id is None
+        assert item.trace_id is None
+        assert item.cache_key is None
+        assert item.cost is None
+        assert item.tokens is None
+    assert filtered.nodes[0].system_prompt_selector is None
+    assert filtered.nodes[0].model_params is None
+    assert filtered.nodes[3].attributes is None
+    assert resolved.content_policy == policy
 
 
 async def test_remote_resolution_is_source_free_and_ephemeral() -> None:

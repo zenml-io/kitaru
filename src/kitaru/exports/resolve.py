@@ -22,6 +22,7 @@ from kitaru.exports._runtime import parse_command_argv, reject_protected_source
 from kitaru.exports._sanitize import EphemeralSanitizer
 from kitaru.exports.models import (
     V1_EXPORT_BUDGETS,
+    ContentPolicy,
     DependencyPlan,
     EnvironmentPolicy,
     ExportError,
@@ -30,6 +31,7 @@ from kitaru.exports.models import (
     RewardSelector,
     RuntimeEnvironmentRequirement,
     SourceInventory,
+    SourcePolicy,
 )
 
 _MAX_TASK_INPUT_BYTES = 32 * 1024
@@ -64,6 +66,8 @@ class RemoteExportResolution:
     command_argv: tuple[str, ...]
     required_environment_names: tuple[str, ...]
     runtime_environment: tuple[RuntimeEnvironmentRequirement, ...]
+    content_policy: ContentPolicy
+    environment_policy: EnvironmentPolicy
     _sanitizer: EphemeralSanitizer
 
 
@@ -325,6 +329,63 @@ async def _resolve_evaluator(
     )
 
 
+def _replace_fields(value: Any, updates: dict[str, Any]) -> Any:
+    """Return one copied API value with schema-valid content omissions."""
+    if isinstance(value, BaseModel):
+        return value.model_copy(update=updates, deep=True)
+    copied = SimpleNamespace(**vars(value))
+    for name, replacement in updates.items():
+        setattr(copied, name, replacement)
+    return copied
+
+
+def _apply_content_policy(value: Any, policy: ContentPolicy) -> Any:
+    """Remove only the optional evidence categories selected by the caller."""
+    session_updates: dict[str, Any] = {}
+    if not policy.is_included("session_outputs"):
+        session_updates["outputs"] = None
+    if not policy.is_included("metadata"):
+        session_updates["metadata"] = {}
+    if not policy.is_included("diagnostic_details"):
+        session_updates.update(error=None, external_id=None)
+    if not policy.is_included("usage_and_cost"):
+        session_updates.update(cost=None, tokens=None)
+    session = _replace_fields(value.session, session_updates)
+
+    payload_categories = {
+        "llm_call": "model_payloads",
+        "tool_call": "tool_payloads",
+        "subagent_call": "subagent_payloads",
+        "span": "span_payloads",
+    }
+    nodes: list[Any] = []
+    for node in value.nodes:
+        updates: dict[str, Any] = {}
+        node_type = str(node.node_type)
+        category = payload_categories.get(node_type)
+        if category is not None and not policy.is_included(category):
+            updates.update(
+                inputs=None,
+                outputs=None,
+                input_text_selector=None,
+                output_text_selector=None,
+            )
+            if node_type == "llm_call":
+                updates.update(system_prompt_selector=None, model_params=None)
+            if node_type == "span":
+                updates["attributes"] = None
+        if not policy.is_included("visible_reasoning"):
+            updates["reasoning"] = None
+        if not policy.is_included("metadata"):
+            updates["metadata"] = {}
+        if not policy.is_included("diagnostic_details"):
+            updates.update(error=None, external_id=None, trace_id=None, cache_key=None)
+        if not policy.is_included("usage_and_cost"):
+            updates.update(cost=None, tokens=None)
+        nodes.append(_replace_fields(node, updates))
+    return _replace_fields(value, {"session": session, "nodes": nodes})
+
+
 async def _resolve_sessions(
     client: Any,
     *,
@@ -332,6 +393,7 @@ async def _resolve_sessions(
     cohort_version: Any,
     cohort_version_id: uuid.UUID,
     sanitizer: EphemeralSanitizer,
+    content_policy: ContentPolicy,
 ) -> tuple[Any, ...]:
     params = SessionListParams(
         filter=FilterCondition(
@@ -398,7 +460,8 @@ async def _resolve_sessions(
                 "sessions_too_large",
                 "Serialized sessions exceed the 256 MiB aggregate export limit.",
             )
-        sanitized_sessions.append(sanitizer.sanitize(full))
+        sanitized = sanitizer.sanitize(full)
+        sanitized_sessions.append(_apply_content_policy(sanitized, content_policy))
     return tuple(sanitized_sessions)
 
 
@@ -409,10 +472,12 @@ async def resolve_remote_export(
     cohort_version_id: uuid.UUID,
     agent_version_id: uuid.UUID,
     reward: RewardSelector,
+    content_policy: ContentPolicy | None = None,
     environment_policy: EnvironmentPolicy | None = None,
 ) -> RemoteExportResolution:
     """Authorize, sanitize, and freeze remote state before local source access."""
-    policy = environment_policy or EnvironmentPolicy()
+    selected_content = content_policy or ContentPolicy()
+    selected_environment = environment_policy or EnvironmentPolicy()
     experiment, cohort_version, agent_version = await asyncio.gather(
         client.experiments.get(experiment_id),
         client.cohort_versions.get(cohort_version_id),
@@ -441,7 +506,7 @@ async def resolve_remote_export(
     sanitized_agent_version, runtime_environment = _sanitize_agent_version(
         agent_version,
         sanitizer=sanitizer,
-        environment_policy=policy,
+        environment_policy=selected_environment,
         secret_environment_names=secret_names,
     )
     sessions = await _resolve_sessions(
@@ -450,6 +515,7 @@ async def resolve_remote_export(
         cohort_version=cohort_version,
         cohort_version_id=cohort_version_id,
         sanitizer=sanitizer,
+        content_policy=selected_content,
     )
 
     evaluator_configs = list(experiment.evaluators)
@@ -494,6 +560,8 @@ async def resolve_remote_export(
             requirement.name for requirement in runtime_environment
         ),
         runtime_environment=runtime_environment,
+        content_policy=selected_content,
+        environment_policy=selected_environment,
         _sanitizer=sanitizer,
     )
 
@@ -524,6 +592,7 @@ def finalize_remote_export(
     remote: RemoteExportResolution,
     *,
     source: SourceInventory,
+    source_policy: SourcePolicy | None = None,
 ) -> ResolvedExport:
     """Combine sanitized remote state with one validated local source snapshot."""
     dependency_plan = classify_dependencies(source, sanitizer=remote._sanitizer)
@@ -563,6 +632,9 @@ def finalize_remote_export(
         required_environment_names=remote.required_environment_names,
         runtime_environment=remote.runtime_environment,
         dependency_plan=dependency_plan,
+        content_policy=remote.content_policy,
+        environment_policy=remote.environment_policy,
+        source_policy=source_policy or SourcePolicy(),
     )
 
 
@@ -574,7 +646,9 @@ async def resolve_export(
     agent_version_id: uuid.UUID,
     reward: RewardSelector,
     source: SourceInventory,
+    content_policy: ContentPolicy | None = None,
     environment_policy: EnvironmentPolicy | None = None,
+    source_policy: SourcePolicy | None = None,
 ) -> ResolvedExport:
     """Resolve remote inputs first, then validate one local source inventory.
 
@@ -595,6 +669,7 @@ async def resolve_export(
         cohort_version_id=cohort_version_id,
         agent_version_id=agent_version_id,
         reward=reward,
+        content_policy=content_policy,
         environment_policy=environment_policy,
     )
-    return finalize_remote_export(remote, source=source)
+    return finalize_remote_export(remote, source=source, source_policy=source_policy)

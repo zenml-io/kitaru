@@ -2,7 +2,7 @@
 
 import uuid
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any, Literal, cast
 
@@ -361,6 +361,9 @@ class ResolvedExport:
     required_environment_names: tuple[str, ...] = ()
     runtime_environment: tuple[RuntimeEnvironmentRequirement, ...] = ()
     dependency_plan: DependencyPlan | None = None
+    content_policy: ContentPolicy = field(default_factory=ContentPolicy)
+    environment_policy: EnvironmentPolicy = field(default_factory=EnvironmentPolicy)
+    source_policy: SourcePolicy = field(default_factory=SourcePolicy)
 
 
 class ValidationReceipt(BaseModel):
