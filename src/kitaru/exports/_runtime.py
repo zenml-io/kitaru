@@ -26,8 +26,12 @@ _SHELLS = frozenset(
         "zsh",
     }
 )
-_UV_FLAGS_WITH_VALUE = frozenset({"--directory", "--package", "--project", "--python"})
+_UV_FLAGS_WITH_VALUE = frozenset({"--directory", "--package", "--project"})
 _UV_FLAGS = frozenset({"--frozen", "--locked", "--no-project", "--no-sync"})
+_UV_PYTHON_FLAGS = frozenset({"-p", "--python"})
+_UV_PYTHON_OVERRIDE_MESSAGE = (
+    "Export v1 does not allow uv run to select a Python runtime."
+)
 
 
 def _validate_program(argv: tuple[str, ...]) -> None:
@@ -65,6 +69,12 @@ def _validate_uv(argv: tuple[str, ...]) -> None:
     index = 2
     while index < len(argv) and argv[index].startswith("-"):
         flag = argv[index]
+        if (
+            flag in _UV_PYTHON_FLAGS
+            or flag.startswith("--python=")
+            or (flag.startswith("-p") and not flag.startswith("--"))
+        ):
+            raise ExportError("unsupported_run_command", _UV_PYTHON_OVERRIDE_MESSAGE)
         if flag in _UV_FLAGS:
             index += 1
             continue

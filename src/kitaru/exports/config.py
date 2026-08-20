@@ -52,7 +52,7 @@ class ExportRequest(BaseModel):
     environment_policy: EnvironmentPolicy = Field(default_factory=EnvironmentPolicy)
     source_policy: SourcePolicy = Field(default_factory=SourcePolicy)
     trace_format: TraceFormat | None = None
-    trace_path: str | None = None
+    trace_path: str | None = Field(default=None, max_length=1_024)
     archive: bool = False
     dry_run: bool = False
 

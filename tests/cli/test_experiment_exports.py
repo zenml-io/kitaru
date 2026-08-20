@@ -257,6 +257,53 @@ async def test_cli_treats_malformed_export_receipt_as_internal_error(
     assert "validation" not in raised.value.message.lower()
 
 
+async def test_cli_maps_oversized_trace_path_to_invalid_arguments(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    identifier = uuid.uuid4()
+    loaded = _loaded_exporter()
+
+    async def resolve_asset(*_args: Any) -> Any:
+        return SimpleNamespace(id=identifier)
+
+    async def resolve_version(*_args: Any) -> Any:
+        return object(), SimpleNamespace(id=identifier)
+
+    async def fail_export(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("invalid export request reached the shared operation")
+
+    monkeypatch.setattr(experiment_exports, "resolve_asset", resolve_asset)
+    monkeypatch.setattr(experiment_exports, "resolve_exporter", lambda _format: loaded)
+    monkeypatch.setattr(experiment_exports, "get_cohort_version", resolve_version)
+    monkeypatch.setattr(experiment_exports, "get_agent_version", resolve_version)
+    monkeypatch.setattr(experiment_exports, "export_experiment", fail_export)
+
+    with pytest.raises(CLIError) as raised:
+        await experiment_exports.export_experiment_command(
+            SimpleNamespace(experiments=object()),
+            "experiment",
+            cohort_version="cohort@1",
+            agent="agent@1",
+            format="harbor",
+            source_root=tmp_path,
+            destination=tmp_path / "bundle",
+            primary_reward="quality:correctness:score",
+            required_env=None,
+            omit_content=None,
+            environment_mode="include",
+            include_source=None,
+            exclude_source=None,
+            trace_format="atif",
+            trace_path="/" + "x" * 1_024,
+            archive=False,
+            dry_run=True,
+        )
+
+    assert raised.value.kind == "invalid_arguments"
+    assert "trace_path" in raised.value.message
+    assert "1024" in raised.value.message
+
+
 async def test_cli_maps_missing_exporter_before_reference_resolution(
     tmp_path: Path, monkeypatch: Any
 ) -> None:

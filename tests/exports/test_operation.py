@@ -295,6 +295,26 @@ def test_harbor_requires_an_explicit_trace_contract(tmp_path: Path) -> None:
         )
 
 
+def test_harbor_trace_path_matches_exporter_option_budget(tmp_path: Path) -> None:
+    maximum_trace_path = "/" + "x" * 1_023
+    request = _request(
+        tmp_path,
+        format="harbor",
+        trace_format="atif",
+        trace_path=maximum_trace_path,
+    )
+
+    assert request.trace_path == maximum_trace_path
+
+    with pytest.raises(ValidationError, match="at most 1024 characters"):
+        _request(
+            tmp_path,
+            format="harbor",
+            trace_format="atif",
+            trace_path=maximum_trace_path + "x",
+        )
+
+
 async def test_dry_run_calls_plugin_preflight_without_rendering(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

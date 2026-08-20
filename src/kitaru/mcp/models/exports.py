@@ -33,7 +33,7 @@ class ExperimentExportRequest(MCPModel):
     environment_policy: EnvironmentPolicy = Field(default_factory=EnvironmentPolicy)
     source_policy: SourcePolicy = Field(default_factory=SourcePolicy)
     trace_format: Literal["atif", "kitaru"] | None = None
-    trace_path: str | None = Field(default=None, max_length=4096)
+    trace_path: str | None = Field(default=None, max_length=1024)
     archive: bool = False
     dry_run: bool = False
 

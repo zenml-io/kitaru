@@ -250,6 +250,48 @@ async def test_bounded_response_returns_decoded_json() -> None:
     assert response.headers["Content-Length"] == str(len(b'{"ok":true}'))
 
 
+async def test_bounded_response_decodes_concatenated_gzip_members() -> None:
+    """Decode every gzip member within one cumulative response limit."""
+    decoded = b'{"ok":true}'
+    content = gzip.compress(b'{"ok":') + gzip.compress(b"true}")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={
+                "Content-Encoding": "gzip",
+                "Content-Type": "application/json",
+            },
+            stream=TrackingStream([content]),
+        )
+
+    client = mock_api_client(handler)
+    response = await client.request(
+        "GET", "/api/v1/info", max_response_bytes=len(decoded)
+    )
+
+    assert response.content == decoded
+    assert response.json() == {"ok": True}
+
+
+async def test_bounded_response_caps_output_across_gzip_members() -> None:
+    """Apply one decoded-byte limit across every member in a gzip response."""
+    content = gzip.compress(b"1234") + gzip.compress(b"5678")
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            headers={"Content-Encoding": "gzip"},
+            stream=TrackingStream([content]),
+        )
+
+    client = mock_api_client(handler)
+    with pytest.raises(ResponseTooLargeError) as exc_info:
+        await client.request("GET", "/api/v1/info", max_response_bytes=6)
+
+    assert exc_info.value.max_bytes == 6
+
+
 async def test_bounded_response_rejects_truncated_compressed_body() -> None:
     """Reject compressed content that never reaches its stream end marker."""
     content = gzip.compress(b'{"ok":true}')[:-8]

@@ -120,6 +120,7 @@ class _BoundedContentDecoder:
     """Incrementally decode one compressed response without exceeding a cap."""
 
     def __init__(self, encoding: str) -> None:
+        self._supports_concatenated_members = encoding in {"gzip", "x-gzip"}
         self._pending = bytearray()
         self._decompressor: Any | None = (
             None if encoding == "deflate" else zlib.decompressobj(zlib.MAX_WBITS | 16)
@@ -177,6 +178,12 @@ class _BoundedContentDecoder:
             if len(chunk) > available:
                 raise ResponseTooLargeError(limit)
             decoded.extend(chunk)
+            if self._supports_concatenated_members and self._decompressor.eof:
+                unused = self._decompressor.unused_data
+                if unused:
+                    self._decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16)
+                    pending = unused
+                    continue
             unconsumed = self._decompressor.unconsumed_tail
             if not unconsumed:
                 break

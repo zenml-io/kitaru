@@ -577,6 +577,70 @@ async def test_resolve_export_rejects_unsafe_run_commands(
     assert "sentinel-secret-value" not in str(raised.value)
 
 
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run --python 3.13 python agent.py",
+        "uv run --python=3.13 python agent.py",
+        "uv run -p 3.13 python agent.py",
+        "uv run -p3.13 python agent.py",
+        "uv run -p=3.13 python agent.py",
+    ],
+)
+async def test_resolve_export_rejects_uv_python_overrides(
+    tmp_path: Path, command: str
+) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    client.agent_versions.values[ids["agent_version"]].run_spec.command = command
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "unsupported_run_command"
+    assert (
+        raised.value.message
+        == "Export v1 does not allow uv run to select a Python runtime."
+    )
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "uv run --python-platform linux python agent.py",
+        "uv run --python-platform=linux python agent.py",
+        "uv run --managed-python python agent.py",
+        "uv run --no-managed-python python agent.py",
+        "uv run --no-python-downloads python agent.py",
+    ],
+)
+async def test_resolve_export_rejects_other_uv_python_runtime_options(
+    tmp_path: Path, command: str
+) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    client.agent_versions.values[ids["agent_version"]].run_spec.command = command
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "unsupported_run_command"
+
+
 async def test_resolve_export_deduplicates_secret_reads_but_preserves_requirements(
     tmp_path: Path,
 ) -> None:

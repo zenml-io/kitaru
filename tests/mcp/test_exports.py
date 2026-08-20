@@ -134,6 +134,26 @@ def test_export_request_validation_is_invalid_arguments() -> None:
     assert map_exception(raised.value).code == "invalid_arguments"
 
 
+def test_export_trace_path_budget_is_invalid_arguments() -> None:
+    with pytest.raises(ValidationError) as raised:
+        ExperimentExportRequest(
+            experiment_id=uuid.uuid4(),
+            cohort_version_id=uuid.uuid4(),
+            agent_version_id=uuid.uuid4(),
+            format="harbor",
+            source_root="/workspace/source",
+            destination="/workspace/bundle",
+            primary_reward="quality:correctness:score",
+            trace_format="atif",
+            trace_path="/" + "x" * 1_024,
+        )
+
+    mapped = map_exception(raised.value)
+    assert mapped.code == "invalid_arguments"
+    assert mapped.details is not None
+    assert mapped.details["issues"][0]["location"] == ["trace_path"]
+
+
 async def test_export_registry_maps_malformed_receipt_to_internal_error(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
