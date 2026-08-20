@@ -1,7 +1,9 @@
 """Tests for target trace conversion."""
 
 import uuid
+from copy import deepcopy
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -162,6 +164,49 @@ def _verifiers_trace() -> dict[str, Any]:
     }
 
 
+def _kitaru_trace(
+    *,
+    status: SessionStatus = SessionStatus.COMPLETED,
+    atif_trace: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    view = convert_trace(atif_trace or _atif_trace(), format="atif", context=_context())
+    source_id = uuid.UUID(int=99)
+    error = "agent failed" if status == SessionStatus.FAILED else None
+    nodes = []
+    for node in view.nodes:
+        nodes.append(
+            node.model_copy(
+                update={
+                    "id": uuid.uuid5(source_id, f"export-trace-node:{node.index}"),
+                    "session_id": source_id,
+                    "parent_id": uuid.uuid5(
+                        source_id, f"export-trace-node:{node.parent_index}"
+                    )
+                    if node.parent_index is not None
+                    else None,
+                    "secondary_parent_ids": [
+                        uuid.uuid5(source_id, f"export-trace-node:{parent}")
+                        for parent in node.secondary_parent_indexes
+                    ],
+                }
+            ).model_dump(mode="json")
+        )
+    return {
+        "session": view.session.model_copy(
+            update={
+                "id": source_id,
+                "status": status,
+                "inputs": {"wrong": True},
+                "outputs": {"partial": "42"} if error else "The answer is 42.",
+                "error": error,
+                "llm_call_count": 7,
+                "tool_call_count": 3,
+            }
+        ).model_dump(mode="json"),
+        "nodes": nodes,
+    }
+
+
 def test_convert_atif_preserves_messages_tools_usage_and_output() -> None:
     view = convert_trace(_atif_trace(), format="atif", context=_context())
 
@@ -178,14 +223,116 @@ def test_convert_atif_preserves_messages_tools_usage_and_output() -> None:
         "content": "What is six times seven?",
     }
     assert view.nodes[1].reasoning == "Use the calculator"
+    assert view.nodes[1].inputs == {
+        "messages": [{"role": "user", "content": "What is six times seven?"}]
+    }
     assert view.nodes[1].outputs["tool_calls"][0]["id"] == "call-1"
     assert view.nodes[2].inputs == {"a": 6, "b": 7}
     assert view.nodes[2].outputs == "42"
     assert view.nodes[3].outputs == {"message": "The answer is 42."}
+    assert view.nodes[3].inputs == {
+        "messages": [
+            {"role": "user", "content": "What is six times seven?"},
+            {
+                "role": "assistant",
+                "content": "I will calculate it.",
+                "reasoning_content": "Use the calculator",
+                "tool_calls": [
+                    {
+                        "id": "call-1",
+                        "name": "multiply",
+                        "arguments": {"a": 6, "b": 7},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": "call-1",
+                "name": "multiply",
+                "content": "42",
+            },
+        ]
+    }
     assert view.session.tokens is not None
     assert view.session.tokens.input_tokens == 10
     assert view.session.tokens.output_tokens == 4
     assert view.session.tokens.cached_input_tokens == 2
+    assert view.session.cost == Decimal("0.01")
+
+
+def test_convert_atif_keeps_parallel_tool_calls_as_siblings_and_joins() -> None:
+    trace = _atif_trace()
+    trace["steps"][1]["tool_calls"] = [
+        {
+            "tool_call_id": "call-left",
+            "function_name": "multiply",
+            "arguments": {"a": 6, "b": 7},
+        },
+        {
+            "tool_call_id": "call-right",
+            "function_name": "add",
+            "arguments": {"a": 40, "b": 2},
+        },
+    ]
+    trace["steps"][1]["observation"] = {
+        "results": [
+            {"source_call_id": "call-left", "content": "42"},
+            {"source_call_id": "call-right", "content": "42"},
+        ]
+    }
+
+    view = convert_trace(trace, format="atif", context=_context())
+
+    assert [node.parent_index for node in view.nodes] == [None, 0, 1, 1, 2]
+    assert view.nodes[4].secondary_parent_indexes == [3]
+    assert view.nodes[4].secondary_parent_ids == [view.nodes[3].id]
+
+
+def test_convert_atif_prefers_declared_final_usage_and_cost() -> None:
+    trace = _atif_trace()
+    trace["final_metrics"] = {
+        "total_prompt_tokens": 30,
+        "total_completion_tokens": 9,
+        "total_cached_tokens": 4,
+        "total_cost_usd": 0.025,
+        "total_steps": 3,
+    }
+
+    view = convert_trace(trace, format="atif", context=_context())
+
+    assert view.session.tokens is not None
+    assert view.session.tokens.input_tokens == 30
+    assert view.session.tokens.output_tokens == 9
+    assert view.session.tokens.cached_input_tokens == 4
+    assert view.session.cost == Decimal("0.025")
+
+
+@pytest.mark.parametrize(
+    ("declared_count", "expected_count", "expected_type", "warns"),
+    [
+        (0, 1, "span", False),
+        (1, 2, "llm_call", False),
+        (3, 4, "llm_call", True),
+    ],
+)
+def test_convert_atif_preserves_declared_llm_call_counts(
+    declared_count: int,
+    expected_count: int,
+    expected_type: str,
+    warns: bool,
+) -> None:
+    trace = _atif_trace()
+    trace["steps"][1]["llm_call_count"] = declared_count
+    if declared_count == 0:
+        trace["steps"][1].pop("metrics")
+        trace["steps"][1].pop("reasoning_content")
+
+    view = convert_trace(trace, format="atif", context=_context())
+
+    assert view.session.llm_call_count == expected_count
+    assert view.nodes[1].node_type.value == expected_type
+    assert view.nodes[1].metadata["declared_llm_call_count"] == declared_count
+    assert ("conversion_warnings" in view.nodes[1].metadata) is warns
 
 
 def test_convert_verifiers_preserves_linear_message_trace() -> None:
@@ -196,33 +343,254 @@ def test_convert_verifiers_preserves_linear_message_trace() -> None:
     assert view.session.tool_call_count == 1
     assert [node.index for node in view.nodes] == [0, 1, 2, 3]
     assert view.nodes[1].outputs["tool_calls"][0]["arguments"] == '{"a":6,"b":7}'
+    assert view.nodes[1].inputs == {
+        "messages": [{"role": "user", "content": "Calculate 6 * 7"}]
+    }
     assert view.nodes[2].external_id == "call-1"
     assert view.nodes[2].outputs == "42"
     assert view.nodes[3].tokens is not None
     assert view.nodes[3].tokens.output_tokens == 5
+    assert view.session.tokens is not None
+    assert view.session.tokens.input_tokens == 22
+    assert view.session.cost == Decimal("0.02")
+
+
+def test_convert_verifiers_preserves_branches_without_linearizing() -> None:
+    trace = _verifiers_trace()
+    trace["nodes"] = [
+        trace["nodes"][0],
+        {
+            "parent": 0,
+            "message": {"role": "assistant", "content": "branch one"},
+            "sampled": True,
+            "timestamp": 1767323046.0,
+        },
+        {
+            "parent": 0,
+            "message": {"role": "assistant", "content": "branch two"},
+            "sampled": True,
+            "timestamp": 1767323047.0,
+        },
+        {
+            "parent": 1,
+            "message": {"role": "user", "content": "continue branch one"},
+            "sampled": False,
+            "timestamp": 1767323048.0,
+        },
+        {
+            "parent": 3,
+            "message": {"role": "assistant", "content": "joined outcome"},
+            "sampled": True,
+            "timestamp": 1767323049.0,
+        },
+    ]
+    trace["calls"] = [
+        {"node": 1, "model": "fixture-model"},
+        {"node": 2, "model": "fixture-model"},
+        {"node": 4, "model": "fixture-model"},
+    ]
+
+    view = convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert [node.parent_index for node in view.nodes] == [None, 0, 0, 1, 3]
+    assert view.nodes[4].inputs == {
+        "messages": [
+            {"role": "user", "content": "Calculate 6 * 7"},
+            {"role": "assistant", "content": "branch one"},
+            {"role": "user", "content": "continue branch one"},
+        ]
+    }
+
+
+def test_convert_verifiers_preserves_recovered_retry_history() -> None:
+    trace = _verifiers_trace()
+    retry = {
+        "node": None,
+        "model": "fixture-model",
+        "usage": {"prompt_tokens": 2, "completion_tokens": 0, "cost": 0.005},
+        "time": {"start": 1767323045.1, "end": 1767323045.4},
+        "error": {"type": "ProviderError", "message": "temporary failure"},
+    }
+    trace["calls"].insert(0, retry)
+    trace["errors"] = [{"type": "ProviderError", "message": "temporary failure"}]
+
+    view = convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert view.session.status == SessionStatus.COMPLETED
+    assert view.session.error is None
+    assert view.session.llm_call_count == 3
+    assert view.session.tokens is not None
+    assert view.session.tokens.input_tokens == 24
+    assert view.session.cost == Decimal("0.025")
+    conversion = view.session.metadata["trace_conversion"]
+    assert conversion["uncommitted_model_calls"][0]["error"]["message"] == (
+        "temporary failure"
+    )
+    assert conversion["errors"][0]["message"] == "temporary failure"
+
+
+def test_convert_verifiers_preserves_final_failed_retry() -> None:
+    trace = _verifiers_trace()
+    trace["ok"] = False
+    trace["errors"] = [{"type": "RuntimeError", "message": "retry exhausted"}]
+    trace["calls"].append(
+        {
+            "node": None,
+            "model": "fixture-model",
+            "error": {"type": "ProviderError", "message": "provider down"},
+        }
+    )
+
+    view = convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert view.session.status == SessionStatus.FAILED
+    assert view.session.error == "retry exhausted"
+    assert view.session.outputs == "The answer is 42."
+    assert view.session.llm_call_count == 3
+    assert view.session.metadata["trace_conversion"]["uncommitted_model_calls"] == [
+        {
+            "node": None,
+            "model": "fixture-model",
+            "error": {"type": "ProviderError", "message": "provider down"},
+        }
+    ]
 
 
 def test_convert_full_session_keeps_context_identity_and_real_nodes() -> None:
-    atif_view = convert_trace(_atif_trace(), format="atif", context=_context())
-    emitted = {
-        "session": atif_view.session.model_copy(
-            update={"id": uuid.UUID(int=99), "inputs": {"wrong": True}}
-        ).model_dump(mode="json"),
-        "nodes": [
-            node.model_copy(update={"session_id": uuid.UUID(int=99)}).model_dump(
-                mode="json"
-            )
-            for node in atif_view.nodes
-        ],
-    }
+    emitted = _kitaru_trace()
 
     view = convert_trace(emitted, format="kitaru", context=_context())
 
     assert view.session.id == uuid.UUID(int=1)
     assert view.session.inputs == {"question": "What is six times seven?"}
     assert view.session.outputs == "The answer is 42."
+    assert view.session.llm_call_count == 7
+    assert view.session.tool_call_count == 3
     assert len(view.nodes) == 4
     assert all(node.session_id == uuid.UUID(int=1) for node in view.nodes)
+
+
+def test_convert_full_session_preserves_secondary_ancestry() -> None:
+    atif_trace = _atif_trace()
+    atif_trace["steps"][1]["tool_calls"].append(
+        {
+            "tool_call_id": "call-2",
+            "function_name": "add",
+            "arguments": {"a": 40, "b": 2},
+        }
+    )
+    atif_trace["steps"][1]["observation"]["results"].append(
+        {"source_call_id": "call-2", "content": "42"}
+    )
+    emitted = _kitaru_trace(atif_trace=atif_trace)
+
+    view = convert_trace(emitted, format="kitaru", context=_context())
+
+    assert view.nodes[4].parent_index == 2
+    assert view.nodes[4].secondary_parent_indexes == [3]
+    assert view.nodes[4].secondary_parent_ids == [view.nodes[3].id]
+
+
+@pytest.mark.parametrize(
+    ("status", "error", "expected"),
+    [
+        (SessionStatus.COMPLETED, None, SessionStatus.COMPLETED),
+        (SessionStatus.FAILED, "agent failed", SessionStatus.FAILED),
+    ],
+)
+def test_convert_kitaru_preserves_terminal_outcome(
+    status: SessionStatus, error: str | None, expected: SessionStatus
+) -> None:
+    trace = _kitaru_trace(status=status)
+    trace["session"]["error"] = error
+
+    view = convert_trace(trace, format="kitaru", context=_context())
+
+    assert view.session.status == expected
+    assert view.session.error == error
+
+
+def test_convert_kitaru_rejects_nonterminal_session() -> None:
+    trace = _kitaru_trace()
+    trace["session"]["status"] = "in_progress"
+
+    with pytest.raises(ExportError) as raised:
+        convert_trace(trace, format="kitaru", context=_context())
+
+    assert raised.value.code == "incomplete_trace"
+
+
+@pytest.mark.parametrize(
+    ("mutate", "code"),
+    [
+        (lambda nodes: nodes[1].update(parent_index="0"), "malformed_trace_parent"),
+        (lambda nodes: nodes[2].update(parent_index=99), "trace_parent_out_of_range"),
+        (lambda nodes: nodes[2].update(parent_index=3), "forward_trace_parent"),
+        (
+            lambda nodes: nodes[3].update(parent_index=1, secondary_parent_indexes=[1]),
+            "duplicate_trace_parent",
+        ),
+        (
+            lambda nodes: nodes[1].update(index=10),
+            "missing_trace_parent",
+        ),
+    ],
+)
+def test_convert_kitaru_rejects_invalid_parent_graphs(mutate: Any, code: str) -> None:
+    trace = _kitaru_trace()
+    mutate(trace["nodes"])
+
+    with pytest.raises(ExportError) as raised:
+        convert_trace(trace, format="kitaru", context=_context())
+
+    assert raised.value.code == code
+
+
+@pytest.mark.parametrize(
+    ("parent", "code"),
+    [
+        ("0", "malformed_trace_parent"),
+        (99, "trace_parent_out_of_range"),
+        (2, "forward_trace_parent"),
+        ([0, 1], "malformed_trace_parent"),
+    ],
+)
+def test_convert_verifiers_rejects_invalid_parents(parent: Any, code: str) -> None:
+    trace = _verifiers_trace()
+    trace["nodes"][1]["parent"] = parent
+
+    with pytest.raises(ExportError) as raised:
+        convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert raised.value.code == code
+
+
+def test_convert_verifiers_rejects_missing_parent() -> None:
+    trace = _verifiers_trace()
+    del trace["nodes"][1]["parent"]
+
+    with pytest.raises(ExportError) as raised:
+        convert_trace(trace, format="verifiers-v1", context=_context())
+
+    assert raised.value.code == "missing_trace_parent"
+
+
+@pytest.mark.parametrize("format", ["atif", "verifiers-v1"])
+def test_convert_trace_rejects_missing_tool_results_with_stable_code(
+    format: TraceFormat,
+) -> None:
+    trace = deepcopy(_atif_trace() if format == "atif" else _verifiers_trace())
+    if format == "atif":
+        trace["steps"][1]["observation"]["results"] = []
+    else:
+        trace["nodes"].pop(2)
+        trace["nodes"][2]["parent"] = 1
+        trace["calls"][1]["node"] = 2
+
+    with pytest.raises(ExportError) as raised:
+        convert_trace(trace, format=format, context=_context())
+
+    assert raised.value.code == "missing_tool_result"
 
 
 @pytest.mark.parametrize(
@@ -251,7 +619,7 @@ def test_convert_full_session_keeps_context_identity_and_real_nodes() -> None:
                     {"parent": None, "message": {"role": "assistant", "content": "y"}},
                 ],
             },
-            "invalid_trace_order",
+            "unsupported_trace_shape",
         ),
         (
             "kitaru",
