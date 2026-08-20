@@ -28,20 +28,21 @@ from kitaru.api_models.v1.tag import (
     TagResponse,
     TagUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import authorize, get_tag_service
 from kitaru.server.adapters.rest.mapping.tags import (
     tag_link_to_response,
     tag_list_params_to_filter,
     tag_to_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.tag_service import TagService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_tag(
     body: TagCreateRequest,
     service: Annotated[TagService, Depends(get_tag_service)],

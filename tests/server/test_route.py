@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for CommitRoute."""
+"""Tests for KitaruAPIRoute."""
 
 from collections.abc import AsyncGenerator
 from typing import Any, cast
@@ -20,7 +20,8 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.rest.commit_route import CommitRoute, attach_request_session
+from kitaru.server.adapters.rest.request_state import attach_request_session
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 
 _SCOPE: dict[str, Any] = {
     "type": "http",
@@ -78,10 +79,10 @@ def _drive(scope: dict[str, Any], events: list[str]) -> Any:
     return receive, send
 
 
-async def test_commit_route_commits_before_response_is_sent() -> None:
+async def test_route_commits_before_response_is_sent() -> None:
     """Commit the request session before the response body is sent."""
     events: list[str] = []
-    router = APIRouter(route_class=CommitRoute)
+    router = APIRouter(route_class=KitaruAPIRoute)
 
     async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
         attach_request_session(request, cast(AsyncSession, _RecordingSession(events)))
@@ -101,10 +102,10 @@ async def test_commit_route_commits_before_response_is_sent() -> None:
     assert events == ["committed", "response_sent"]
 
 
-async def test_commit_route_skips_commit_on_exception() -> None:
+async def test_route_skips_commit_on_exception() -> None:
     """Skip the commit when the route handler raises."""
     events: list[str] = []
-    router = APIRouter(route_class=CommitRoute)
+    router = APIRouter(route_class=KitaruAPIRoute)
 
     async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
         attach_request_session(request, cast(AsyncSession, _RecordingSession(events)))
@@ -125,10 +126,10 @@ async def test_commit_route_skips_commit_on_exception() -> None:
     assert "committed" not in events
 
 
-async def test_commit_route_without_session_returns_response() -> None:
+async def test_route_without_session_returns_response() -> None:
     """Return the response untouched when no dependency created a session."""
     events: list[str] = []
-    router = APIRouter(route_class=CommitRoute)
+    router = APIRouter(route_class=KitaruAPIRoute)
 
     @router.get("/no-session")
     async def no_session() -> dict[str, str]:

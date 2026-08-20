@@ -30,7 +30,6 @@ from kitaru.api_models.v1.ui import (
     ReplayEvaluationValues,
     SessionWithEvaluationsResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_evaluation_service,
@@ -43,6 +42,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_list_params_to_filter,
     session_to_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
@@ -59,7 +59,7 @@ from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.filtering import MAX_FILTER_IN_VALUES, FilterCondition
 from kitaru.server.utils import paginate_all
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 MAX_VALUE_REPLAYS = 50
 

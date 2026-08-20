@@ -20,7 +20,12 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeAgentRepository, FakeAgentVersionRepository, FakeTagRepository
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeTagRepository,
+    override_idempotency,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_agent_service,
@@ -82,6 +87,7 @@ async def client(
     app.dependency_overrides[get_agent_version_service] = lambda: version_service
     app.dependency_overrides[get_tag_service] = lambda: tag_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

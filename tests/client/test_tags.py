@@ -18,7 +18,7 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeTagRepository, asgi_api_client
+from conftest import FakeTagRepository, asgi_api_client, override_idempotency
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.tag import (
     TagCreateRequest,
@@ -54,6 +54,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     service = TagService(repository=FakeTagRepository())
     app.dependency_overrides[get_tag_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

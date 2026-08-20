@@ -36,6 +36,7 @@ from conftest import (
     create_blob,
     create_plugin,
     create_worker,
+    override_idempotency,
 )
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.client.api_client import KitaruAPIClient
@@ -101,6 +102,7 @@ async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
     app.dependency_overrides[get_session_node_service] = lambda: node_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     agent = await create_agent(services.agents, ACCOUNT.id)
     async with asgi_api_client(app) as client:
         yield TaskAppFixture(client=client, services=services, agent=agent)

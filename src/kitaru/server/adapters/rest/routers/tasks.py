@@ -29,7 +29,6 @@ from kitaru.api_models.v1.task import (
 )
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.auth.jwt import TaskSubject
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_task_only,
@@ -45,6 +44,7 @@ from kitaru.server.adapters.rest.mapping.tasks import (
     task_to_response,
     task_update_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -53,7 +53,7 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.services.resource_access import build_task_grants
 from kitaru.server.application.services.task_service import TaskService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("")

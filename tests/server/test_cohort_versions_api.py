@@ -26,6 +26,7 @@ from conftest import (
     FakeSessionRepository,
     create_agent,
     create_session,
+    override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -96,6 +97,7 @@ async def client(
     app.dependency_overrides[get_cohort_service] = lambda: cohort_service
     app.dependency_overrides[get_cohort_version_service] = lambda: version_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

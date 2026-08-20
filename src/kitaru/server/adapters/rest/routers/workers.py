@@ -29,7 +29,6 @@ from kitaru.api_models.v1.worker import (
     WorkerResponse,
 )
 from kitaru.server.adapters.auth.auth_service import AuthService
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_worker,
@@ -43,12 +42,13 @@ from kitaru.server.adapters.rest.mapping.workers import (
     worker_list_params_to_filter,
     worker_to_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerAuthContext
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.worker_service import WorkerService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("")
