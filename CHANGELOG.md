@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.2]
+
+### Changed
+
+- Updated the bundled frontend to `kitaru-ui-v0.2.2`.
+
 ### Added
 
 - Added local experiment export projects for Harbor 0.20 and Verifiers 0.3 through independently installable `kitaru-harbor-exporter` and `kitaru-verifiers-exporter` packages, with explicit content, environment, and source policies; protected runtime values; deterministic core and exporter provenance; target-native agent and evaluator execution; and a PrimeRL 0.8 training-source handoff.
