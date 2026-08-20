@@ -1,36 +1,36 @@
 """Render a Kitaru experiment as a Harbor 0.20 task dataset."""
 
 import hashlib
+import importlib.metadata
 import json
 import tomllib
 from pathlib import Path, PurePosixPath
-from typing import Literal
 
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
-from kitaru.exports._bridge import (
-    get_runtime_bridge_version,
-    materialize_runtime_bridge,
-)
-from kitaru.exports.config import normalize_environment_names
-from kitaru.exports.formats._validation import (
-    validate_generated_resources,
-    validate_kitaru_requirement,
-    validate_runtime_bridge,
-)
-from kitaru.exports.models import (
+from kitaru.exports import (
+    EXPORTER_CONTRACT_VERSION,
     V1_EXPORT_BUDGETS,
     DependencyPlan,
     DependencyReceipt,
+    ExporterContext,
+    ExporterMetadata,
+    ExporterOptions,
     ExportError,
     ExportManifest,
     ResolvedExport,
     ValidationReceipt,
 )
-from kitaru.exports.source import copy_source
-from kitaru.exports.writer import (
+from kitaru.exports.render_support import (
+    copy_source,
     directory_digest,
     file_digest,
     file_digests,
+    get_runtime_bridge_version,
+    materialize_runtime_bridge,
+    normalize_environment_names,
+    validate_generated_resources,
+    validate_kitaru_requirement,
+    validate_runtime_bridge,
     write_canonical_json,
 )
 
@@ -42,9 +42,19 @@ _MAX_EVALUATOR_OUTPUT_BYTES = 64 * 1024
 _UV_VERSION = "0.12.1"
 _IMAGE_PREFIX = "kitaru-export"
 _SUPPORTED_TRACES = {"atif", "kitaru"}
+_DISTRIBUTION_NAME = "kitaru-harbor-exporter"
 
 
-def harbor_task_digest(task_dir: Path) -> str:
+def _get_distribution_version() -> str:
+    try:
+        return importlib.metadata.version(_DISTRIBUTION_NAME)
+    except importlib.metadata.PackageNotFoundError:
+        return "0.1.0"
+
+
+def harbor_task_digest(
+    task_dir: Path, *, context: ExporterContext | None = None
+) -> str:
     """Compute the local structural digest written to the Harbor dataset.
 
     Exact compatibility is proved separately against Harbor's pinned Packager. This
@@ -52,10 +62,14 @@ def harbor_task_digest(task_dir: Path) -> str:
     """
     included: list[Path] = []
     for name in ("task.toml", "instruction.md", "README.md"):
+        if context is not None:
+            context.checkpoint()
         path = task_dir / name
         if path.is_file():
             included.append(path)
     for name in ("environment", "tests", "solution", "steps"):
+        if context is not None:
+            context.checkpoint()
         directory = task_dir / name
         if directory.is_dir():
             included.extend(path for path in directory.rglob("*") if path.is_file())
@@ -64,8 +78,15 @@ def harbor_task_digest(task_dir: Path) -> str:
     for path in sorted(
         included, key=lambda item: item.relative_to(task_dir).as_posix()
     ):
+        if context is not None:
+            context.checkpoint()
         relative = path.relative_to(task_dir).as_posix()
-        file_hash = file_digest(path)
+        file_hash = file_digest(
+            path,
+            cancellation_checkpoint=(
+                context.checkpoint if context is not None else None
+            ),
+        )
         digest.update(f"{relative}\0{file_hash}\n".encode())
     return digest.hexdigest()
 
@@ -90,7 +111,11 @@ def _validate_trace_declaration(trace_format: str, trace_path: str) -> None:
 
 
 def _write_evaluators(
-    resolved: ResolvedExport, root: Path, *, kitaru_version: str
+    resolved: ResolvedExport,
+    root: Path,
+    *,
+    kitaru_version: str,
+    context: ExporterContext,
 ) -> None:
     evaluator_dir = root / "evaluators"
     evaluator_dir.mkdir()
@@ -100,6 +125,7 @@ def _write_evaluators(
     for index, evaluator in enumerate(
         sorted(resolved.evaluators, key=lambda item: item.name)
     ):
+        context.checkpoint()
         script_path: str | None = None
         source = evaluator.version.source
         if isinstance(source, ScriptPluginSource):
@@ -409,12 +435,13 @@ def _task_toml(
     return "\n".join(lines) + "\n"
 
 
-def preflight_harbor_export(
+def _preflight_harbor_export(
     resolved: ResolvedExport,
     *,
-    trace_format: Literal["atif", "kitaru"] | str,
+    trace_format: str,
     trace_path: str,
     required_environment_names: tuple[str, ...] = (),
+    context: ExporterContext,
 ) -> tuple[tuple[str, ...], str]:
     """Validate Harbor-specific inputs without writing an artifact."""
     _validate_trace_declaration(trace_format, trace_path)
@@ -442,6 +469,7 @@ def preflight_harbor_export(
         ) from error
     runtime_version = get_runtime_bridge_version()
     for requirement in dependency_plan.requirements:
+        context.checkpoint()
         if requirement.project == "kitaru":
             validate_kitaru_requirement(
                 requirement.requirement,
@@ -449,6 +477,7 @@ def preflight_harbor_export(
                 subject="A declared Kitaru",
             )
     for evaluator in resolved.evaluators:
+        context.checkpoint()
         source = evaluator.version.source
         if isinstance(source, PackagePluginSource):
             validate_kitaru_requirement(
@@ -459,21 +488,24 @@ def preflight_harbor_export(
     return normalized_names, runtime_version
 
 
-def render_harbor(
+def _render_harbor(
     resolved: ResolvedExport,
     destination: Path,
     *,
-    trace_format: Literal["atif", "kitaru"] | str,
+    trace_format: str,
     trace_path: str,
     required_environment_names: tuple[str, ...] = (),
+    context: ExporterContext,
 ) -> ExportManifest:
     """Render a complete Harbor dataset into an empty destination directory."""
-    required_environment_names, runtime_version = preflight_harbor_export(
+    required_environment_names, runtime_version = _preflight_harbor_export(
         resolved,
         trace_format=trace_format,
         trace_path=trace_path,
         required_environment_names=required_environment_names,
+        context=context,
     )
+    context.checkpoint()
     if destination.exists() and (
         not destination.is_dir() or next(destination.iterdir(), None) is not None
     ):
@@ -486,8 +518,13 @@ def render_harbor(
     assert dependency_plan is not None
 
     destination.mkdir(parents=True, exist_ok=True)
+    context.checkpoint()
     agent_image = destination / "agent_image"
-    copy_source(resolved.source, agent_image / "agent_source")
+    copy_source(
+        resolved.source,
+        agent_image / "agent_source",
+        cancellation_checkpoint=context.checkpoint,
+    )
     bridge = materialize_runtime_bridge(agent_image / "bridge")
     assert bridge.originating_kitaru_version == runtime_version
     (agent_image / "bridge-requirements.txt").write_text(
@@ -497,6 +534,7 @@ def render_harbor(
         resolved,
         agent_image,
         kitaru_version=bridge.originating_kitaru_version,
+        context=context,
     )
     trace_log_name = (
         "trajectory.json" if trace_format == "atif" else "kitaru-session.json"
@@ -528,13 +566,17 @@ def render_harbor(
         _AGENT_SOURCE.replace("__KITARU_SUPPORTS_ATIF__", repr(trace_format == "atif"))
     )
 
-    image = f"{_IMAGE_PREFIX}:{directory_digest(agent_image)[:12]}"
+    image_digest = directory_digest(
+        agent_image, cancellation_checkpoint=context.checkpoint
+    )
+    image = f"{_IMAGE_PREFIX}:{image_digest[:12]}"
     dataset_dir = destination / "dataset"
     dataset_dir.mkdir()
     references: list[tuple[str, str]] = []
     for index, session in enumerate(
         sorted(resolved.sessions, key=lambda item: str(item.session.id)), start=1
     ):
+        context.checkpoint()
         task_id = f"task-{index:05d}-{str(session.session.id)[:8]}"
         task_name = f"kitaru/{task_id}"
         task_dir = dataset_dir / task_id
@@ -572,7 +614,7 @@ def render_harbor(
         test_path = task_dir / "tests/test.sh"
         test_path.write_text(_test_script(trace_format))
         test_path.chmod(0o755)
-        references.append((task_name, harbor_task_digest(task_dir)))
+        references.append((task_name, harbor_task_digest(task_dir, context=context)))
 
     dataset_name = f"kitaru/experiment-{str(resolved.experiment.id)[:8]}"
     dataset_lines = [
@@ -583,6 +625,7 @@ def render_harbor(
         'keywords = ["kitaru", "evaluation"]',
     ]
     for name, digest in references:
+        context.checkpoint()
         dataset_lines.extend(
             [
                 "",
@@ -633,6 +676,7 @@ runtime values must be supplied through Harbor's environment mechanism.
     manifest = ExportManifest(
         format="harbor",
         target_version=HARBOR_VERSION,
+        exporter=context.exporter,
         experiment_id=resolved.experiment.id,
         cohort_version_id=resolved.cohort_version.id,
         agent_version_id=resolved.agent_version.id,
@@ -644,7 +688,9 @@ runtime values must be supplied through Harbor's environment mechanism.
             f"{resolved.reward.evaluator}:{resolved.reward.result}:{resolved.reward.field}"
         ),
         source_digest=resolved.source.digest,
-        generated_files=file_digests(destination),
+        generated_files=file_digests(
+            destination, cancellation_checkpoint=context.checkpoint
+        ),
         required_environment_names=required_environment_names,
         exclusions=resolved.source.excluded,
         content_policy=resolved.content_policy,
@@ -663,11 +709,12 @@ runtime values must be supplied through Harbor's environment mechanism.
         destination / "kitaru-export.json", manifest.model_dump(mode="json")
     )
     validate_generated_resources(destination)
-    validate_harbor(destination)
+    validate_harbor(destination, context=context)
+    context.checkpoint()
     return manifest
 
 
-def validate_harbor(root: Path) -> None:
+def validate_harbor(root: Path, *, context: ExporterContext | None = None) -> None:
     """Validate the generated Harbor structure without importing executable code."""
     required = [
         root / "README.md",
@@ -705,7 +752,10 @@ def validate_harbor(root: Path) -> None:
         raise ExportError(
             "invalid_harbor_bundle", "Manifest generated file inventory is invalid."
         )
-    actual_files = file_digests(root)
+    actual_files = file_digests(
+        root,
+        cancellation_checkpoint=(context.checkpoint if context is not None else None),
+    )
     actual_files.pop("kitaru-export.json", None)
     if actual_files != expected_files:
         raise ExportError(
@@ -716,6 +766,8 @@ def validate_harbor(root: Path) -> None:
         root / "agent_image/evaluate.py",
         *(root / "agent_image/bridge").glob("*.py"),
     ):
+        if context is not None:
+            context.checkpoint()
         source = path.read_text()
         if "kitaru.exports" in source:
             raise ExportError(
@@ -736,6 +788,8 @@ def validate_harbor(root: Path) -> None:
         reference.get("name"): reference.get("digest") for reference in references
     }
     for task in tasks:
+        if context is not None:
+            context.checkpoint()
         try:
             config = tomllib.loads((task / "task.toml").read_text())
             task_data = json.loads((task / "tests/task.json").read_text())
@@ -748,7 +802,7 @@ def validate_harbor(root: Path) -> None:
             raise ExportError(
                 "invalid_harbor_bundle", f"Task {task.name} does not use schema 1.3."
             )
-        if by_name.get(name) != f"sha256:{harbor_task_digest(task)}":
+        if by_name.get(name) != f"sha256:{harbor_task_digest(task, context=context)}":
             raise ExportError(
                 "invalid_harbor_bundle", f"Task {task.name} digest does not match."
             )
@@ -763,3 +817,77 @@ def validate_harbor(root: Path) -> None:
             raise ExportError(
                 "invalid_harbor_bundle", f"Task {task.name} input copies differ."
             )
+
+
+class HarborExporter:
+    """Generate structurally validated Harbor 0.20.0 artifacts."""
+
+    metadata = ExporterMetadata(
+        contract_version=EXPORTER_CONTRACT_VERSION,
+        distribution_name=_DISTRIBUTION_NAME,
+        distribution_version=_get_distribution_version(),
+        format="harbor",
+        target_version=HARBOR_VERSION,
+    )
+
+    def preflight(
+        self,
+        resolved: ResolvedExport,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> None:
+        """Validate Harbor-specific options without writing an artifact."""
+        trace_format = options.trace_format
+        trace_path = options.trace_path
+        if trace_format is None:
+            raise ExportError(
+                "unsupported_trace_format",
+                "Harbor export requires an ATIF or Kitaru full-session trace.",
+            )
+        if trace_path is None:
+            raise ExportError(
+                "missing_trace_path", "Harbor export requires a trace path."
+            )
+        _preflight_harbor_export(
+            resolved,
+            trace_format=trace_format,
+            trace_path=trace_path,
+            required_environment_names=options.required_environment_names,
+            context=context,
+        )
+        context.checkpoint()
+
+    def render(
+        self,
+        resolved: ResolvedExport,
+        staging_root: Path,
+        *,
+        options: ExporterOptions,
+        context: ExporterContext,
+    ) -> ExportManifest:
+        """Render a Harbor artifact inside the supplied core-owned staging root."""
+        trace_format = options.trace_format
+        trace_path = options.trace_path
+        if trace_format is None:
+            raise ExportError(
+                "unsupported_trace_format",
+                "Harbor export requires an ATIF or Kitaru full-session trace.",
+            )
+        if trace_path is None:
+            raise ExportError(
+                "missing_trace_path", "Harbor export requires a trace path."
+            )
+        return _render_harbor(
+            resolved,
+            staging_root,
+            trace_format=trace_format,
+            trace_path=trace_path,
+            required_environment_names=options.required_environment_names,
+            context=context,
+        )
+
+
+def create_exporter() -> HarborExporter:
+    """Create the installed Harbor exporter implementation."""
+    return HarborExporter()

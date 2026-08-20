@@ -24,14 +24,8 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
+from kitaru.exports import ExporterContext, ExporterOptions, ExporterProvenance
 from kitaru.exports._dependencies import classify_dependencies
-from kitaru.exports.formats.harbor import (
-    HARBOR_VERSION,
-    SCORING_TIMEOUT_SECONDS,
-    harbor_task_digest,
-    render_harbor,
-    validate_harbor,
-)
 from kitaru.exports.models import (
     ContentPolicy,
     EnvironmentPolicy,
@@ -43,6 +37,47 @@ from kitaru.exports.models import (
 )
 from kitaru.exports.source import inventory_source
 from kitaru.exports.writer import file_digests
+from kitaru_harbor_exporter import (
+    HARBOR_VERSION,
+    SCORING_TIMEOUT_SECONDS,
+    HarborExporter,
+    create_exporter,
+    harbor_task_digest,
+    validate_harbor,
+)
+
+_EXPORTER = HarborExporter()
+
+
+def _get_context(
+    checkpoint: Any = lambda: None,
+) -> ExporterContext:
+    return ExporterContext(
+        exporter=ExporterProvenance.model_validate(_EXPORTER.metadata.model_dump()),
+        cancellation_checkpoint=checkpoint,
+    )
+
+
+def render_harbor(
+    resolved: ResolvedExport,
+    destination: Path,
+    *,
+    trace_format: str,
+    trace_path: str,
+    required_environment_names: tuple[str, ...] = (),
+    context: ExporterContext | None = None,
+) -> Any:
+    """Invoke the Harbor renderer through the installed exporter contract."""
+    return _EXPORTER.render(
+        resolved,
+        destination,
+        options=ExporterOptions.model_construct(
+            trace_format=trace_format,
+            trace_path=trace_path,
+            required_environment_names=required_environment_names,
+        ),
+        context=context or _get_context(),
+    )
 
 
 def _resolved(source_root: Path, *, session_count: int = 2) -> ResolvedExport:
@@ -55,7 +90,7 @@ def _resolved(source_root: Path, *, session_count: int = 2) -> ResolvedExport:
     now = datetime(2026, 1, 1, tzinfo=UTC)
     agent_id = uuid.UUID(int=10)
     evaluator_script = (
-        Path(__file__).parents[1] / "fixtures" / "exports" / "evaluator.py"
+        Path(__file__).parents[3] / "tests" / "fixtures" / "exports" / "evaluator.py"
     ).read_bytes()
     evaluator = MaterializedEvaluator(
         name="quality",
@@ -165,6 +200,7 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
 
     manifest = json.loads((output / "kitaru-export.json").read_text())
     assert manifest["target_version"] == HARBOR_VERSION
+    assert manifest["exporter"] == _EXPORTER.metadata.model_dump(mode="json")
     assert manifest["source_digest"] == _resolved(source).source.digest
     assert manifest["required_environment_names"] == ["MODEL_API_KEY"]
     assert manifest["dependencies"]["status"] == "declared"
@@ -182,6 +218,88 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
     assert "kitaru.exports" not in "".join(
         path.read_text() for path in (output / "agent_image/bridge").glob("*.py")
     )
+    assert "kitaru_harbor_exporter" not in "".join(
+        path.read_text() for path in output.rglob("*.py") if path.is_file()
+    )
+
+
+def test_harbor_exporter_factory_reports_installed_contract() -> None:
+    exporter = create_exporter()
+
+    assert isinstance(exporter, HarborExporter)
+    assert exporter.metadata.contract_version == 1
+    assert exporter.metadata.distribution_name == "kitaru-harbor-exporter"
+    assert exporter.metadata.distribution_version == "0.1.0"
+    assert exporter.metadata.format == "harbor"
+    assert exporter.metadata.target_version == "0.20.0"
+
+
+def test_harbor_exporter_honors_cancellation_before_writing(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    output = tmp_path / "bundle"
+
+    def cancel() -> None:
+        raise RuntimeError("cancelled")
+
+    with pytest.raises(RuntimeError, match="cancelled"):
+        render_harbor(
+            _resolved(source),
+            output,
+            trace_format="atif",
+            trace_path="/workspace/trajectory.json",
+            context=_get_context(cancel),
+        )
+
+    assert not output.exists()
+
+
+def test_harbor_exporter_preflight_does_not_write(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+
+    _EXPORTER.preflight(
+        _resolved(source),
+        options=ExporterOptions(
+            trace_format="atif",
+            trace_path="/workspace/trajectory.json",
+        ),
+        context=_get_context(),
+    )
+
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["source"]
+
+
+def test_harbor_exporter_cancels_inside_bounded_render_loop(tmp_path: Path) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('agent')\n")
+    staging = tmp_path / "staging"
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    sentinel = outside / "sentinel.txt"
+    sentinel.write_text("unchanged\n")
+    checkpoints = 0
+
+    def cancel_during_render() -> None:
+        nonlocal checkpoints
+        checkpoints += 1
+        if checkpoints == 12:
+            raise RuntimeError("cancelled during render")
+
+    with pytest.raises(RuntimeError, match="cancelled during render"):
+        render_harbor(
+            _resolved(source, session_count=10),
+            staging,
+            trace_format="atif",
+            trace_path="/workspace/trajectory.json",
+            context=_get_context(cancel_during_render),
+        )
+
+    assert sentinel.read_text() == "unchanged\n"
+    assert not (outside / "kitaru-export.json").exists()
 
 
 def test_harbor_readme_records_effective_policies(tmp_path: Path) -> None:

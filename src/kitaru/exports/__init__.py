@@ -1,6 +1,7 @@
 """Public contracts for local experiment export plugins."""
 
 from kitaru.exports.models import (
+    V1_EXPORT_BUDGETS,
     ArtifactProvenance,
     DependencyPlan,
     DependencyReceipt,
@@ -25,6 +26,7 @@ from kitaru.exports.plugin import (
 __all__ = [
     "EXPORTER_CONTRACT_VERSION",
     "EXPORTER_ENTRY_POINT_GROUP",
+    "V1_EXPORT_BUDGETS",
     "ArtifactProvenance",
     "DependencyPlan",
     "DependencyReceipt",
