@@ -3,6 +3,7 @@
 import importlib.metadata
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from functools import cache
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
@@ -130,6 +131,7 @@ def _get_distribution_identity(entry_point: Any) -> tuple[str, str]:
     return name, raw_version
 
 
+@cache
 def _iter_installed_exporter_entry_points() -> tuple[Any, ...]:
     discovered: list[Any] = []
     for distribution in importlib.metadata.distributions():

@@ -15,6 +15,7 @@ from typing import Any
 
 import pytest
 
+import kitaru_verifiers_exporter
 from kitaru.api_models.v1.agent_version import AgentVersionResponse, RunSpec
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
@@ -43,14 +44,14 @@ from kitaru.exports.models import (
     SourcePolicy,
 )
 from kitaru.exports.source import inventory_source
-from kitaru_verifiers_exporter import (
+from kitaru_verifiers_exporter import create_exporter
+from kitaru_verifiers_exporter import exporter as verifiers_v1
+from kitaru_verifiers_exporter.exporter import (
     PRIME_RL_VERSION,
     VERIFIERS_VERSION,
     VerifiersExporter,
-    create_exporter,
     validate_verifiers_v1,
 )
-from kitaru_verifiers_exporter import exporter as verifiers_v1
 
 _EXPORTER = VerifiersExporter()
 
@@ -226,6 +227,7 @@ def test_render_writes_one_complete_collision_safe_plugin(tmp_path: Path) -> Non
 def test_verifiers_exporter_factory_reports_installed_contract() -> None:
     exporter = create_exporter()
 
+    assert kitaru_verifiers_exporter.__all__ == ["create_exporter"]
     assert isinstance(exporter, VerifiersExporter)
     assert exporter.metadata.contract_version == 1
     assert exporter.metadata.distribution_name == "kitaru-verifiers-exporter"

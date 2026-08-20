@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 
+import kitaru_harbor_exporter
 from kitaru.api_models.v1.agent_version import AgentVersionResponse, RunSpec
 from kitaru.api_models.v1.cohort_version import CohortVersionResponse
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
@@ -37,11 +38,11 @@ from kitaru.exports.models import (
 )
 from kitaru.exports.source import inventory_source
 from kitaru.exports.writer import file_digests
-from kitaru_harbor_exporter import (
+from kitaru_harbor_exporter import create_exporter
+from kitaru_harbor_exporter.exporter import (
     HARBOR_VERSION,
     SCORING_TIMEOUT_SECONDS,
     HarborExporter,
-    create_exporter,
     harbor_task_digest,
     validate_harbor,
 )
@@ -226,6 +227,7 @@ def test_render_harbor_emits_native_dataset_and_shared_image(tmp_path: Path) -> 
 def test_harbor_exporter_factory_reports_installed_contract() -> None:
     exporter = create_exporter()
 
+    assert kitaru_harbor_exporter.__all__ == ["create_exporter"]
     assert isinstance(exporter, HarborExporter)
     assert exporter.metadata.contract_version == 1
     assert exporter.metadata.distribution_name == "kitaru-harbor-exporter"
