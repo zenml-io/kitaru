@@ -256,7 +256,7 @@ async def test_register_worker_rejects_reregistering_client(
         headers={CLIENT_HEADER: client_header},
     )
     assert response.status_code == 426
-    assert "0.22.2 or newer" in response.json()["detail"]
+    assert "newer than 0.22.2" in response.json()["detail"]
 
 
 @pytest.mark.parametrize(
