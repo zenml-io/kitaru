@@ -11,7 +11,23 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Kitaru request header names."""
+"""Kitaru request headers."""
+
+from importlib.metadata import version
+
+from kitaru.analytics.source import AnalyticsSource
 
 CLIENT_HEADER = "X-Kitaru-Client"
 SKILL_HEADER = "X-Kitaru-Skill"
+
+
+def format_client_header(source: AnalyticsSource) -> str:
+    """Format the client identification header value.
+
+    Args:
+        source: Client sending the requests.
+
+    Returns:
+        ``<source>/<version>`` header value.
+    """
+    return f"{source.value}/{version('kitaru')}"

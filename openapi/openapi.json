@@ -8632,7 +8632,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.22.1+dev"
+    "version": "0.22.2+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -16259,7 +16259,7 @@
         ]
       },
       "post": {
-        "description": "Register a worker.\n\nEvery registration creates a new worker, names are labels and need not\nbe unique. Clients observe HTTP 200 on success, 426 from a Kitaru client\nthat renews by re-registering, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n    client: Client identification header value.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
+        "description": "Register a worker.\n\nEvery registration creates a new worker, names are labels and need not\nbe unique. Clients observe HTTP 200 on success, 426 from an SDK that\nrenews by re-registering, and 422 on invalid input.\n\nArgs:\n    body: Worker create request.\n    service: Worker service.\n    auth_service: Authentication service for the current request.\n    actor: Caller context.\n    settings: API settings for this process.\n    client: Client identification header value.\n\nReturns:\n    Stored worker with a bearer token scoped to it.",
         "operationId": "register_worker_api_v1_workers_post",
         "parameters": [
           {

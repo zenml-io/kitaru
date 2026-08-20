@@ -16,7 +16,6 @@
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
-from importlib.metadata import version
 
 
 class AnalyticsSource(StrEnum):
@@ -44,15 +43,3 @@ _DEFAULT_ATTRIBUTION = AnalyticsAttribution()
 current_attribution: ContextVar[AnalyticsAttribution] = ContextVar(
     "kitaru_analytics_attribution", default=_DEFAULT_ATTRIBUTION
 )
-
-
-def format_client_header(source: AnalyticsSource) -> str:
-    """Format the client identification header value.
-
-    Args:
-        source: Client sending the requests.
-
-    Returns:
-        ``<source>/<version>`` header value.
-    """
-    return f"{source.value}/{version('kitaru')}"

@@ -3355,8 +3355,8 @@ export interface paths {
          * @description Register a worker.
          *
          *     Every registration creates a new worker, names are labels and need not
-         *     be unique. Clients observe HTTP 200 on success, 426 from a Kitaru client
-         *     that renews by re-registering, and 422 on invalid input.
+         *     be unique. Clients observe HTTP 200 on success, 426 from an SDK that
+         *     renews by re-registering, and 422 on invalid input.
          *
          *     Args:
          *         body: Worker create request.

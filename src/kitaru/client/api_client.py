@@ -21,7 +21,7 @@ from typing import Any
 
 import httpx
 
-from kitaru.analytics.source import AnalyticsSource, format_client_header
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.auth import CONTROL_PLANE_API_KEY_PREFIX
 from kitaru.client.auth import (
     CredentialStoreTokenSource,
@@ -63,7 +63,7 @@ from kitaru.client.resources.tags import TagsResource
 from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.users import UsersResource
 from kitaru.client.resources.workers import WorkersResource
-from kitaru.headers import CLIENT_HEADER, SKILL_HEADER
+from kitaru.headers import CLIENT_HEADER, SKILL_HEADER, format_client_header
 from kitaru.transport import build_async_client
 
 

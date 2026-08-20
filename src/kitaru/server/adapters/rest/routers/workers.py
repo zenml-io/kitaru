@@ -20,6 +20,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Header, Query, status
 from packaging.version import InvalidVersion, Version
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
@@ -55,18 +56,14 @@ from kitaru.server.domain.worker import WorkerClientUnsupported
 
 router = APIRouter(route_class=KitaruAPIRoute)
 
-# Newest release that renews a worker token by registering again rather than
-# through the token endpoint. Those releases go on heartbeating the id they
-# registered with first, which the token they now hold does not name, so the
-# tasks they are running stop being stamped and get swept away from them.
-LAST_UNSUPPORTED_WORKER_CLIENT_VERSION = "0.22.1"
+LAST_UNSUPPORTED_WORKER_CLIENT_VERSION = "0.22.2"
 
 
 def _check_worker_client(client: str) -> None:
-    """Reject a client older than the oldest version that renews its token.
+    """Reject an SDK older than the oldest version that renews its token.
 
-    A caller that does not identify itself as a Kitaru client, or reports no
-    readable version, is left alone.
+    A caller that is not the Python SDK, or reports no readable version, is
+    left alone.
 
     Args:
         client: Client identification header value.
@@ -75,7 +72,11 @@ def _check_worker_client(client: str) -> None:
         WorkerClientUnsupported: The client predates token renewal.
     """
     identity = parse_client_identity(client)
-    if identity is None or identity.version is None:
+    if (
+        identity is None
+        or identity.source is not AnalyticsSource.PYTHON
+        or identity.version is None
+    ):
         return
     try:
         client_version = Version(identity.version)
@@ -99,8 +100,8 @@ async def register_worker(
     """Register a worker.
 
     Every registration creates a new worker, names are labels and need not
-    be unique. Clients observe HTTP 200 on success, 426 from a Kitaru client
-    that renews by re-registering, and 422 on invalid input.
+    be unique. Clients observe HTTP 200 on success, 426 from an SDK that
+    renews by re-registering, and 422 on invalid input.
 
     Args:
         body: Worker create request.

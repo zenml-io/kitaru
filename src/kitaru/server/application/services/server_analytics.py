@@ -150,8 +150,13 @@ class ServerAnalytics:
             if actor.external_id is not None:
                 properties["control_plane_user_id"] = actor.external_id
         attribution = current_attribution.get()
-        if attribution.version is not None:
-            properties["client_version"] = attribution.version
+        # Each client versions on its own series, so the version is only
+        # readable attached to the client that reported it.
+        properties["client_version"] = (
+            f"{attribution.source.value}/{attribution.version}"
+            if attribution.version is not None
+            else attribution.source.value
+        )
         if attribution.skill is not None:
             properties["skill"] = attribution.skill
         self._get_buffer().messages.append(

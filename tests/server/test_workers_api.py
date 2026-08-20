@@ -244,12 +244,12 @@ async def test_renew_worker_token_of_another_account(
 
 @pytest.mark.parametrize(
     "client_header",
-    ["kitaru-python/0.22.1", "kitaru-cli/0.22.0rc10", "kitaru-mcp/0.9"],
+    ["kitaru-python/0.22.2", "kitaru-python/0.22.0rc10", "kitaru-python/0.9"],
 )
 async def test_register_worker_rejects_reregistering_client(
     client: httpx.AsyncClient, client_header: str
 ) -> None:
-    """Observe HTTP 426 for a Kitaru client that renews by re-registering."""
+    """Observe HTTP 426 for an SDK version that renews by re-registering."""
     response = await client.post(
         "/api/v1/workers",
         json={"name": "worker-1", "scope": SCOPE, "runtime": RUNTIME, "metadata": {}},
@@ -262,10 +262,13 @@ async def test_register_worker_rejects_reregistering_client(
 @pytest.mark.parametrize(
     "client_header",
     [
-        "kitaru-cli/0.22.2",
-        "kitaru-python/0.22.2.dev0",
+        "kitaru-python/0.22.3.dev0",
         "kitaru-python/0.23.0.dev0",
         "kitaru-python/1.0.0",
+        "kitaru-cli/0.22.2",
+        "kitaru-mcp/0.9",
+        "kitaru-ui/0.9",
+        "kitaru-typescript/0.1.1",
         "curl/8.4.0",
         "kitaru-python",
         "kitaru-python/not-a-version",
@@ -275,7 +278,7 @@ async def test_register_worker_rejects_reregistering_client(
 async def test_register_worker_admits_supported_client(
     client: httpx.AsyncClient, client_header: str
 ) -> None:
-    """Admit anything at or above the minimum client version."""
+    """Admit any non-SDK client and every SDK at or above the minimum."""
     response = await client.post(
         "/api/v1/workers",
         json={"name": "worker-1", "scope": SCOPE, "runtime": RUNTIME, "metadata": {}},
