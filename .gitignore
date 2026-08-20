@@ -270,8 +270,12 @@ AGENTS.override.md
 .agents/skills/*
 !.agents/skills/kitaru-dev/
 !.agents/skills/kitaru-dev/**
+!.agents/skills/kitaru-adapter-development/
+!.agents/skills/kitaru-adapter-development/**
 !.agents/skills/kitaru-docs/
 !.agents/skills/kitaru-docs/**
+!.agents/skills/kitaru-importer-development/
+!.agents/skills/kitaru-importer-development/**
 !.agents/skills/kitaru-release/
 !.agents/skills/kitaru-release/**
 !.agents/skills/kitaru-evaluator-authoring/
@@ -280,6 +284,8 @@ AGENTS.override.md
 !.agents/skills/kitaru-session-improvement/**
 !.agents/skills/kitaru-tests-release/
 !.agents/skills/kitaru-tests-release/**
+!.agents/skills/kitaru-ui-api-development/
+!.agents/skills/kitaru-ui-api-development/**
 
 # Agent Skills
 .pi/
