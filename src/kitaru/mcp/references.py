@@ -59,6 +59,7 @@ class ReferenceResolutionError(Exception):
     details: dict[str, JsonValue] | None = None
 
     def __post_init__(self) -> None:
+        """Initialize the `Exception` base with the error message."""
         Exception.__init__(self, self.message)
 
 

@@ -23,7 +23,11 @@ import pytest
 from asyncpg.exceptions import LockNotAvailableError
 from sqlalchemy.exc import DBAPIError
 
-from conftest import build_job_and_task_services, local_settings
+from conftest import (
+    FakeIdempotencyKeyRepository,
+    build_job_and_task_services,
+    local_settings,
+)
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.api import task_sweeper
 from kitaru.server.api.config import APISettings
@@ -85,6 +89,11 @@ def _stub_sweeper_wiring(monkeypatch: pytest.MonkeyPatch, service: TaskService) 
         task_sweeper, "get_server_analytics", lambda *args, **kwargs: None
     )
     monkeypatch.setattr(task_sweeper, "get_task_service", lambda *args: service)
+    monkeypatch.setattr(
+        task_sweeper,
+        "get_idempotency_key_repository",
+        lambda *args, **kwargs: FakeIdempotencyKeyRepository(),
+    )
 
 
 async def test_sweep_once_propagates_before_rescuing(
@@ -155,8 +164,8 @@ async def test_sweep_once_continues_after_a_failing_item(
     )
 
     assert swept == [first, second]
-    assert [session.rollbacks for session in database.sessions] == [1, 0]
-    assert [session.commits for session in database.sessions] == [0, 1]
+    assert [session.rollbacks for session in database.sessions] == [1, 0, 0]
+    assert [session.commits for session in database.sessions] == [0, 1, 1]
 
 
 async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
@@ -187,8 +196,8 @@ async def test_sweep_once_skips_a_job_whose_task_rows_are_held(
     )
 
     assert propagated == [held, free]
-    assert [session.rollbacks for session in database.sessions] == [1, 0]
-    assert [session.commits for session in database.sessions] == [0, 1]
+    assert [session.rollbacks for session in database.sessions] == [1, 0, 0]
+    assert [session.commits for session in database.sessions] == [0, 1, 1]
 
 
 async def test_start_task_sweeper_returns_none_when_interval_is_zero() -> None:

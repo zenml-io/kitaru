@@ -7881,6 +7881,19 @@
             "title": "Cache Key",
             "type": "string"
           },
+          "occurrence": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Zero-based match position in baseline order, the newest match when unset.",
+            "title": "Occurrence"
+          },
           "tool_name": {
             "description": "Tool being called.",
             "title": "Tool Name",
@@ -14064,7 +14077,7 @@
     },
     "/api/v1/replays/{replay_id}/tool-lookup": {
       "post": {
-        "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, 404 when no replay has this id, and 422 when\nthe tool is not configured for history.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Whether a cached result was found, and the result if so.",
+        "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, 404 when no replay has this id, and 422 when\nthe tool is not configured for history or an occurrence was given for a\nnon-baseline history scope.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Whether a cached result was found, and the result if so.",
         "operationId": "tool_lookup_api_v1_replays__replay_id__tool_lookup_post",
         "parameters": [
           {

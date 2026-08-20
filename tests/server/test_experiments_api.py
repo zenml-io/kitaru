@@ -27,6 +27,7 @@ from conftest import (
     build_replay_services,
     create_agent,
     create_plugin,
+    override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -75,6 +76,7 @@ async def client(services: ReplayServices) -> AsyncGenerator[httpx.AsyncClient, 
         services.experiment_service
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client

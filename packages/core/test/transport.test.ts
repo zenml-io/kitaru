@@ -4,6 +4,7 @@ import { KitaruApiError } from "../src/errors.js";
 import {
   bytesBody,
   formBody,
+  type HttpMethod,
   jsonBody,
   KitaruTransport,
   multipartBody,
@@ -135,6 +136,53 @@ describe("KitaruTransport", () => {
     expect((firstMultipart as FormData).get("file")).toBeInstanceOf(Blob);
     expect((secondMultipart as FormData).get("metadata")).toBe("same");
     expect((secondMultipart as FormData).get("file")).toBeInstanceOf(Blob);
+  });
+
+  it("stamps POST with an idempotency key held across attempts", async () => {
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(jsonResponse({ detail: "unavailable" }, 503))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const transport = new KitaruTransport({
+      apiUrl: "https://api.example",
+      fetch,
+      timeoutMs: 1_000,
+    });
+
+    await transport.request({
+      method: "POST",
+      path: "/v1/items",
+      body: jsonBody({ name: "item" }),
+      retry: { attempts: 2, statuses: new Set([503]) },
+    });
+    await transport.request({
+      method: "POST",
+      path: "/v1/items",
+      body: jsonBody({ name: "other" }),
+    });
+    await transport.request({ method: "PATCH", path: "/v1/items/1" });
+    await transport.request({ method: "GET", path: "/v1/items" });
+    await transport.request({
+      method: "post" as HttpMethod,
+      path: "/v1/items",
+      body: jsonBody({ name: "lower" }),
+    });
+
+    const headerOf = (index: number) =>
+      (fetch.mock.calls[index]?.[1]?.headers as Record<string, string>)[
+        "Idempotency-Key"
+      ];
+    expect(headerOf(0)).toMatch(/^[0-9a-f-]{36}$/);
+    expect(headerOf(1)).toBe(headerOf(0));
+    expect(headerOf(2)).not.toBe(headerOf(0));
+    expect(headerOf(3)).toBeUndefined();
+    expect(headerOf(4)).toBeUndefined();
+    expect(headerOf(5)).toMatch(/^[0-9a-f-]{36}$/);
+    expect(fetch.mock.calls[5]?.[1]?.method).toBe("POST");
   });
 
   it("gives each retry attempt a fresh timeout", async () => {

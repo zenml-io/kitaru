@@ -73,8 +73,11 @@ Setup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each replay repository implementation, an owner id, and factories
-    for a fresh job id, replay config id, and baseline session id."""
+    """Provide each replay repository implementation and its collaborators.
+
+    Yields the repository, an owner id, and factories for a fresh job id,
+    replay config id, and baseline session id.
+    """
     if request.param == "fake":
         owner_id = uuid.uuid4()
         jobs = FakeJobRepository()

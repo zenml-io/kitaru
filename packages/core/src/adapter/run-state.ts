@@ -45,11 +45,13 @@ export interface AdapterRunState {
   readonly rootIndex: number;
   readonly sessionId: string;
   readonly spec?: ReplaySpec;
+  advanceHistoryOccurrence(cacheKey: string, usedOccurrence: number): void;
   allocateNode(): { index: number };
   awaitSteps(): Promise<void>;
   clearLedger(callIds: readonly string[]): void;
   enqueueStep(operation: () => Promise<void>): Promise<void>;
   failedLedgerEntries(): ToolLedgerEntry[];
+  getHistoryOccurrence(cacheKey: string): number;
   getToolCall(callId: string): ToolLedgerEntry | undefined;
   setToolCall(entry: ToolLedgerEntry): void;
   storeFailure(error: unknown): void;
@@ -67,6 +69,10 @@ export class RunState implements AdapterRunState {
   readonly spec?: ReplaySpec;
 
   #failure: unknown;
+  // Repeated baseline-history calls with identical arguments share a cache
+  // key; this counter walks them through the recorded occurrences in order
+  // instead of replaying the newest match every time.
+  #historyOccurrences = new Map<string, number>();
   #ledger = new Map<string, ToolLedgerEntry>();
   #nextIndex: number;
   #stepBoundary: string = new Date().toISOString();
@@ -83,6 +89,13 @@ export class RunState implements AdapterRunState {
     this.#nextIndex = this.rootIndex + 1;
     this.sessionId = options.sessionId;
     this.spec = options.spec;
+  }
+
+  advanceHistoryOccurrence(cacheKey: string, usedOccurrence: number): void {
+    // Write back from the occurrence this call consumed rather than
+    // re-reading the counter, so overlapping identical calls that both read
+    // the same occurrence cannot advance it twice.
+    this.#historyOccurrences.set(cacheKey, usedOccurrence + 1);
   }
 
   allocateNode(): { index: number } {
@@ -132,6 +145,10 @@ export class RunState implements AdapterRunState {
 
   get failure(): unknown {
     return this.#failure;
+  }
+
+  getHistoryOccurrence(cacheKey: string): number {
+    return this.#historyOccurrences.get(cacheKey) ?? 0;
   }
 
   getToolCall(callId: string): ToolLedgerEntry | undefined {

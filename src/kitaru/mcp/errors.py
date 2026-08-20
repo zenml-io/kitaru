@@ -31,6 +31,7 @@ class MCPToolError(Exception):
     recovery: str | None = None
 
     def __post_init__(self) -> None:
+        """Initialize the `Exception` base with the error message."""
         Exception.__init__(self, self.message)
 
 
@@ -41,6 +42,7 @@ class MCPOutputValidationError(Exception):
     validation_error: ValidationError
 
     def __post_init__(self) -> None:
+        """Initialize the `Exception` base with a fixed validation message."""
         Exception.__init__(self, "MCP handler output validation failed")
 
 

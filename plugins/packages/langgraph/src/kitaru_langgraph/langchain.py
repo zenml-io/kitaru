@@ -16,6 +16,7 @@ from langgraph.types import Command
 from kitaru.api_models.v1.replay import ToolLookupRequest
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
+    HistoryScope,
     LLMConfig,
     PassthroughConfig,
     StaticCase,
@@ -158,7 +159,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
                 )
         elif isinstance(policy, HistoryConfig):
             result = bridge.run(
-                self._history_result(recorder, name, call_id, arguments)
+                self._history_result(recorder, policy, name, call_id, arguments)
             )
         if result is None:
             if policy.on_miss is ToolPolicyOnMiss.PASSTHROUGH:
@@ -246,7 +247,9 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
                     case.result, tool_call_id=call_id, tool_name=name
                 )
         elif isinstance(policy, HistoryConfig):
-            result = await self._history_result(recorder, name, call_id, arguments)
+            result = await self._history_result(
+                recorder, policy, name, call_id, arguments
+            )
         if result is None:
             return await self._handle_miss(
                 recorder, request, handler, policy.type, policy.on_miss
@@ -301,6 +304,7 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
     async def _history_result(
         self,
         recorder: InvocationRecorder,
+        policy: HistoryConfig,
         name: str,
         call_id: str,
         arguments: dict[str, Any],
@@ -312,12 +316,21 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
         cache_key = compute_tool_cache_key(name, arguments)
         if cache_key is None or recorder.replay is None:
             return None
+        occurrence = (
+            recorder.history_occurrences.get(cache_key, 0)
+            if policy.scope is HistoryScope.BASELINE
+            else None
+        )
         lookup = await recorder.client.replays.tool_lookup(
             recorder.replay.id,
-            ToolLookupRequest(tool_name=name, cache_key=cache_key),
+            ToolLookupRequest(
+                tool_name=name, cache_key=cache_key, occurrence=occurrence
+            ),
         )
         if not lookup.found:
             return None
+        if occurrence is not None:
+            recorder.history_occurrences[cache_key] = occurrence + 1
         try:
             return decode_tool_outcome(
                 lookup.result,

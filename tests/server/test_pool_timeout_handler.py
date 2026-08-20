@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Tests for the pool timeout exception handler."""
 
+from unittest import mock
+
 import httpx
 import pytest
 from fastapi import FastAPI
@@ -20,12 +22,16 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from conftest import local_settings
+from kitaru.server.api import ui
 from kitaru.server.api.app import create_app
 
 
 def create_app_with_error_probes() -> FastAPI:
     """Create the app with extra routes raising database errors."""
-    app = create_app(local_settings())
+    # Build the app as if no UI bundle were packaged: the bundled UI's
+    # catch-all route would shadow the probe routes added below.
+    with mock.patch.object(ui, "_get_ui_dist_dir", return_value=None):
+        app = create_app(local_settings())
 
     @app.get("/probe-pool-timeout")
     async def raise_pool_timeout() -> None:

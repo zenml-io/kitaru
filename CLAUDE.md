@@ -15,7 +15,7 @@ src/kitaru/           # Python package (src layout) — see src/kitaru/AGENTS.md
   client/             # Async SDK making REST calls
   server/             # FastAPI server (API, application, domain, adapters layers)
 tests/                # pytest tests — see tests/AGENTS.md
-examples/             # Runnable SDK examples
+examples/             # Runnable SDK examples: python/ (adapter examples) and typescript/ (SDK + adapter examples)
 docs/                 # Three docs surfaces — see "Documentation surfaces" below
   book/               # GitBook source for docs.zenml.io/kitaru (hand-written .md)
   content/docs/       # FumaDocs SDK reference content (generated)

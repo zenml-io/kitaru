@@ -75,8 +75,11 @@ ScopedSetup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each session node repository implementation, a session id to
-    attach nodes to, and a factory for further session ids."""
+    """Provide each session node repository implementation and its collaborators.
+
+    Yields the repository, a session id to attach nodes to, and a factory for
+    further session ids.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         owner_id = uuid.uuid4()
@@ -117,10 +120,13 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 async def scoped_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[ScopedSetup, None]:
-    """Provide a session node repository wired to sessions and cohort versions
+    """Provide a cohort-scoped session node repository and its collaborators.
+
+    Yields a session node repository wired to sessions and cohort versions
     sharing its backend, a cohort repository, a cohort version repository, an
     owner id, a factory for agent ids, and a factory for session ids on a
-    given agent."""
+    given agent.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         cohorts = FakeCohortRepository()
@@ -501,6 +507,56 @@ async def test_get_indexes_by_ids_takes_no_query_for_an_empty_request(
     await repository.upsert_batch(session_id, [_node(0, session_id=session_id)])
 
     assert await repository.get_indexes_by_ids(session_id, []) == {}
+
+
+async def test_find_nth_by_cache_key_in_session_walks_index_order(
+    setup: Setup,
+) -> None:
+    """Resolve each occurrence in index order, missing past the last match."""
+    repository, session_id, make_session_id = setup
+    other_session_id = await make_session_id()
+    cache_key = "d" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                index,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                outputs={"ticket": ticket},
+            )
+            for index, ticket in enumerate(["a", "b", "c"])
+        ],
+    )
+    await repository.upsert_batch(
+        other_session_id,
+        [
+            _node(
+                0,
+                session_id=other_session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                outputs={"ticket": "elsewhere"},
+            )
+        ],
+    )
+
+    found = [
+        await repository.find_nth_by_cache_key_in_session(
+            session_id, cache_key, occurrence
+        )
+        for occurrence in range(3)
+    ]
+    assert [node.outputs for node in found if node is not None] == [
+        {"ticket": "a"},
+        {"ticket": "b"},
+        {"ticket": "c"},
+    ]
+    assert (
+        await repository.find_nth_by_cache_key_in_session(session_id, cache_key, 3)
+        is None
+    )
 
 
 async def test_find_latest_by_cache_key_in_agent_scopes_to_agent(

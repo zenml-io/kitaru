@@ -1,7 +1,7 @@
 import { historyCacheKey } from "../cache-key.js";
 import { ToolPolicyError, ToolPolicyMissError } from "../errors.js";
 import { recorderError, toRecorderJson } from "../json.js";
-import type { JsonValue, ToolPolicy } from "../types.js";
+import type { JsonValue, ToolLookupRequest, ToolPolicy } from "../types.js";
 import { isRecord } from "../validation.js";
 import { recordedToolPayloadJson } from "./recorded-json.js";
 import type { AdapterRunState } from "./run-state.js";
@@ -234,10 +234,27 @@ export async function decideToolCall(
     if (!state.replayId) {
       throw new ToolPolicyError("History policy requires a replay ID");
     }
-    const lookup = await state.client.lookupToolResult(state.replayId, {
+    const request: ToolLookupRequest = {
       cache_key: cacheKey,
       tool_name: input.toolName,
-    });
+    };
+    // Baseline lookups walk repeated identical calls through the recorded
+    // occurrences in order; other scopes have no stable per-run ordering, so
+    // they take the server's default (newest match) instead.
+    const occurrence =
+      policy.scope === "baseline"
+        ? state.getHistoryOccurrence(cacheKey)
+        : undefined;
+    if (occurrence !== undefined) {
+      request.occurrence = occurrence;
+    }
+    const lookup = await state.client.lookupToolResult(state.replayId, request);
+    // Any hit consumes its recorded occurrence, even one the ambiguity guard
+    // below rejects, matching the Python adapters; a miss keeps the counter
+    // still so a later identical call can retry the same recorded position.
+    if (lookup.found && occurrence !== undefined) {
+      state.advanceHistoryOccurrence(cacheKey, occurrence);
+    }
     if (lookup.found && lookup.result === null) {
       throw new ToolPolicyError(
         `History lookup for tool '${input.toolName}' cannot distinguish a ` +

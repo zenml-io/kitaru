@@ -214,5 +214,5 @@ Manual approval is a two-call workflow in AI SDK, but Kitaru cannot persist a wa
 
 ## Runnable examples
 
-- [Vercel AI SDK support triage](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_support_triage) is the smaller adapter-focused example. It shows a support agent, local tools, model replacement, and optional cost calculation.
-- [Vercel AI SDK ticket resolver](https://github.com/zenml-io/kitaru/tree/develop/v2_examples/vercel_ai_ticket_resolver) is the full end-to-end walkthrough. It records a deterministic ten-ticket baseline, reviews failures, creates an evaluator and cohorts, and runs target and control replays through a worker. Its synthetic tools make passthrough safe within that example only.
+- [Vercel AI SDK support triage](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/vercel_ai_support_triage) is the smaller adapter-focused example. It shows a support agent, local tools, model replacement, and optional cost calculation.
+- [Vercel AI SDK ticket resolver](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/vercel_ai_ticket_resolver) is the full end-to-end walkthrough. It records a deterministic ten-ticket baseline, reviews failures, creates an evaluator and cohorts, and runs target and control replays through a worker. Its synthetic tools make passthrough safe within that example only.

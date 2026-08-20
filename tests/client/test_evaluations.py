@@ -30,6 +30,7 @@ from conftest import (
     FakeTaskRepository,
     asgi_api_client,
     create_plugin,
+    override_idempotency,
 )
 from kitaru.api_models.v1.evaluation import (
     EvaluationBatchCreateRequest,
@@ -119,6 +120,7 @@ async def api_client(
     app.dependency_overrides[get_job_service] = lambda: job_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

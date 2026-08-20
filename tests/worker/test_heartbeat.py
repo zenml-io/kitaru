@@ -111,7 +111,14 @@ async def test_run_tolerates_a_failed_heartbeat_request() -> None:
     )
 
     task = asyncio.create_task(heartbeat.run())
-    await asyncio.sleep(0.05)
+    # Poll for the heartbeat after the failed one instead of sleeping a fixed
+    # window, which a loaded runner can overshoot before the loop runs twice.
+    deadline = asyncio.get_running_loop().time() + 5.0
+    while (
+        len(client.workers.heartbeats) < 2
+        and asyncio.get_running_loop().time() < deadline
+    ):
+        await asyncio.sleep(0.01)
     task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await task

@@ -26,7 +26,6 @@ from kitaru.api_models.v1.annotation import (
     ManualAnnotationCreateRequest,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import authorize, get_annotation_service
 from kitaru.server.adapters.rest.mapping.annotations import (
     annotation_list_params_to_filter,
@@ -35,13 +34,15 @@ from kitaru.server.adapters.rest.mapping.annotations import (
     investigation_answer_create_to_command,
     manual_annotation_create_to_command,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.annotation_service import AnnotationService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_annotation(
     body: AnnotationCreateRequest,
     service: Annotated[AnnotationService, Depends(get_annotation_service)],
