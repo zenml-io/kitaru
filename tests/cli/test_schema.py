@@ -238,6 +238,22 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
     assert "not_found" in session_get_errors
     assert "conflict" not in session_list_errors | session_get_errors
 
+    [experiment_export] = describe_schema(("experiment", "export"))
+    export_parameters = {
+        parameter["name"] for parameter in experiment_export["parameters"]
+    }
+    assert {
+        "--omit-content",
+        "--environment-mode",
+        "--include-source",
+        "--exclude-source",
+    } <= export_parameters
+    assert not any(
+        component in parameter
+        for parameter in export_parameters
+        for component in ("taskset-only", "harness-only", "evaluator-only", "append")
+    )
+
     evaluation_commands = {
         item["command"]: item for item in describe_schema(("evaluation",))
     }

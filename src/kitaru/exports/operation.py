@@ -51,6 +51,7 @@ class ExportReceipt(BaseModel):
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
     session_count: int
+    task_count: int
     evaluator_count: int
     source_digest: str
     destination: str
@@ -244,6 +245,7 @@ async def export_experiment(
                 cohort_version_id=resolved.cohort_version.id,
                 agent_version_id=resolved.agent_version.id,
                 session_count=len(resolved.sessions),
+                task_count=len(resolved.sessions),
                 evaluator_count=len(resolved.evaluators),
                 source_digest=source.digest,
                 destination=str(request.destination.expanduser().absolute()),
@@ -302,6 +304,7 @@ async def export_experiment(
             cohort_version_id=resolved.cohort_version.id,
             agent_version_id=resolved.agent_version.id,
             session_count=len(resolved.sessions),
+            task_count=len(resolved.sessions),
             evaluator_count=len(resolved.evaluators),
             source_digest=source.digest,
             destination=str(request.destination.expanduser().absolute()),

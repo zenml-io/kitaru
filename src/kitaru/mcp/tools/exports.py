@@ -5,6 +5,8 @@
 
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from kitaru.exports.config import ExportRequest
 from kitaru.exports.models import ExportError, get_export_error_kind
 from kitaru.exports.operation import ExportOperationStateMachine, export_experiment
@@ -48,6 +50,11 @@ def _resolve_destination(path: str, roots: tuple[Path, ...]) -> Path:
             "invalid_arguments", "destination parent must be an existing directory."
         ) from error
     resolved = (parent / candidate.name).resolve(strict=False)
+    if not _is_within(parent, roots):
+        raise MCPToolError(
+            "path_not_allowed",
+            "destination parent is outside the configured workspace roots.",
+        )
     if not _is_within(resolved, roots):
         raise MCPToolError(
             "path_not_allowed", "destination is outside the configured workspace roots."
@@ -60,10 +67,16 @@ def _resolve_destination(path: str, roots: tuple[Path, ...]) -> Path:
 
 
 def _map_export_error(error: ExportError) -> MCPToolError:
+    recovery = {
+        "destination_conflict": "Choose a new destination path.",
+        "archive_conflict": "Choose a destination whose ZIP path does not exist.",
+        "missing_source_include": "Check source_policy.include against source_root.",
+    }.get(error.code)
     return MCPToolError(
         get_export_error_kind(error),
         error.message,
         details={"export_code": error.code},
+        recovery=recovery,
     )
 
 
@@ -96,6 +109,9 @@ async def handle_experiment_export(
                 destination=destination,
                 primary_reward=request.primary_reward,
                 required_environment_names=tuple(request.required_environment_names),
+                content_policy=request.content_policy,
+                environment_policy=request.environment_policy,
+                source_policy=request.source_policy,
                 trace_format=request.trace_format,
                 trace_path=request.trace_path,
                 archive=request.archive,
@@ -105,4 +121,9 @@ async def handle_experiment_export(
         )
     except ExportError as error:
         raise _map_export_error(error) from error
-    return ExperimentExportReceipt.model_validate(receipt.model_dump(mode="json"))
+    payload = (
+        receipt.model_dump(mode="json")
+        if isinstance(receipt, BaseModel)
+        else receipt
+    )
+    return ExperimentExportReceipt.model_validate(payload)

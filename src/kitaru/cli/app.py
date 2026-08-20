@@ -2409,6 +2409,34 @@ async def experiment_get(experiment: str, /) -> CommandResult:
                 "Environment variable name required at runtime; repeatable.",
             ),
             ParameterSpec(
+                "--omit-content",
+                "content-category[]",
+                "option",
+                False,
+                "Optional experimental content category to omit; repeatable.",
+            ),
+            ParameterSpec(
+                "--environment-mode",
+                "include|runtime_only",
+                "option",
+                False,
+                "Include registered values or require them at runtime.",
+            ),
+            ParameterSpec(
+                "--include-source",
+                "relative-path[]",
+                "option",
+                False,
+                "Generated source path to include explicitly; repeatable.",
+            ),
+            ParameterSpec(
+                "--exclude-source",
+                "relative-path[]",
+                "option",
+                False,
+                "Additional source path to exclude; repeatable.",
+            ),
+            ParameterSpec(
                 "--trace-format", "atif|kitaru", "option", False, "Harbor trace format."
             ),
             ParameterSpec(
@@ -2450,6 +2478,23 @@ async def experiment_export(
     destination: Path,
     primary_reward: str,
     required_env: list[str] | None = None,
+    omit_content: list[
+        Literal[
+            "session_outputs",
+            "model_payloads",
+            "tool_payloads",
+            "subagent_payloads",
+            "span_payloads",
+            "visible_reasoning",
+            "metadata",
+            "diagnostic_details",
+            "usage_and_cost",
+        ]
+    ]
+    | None = None,
+    environment_mode: Literal["include", "runtime_only"] = "include",
+    include_source: list[str] | None = None,
+    exclude_source: list[str] | None = None,
     trace_format: Literal["atif", "kitaru"] | None = None,
     trace_path: str | None = None,
     archive: bool = False,
@@ -2467,6 +2512,10 @@ async def experiment_export(
             destination=destination,
             primary_reward=primary_reward,
             required_env=required_env,
+            omit_content=omit_content,
+            environment_mode=environment_mode,
+            include_source=include_source,
+            exclude_source=exclude_source,
             trace_format=trace_format,
             trace_path=trace_path,
             archive=archive,
