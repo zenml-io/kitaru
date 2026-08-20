@@ -78,6 +78,28 @@ def test_publish_bundle_refuses_existing_archive(tmp_path: Path) -> None:
     assert not (tmp_path / "bundle").exists()
 
 
+def test_archive_publication_rolls_back_when_staging_unlink_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    original_unlink = Path.unlink
+    failed = False
+
+    def fail_staging_unlink(path: Path, missing_ok: bool = False) -> None:
+        nonlocal failed
+        if path.name.endswith(".tmp.zip") and not failed:
+            failed = True
+            raise OSError("injected unlink failure")
+        original_unlink(path, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fail_staging_unlink)
+
+    with pytest.raises(OSError, match="injected unlink failure"):
+        publish_bundle(tmp_path / "bundle", _render, archive=True)
+
+    assert not (tmp_path / "bundle").exists()
+    assert not (tmp_path / "bundle.zip").exists()
+
+
 def test_publish_bundle_reports_crash_style_incomplete_reservation(
     tmp_path: Path,
 ) -> None:

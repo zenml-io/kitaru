@@ -13,11 +13,15 @@ import uuid
 import zipfile
 from collections.abc import Callable
 from contextlib import suppress
-from contextvars import ContextVar
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from kitaru.exports._cancellation import (
+    CancellationCheckpoint,
+    export_cancellation_scope,
+    get_cancellation_checkpoint,
+)
 from kitaru.exports.models import ExportError, PublishedBundle
 
 _COPY_BUFFER_BYTES = 1024 * 1024
@@ -27,11 +31,7 @@ _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 0x00000004
 _AT_FDCWD = -100
 
-CancellationCheckpoint = Callable[[], None]
 _PathIdentity = tuple[int, int]
-_ACTIVE_CANCELLATION_CHECKPOINT: ContextVar[CancellationCheckpoint | None] = ContextVar(
-    "kitaru_export_writer_cancellation_checkpoint", default=None
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,20 +56,6 @@ class StagedBundle:
     digest: str
 
 
-def _noop_checkpoint() -> None:
-    return None
-
-
-def _get_checkpoint(
-    cancellation_checkpoint: CancellationCheckpoint | None,
-) -> CancellationCheckpoint:
-    return (
-        cancellation_checkpoint
-        or _ACTIVE_CANCELLATION_CHECKPOINT.get()
-        or _noop_checkpoint
-    )
-
-
 def canonical_json_bytes(value: Any) -> bytes:
     """Serialize a JSON value in the exporter's canonical form."""
     return (
@@ -79,17 +65,17 @@ def canonical_json_bytes(value: Any) -> bytes:
 
 def write_canonical_json(path: Path, value: Any) -> None:
     """Write canonical JSON, creating its parent directories."""
-    _get_checkpoint(None)()
+    get_cancellation_checkpoint(None)()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(canonical_json_bytes(value))
-    _get_checkpoint(None)()
+    get_cancellation_checkpoint(None)()
 
 
 def file_digest(
     path: Path, *, cancellation_checkpoint: CancellationCheckpoint | None = None
 ) -> str:
     """Hash one file without loading it into memory."""
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     digest = hashlib.sha256()
     with path.open("rb") as source:
         while chunk := source.read(_COPY_BUFFER_BYTES):
@@ -103,7 +89,7 @@ def file_digests(
     root: Path, *, cancellation_checkpoint: CancellationCheckpoint | None = None
 ) -> dict[str, str]:
     """Return stable SHA-256 hashes for every regular file below a root."""
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     result: dict[str, str] = {}
     for path in sorted(item for item in root.rglob("*") if item.is_file()):
         checkpoint()
@@ -124,7 +110,7 @@ def directory_digest(
     root: Path, *, cancellation_checkpoint: CancellationCheckpoint | None = None
 ) -> str:
     """Hash a directory's relative paths and file contents deterministically."""
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     digest = hashlib.sha256()
     for path, content_hash in file_digests(
         root, cancellation_checkpoint=cancellation_checkpoint
@@ -278,7 +264,7 @@ def _write_deterministic_zip(
     *,
     cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> _OwnedFile:
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     descriptor = _open_private_file(archive_path)
     value = os.fstat(descriptor)
     owned = _OwnedFile(path=archive_path, identity=(value.st_dev, value.st_ino))
@@ -322,7 +308,14 @@ def _publish_file_noreplace(source: _OwnedFile, destination: Path) -> _OwnedFile
         ) from error
     published = _OwnedFile(path=destination, identity=source.identity)
     _validate_owned_file(published)
-    source.path.unlink()
+    try:
+        source.path.unlink()
+    except OSError as error:
+        try:
+            _unlink_owned_file(published)
+        except ExportError as cleanup_error:
+            raise cleanup_error from error
+        raise
     return published
 
 
@@ -380,7 +373,7 @@ def stage_bundle(
     cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> StagedBundle:
     """Render, validate, hash, and optionally archive without publishing outputs."""
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     destination = destination.expanduser().absolute()
     parent = destination.parent
     try:
@@ -429,14 +422,8 @@ def stage_bundle(
             conflict_code="destination_conflict",
         )
         checkpoint()
-        token = _ACTIVE_CANCELLATION_CHECKPOINT.set(cancellation_checkpoint)
-        try:
-            from kitaru.exports.source import export_cancellation_scope
-
-            with export_cancellation_scope(cancellation_checkpoint):
-                render(staging)
-        finally:
-            _ACTIVE_CANCELLATION_CHECKPOINT.reset(token)
+        with export_cancellation_scope(cancellation_checkpoint):
+            render(staging)
         checkpoint()
         digest = directory_digest(
             staging, cancellation_checkpoint=cancellation_checkpoint

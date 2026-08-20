@@ -122,8 +122,6 @@ async def handle_experiment_export(
     except ExportError as error:
         raise _map_export_error(error) from error
     payload = (
-        receipt.model_dump(mode="json")
-        if isinstance(receipt, BaseModel)
-        else receipt
+        receipt.model_dump(mode="json") if isinstance(receipt, BaseModel) else receipt
     )
     return ExperimentExportReceipt.model_validate(payload)

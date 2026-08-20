@@ -391,6 +391,22 @@ def test_distinct_artifacts_have_side_by_side_safe_names(tmp_path: Path) -> None
     assert one["module_name"] != two["module_name"]
 
 
+def test_task_private_requirements_change_native_identity(tmp_path: Path) -> None:
+    resolved = _resolved(tmp_path / "source")
+    first = tmp_path / "first"
+    second = tmp_path / "second"
+    render_verifiers_v1(resolved, first, required_environment_names=("SCORING_TOKEN",))
+    render_verifiers_v1(
+        resolved, second, required_environment_names=("OTHER_SCORING_TOKEN",)
+    )
+
+    one = _module(first)[0]["provenance"]
+    two = _module(second)[0]["provenance"]
+    assert one["benchmark_digest"] != two["benchmark_digest"]
+    assert one["artifact_digest"] != two["artifact_digest"]
+    assert one["plugin_id"] != two["plugin_id"]
+
+
 def test_eval_and_primerl_configs_select_same_docker_composition(
     tmp_path: Path,
 ) -> None:

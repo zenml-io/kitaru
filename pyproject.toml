@@ -188,6 +188,14 @@ include = ["scripts/generate_sdk_docs.py"]
 [tool.ty.overrides.rules]
 unresolved-import = "ignore"
 
+# Exact exporter target packages are installed only inside isolated smoke
+# environments, not in Kitaru's core development environment.
+[[tool.ty.overrides]]
+include = ["scripts/smoke_export_artifacts.py"]
+
+[tool.ty.overrides.rules]
+unresolved-import = "ignore"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]

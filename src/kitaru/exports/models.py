@@ -293,7 +293,6 @@ class SourceFile:
     size: int
     sha256: str
     mode: Literal[0o644, 0o755]
-    link_target: str | None = None
 
 
 @dataclass(frozen=True)

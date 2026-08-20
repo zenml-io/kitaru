@@ -4,14 +4,17 @@ import errno
 import hashlib
 import os
 import stat
-from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
-from contextvars import ContextVar
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import BinaryIO, Literal
 
+from kitaru.exports._cancellation import (
+    CancellationCheckpoint,
+    export_cancellation_scope,
+    get_cancellation_checkpoint,
+)
 from kitaru.exports.models import (
     V1_EXPORT_BUDGETS,
     ExportError,
@@ -58,36 +61,6 @@ _PROTECTED_FILENAMES = frozenset(
 _PRIVATE_KEY_PREFIXES = ("id_dsa", "id_ecdsa", "id_ed25519", "id_rsa")
 _PRIVATE_KEY_SUFFIXES = (".key", ".p12", ".pem", ".pfx")
 _COPY_BUFFER_BYTES = 1024 * 1024
-CancellationCheckpoint = Callable[[], None]
-_ACTIVE_CANCELLATION_CHECKPOINT: ContextVar[CancellationCheckpoint | None] = ContextVar(
-    "kitaru_export_source_cancellation_checkpoint", default=None
-)
-
-
-def _noop_checkpoint() -> None:
-    return None
-
-
-def _get_checkpoint(
-    cancellation_checkpoint: CancellationCheckpoint | None,
-) -> CancellationCheckpoint:
-    return (
-        cancellation_checkpoint
-        or _ACTIVE_CANCELLATION_CHECKPOINT.get()
-        or _noop_checkpoint
-    )
-
-
-@contextmanager
-def export_cancellation_scope(
-    cancellation_checkpoint: CancellationCheckpoint | None,
-) -> Iterator[None]:
-    """Make one checkpoint available to nested source-copy calls."""
-    token = _ACTIVE_CANCELLATION_CHECKPOINT.set(cancellation_checkpoint)
-    try:
-        yield
-    finally:
-        _ACTIVE_CANCELLATION_CHECKPOINT.reset(token)
 
 
 @dataclass(frozen=True)
@@ -139,11 +112,17 @@ def _stat_version(value: os.stat_result) -> tuple[int, int, int, int, int]:
     )
 
 
-def _open_source_file(path: Path) -> BinaryIO:
+def _open_source_file(path: str | Path, *, directory_fd: int | None = None) -> BinaryIO:
     flags = os.O_RDONLY | getattr(os, "O_BINARY", 0)
     flags |= getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
+    descriptor = os.open(path, flags, dir_fd=directory_fd)
     return os.fdopen(descriptor, "rb")
+
+
+def _open_source_directory(path: str | Path, *, directory_fd: int | None = None) -> int:
+    flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+    flags |= getattr(os, "O_NOFOLLOW", 0)
+    return os.open(path, flags, dir_fd=directory_fd)
 
 
 def _read_opened_file(
@@ -152,7 +131,7 @@ def _read_opened_file(
     max_bytes: int,
     cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> bytes:
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     content = bytearray()
     while chunk := source.read(min(_COPY_BUFFER_BYTES, max_bytes + 1 - len(content))):
         checkpoint()
@@ -182,21 +161,22 @@ def _validate_regular_file(value: os.stat_result, relative: str) -> None:
 
 
 def _snapshot_file(
-    path: Path,
+    path: str | Path,
     relative: str,
     *,
     max_file_bytes: int,
+    directory_fd: int | None = None,
     cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> tuple[SourceFile, bytes]:
     try:
-        path_before = path.stat(follow_symlinks=False)
+        path_before = os.stat(path, dir_fd=directory_fd, follow_symlinks=False)
         _validate_regular_file(path_before, relative)
         if path_before.st_size > max_file_bytes:
             raise ExportError(
                 "source_file_too_large",
                 f"Source file exceeds {max_file_bytes} bytes: {relative}",
             )
-        with _open_source_file(path) as source:
+        with _open_source_file(path, directory_fd=directory_fd) as source:
             handle_before = os.fstat(source.fileno())
             _validate_regular_file(handle_before, relative)
             if _stat_identity(handle_before) != _stat_identity(path_before):
@@ -204,11 +184,8 @@ def _snapshot_file(
                     "source_changed",
                     f"Source file changed during export: {relative}",
                 )
-            token = _ACTIVE_CANCELLATION_CHECKPOINT.set(cancellation_checkpoint)
-            try:
+            with export_cancellation_scope(cancellation_checkpoint):
                 content = _read_opened_file(source, max_bytes=max_file_bytes)
-            finally:
-                _ACTIVE_CANCELLATION_CHECKPOINT.reset(token)
             handle_after = os.fstat(source.fileno())
     except ExportError:
         raise
@@ -222,7 +199,7 @@ def _snapshot_file(
             "source_read_failed", f"Cannot read source file {relative}: {error}"
         ) from error
     try:
-        path_after = path.stat(follow_symlinks=False)
+        path_after = os.stat(path, dir_fd=directory_fd, follow_symlinks=False)
     except OSError as error:
         raise ExportError(
             "source_changed", f"Source file changed during export: {relative}"
@@ -256,7 +233,6 @@ def _snapshot_file(
             size=len(content),
             sha256=hashlib.sha256(content).hexdigest(),
             mode=mode,
-            link_target=None,
         ),
         content,
     )
@@ -294,7 +270,7 @@ def inventory_source(
     cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> SourceInventory:
     """Acquire one bounded immutable source snapshot without following links."""
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     checkpoint()
     try:
         requested_root = root.expanduser().absolute()
@@ -388,11 +364,19 @@ def inventory_source(
             )
         ) or (parent == staging_parent and path.name == reservation_name)
 
-    def walk(directory: Path, relative_directory: PurePosixPath) -> None:
+    def walk(
+        directory: Path,
+        relative_directory: PurePosixPath,
+        *,
+        directory_fd: int | None,
+    ) -> None:
         nonlocal file_count, total_size
         checkpoint()
         try:
-            with os.scandir(directory) as iterator:
+            scan_target: int | Path = (
+                directory_fd if directory_fd is not None else directory
+            )
+            with os.scandir(scan_target) as iterator:
                 entries = sorted(iterator, key=lambda item: item.name)
         except OSError as error:
             relative = relative_directory.as_posix()
@@ -402,7 +386,7 @@ def inventory_source(
             ) from error
         for entry in entries:
             checkpoint()
-            path = Path(entry.path)
+            path = directory / entry.name
             relative_path = relative_directory / entry.name
             relative = relative_path.as_posix()
             if len(relative.encode("utf-8")) > max_path_bytes:
@@ -411,7 +395,15 @@ def inventory_source(
                     f"Source path exceeds {max_path_bytes} UTF-8 bytes: {relative}",
                 )
             try:
-                entry_stat = entry.stat(follow_symlinks=False)
+                entry_stat = (
+                    os.stat(
+                        entry.name,
+                        dir_fd=directory_fd,
+                        follow_symlinks=False,
+                    )
+                    if directory_fd is not None
+                    else entry.stat(follow_symlinks=False)
+                )
             except OSError as error:
                 raise ExportError(
                     "source_read_failed",
@@ -444,7 +436,34 @@ def inventory_source(
                 ):
                     excluded.add(relative)
                     continue
-                walk(path, relative_path)
+                if directory_fd is None:
+                    walk(path, relative_path, directory_fd=None)
+                else:
+                    child_fd: int | None = None
+                    try:
+                        child_fd = _open_source_directory(
+                            entry.name, directory_fd=directory_fd
+                        )
+                        child_stat = os.fstat(child_fd)
+                        if _stat_identity(child_stat) != _stat_identity(entry_stat):
+                            raise ExportError(
+                                "source_changed",
+                                f"Source directory changed during export: {relative}",
+                            )
+                        walk(path, relative_path, directory_fd=child_fd)
+                    except OSError as error:
+                        if error.errno == errno.ELOOP:
+                            raise ExportError(
+                                "unsupported_source_symlink",
+                                f"Source symlinks are not supported: {relative}",
+                            ) from error
+                        raise ExportError(
+                            "source_read_failed",
+                            f"Cannot read source directory {relative}: {error}",
+                        ) from error
+                    finally:
+                        if child_fd is not None:
+                            os.close(child_fd)
                 continue
             file_count += 1
             if file_count > max_files:
@@ -474,9 +493,10 @@ def inventory_source(
                     f"Source tree exceeds {max_total_bytes} bytes.",
                 )
             item, content = _snapshot_file(
-                path,
+                entry.name if directory_fd is not None else path,
                 relative,
                 max_file_bytes=max_file_bytes,
+                directory_fd=directory_fd,
                 cancellation_checkpoint=cancellation_checkpoint,
             )
             total_size += item.size
@@ -488,7 +508,31 @@ def inventory_source(
             files.append(item)
             contents[item.path] = content
 
-    walk(resolved_root, PurePosixPath())
+    root_fd: int | None = None
+    try:
+        if os.name == "posix":
+            try:
+                root_fd = _open_source_directory(resolved_root)
+            except OSError as error:
+                if error.errno == errno.ELOOP:
+                    raise ExportError(
+                        "unsupported_source_symlink",
+                        "Source root changed to a symlink during export.",
+                    ) from error
+                raise ExportError(
+                    "source_read_failed", f"Cannot open source root: {error}"
+                ) from error
+            if _stat_identity(os.fstat(root_fd)) != _stat_identity(root_stat):
+                raise ExportError(
+                    "source_changed", "Source root changed during export."
+                )
+        walk(resolved_root, PurePosixPath(), directory_fd=root_fd)
+        root_after = os.fstat(root_fd) if root_fd is not None else resolved_root.stat()
+        if _stat_identity(root_after) != _stat_identity(root_stat):
+            raise ExportError("source_changed", "Source root changed during export.")
+    finally:
+        if root_fd is not None:
+            os.close(root_fd)
     missing_includes = sorted(set(includes) - matched_includes)
     missing_excludes = sorted(set(excludes) - matched_excludes)
     if missing_includes or missing_excludes:
@@ -541,7 +585,7 @@ def copy_source(
     cancellation_checkpoint: CancellationCheckpoint | None = None,
 ) -> None:
     """Copy retained source bytes without reopening source paths."""
-    checkpoint = _get_checkpoint(cancellation_checkpoint)
+    checkpoint = get_cancellation_checkpoint(cancellation_checkpoint)
     checkpoint()
     destination.mkdir(parents=True, exist_ok=False)
     for item in inventory.files:

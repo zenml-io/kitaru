@@ -16,6 +16,11 @@ _SOURCE_FILES = (
 )
 
 
+def get_runtime_bridge_version() -> str:
+    """Return the Kitaru version required by the generated runtime bridge."""
+    return importlib.metadata.version("kitaru")
+
+
 def materialize_runtime_bridge(destination: Path) -> RuntimeBridgeReceipt:
     """Write and identify the exact bridge bytes included in a generated bundle."""
     source_root = Path(__file__).parent
@@ -38,6 +43,6 @@ def materialize_runtime_bridge(destination: Path) -> RuntimeBridgeReceipt:
     return RuntimeBridgeReceipt(
         schema_version=RUNTIME_BRIDGE_SCHEMA_VERSION,
         sha256=aggregate.hexdigest(),
-        originating_kitaru_version=importlib.metadata.version("kitaru"),
+        originating_kitaru_version=get_runtime_bridge_version(),
         files=files,
     )

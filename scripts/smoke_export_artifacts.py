@@ -527,17 +527,13 @@ def _verify_harbor(root: Path, candidate_wheel: Path, runtime: bool) -> None:
     install_start = source.find(
         "COPY bridge-requirements.txt evaluator-requirements.txt /opt/kitaru-export/"
     )
-    install_end = source.find("COPY bridge/", install_start)
-    if install_start < 0 or install_end < 0:
+    if install_start < 0:
         raise SmokeFailure("could not find the Harbor dependency install block")
     source = (
         source[:install_start]
-        + "COPY bridge-requirements.txt evaluator-requirements.txt "
-        "/opt/kitaru-export/\n"
-        "COPY candidate-wheels/ /opt/kitaru-candidate/\n"
-        f"RUN uv pip install --system /opt/kitaru-candidate/{candidate_wheel.name} "
-        "-r /opt/kitaru-export/bridge-requirements.txt \\\n"
-        "    -r /opt/kitaru-export/evaluator-requirements.txt\n" + source[install_end:]
+        + "COPY candidate-wheels/ /opt/kitaru-candidate/\n"
+        + f"RUN uv pip install --system /opt/kitaru-candidate/{candidate_wheel.name}\n"
+        + source[install_start:]
     )
     dockerfile.write_text(source)
     environment = os.environ.copy()

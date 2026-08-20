@@ -6,8 +6,10 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 
+from kitaru.client.exceptions import APIError
 from kitaru.exports.models import (
     ContentPolicy,
     EnvironmentPolicy,
@@ -472,6 +474,51 @@ async def test_resolve_export_hides_secret_identity_when_authorization_fails(
 
 
 @pytest.mark.parametrize(
+    "error",
+    [APIError(503, "temporarily unavailable"), httpx.ReadTimeout("timed out")],
+)
+async def test_resolve_export_preserves_retryable_secret_service_failures(
+    tmp_path: Path, error: Exception
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+    client.secrets.values[ids["secret"]] = error
+
+    with pytest.raises(type(error)):
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+
+async def test_resolve_export_rejects_secret_inside_registered_environment(
+    tmp_path: Path,
+) -> None:
+    _write_source(tmp_path)
+    client, ids = _client()
+    client.agent_versions.values[ids["agent_version"]].run_spec.env = {
+        "AUTHORIZATION": "Bearer sentinel-secret-value"
+    }
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "protected_value_in_environment"
+    assert "sentinel-secret-value" not in str(raised.value)
+
+
+@pytest.mark.parametrize(
     ("command", "code"),
     [
         ("python agent.py && echo unsafe", "unsupported_run_command"),
@@ -697,6 +744,50 @@ async def test_resolve_export_enforces_session_and_evaluator_blob_budgets(
             source=inventory_source(tmp_path),
         )
     assert raised.value.code == "evaluator_too_large"
+
+
+async def test_resolve_export_stops_fetching_after_aggregate_session_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "agent.py").write_text("print('ok')\n")
+    client, ids = _client()
+    session_ids = [uuid.UUID(int=index + 1_000) for index in range(60)]
+    client.cohort_versions.values[ids["cohort_version"]].session_count = len(
+        session_ids
+    )
+    client.sessions.summaries = [
+        SimpleNamespace(id=session_id) for session_id in session_ids
+    ]
+    client.sessions.full = {
+        session_id: SimpleNamespace(
+            session=SimpleNamespace(
+                id=session_id,
+                agent_id=ids["agent"],
+                inputs={"prompt": "hello"},
+                outputs="safe output",
+            ),
+            nodes=[],
+        )
+        for session_id in session_ids
+    }
+
+    monkeypatch.setattr(
+        "kitaru.exports.resolve._serialized_size",
+        lambda value, **kwargs: 16 * 1024 * 1024 if hasattr(value, "session") else 1,
+    )
+
+    with pytest.raises(ExportError) as raised:
+        await resolve_export(
+            client,
+            experiment_id=ids["experiment"],
+            cohort_version_id=ids["cohort_version"],
+            agent_version_id=ids["agent_version"],
+            reward=RewardSelector.parse("quality:correctness:score"),
+            source=inventory_source(tmp_path),
+        )
+
+    assert raised.value.code == "sessions_too_large"
+    assert len(client.sessions.full_limits) == 20
 
 
 @pytest.mark.parametrize(

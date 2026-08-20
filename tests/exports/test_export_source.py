@@ -3,7 +3,7 @@
 import os
 import stat
 from pathlib import Path
-from typing import BinaryIO
+from typing import Any, BinaryIO
 
 import pytest
 
@@ -11,7 +11,7 @@ from kitaru.exports._dependencies import classify_dependencies
 from kitaru.exports._runtime import reject_protected_source
 from kitaru.exports._sanitize import EphemeralSanitizer
 from kitaru.exports.models import ExportError, SourcePolicy
-from kitaru.exports.source import copy_source, inventory_source
+from kitaru.exports.source import copy_source, inventory_source, source_file_bytes
 
 
 def test_inventory_source_is_stable_and_excludes_sensitive_files(
@@ -210,15 +210,17 @@ def test_inventory_source_opens_each_file_once_and_copy_does_not_reopen(
 
     original = source_module._open_source_file
 
-    def recording_open(path: Path) -> BinaryIO:
-        opened.append(path)
-        return original(path)
+    def recording_open(
+        path: str | Path, *, directory_fd: int | None = None
+    ) -> BinaryIO:
+        opened.append(Path(path))
+        return original(path, directory_fd=directory_fd)
 
     monkeypatch.setattr(source_module, "_open_source_file", recording_open)
     inventory = inventory_source(tmp_path)
     copy_source(inventory, tmp_path / "copy")
 
-    assert opened == [tmp_path / "agent.py"]
+    assert opened == [Path("agent.py")]
 
 
 def test_inventory_source_rejects_mutation_during_open_read(
@@ -283,3 +285,44 @@ def test_dependency_and_protected_source_checks_use_retained_snapshot_bytes(
             inventory,
             sanitizer=EphemeralSanitizer(["secret-value"]),
         )
+
+
+def test_runtime_sanitizer_skips_short_ordinary_values() -> None:
+    sanitizer = EphemeralSanitizer.for_runtime(["prod", "long-secret-value"])
+
+    assert sanitizer.sanitize("prod long-secret-value") == "prod [REDACTED]"
+
+
+@pytest.mark.skipif(os.name != "posix", reason="descriptor traversal is POSIX-only")
+def test_inventory_source_stays_bound_to_verified_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    source.mkdir()
+    (source / "agent.py").write_text("print('safe')\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "secret.txt").write_text("outside-secret\n")
+    moved = tmp_path / "verified-source"
+    from kitaru.exports import source as source_module
+
+    original_scandir = source_module.os.scandir
+    swapped = False
+
+    def swap_before_scan(path: int | str | bytes | os.PathLike[str]) -> Any:
+        nonlocal swapped
+        if isinstance(path, int) and not swapped:
+            swapped = True
+            source.rename(moved)
+            source.symlink_to(outside, target_is_directory=True)
+        return original_scandir(path)
+
+    monkeypatch.setattr(source_module.os, "scandir", swap_before_scan)
+    try:
+        inventory = inventory_source(source)
+    finally:
+        source.unlink()
+        moved.rename(source)
+
+    assert [file.path for file in inventory.files] == ["agent.py"]
+    assert b"outside-secret" not in source_file_bytes(inventory, "agent.py")

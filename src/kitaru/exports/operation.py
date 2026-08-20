@@ -14,8 +14,11 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.exports.config import EXPORT_TARGET_VERSIONS, ExportFormat, ExportRequest
-from kitaru.exports.formats.harbor import render_harbor
-from kitaru.exports.formats.verifiers_v1 import render_verifiers_v1
+from kitaru.exports.formats.harbor import preflight_harbor_export, render_harbor
+from kitaru.exports.formats.verifiers_v1 import (
+    preflight_verifiers_v1_export,
+    render_verifiers_v1,
+)
 from kitaru.exports.models import (
     ArtifactProvenance,
     BoundedPathSummary,
@@ -235,10 +238,27 @@ async def export_experiment(
             cancellation_checkpoint=state.checkpoint,
         )
         state.checkpoint()
-        resolved = finalize_remote_export(
-            remote, source=source, source_policy=request.source_policy
+        resolved = await asyncio.to_thread(
+            finalize_remote_export,
+            remote,
+            source=source,
+            source_policy=request.source_policy,
         )
         state.checkpoint()
+        if request.format == "harbor":
+            assert request.trace_format is not None
+            assert request.trace_path is not None
+            preflight_harbor_export(
+                resolved,
+                trace_format=request.trace_format,
+                trace_path=request.trace_path,
+                required_environment_names=request.required_environment_names,
+            )
+        else:
+            preflight_verifiers_v1_export(
+                resolved,
+                required_environment_names=request.required_environment_names,
+            )
         if request.dry_run:
             target_version = EXPORT_TARGET_VERSIONS[request.format]
             receipt = ExportReceipt(

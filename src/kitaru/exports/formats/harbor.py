@@ -6,12 +6,17 @@ import tomllib
 from pathlib import Path, PurePosixPath
 from typing import Literal
 
-from packaging.requirements import InvalidRequirement, Requirement
-from packaging.utils import canonicalize_name
-
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
-from kitaru.exports._bridge import materialize_runtime_bridge
+from kitaru.exports._bridge import (
+    get_runtime_bridge_version,
+    materialize_runtime_bridge,
+)
 from kitaru.exports.config import normalize_environment_names
+from kitaru.exports.formats._validation import (
+    validate_generated_resources,
+    validate_kitaru_requirement,
+    validate_runtime_bridge,
+)
 from kitaru.exports.models import (
     V1_EXPORT_BUDGETS,
     DependencyPlan,
@@ -19,7 +24,6 @@ from kitaru.exports.models import (
     ExportError,
     ExportManifest,
     ResolvedExport,
-    RuntimeBridgeReceipt,
     ValidationReceipt,
 )
 from kitaru.exports.source import copy_source
@@ -85,25 +89,6 @@ def _validate_trace_declaration(trace_format: str, trace_path: str) -> None:
         )
 
 
-def _validate_kitaru_requirement(requirement: str, version: str) -> None:
-    try:
-        parsed = Requirement(requirement)
-    except InvalidRequirement as error:
-        raise ExportError(
-            "invalid_dependency_metadata", "A Kitaru requirement is invalid."
-        ) from error
-    if canonicalize_name(parsed.name) != "kitaru":
-        return
-    if parsed.url is not None or not parsed.specifier.contains(
-        version, prereleases=True
-    ):
-        raise ExportError(
-            "dependency_conflict",
-            f"Generated evaluation requires Kitaru {version}; a declared Kitaru "
-            "requirement excludes that version.",
-        )
-
-
 def _write_evaluators(
     resolved: ResolvedExport, root: Path, *, kitaru_version: str
 ) -> None:
@@ -142,7 +127,11 @@ def _write_evaluators(
                     "invalid_dependency_metadata",
                     "Evaluator requirements must be one inert requirement per line.",
                 )
-            _validate_kitaru_requirement(source.requirement, kitaru_version)
+            validate_kitaru_requirement(
+                source.requirement,
+                kitaru_version,
+                subject="An evaluator",
+            )
             requirements.append(source.requirement)
         else:
             raise ExportError(
@@ -329,7 +318,7 @@ def main() -> None:
     }
     minimal_env.update({name: os.environ[name] for name in required_names})
     secrets = [os.environ[name] for name in required_names]
-    sanitizer = EphemeralSanitizer(secrets)
+    sanitizer = EphemeralSanitizer.for_runtime(secrets)
     with tempfile.TemporaryDirectory(prefix="kitaru-evaluator-") as temporary:
         cwd = Path(temporary)
         process = run_evaluator_process(
@@ -420,24 +409,16 @@ def _task_toml(
     return "\n".join(lines) + "\n"
 
 
-def render_harbor(
+def preflight_harbor_export(
     resolved: ResolvedExport,
-    destination: Path,
     *,
     trace_format: Literal["atif", "kitaru"] | str,
     trace_path: str,
     required_environment_names: tuple[str, ...] = (),
-) -> ExportManifest:
-    """Render a complete Harbor dataset into an empty destination directory."""
+) -> tuple[tuple[str, ...], str]:
+    """Validate Harbor-specific inputs without writing an artifact."""
     _validate_trace_declaration(trace_format, trace_path)
-    if destination.exists() and (
-        not destination.is_dir() or next(destination.iterdir(), None) is not None
-    ):
-        raise ExportError(
-            "destination_conflict", f"Destination is not empty: {destination}"
-        )
-    run_spec = resolved.agent_version.run_spec
-    if run_spec is None:
+    if resolved.agent_version.run_spec is None:
         raise ExportError("missing_run_spec", "Agent version has no run specification.")
     if not resolved.command_argv:
         raise ExportError(
@@ -451,7 +432,7 @@ def render_harbor(
             "Agent dependencies were not classified during preflight.",
         )
     try:
-        required_environment_names = normalize_environment_names(
+        normalized_names = normalize_environment_names(
             (*resolved.required_environment_names, *required_environment_names)
         )
     except ValueError as error:
@@ -459,16 +440,56 @@ def render_harbor(
             "invalid_environment_name",
             "Required environment names must be unique identifiers.",
         ) from error
+    runtime_version = get_runtime_bridge_version()
+    for requirement in dependency_plan.requirements:
+        if requirement.project == "kitaru":
+            validate_kitaru_requirement(
+                requirement.requirement,
+                runtime_version,
+                subject="A declared Kitaru",
+            )
+    for evaluator in resolved.evaluators:
+        source = evaluator.version.source
+        if isinstance(source, PackagePluginSource):
+            validate_kitaru_requirement(
+                source.requirement,
+                runtime_version,
+                subject="An evaluator",
+            )
+    return normalized_names, runtime_version
+
+
+def render_harbor(
+    resolved: ResolvedExport,
+    destination: Path,
+    *,
+    trace_format: Literal["atif", "kitaru"] | str,
+    trace_path: str,
+    required_environment_names: tuple[str, ...] = (),
+) -> ExportManifest:
+    """Render a complete Harbor dataset into an empty destination directory."""
+    required_environment_names, runtime_version = preflight_harbor_export(
+        resolved,
+        trace_format=trace_format,
+        trace_path=trace_path,
+        required_environment_names=required_environment_names,
+    )
+    if destination.exists() and (
+        not destination.is_dir() or next(destination.iterdir(), None) is not None
+    ):
+        raise ExportError(
+            "destination_conflict", f"Destination is not empty: {destination}"
+        )
+    run_spec = resolved.agent_version.run_spec
+    assert run_spec is not None
+    dependency_plan = resolved.dependency_plan
+    assert dependency_plan is not None
 
     destination.mkdir(parents=True, exist_ok=True)
     agent_image = destination / "agent_image"
     copy_source(resolved.source, agent_image / "agent_source")
     bridge = materialize_runtime_bridge(agent_image / "bridge")
-    for requirement in dependency_plan.requirements:
-        if requirement.project == "kitaru":
-            _validate_kitaru_requirement(
-                requirement.requirement, bridge.originating_kitaru_version
-            )
+    assert bridge.originating_kitaru_version == runtime_version
     (agent_image / "bridge-requirements.txt").write_text(
         f"kitaru=={bridge.originating_kitaru_version}\n"
     )
@@ -641,69 +662,9 @@ runtime values must be supplied through Harbor's environment mechanism.
     write_canonical_json(
         destination / "kitaru-export.json", manifest.model_dump(mode="json")
     )
-    _validate_generated_resources(destination)
+    validate_generated_resources(destination)
     validate_harbor(destination)
     return manifest
-
-
-def _validate_generated_resources(root: Path) -> None:
-    count = 0
-    total_bytes = 0
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            raise ExportError(
-                "unsupported_bundle_symlink",
-                "Generated bundles cannot contain symlinks.",
-            )
-        if not path.is_file():
-            continue
-        count += 1
-        if count > V1_EXPORT_BUDGETS.max_generated_files:
-            raise ExportError(
-                "generated_files_limit",
-                f"Generated file count {count} exceeds limit "
-                f"{V1_EXPORT_BUDGETS.max_generated_files}.",
-            )
-        relative = path.relative_to(root).as_posix()
-        path_bytes = len(relative.encode("utf-8"))
-        if path_bytes > V1_EXPORT_BUDGETS.max_relative_path_bytes:
-            raise ExportError(
-                "generated_path_limit",
-                f"Generated path length {path_bytes} exceeds limit "
-                f"{V1_EXPORT_BUDGETS.max_relative_path_bytes} bytes.",
-            )
-        total_bytes += path.stat().st_size
-        if total_bytes > V1_EXPORT_BUDGETS.max_artifact_bytes:
-            raise ExportError(
-                "artifact_size_limit",
-                f"Generated artifact bytes {total_bytes} exceed limit "
-                f"{V1_EXPORT_BUDGETS.max_artifact_bytes}.",
-            )
-
-
-def _validate_runtime_bridge(root: Path, receipt_data: object) -> None:
-    try:
-        receipt = RuntimeBridgeReceipt.model_validate(receipt_data)
-    except ValueError as error:
-        raise ExportError(
-            "invalid_harbor_bundle", "Runtime bridge receipt is invalid."
-        ) from error
-    bridge_root = root / "agent_image/bridge"
-    aggregate = hashlib.sha256()
-    for relative, expected in receipt.files.items():
-        path = bridge_root / relative
-        if not path.is_file() or file_digest(path) != expected:
-            raise ExportError(
-                "invalid_harbor_bundle", "Runtime bridge bytes do not match manifest."
-            )
-        aggregate.update(relative.encode("utf-8"))
-        aggregate.update(b"\0")
-        aggregate.update(path.read_bytes())
-        aggregate.update(b"\n")
-    if aggregate.hexdigest() != receipt.sha256:
-        raise ExportError(
-            "invalid_harbor_bundle", "Runtime bridge digest does not match manifest."
-        )
 
 
 def validate_harbor(root: Path) -> None:
@@ -734,7 +695,11 @@ def validate_harbor(root: Path) -> None:
         raise ExportError(
             "invalid_harbor_bundle", "Manifest target is not Harbor 0.20.0."
         )
-    _validate_runtime_bridge(root, manifest.get("runtime_bridge"))
+    validate_runtime_bridge(
+        root / "agent_image/bridge",
+        manifest.get("runtime_bridge"),
+        error_code="invalid_harbor_bundle",
+    )
     expected_files = manifest.get("generated_files")
     if not isinstance(expected_files, dict):
         raise ExportError(
@@ -758,7 +723,7 @@ def validate_harbor(root: Path) -> None:
                 "Generated runtime imports private Kitaru exporter modules.",
             )
         compile(source, str(path.relative_to(root)), "exec")
-    _validate_generated_resources(root)
+    validate_generated_resources(root)
     references = dataset.get("tasks")
     if not isinstance(references, list) or not references:
         raise ExportError("invalid_harbor_bundle", "Dataset contains no tasks.")

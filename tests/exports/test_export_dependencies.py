@@ -106,6 +106,20 @@ def test_in_root_relative_dependency_is_preserved(tmp_path: Path) -> None:
     assert plan.requirements[0].source_path == "packages/helper"
 
 
+def test_relative_dependency_must_be_present_in_snapshot(tmp_path: Path) -> None:
+    package = tmp_path / "dist" / "helper"
+    package.mkdir(parents=True)
+    (package / "pyproject.toml").write_text('[project]\nname="helper"\nversion="1"\n')
+    _write_pyproject(tmp_path, ["helper"])
+    with (tmp_path / "pyproject.toml").open("a") as pyproject:
+        pyproject.write('\n[tool.uv.sources]\nhelper = { path = "dist/helper" }\n')
+
+    with pytest.raises(ExportError) as raised:
+        classify_dependencies(inventory_source(tmp_path))
+
+    assert raised.value.code == "unsafe_dependency"
+
+
 def test_uv_workspace_dependency_resolves_to_an_in_root_member(tmp_path: Path) -> None:
     package = tmp_path / "packages" / "helper"
     package.mkdir(parents=True)

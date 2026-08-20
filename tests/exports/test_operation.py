@@ -246,11 +246,20 @@ async def test_dry_run_resolves_without_calling_a_renderer(
         assert actual_remote is remote
         return resolved
 
+    preflighted: list[Any] = []
+
+    def fake_preflight(actual_resolved: Any, **_kwargs: Any) -> None:
+        preflighted.append(actual_resolved)
+
     monkeypatch.setattr(
         "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
     )
     monkeypatch.setattr(
         "kitaru.exports.operation.finalize_remote_export", fake_finalize
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.preflight_verifiers_v1_export",
+        fake_preflight,
     )
     destination = tmp_path / "out"
     receipt = await export_experiment(
@@ -276,6 +285,7 @@ async def test_dry_run_resolves_without_calling_a_renderer(
     assert receipt.assurance.preflight.status == "passed"
     assert receipt.assurance.structural_validation.status == "not_performed"
     assert receipt.assurance.release_compatibility.status == "not_performed"
+    assert preflighted == [resolved]
     assert not destination.exists()
 
 
@@ -374,6 +384,10 @@ async def test_operation_publishes_renderer_output(
     )
     monkeypatch.setattr(
         "kitaru.exports.operation.finalize_remote_export", fake_finalize
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.preflight_verifiers_v1_export",
+        lambda *_args, **_kwargs: None,
     )
     monkeypatch.setattr("kitaru.exports.operation.render_verifiers_v1", fake_render)
     destination = tmp_path / "bundle"

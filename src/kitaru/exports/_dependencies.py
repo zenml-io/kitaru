@@ -3,9 +3,10 @@
 import fnmatch
 import hashlib
 import json
+import posixpath
 import re
 import tomllib
-from pathlib import Path, PurePosixPath
+from pathlib import PurePosixPath
 from typing import Any
 from urllib.parse import urlsplit
 
@@ -130,22 +131,23 @@ def _parse_requirement(value: str) -> Requirement:
     return requirement
 
 
-def _inside_root(root: Path, candidate: Path) -> str:
-    resolved_root = root.resolve()
-    resolved_candidate = candidate.resolve()
-    try:
-        relative = resolved_candidate.relative_to(resolved_root)
-    except ValueError as error:
+def _inside_snapshot(path: str, files: frozenset[str]) -> str:
+    normalized = posixpath.normpath(path.replace("\\", "/"))
+    relative = PurePosixPath(normalized)
+    if relative.is_absolute() or normalized == ".." or normalized.startswith("../"):
         raise ExportError(
             "unsafe_dependency",
             "Relative dependency targets must remain inside the source root.",
-        ) from error
-    if not resolved_candidate.exists():
+        )
+    project_file = (
+        "pyproject.toml" if normalized == "." else f"{normalized}/pyproject.toml"
+    )
+    if normalized not in files and project_file not in files:
         raise ExportError(
             "unsafe_dependency",
             "A relative dependency target does not exist in the source snapshot.",
         )
-    return PurePosixPath(relative).as_posix()
+    return relative.as_posix()
 
 
 def _workspace_source_path(
@@ -216,7 +218,7 @@ def _source_paths(
         path = source_config.get("path")
         is_workspace = source_config.get("workspace") is True
         if isinstance(path, str) and not is_workspace and len(source_config) == 1:
-            resolved[name] = _inside_root(inventory.root, inventory.root / path)
+            resolved[name] = _inside_snapshot(path, files)
         elif is_workspace and set(source_config) == {"workspace"}:
             resolved[name] = _workspace_source_path(
                 name,

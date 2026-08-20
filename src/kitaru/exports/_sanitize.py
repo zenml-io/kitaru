@@ -44,6 +44,22 @@ class EphemeralSanitizer:
         self._values = tuple(sorted(unique, key=lambda item: (-len(item), item)))
         self._encoded_values = tuple(value.encode("utf-8") for value in self._values)
 
+    @classmethod
+    def for_runtime(cls, values: list[str]) -> "EphemeralSanitizer":
+        """Build a best-effort sanitizer for values supplied at runtime.
+
+        Short ordinary configuration values cannot be redacted safely because
+        they would match unrelated output. Export-time attached secrets remain
+        subject to the strict constructor validation.
+        """
+        return cls(
+            [
+                value
+                for value in values
+                if len(value.encode("utf-8")) >= _MINIMUM_SAFE_SECRET_BYTES
+            ]
+        )
+
     def __repr__(self) -> str:
         """Return a representation that cannot reveal protected material."""
         return f"<{type(self).__name__} protected_values={len(self._values)}>"

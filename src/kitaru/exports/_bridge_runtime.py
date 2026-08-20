@@ -4,7 +4,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from kitaru.api_models.v1.evaluator import EvaluatorVersionResponse
 from kitaru.api_models.v1.session_node import SessionWithNodesResponse
@@ -12,7 +12,7 @@ from kitaru.api_models.v1.session_node import SessionWithNodesResponse
 from ._sanitize import EphemeralSanitizer
 from .evaluators import evaluate_session, load_evaluator
 from .models import ExportError, MaterializedEvaluator, RewardSelector
-from .trace import convert_trace
+from .trace import TraceFormat, convert_trace
 
 _MAX_SESSION_BYTES = 16 * 1024 * 1024
 _MAX_METADATA_BYTES = 2 * 1024 * 1024
@@ -59,11 +59,10 @@ def _get_script_path(root: Path, value: object) -> Path | None:
     return candidate
 
 
-def _run(task_path: Path, trace_path: Path, metadata_path: Path) -> dict[str, Any]:
-    task = _load_json(task_path, max_bytes=_MAX_SESSION_BYTES)
+def _run(task: dict[str, Any], trace_path: Path, metadata_path: Path) -> dict[str, Any]:
     trace = _load_json(trace_path, max_bytes=_MAX_SESSION_BYTES)
     metadata = _load_json(metadata_path, max_bytes=_MAX_METADATA_BYTES)
-    if not isinstance(task, dict) or not isinstance(trace, dict):
+    if not isinstance(trace, dict):
         raise ExportError(
             "invalid_evaluator_input", "Task context and trace must be JSON objects."
         )
@@ -103,9 +102,13 @@ def _run(task_path: Path, trace_path: Path, metadata_path: Path) -> dict[str, An
     selector = RewardSelector(**selector_data)
     context = SessionWithNodesResponse.model_validate(task.get("context"))
     trace_format = task.get("trace_format")
+    if trace_format not in {"kitaru", "atif", "verifiers-v1"}:
+        raise ExportError(
+            "invalid_evaluator_input", "Declared trace format is invalid."
+        )
     session = convert_trace(
         trace,
-        format=trace_format,
+        format=cast(TraceFormat, trace_format),
         context=context,
         secret_values=secrets,
     )
@@ -128,17 +131,20 @@ def main() -> int:
     secrets: list[str] = []
     try:
         task = _load_json(task_path, max_bytes=_MAX_SESSION_BYTES)
-        if isinstance(task, dict):
-            names = task.get("required_environment_names", [])
-            if isinstance(names, list):
-                secrets = [
-                    os.environ[name]
-                    for name in names
-                    if isinstance(name, str) and name in os.environ
-                ]
-        result = _run(task_path, trace_path, metadata_path)
+        if not isinstance(task, dict):
+            raise ExportError(
+                "invalid_evaluator_input", "Task context must be a JSON object."
+            )
+        names = task.get("required_environment_names", [])
+        if isinstance(names, list):
+            secrets = [
+                os.environ[name]
+                for name in names
+                if isinstance(name, str) and name in os.environ
+            ]
+        result = _run(task, trace_path, metadata_path)
     except ExportError as error:
-        sanitizer = EphemeralSanitizer(secrets)
+        sanitizer = EphemeralSanitizer.for_runtime(secrets)
         _write_result(
             {
                 "ok": False,
@@ -148,7 +154,7 @@ def main() -> int:
         )
         return 1
     except Exception as error:
-        sanitizer = EphemeralSanitizer(secrets)
+        sanitizer = EphemeralSanitizer.for_runtime(secrets)
         _write_result(
             {
                 "ok": False,

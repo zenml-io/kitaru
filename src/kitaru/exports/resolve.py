@@ -3,13 +3,16 @@
 import asyncio
 import hashlib
 import json
+import posixpath
 import re
 import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from types import SimpleNamespace
 from typing import Any, Literal
 
+import httpx
 from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 from pydantic import BaseModel
@@ -18,7 +21,7 @@ from kitaru.api_models.v1.evaluator import EvaluatorListParams
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.session import SessionListParams
-from kitaru.client.exceptions import ResponseTooLargeError
+from kitaru.client.exceptions import APIError, ResponseTooLargeError
 from kitaru.exports._dependencies import classify_dependencies
 from kitaru.exports._runtime import parse_command_argv, reject_protected_source
 from kitaru.exports._sanitize import EphemeralSanitizer
@@ -69,7 +72,6 @@ class RemoteExportResolution:
     evaluators: tuple[MaterializedEvaluator, ...]
     reward: RewardSelector
     command_argv: tuple[str, ...]
-    required_environment_names: tuple[str, ...]
     runtime_environment: tuple[RuntimeEnvironmentRequirement, ...]
     content_policy: ContentPolicy
     environment_policy: EnvironmentPolicy
@@ -228,7 +230,7 @@ async def _resolve_attached_secrets(
                         "Attached secret values exceed the 1 MiB export limit.",
                     )
                 values.append(value)
-        except ExportError:
+        except (ExportError, APIError, httpx.TransportError, TimeoutError):
             raise
         except Exception:
             raise ExportError(
@@ -263,10 +265,8 @@ def _sanitize_agent_version(
     environment_policy: EnvironmentPolicy,
     secret_environment_names: tuple[str, ...],
 ) -> tuple[Any, tuple[RuntimeEnvironmentRequirement, ...]]:
-    sanitized_agent = sanitizer.sanitize(agent_version)
-    run_spec = sanitized_agent.run_spec
-    registered = dict(run_spec.env)
-    for name, value in registered.items():
+    original_registered = dict(agent_version.run_spec.env)
+    for name, value in original_registered.items():
         _validate_environment_name(name)
         sanitizer.reject_text(
             value,
@@ -276,6 +276,9 @@ def _sanitize_agent_version(
                 "value; export cannot infer safe ownership."
             ),
         )
+    sanitized_agent = sanitizer.sanitize(agent_version)
+    run_spec = sanitized_agent.run_spec
+    registered = dict(run_spec.env)
     secret_names = set(secret_environment_names)
     if environment_policy.mode == "include":
         included = {
@@ -499,60 +502,60 @@ async def _resolve_sessions(
             f"Cohort version records {cohort_version.session_count} sessions but "
             f"{len(session_ids)} unique members were returned.",
         )
-    session_slots = asyncio.Semaphore(_MAX_SESSION_FETCHES)
 
     async def get_session(session_id: uuid.UUID) -> Any:
-        async with session_slots:
-            return await _call_bounded(
-                client.sessions.get_with_nodes,
-                session_id,
-                max_bytes=V1_EXPORT_BUDGETS.max_session_bytes,
-                code="session_too_large",
-                message="A full session response exceeds the 16 MiB export limit.",
-            )
-
-    sessions = list(
-        await asyncio.gather(*(get_session(session_id) for session_id in session_ids))
-    )
-    sessions.sort(key=lambda full: str(full.session.id))
-    if [full.session.id for full in sessions] != session_ids:
-        raise ExportError(
-            "cohort_session_mismatch",
-            "Full session responses did not match the cohort membership.",
+        return await _call_bounded(
+            client.sessions.get_with_nodes,
+            session_id,
+            max_bytes=V1_EXPORT_BUDGETS.max_session_bytes,
+            code="session_too_large",
+            message="A full session response exceeds the 16 MiB export limit.",
         )
+
     total_bytes = 0
     sanitized_sessions: list[Any] = []
-    for full in sessions:
-        session = full.session
-        _require_matching_agent(session.agent_id, experiment.agent_id, "Session")
-        input_size = _serialized_size(
-            session.inputs,
-            code="invalid_task_inputs",
-            message=f"Session {session.id} inputs are not JSON.",
+    for start in range(0, len(session_ids), _MAX_SESSION_FETCHES):
+        batch_ids = session_ids[start : start + _MAX_SESSION_FETCHES]
+        batch = await asyncio.gather(
+            *(get_session(session_id) for session_id in batch_ids)
         )
-        if input_size > _MAX_TASK_INPUT_BYTES:
-            raise ExportError(
-                "inputs_too_large",
-                f"Session {session.id} inputs exceed {_MAX_TASK_INPUT_BYTES} bytes.",
+        for expected_id, full in zip(batch_ids, batch, strict=True):
+            session = full.session
+            if session.id != expected_id:
+                raise ExportError(
+                    "cohort_session_mismatch",
+                    "Full session responses did not match the cohort membership.",
+                )
+            _require_matching_agent(session.agent_id, experiment.agent_id, "Session")
+            input_size = _serialized_size(
+                session.inputs,
+                code="invalid_task_inputs",
+                message=f"Session {session.id} inputs are not JSON.",
             )
-        session_bytes = _serialized_size(
-            full,
-            code="invalid_session",
-            message=f"Session {session.id} is not serializable.",
-        )
-        if session_bytes > V1_EXPORT_BUDGETS.max_session_bytes:
-            raise ExportError(
-                "session_too_large",
-                "A serialized session exceeds the 16 MiB export limit.",
+            if input_size > _MAX_TASK_INPUT_BYTES:
+                raise ExportError(
+                    "inputs_too_large",
+                    f"Session {session.id} inputs exceed "
+                    f"{_MAX_TASK_INPUT_BYTES} bytes.",
+                )
+            session_bytes = _serialized_size(
+                full,
+                code="invalid_session",
+                message=f"Session {session.id} is not serializable.",
             )
-        total_bytes += session_bytes
-        if total_bytes > V1_EXPORT_BUDGETS.max_total_session_bytes:
-            raise ExportError(
-                "sessions_too_large",
-                "Serialized sessions exceed the 256 MiB aggregate export limit.",
-            )
-        sanitized = sanitizer.sanitize(full)
-        sanitized_sessions.append(_apply_content_policy(sanitized, content_policy))
+            if session_bytes > V1_EXPORT_BUDGETS.max_session_bytes:
+                raise ExportError(
+                    "session_too_large",
+                    "A serialized session exceeds the 16 MiB export limit.",
+                )
+            total_bytes += session_bytes
+            if total_bytes > V1_EXPORT_BUDGETS.max_total_session_bytes:
+                raise ExportError(
+                    "sessions_too_large",
+                    "Serialized sessions exceed the 256 MiB aggregate export limit.",
+                )
+            sanitized = sanitizer.sanitize(full)
+            sanitized_sessions.append(_apply_content_policy(sanitized, content_policy))
     return tuple(sanitized_sessions)
 
 
@@ -671,9 +674,6 @@ async def resolve_remote_export(
         evaluators=tuple(evaluators),
         reward=reward,
         command_argv=command_argv,
-        required_environment_names=tuple(
-            requirement.name for requirement in runtime_environment
-        ),
         runtime_environment=runtime_environment,
         content_policy=selected_content,
         environment_policy=selected_environment,
@@ -721,18 +721,18 @@ def finalize_remote_export(
             code="protected_value_in_path",
             message="Protected runtime material appears in the agent working path.",
         )
-        candidate = (source.root / working_dir).resolve(strict=False)
-        try:
-            candidate.relative_to(source.root)
-        except ValueError as error:
+        normalized = posixpath.normpath(working_dir.replace("\\", "/"))
+        relative = PurePosixPath(normalized)
+        if relative.is_absolute() or normalized == ".." or normalized.startswith("../"):
             raise ExportError(
                 "invalid_working_directory",
                 "Agent working directory escapes the source root.",
-            ) from error
-        if not candidate.is_dir():
+            )
+        prefix = "" if normalized == "." else f"{normalized}/"
+        if prefix and not any(file.path.startswith(prefix) for file in source.files):
             raise ExportError(
                 "invalid_working_directory",
-                "Agent working directory does not exist in the source root.",
+                "Agent working directory does not exist in the source snapshot.",
             )
 
     return ResolvedExport(
@@ -744,7 +744,9 @@ def finalize_remote_export(
         reward=remote.reward,
         source=source,
         command_argv=remote.command_argv,
-        required_environment_names=remote.required_environment_names,
+        required_environment_names=tuple(
+            requirement.name for requirement in remote.runtime_environment
+        ),
         runtime_environment=remote.runtime_environment,
         dependency_plan=dependency_plan,
         content_policy=remote.content_policy,
@@ -765,12 +767,7 @@ async def resolve_export(
     environment_policy: EnvironmentPolicy | None = None,
     source_policy: SourcePolicy | None = None,
 ) -> ResolvedExport:
-    """Resolve remote inputs first, then validate one local source inventory.
-
-    This compatibility wrapper leaves existing callers unchanged. Callers that
-    must prove no local source access before authorization can call
-    :func:`resolve_remote_export`, acquire the source snapshot, and then call
-    :func:`finalize_remote_export`.
+    """Resolve remote export inputs against one local source snapshot.
 
     Raises:
         ExportError: The selected objects cannot be exported faithfully.

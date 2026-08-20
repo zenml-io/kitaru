@@ -9,6 +9,7 @@ import uuid
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -256,12 +257,13 @@ def test_generated_agent_imports_without_container_files(
     harbor = types.ModuleType("harbor")
     agents = types.ModuleType("harbor.agents")
     base = types.ModuleType("harbor.agents.base")
-    base.BaseAgent = object
+    base_module: Any = base
+    base_module.BaseAgent = object
     monkeypatch.setitem(sys.modules, "harbor", harbor)
     monkeypatch.setitem(sys.modules, "harbor.agents", agents)
     monkeypatch.setitem(sys.modules, "harbor.agents.base", base)
     launcher = output / "agent/kitaru_agent.py"
-    namespace = {"__file__": str(launcher)}
+    namespace: dict[str, Any] = {"__file__": str(launcher)}
 
     exec(compile(launcher.read_text(), str(launcher), "exec"), namespace)
 

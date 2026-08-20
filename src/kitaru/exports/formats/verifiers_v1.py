@@ -21,12 +21,20 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from packaging.requirements import InvalidRequirement, Requirement
+from packaging.requirements import Requirement
 from packaging.utils import canonicalize_name
 
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
-from kitaru.exports._bridge import materialize_runtime_bridge
+from kitaru.exports._bridge import (
+    get_runtime_bridge_version,
+    materialize_runtime_bridge,
+)
 from kitaru.exports.config import normalize_environment_names
+from kitaru.exports.formats._validation import (
+    validate_generated_resources,
+    validate_kitaru_requirement,
+    validate_runtime_bridge,
+)
 from kitaru.exports.models import (
     V1_EXPORT_BUDGETS,
     ArtifactProvenance,
@@ -43,7 +51,6 @@ from kitaru.exports.models import (
 from kitaru.exports.source import copy_source
 from kitaru.exports.writer import (
     canonical_json_bytes,
-    file_digest,
     file_digests,
     write_canonical_json,
 )
@@ -78,25 +85,6 @@ def _quote_toml(value: str) -> str:
     return json.dumps(value, ensure_ascii=False)
 
 
-def _validate_kitaru_requirement(requirement: str, kitaru_version: str) -> None:
-    try:
-        parsed = Requirement(requirement)
-    except InvalidRequirement as error:
-        raise ExportError(
-            "invalid_dependency_metadata", "An evaluator requirement is invalid."
-        ) from error
-    if canonicalize_name(parsed.name) != "kitaru":
-        return
-    if parsed.url is not None or not parsed.specifier.contains(
-        kitaru_version, prereleases=True
-    ):
-        raise ExportError(
-            "dependency_conflict",
-            f"Generated scoring requires Kitaru {kitaru_version}; an evaluator "
-            "requirement excludes that version.",
-        )
-
-
 def _evaluator_requirements(
     resolved: ResolvedExport, *, kitaru_version: str
 ) -> tuple[str, ...]:
@@ -109,7 +97,11 @@ def _evaluator_requirements(
                     "invalid_dependency_metadata",
                     "Evaluator requirements must be inert requirement strings.",
                 )
-            _validate_kitaru_requirement(source.requirement, kitaru_version)
+            validate_kitaru_requirement(
+                source.requirement,
+                kitaru_version,
+                subject="An evaluator",
+            )
             parsed = Requirement(source.requirement)
             project = canonicalize_name(parsed.name)
             if project == "kitaru":
@@ -131,7 +123,7 @@ def _evaluator_requirements(
     return tuple(requirements[project] for project in sorted(requirements))
 
 
-def _pyproject(
+def _render_pyproject(
     distribution_name: str,
     module_name: str,
     resolved: ResolvedExport,
@@ -162,7 +154,7 @@ packages = ["{module_name}"]
 '''
 
 
-def _init_module() -> str:
+def _render_init_module() -> str:
     return '''"""Generated Kitaru Taskset and bundled Harness plugin."""
 
 from .plugin import KitaruHarness, KitaruTaskset
@@ -171,7 +163,7 @@ __all__ = ["KitaruHarness", "KitaruTaskset"]
 '''
 
 
-def _plugin_module() -> str:
+def _render_plugin_module() -> str:
     return '''"""Native Verifiers Taskset, Task, and bundled Harness."""
 
 import json
@@ -369,7 +361,7 @@ def evaluate(trace: dict[str, Any], data: Any) -> tuple[float, dict[str, float]]
         **{{name: os.environ[name] for name in required_names}},
     }}
     secrets = [minimal_env[name] for name in required_names]
-    sanitizer = EphemeralSanitizer(secrets)
+    sanitizer = EphemeralSanitizer.for_runtime(secrets)
     with tempfile.TemporaryDirectory(prefix="kitaru-verifiers-score-") as temporary:
         workdir = Path(temporary)
         private_task = workdir / "task.json"
@@ -507,7 +499,7 @@ def _prime_rl_toml(
     return "\n".join(lines) + "\n"
 
 
-def _readme(
+def _render_readme(
     plugin_id: str,
     dependency_status: str,
     runtime_requirements: RuntimeRequirements,
@@ -595,7 +587,9 @@ def _task_rows(
 
 
 def _benchmark_digest(
-    resolved: ResolvedExport, private: list[tuple[Any, dict[str, Any], str]]
+    resolved: ResolvedExport,
+    private: list[tuple[Any, dict[str, Any], str]],
+    task_private_requirements: tuple[str, ...],
 ) -> str:
     return _canonical_digest(
         {
@@ -620,6 +614,7 @@ def _benchmark_digest(
             "scoring_bridge_schema_version": SCORING_BRIDGE_SCHEMA_VERSION,
             "target": "verifiers-v1",
             "target_version": VERIFIERS_VERSION,
+            "task_private_requirements": list(task_private_requirements),
             "task_content_digests": [
                 content_digest for _, _, content_digest in private
             ],
@@ -653,8 +648,8 @@ def _default_harness_digest(
 
 def _runtime_bundle_digest(bridge: RuntimeBridgeReceipt) -> str:
     templates = {
-        "init": _init_module(),
-        "plugin": _plugin_module(),
+        "init": _render_init_module(),
+        "plugin": _render_plugin_module(),
         "scoring": _scoring_module("{module_name}"),
     }
     return _canonical_digest(
@@ -798,54 +793,13 @@ def _write_runtime(
     )
 
 
-def _validate_generated_resources(root: Path) -> None:
-    file_count = 0
-    total_bytes = 0
-    for path in root.rglob("*"):
-        if path.is_symlink():
-            raise ExportError(
-                "unsupported_bundle_symlink",
-                "Generated bundles cannot contain symlinks.",
-            )
-        if not path.is_file():
-            continue
-        file_count += 1
-        if file_count > V1_EXPORT_BUDGETS.max_generated_files:
-            raise ExportError(
-                "generated_files_limit",
-                f"Generated file count {file_count} exceeds limit "
-                f"{V1_EXPORT_BUDGETS.max_generated_files}.",
-            )
-        relative = path.relative_to(root).as_posix()
-        path_bytes = len(relative.encode("utf-8"))
-        if path_bytes > V1_EXPORT_BUDGETS.max_relative_path_bytes:
-            raise ExportError(
-                "generated_path_limit",
-                f"Generated path length {path_bytes} exceeds limit "
-                f"{V1_EXPORT_BUDGETS.max_relative_path_bytes} bytes.",
-            )
-        total_bytes += path.stat().st_size
-        if total_bytes > V1_EXPORT_BUDGETS.max_artifact_bytes:
-            raise ExportError(
-                "artifact_size_limit",
-                f"Generated artifact bytes {total_bytes} exceeds limit "
-                f"{V1_EXPORT_BUDGETS.max_artifact_bytes}.",
-            )
-
-
-def render_verifiers_v1(
+def preflight_verifiers_v1_export(
     resolved: ResolvedExport,
-    root: Path,
     *,
     required_environment_names: tuple[str, ...] = (),
-) -> ExportManifest:
-    """Render one installable Verifiers 0.3.0 Taskset and bundled Harness."""
-    if root.exists() and (not root.is_dir() or next(root.iterdir(), None) is not None):
-        raise ExportError(
-            "invalid_destination", "Verifiers staging directory must be empty."
-        )
-    run_spec = resolved.agent_version.run_spec
-    if run_spec is None:
+) -> tuple[tuple[str, ...], tuple[str, ...], str]:
+    """Validate Verifiers-specific inputs without writing an artifact."""
+    if resolved.agent_version.run_spec is None:
         raise ExportError("missing_run_spec", "Agent version has no run specification.")
     if not resolved.command_argv:
         raise ExportError(
@@ -875,18 +829,49 @@ def render_verifiers_v1(
             "invalid_environment_name",
             "Required environment names must be unique identifiers.",
         ) from error
+    runtime_version = get_runtime_bridge_version()
+    for requirement in dependency_plan.requirements:
+        if requirement.project == "kitaru":
+            validate_kitaru_requirement(
+                requirement.requirement,
+                runtime_version,
+                subject="A declared Kitaru",
+            )
+    _evaluator_requirements(resolved, kitaru_version=runtime_version)
+    return task_private_requirements, bundled_requirements, runtime_version
+
+
+def render_verifiers_v1(
+    resolved: ResolvedExport,
+    root: Path,
+    *,
+    required_environment_names: tuple[str, ...] = (),
+) -> ExportManifest:
+    """Render one installable Verifiers 0.3.0 Taskset and bundled Harness."""
+    (
+        task_private_requirements,
+        bundled_requirements,
+        runtime_version,
+    ) = preflight_verifiers_v1_export(
+        resolved,
+        required_environment_names=required_environment_names,
+    )
+    if root.exists() and (not root.is_dir() or next(root.iterdir(), None) is not None):
+        raise ExportError(
+            "invalid_destination", "Verifiers staging directory must be empty."
+        )
+    run_spec = resolved.agent_version.run_spec
+    assert run_spec is not None
+    dependency_plan = resolved.dependency_plan
+    assert dependency_plan is not None
 
     root.mkdir(parents=True, exist_ok=True)
     bridge_staging = root / ".bridge-staging"
     bridge = materialize_runtime_bridge(bridge_staging)
-    for requirement in dependency_plan.requirements:
-        if requirement.project == "kitaru":
-            _validate_kitaru_requirement(
-                requirement.requirement, bridge.originating_kitaru_version
-            )
+    assert bridge.originating_kitaru_version == runtime_version
     rows, private = _task_rows(resolved)
     provenance = _artifact_provenance(
-        _benchmark_digest(resolved, private),
+        _benchmark_digest(resolved, private, task_private_requirements),
         _default_harness_digest(resolved, dependency_plan),
         _runtime_bundle_digest(bridge),
     )
@@ -894,8 +879,8 @@ def render_verifiers_v1(
     module.mkdir()
     shutil.move(bridge_staging.as_posix(), (module / "bridge").as_posix())
 
-    (module / "__init__.py").write_text(_init_module())
-    (module / "plugin.py").write_text(_plugin_module())
+    (module / "__init__.py").write_text(_render_init_module())
+    (module / "plugin.py").write_text(_render_plugin_module())
     (module / "scoring.py").write_text(_scoring_module(provenance.module_name))
     copy_source(resolved.source, module / "agent_source")
     _write_runtime(module, resolved, dependency_plan)
@@ -916,7 +901,7 @@ def render_verifiers_v1(
         bundled_harness=bundled_requirements,
     )
     (root / "pyproject.toml").write_text(
-        _pyproject(
+        _render_pyproject(
             provenance.distribution_name,
             provenance.module_name,
             resolved,
@@ -938,7 +923,7 @@ def render_verifiers_v1(
         )
     )
     (root / "README.md").write_text(
-        _readme(
+        _render_readme(
             provenance.plugin_id,
             dependency_plan.status,
             runtime_requirements,
@@ -946,7 +931,7 @@ def render_verifiers_v1(
         )
     )
 
-    _validate_generated_resources(root)
+    validate_generated_resources(root)
     validation = ValidationReceipt(
         level="structural", status="passed", target_version=VERIFIERS_VERSION
     )
@@ -983,34 +968,6 @@ def render_verifiers_v1(
     write_canonical_json(root / "kitaru-export.json", manifest.model_dump(mode="json"))
     validate_verifiers_v1(root)
     return manifest
-
-
-def _validate_runtime_bridge(
-    root: Path, module_name: str, receipt_data: object
-) -> None:
-    try:
-        receipt = RuntimeBridgeReceipt.model_validate(receipt_data)
-    except ValueError as error:
-        raise ExportError(
-            "invalid_verifiers_bundle", "Runtime bridge receipt is invalid."
-        ) from error
-    bridge_root = root / module_name / "bridge"
-    aggregate = hashlib.sha256()
-    for relative, expected in receipt.files.items():
-        path = bridge_root / relative
-        if not path.is_file() or file_digest(path) != expected:
-            raise ExportError(
-                "invalid_verifiers_bundle",
-                "Runtime bridge bytes do not match manifest.",
-            )
-        aggregate.update(relative.encode("utf-8"))
-        aggregate.update(b"\0")
-        aggregate.update(path.read_bytes())
-        aggregate.update(b"\n")
-    if aggregate.hexdigest() != receipt.sha256:
-        raise ExportError(
-            "invalid_verifiers_bundle", "Runtime bridge digest does not match manifest."
-        )
 
 
 def _exported_names(module: Path) -> list[str]:
@@ -1193,15 +1150,17 @@ def validate_verifiers_v1(root: Path) -> ValidationReceipt:
                     "generated Python imports private Kitaru exporter modules"
                 )
             ast.parse(source, filename=path.relative_to(root).as_posix())
-        _validate_runtime_bridge(
-            root, provenance.module_name, manifest_data.get("runtime_bridge")
+        validate_runtime_bridge(
+            root / provenance.module_name / "bridge",
+            manifest_data.get("runtime_bridge"),
+            error_code="invalid_verifiers_bundle",
         )
         recorded = manifest_data.get("generated_files")
         actual = file_digests(root)
         actual.pop("kitaru-export.json", None)
         if not isinstance(recorded, dict) or recorded != actual:
             raise ValueError("generated file digests do not match")
-        _validate_generated_resources(root)
+        validate_generated_resources(root)
     except ExportError:
         raise
     except (
