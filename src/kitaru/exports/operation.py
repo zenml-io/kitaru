@@ -30,7 +30,7 @@ from kitaru.exports.models import (
     SourcePolicy,
     TaskProvenance,
 )
-from kitaru.exports.resolve import resolve_export
+from kitaru.exports.resolve import finalize_remote_export, resolve_remote_export
 from kitaru.exports.source import inventory_source
 from kitaru.exports.writer import publish_bundle
 
@@ -175,19 +175,27 @@ def _preflight_destination(request: ExportRequest) -> None:
 async def export_experiment(client: Any, request: ExportRequest) -> ExportReceipt:
     """Resolve an export and optionally publish its deterministic local artifact."""
     _preflight_destination(request)
-    source = await asyncio.to_thread(
-        inventory_source,
-        request.source_root,
-        destination=request.destination,
-    )
-    resolved = await resolve_export(
+    remote = await resolve_remote_export(
         client,
         experiment_id=request.experiment_id,
         cohort_version_id=request.cohort_version_id,
         agent_version_id=request.agent_version_id,
         reward=RewardSelector.parse(request.primary_reward),
-        source=source,
+        environment_policy=request.environment_policy,
     )
+    archive_path = (
+        request.destination.with_name(f"{request.destination.name}.zip")
+        if request.archive
+        else None
+    )
+    source = await asyncio.to_thread(
+        inventory_source,
+        request.source_root,
+        source_policy=request.source_policy,
+        destination=request.destination,
+        archive_path=archive_path,
+    )
+    resolved = finalize_remote_export(remote, source=source)
     if request.dry_run:
         target_version = EXPORT_TARGET_VERSIONS[request.format]
         return ExportReceipt(

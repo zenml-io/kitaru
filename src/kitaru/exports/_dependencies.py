@@ -20,6 +20,7 @@ from .models import (
     ExportError,
     SourceInventory,
 )
+from .source import source_file_bytes
 
 _HASH_OPTION = re.compile(r"(?:^|\s)--hash=sha256:([0-9a-fA-F]{64})(?=\s|$)")
 _GIT_COMMIT = re.compile(r"@[0-9a-fA-F]{40}(?:#|$)")
@@ -28,13 +29,13 @@ _PYTHON_RUNTIME = "3.12"
 
 
 def _read_text(
-    root: Path,
+    source: SourceInventory,
     path: str,
     *,
     sanitizer: EphemeralSanitizer | None,
 ) -> str:
     try:
-        content = (root / path).read_bytes()
+        content = source_file_bytes(source, path)
         text = content.decode("utf-8")
     except (OSError, UnicodeDecodeError) as error:
         raise ExportError(
@@ -149,7 +150,7 @@ def _inside_root(root: Path, candidate: Path) -> str:
 
 def _workspace_source_path(
     project_name: str,
-    root: Path,
+    source: SourceInventory,
     files: frozenset[str],
     workspace: dict[str, Any],
     *,
@@ -171,7 +172,7 @@ def _workspace_source_path(
         if not any(fnmatch.fnmatchcase(directory, pattern) for pattern in members):
             continue
         child = _load_toml(
-            _read_text(root, path, sanitizer=sanitizer),
+            _read_text(source, path, sanitizer=sanitizer),
             path,
         )
         child_name = child.get("project", {}).get("name")
@@ -190,7 +191,7 @@ def _workspace_source_path(
 
 def _source_paths(
     pyproject: dict[str, Any],
-    root: Path,
+    inventory: SourceInventory,
     files: frozenset[str],
     *,
     sanitizer: EphemeralSanitizer | None,
@@ -205,21 +206,21 @@ def _source_paths(
             "tool.uv.sources must be a table when present.",
         )
     resolved: dict[str, str] = {}
-    for raw_name, source in sources.items():
-        if not isinstance(raw_name, str) or not isinstance(source, dict):
+    for raw_name, source_config in sources.items():
+        if not isinstance(raw_name, str) or not isinstance(source_config, dict):
             raise ExportError(
                 "unsupported_dependency_metadata",
                 "Export v1 supports standard table entries in tool.uv.sources.",
             )
         name = canonicalize_name(raw_name)
-        path = source.get("path")
-        is_workspace = source.get("workspace") is True
-        if isinstance(path, str) and not is_workspace and len(source) == 1:
-            resolved[name] = _inside_root(root, root / path)
-        elif is_workspace and set(source) == {"workspace"}:
+        path = source_config.get("path")
+        is_workspace = source_config.get("workspace") is True
+        if isinstance(path, str) and not is_workspace and len(source_config) == 1:
+            resolved[name] = _inside_root(inventory.root, inventory.root / path)
+        elif is_workspace and set(source_config) == {"workspace"}:
             resolved[name] = _workspace_source_path(
                 name,
-                root,
+                inventory,
                 files,
                 workspace if isinstance(workspace, dict) else {},
                 sanitizer=sanitizer,
@@ -265,7 +266,7 @@ def _check_python_compatibility(pyproject: dict[str, Any]) -> None:
 
 def _requirements_from_pyproject(
     pyproject: dict[str, Any],
-    root: Path,
+    source: SourceInventory,
     files: frozenset[str],
     *,
     sanitizer: EphemeralSanitizer | None,
@@ -282,7 +283,7 @@ def _requirements_from_pyproject(
         )
     paths = _source_paths(
         pyproject,
-        root,
+        source,
         files,
         sanitizer=sanitizer,
     )
@@ -366,18 +367,18 @@ def classify_dependencies(
     values: list[tuple[str, str | None]]
     if has_pyproject:
         pyproject = _load_toml(
-            _read_text(source.root, "pyproject.toml", sanitizer=sanitizer),
+            _read_text(source, "pyproject.toml", sanitizer=sanitizer),
             "pyproject.toml",
         )
         values = _requirements_from_pyproject(
             pyproject,
-            source.root,
+            source,
             files,
             sanitizer=sanitizer,
         )
         if has_lock:
             lock = _load_toml(
-                _read_text(source.root, "uv.lock", sanitizer=sanitizer),
+                _read_text(source, "uv.lock", sanitizer=sanitizer),
                 "uv.lock",
             )
             if not isinstance(lock.get("version"), int):
@@ -392,7 +393,7 @@ def classify_dependencies(
             manifests = ("pyproject.toml",)
     else:
         content = _read_text(
-            source.root,
+            source,
             "requirements.txt",
             sanitizer=sanitizer,
         )

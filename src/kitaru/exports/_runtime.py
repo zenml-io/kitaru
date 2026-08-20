@@ -6,6 +6,7 @@ from pathlib import PurePosixPath
 
 from ._sanitize import EphemeralSanitizer
 from .models import ExportError, SourceInventory
+from .source import source_file_bytes
 
 _SHELL_SYNTAX = re.compile(r"[;&|<>`$\n\r]")
 _COMMAND_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -138,13 +139,7 @@ def reject_protected_source(
             code="protected_value_in_path",
             message="Protected runtime material appears in a source path.",
         )
-        try:
-            content = (source.root / file.path).read_bytes()
-        except OSError as error:
-            raise ExportError(
-                "source_read_failed",
-                "A source file could not be read during protected-material preflight.",
-            ) from error
+        content = source_file_bytes(source, file.path)
         sanitizer.reject_bytes(
             content,
             code="protected_value_in_source",

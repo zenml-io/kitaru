@@ -226,10 +226,21 @@ async def test_dry_run_resolves_without_calling_a_renderer(
         },
     )()
 
-    async def fake_resolve(*_args: Any, **_kwargs: Any) -> Any:
+    remote = object()
+
+    async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> Any:
+        return remote
+
+    def fake_finalize(actual_remote: Any, **_kwargs: Any) -> Any:
+        assert actual_remote is remote
         return resolved
 
-    monkeypatch.setattr("kitaru.exports.operation.resolve_export", fake_resolve)
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.finalize_remote_export", fake_finalize
+    )
     destination = tmp_path / "out"
     receipt = await export_experiment(
         object(),
@@ -255,6 +266,27 @@ async def test_dry_run_resolves_without_calling_a_renderer(
     assert receipt.assurance.structural_validation.status == "not_performed"
     assert receipt.assurance.release_compatibility.status == "not_performed"
     assert not destination.exists()
+
+
+async def test_remote_denial_happens_before_local_source_access(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    async def deny_remote(*_args: Any, **_kwargs: Any) -> Any:
+        raise ExportError("secret_authorization_failed", "Export is not authorized.")
+
+    def fail_if_source_is_read(*_args: Any, **_kwargs: Any) -> Any:
+        raise AssertionError("source acquisition ran before remote authorization")
+
+    monkeypatch.setattr("kitaru.exports.operation.resolve_remote_export", deny_remote)
+    monkeypatch.setattr(
+        "kitaru.exports.operation.inventory_source", fail_if_source_is_read
+    )
+
+    with pytest.raises(ExportError, match="secret_authorization_failed"):
+        await export_experiment(
+            object(),
+            _request(tmp_path, source_root=tmp_path / "unreadable-source"),
+        )
 
 
 async def test_dry_run_rejects_an_existing_destination(tmp_path: Path) -> None:
@@ -301,7 +333,13 @@ async def test_operation_publishes_renderer_output(
         },
     )()
 
-    async def fake_resolve(*_args: Any, **_kwargs: Any) -> Any:
+    remote = object()
+
+    async def fake_resolve_remote(*_args: Any, **_kwargs: Any) -> Any:
+        return remote
+
+    def fake_finalize(actual_remote: Any, **_kwargs: Any) -> Any:
+        assert actual_remote is remote
         return resolved
 
     def fake_render(_resolved: Any, root: Path, **_kwargs: Any) -> ExportManifest:
@@ -320,7 +358,12 @@ async def test_operation_publishes_renderer_output(
             ),
         )
 
-    monkeypatch.setattr("kitaru.exports.operation.resolve_export", fake_resolve)
+    monkeypatch.setattr(
+        "kitaru.exports.operation.resolve_remote_export", fake_resolve_remote
+    )
+    monkeypatch.setattr(
+        "kitaru.exports.operation.finalize_remote_export", fake_finalize
+    )
     monkeypatch.setattr("kitaru.exports.operation.render_verifiers_v1", fake_render)
     destination = tmp_path / "bundle"
     receipt = await export_experiment(
