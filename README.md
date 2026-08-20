@@ -38,7 +38,7 @@ Your agent has already been tested thousands of times in production. Most of tha
 
 Kitaru turns that history into something you can test:
 
-- **Every run becomes a session.** Wrap your agent once, or import the traces you already collect from Langfuse, LangSmith, Braintrust, or Logfire. Your trace store stays your system of record.
+- **Every run becomes a session.** Wrap your agent once, or import the traces you already collect from Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix. Your trace store stays your system of record.
 - **Replay re-executes your code.** Your real agent runs again, with tool calls answered from the recording, so no card gets refunded twice. An unchanged replay gives you the faithful baseline; a forked replay shows the effect of one change.
 - **Evaluation starts with human judgment.** Your coding assistant reviews the sessions that matter, interviews you against the evidence, and pins your answers to exact trace locations. Those judgments calibrate evaluators, cohorts freeze the population, and experiments replay the cohort against your change before it ships.
 
@@ -75,7 +75,7 @@ git clone https://github.com/zenml-io/kitaru-template
 cd kitaru-template    # its README has the setup and import commands
 ```
 
-Already have an agent in production? [Import its traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) from Langfuse, LangSmith, Braintrust, or Logfire, or [record with an adapter](https://docs.zenml.io/kitaru/adapters/record-in-production): one wrapper, no rewrite.
+Already have an agent in production? [Import its traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) from Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix, or [record with an adapter](https://docs.zenml.io/kitaru/adapters/record-in-production): one wrapper, no rewrite.
 
 **4. Let your assistant drive the loop.** Open the repo in Claude Code, Codex, or Cursor. On the template, take the guided tour:
 
@@ -117,7 +117,7 @@ One server runs on your infrastructure, with Docker image and Helm chart include
 | [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | From an agent in production to your first replay-backed decision |
 | [Set up your coding agent](https://docs.zenml.io/kitaru/getting-started/setup) | Install the MCP server and the agent skills |
 | [Kitaru template](https://github.com/zenml-io/kitaru-template) | A ready agent and checked-in traces to try the method on |
-| [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Langfuse, LangSmith, Braintrust, Logfire, or any format |
+| [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, or any format |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Replay production traffic against a change and gate it in CI |
 | [Deploy Kitaru](https://docs.zenml.io/kitaru/getting-started/deploy) | Self-host for your team |
 

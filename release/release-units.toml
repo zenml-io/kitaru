@@ -119,6 +119,16 @@ tag-prefix = "python/kitaru-openai-agents/v"
 checks = ["plugin package (openai-agents)"]
 
 [[units]]
+slug = "phoenix-importer"
+path = "plugins/packages/phoenix-importer"
+distribution = "kitaru-phoenix-importer"
+registry = "pypi"
+version-source = "plugins/packages/phoenix-importer/pyproject.toml"
+default-catalog = true
+tag-prefix = "python/kitaru-phoenix-importer/v"
+checks = ["plugin package (phoenix-importer)"]
+
+[[units]]
 slug = "pydantic-ai"
 path = "plugins/packages/pydantic-ai"
 distribution = "kitaru-pydantic-ai"

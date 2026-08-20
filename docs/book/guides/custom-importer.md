@@ -5,7 +5,7 @@ icon: puzzle-piece
 
 # No importer for your format
 
-The built-in importers cover [Langfuse](import-langfuse-traces.md), [LangSmith](import-langsmith-traces.md), [Braintrust](import-braintrust-traces.md), [Logfire](import-logfire-traces.md), and the [Kitaru JSONL contract](importing-sessions.md). Any other trace store, or a homegrown logging format, comes in through a custom importer. An importer is small by design: one callable that parses your export bytes into sessions, usually about a page of Python.
+The built-in importers cover [Langfuse](import-langfuse-traces.md), [LangSmith](import-langsmith-traces.md), [Braintrust](import-braintrust-traces.md), [Logfire](import-logfire-traces.md), [Arize Phoenix](import-phoenix-traces.md), and the [Kitaru JSONL contract](importing-sessions.md). Any other trace store, or a homegrown logging format, comes in through a custom importer. An importer is small by design: one callable that parses your export bytes into sessions, usually about a page of Python.
 
 There are two ways to get one, and the fast way is to not write it yourself: the `kitaru-importer-builder` [agent skill](../agent-native/setup.md) turns a representative export into a locally validated importer. It keeps the mapping from source evidence to normalized sessions explicit, so you can see what is preserved, approximated, or unavailable, and it finishes on your machine until you approve registration.
 

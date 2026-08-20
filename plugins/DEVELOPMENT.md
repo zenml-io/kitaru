@@ -93,7 +93,7 @@ docker run --rm kitaru-plugin-e2e:local \
   python -c 'from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS; print(f"definitions={len(DEFAULT_PLUGIN_DEFINITIONS)}"); [print(d.kind.value, d.name, d.requirement, d.entrypoint) for d in DEFAULT_PLUGIN_DEFINITIONS]'
 ```
 
-The current catalog contains five importers and thirteen evaluators. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
+The current catalog contains six importers and thirteen evaluators. Adapter distributions are installed directly by agent projects and are not registered in this catalog.
 
 ## Start the candidate server
 
@@ -258,6 +258,7 @@ Use the package directory and distribution name from this table:
 | `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |
 | `langgraph` | `kitaru-langgraph` | `langgraph-vX.Y.Z` |
 | `logfire-importer` | `kitaru-logfire-importer` | `logfire-importer-vX.Y.Z` |
+| `phoenix-importer` | `kitaru-phoenix-importer` | `python/kitaru-phoenix-importer/vX.Y.Z` |
 | `langsmith-importer` | `kitaru-langsmith-importer` | `langsmith-importer-vX.Y.Z` |
 | `openai-agents` | `kitaru-openai-agents` | `openai-agents-vX.Y.Z` |
 | `pydantic-ai` | `kitaru-pydantic-ai` | `pydantic-ai-vX.Y.Z` |
