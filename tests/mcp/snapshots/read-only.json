@@ -804,6 +804,20 @@
           "title": "CohortVersionResponse",
           "type": "object"
         },
+        "CopyWorkdirHook": {
+          "additionalProperties": false,
+          "description": "Copy workdir hook.",
+          "properties": {
+            "type": {
+              "const": "copy_workdir",
+              "default": "copy_workdir",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "CopyWorkdirHook",
+          "type": "object"
+        },
         "EvaluatorConfig": {
           "additionalProperties": false,
           "description": "Evaluator config.",
@@ -1105,6 +1119,68 @@
             "evaluators"
           ],
           "title": "ExperimentResponse",
+          "type": "object"
+        },
+        "GitCloneHook": {
+          "additionalProperties": false,
+          "description": "Git clone hook.",
+          "properties": {
+            "ref": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Ref checked out after the clone.",
+              "title": "Ref"
+            },
+            "type": {
+              "const": "git_clone",
+              "default": "git_clone",
+              "title": "Type",
+              "type": "string"
+            },
+            "url": {
+              "description": "Repository to clone.",
+              "title": "Url",
+              "type": "string"
+            }
+          },
+          "required": [
+            "url"
+          ],
+          "title": "GitCloneHook",
+          "type": "object"
+        },
+        "GitPushHook": {
+          "additionalProperties": false,
+          "description": "Git push hook.",
+          "properties": {
+            "branch": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Branch pushed to.",
+              "title": "Branch"
+            },
+            "type": {
+              "const": "git_push",
+              "default": "git_push",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "GitPushHook",
           "type": "object"
         },
         "HistoryConfig": {
@@ -1600,6 +1676,32 @@
               "description": "Process environment.",
               "title": "Env",
               "type": "object"
+            },
+            "hooks": {
+              "description": "Hooks run around the task process.",
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "copy_workdir": "#/$defs/CopyWorkdirHook",
+                    "git_clone": "#/$defs/GitCloneHook",
+                    "git_push": "#/$defs/GitPushHook"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/CopyWorkdirHook"
+                  },
+                  {
+                    "$ref": "#/$defs/GitCloneHook"
+                  },
+                  {
+                    "$ref": "#/$defs/GitPushHook"
+                  }
+                ]
+              },
+              "title": "Hooks",
+              "type": "array"
             },
             "secret_ids": {
               "description": "Secrets merged into the process environment.",
