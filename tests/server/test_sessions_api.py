@@ -41,6 +41,7 @@ from conftest import (
     create_session,
     local_settings,
     override_idempotency,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -49,6 +50,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
     get_auth_service,
+    get_auth_session,
     get_evaluation_service,
     get_idempotency_key_repository,
     get_session_node_service,
@@ -862,6 +864,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         replay_repository=FakeReplayRepository(),
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         worker_token = auth_service.issue_worker_token(
@@ -931,6 +934,7 @@ def _build_task_scoped_app(
     app.dependency_overrides[get_idempotency_key_repository] = lambda: (
         FakeIdempotencyKeyRepository()
     )
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 

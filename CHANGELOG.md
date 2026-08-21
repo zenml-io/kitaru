@@ -147,6 +147,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - All API routes moved from the `/v1` prefix to `/api/v1`.
 - The public `zenml-io/kitaru-template` repository is now the sole canonical returns walkthrough; the duplicate in-tree example was removed.
 - Replaced the worker scope `kinds` field with explicit claims that can pin agent task claims to a specific agent version, so agent-specific workers on one server no longer claim each other's tasks. The `--kinds` worker CLI flag is replaced by the repeatable `--claim` flag.
+- API key `last_used` and device `last_login` updates commit when authentication succeeds instead of when the request completes.
 - Added public installation, adapter, replay-boundary, and runnable-example documentation for the TypeScript SDK, Mastra adapter, and Vercel AI SDK adapter.
 
 ### Fixed
@@ -159,6 +160,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 - CLI and MCP investigation creation return the dashboard review page as a `review` link, resolved from the server-stated dashboard URL or, for servers hosting the bundled UI, from the URL the client logged into. If link resolution fails after creation, both preserve the created investigation and return a warning.
 - Standalone replay CLI create, list, and get commands; cohort baseline selection in the CLI and MCP; and native MCP reads for tags and workers plus capability-gated tag lifecycle operations.
+- Endpoints can serve reads from a read replica configured via `KITARU_SERVER_READ_DATABASE_URL` or `KITARU_SERVER_DB_READ_HOST`.
+- Requests to read-replica endpoints are served from the primary database when they carry the `Prefer: consistency=strong` header.
+- The UI session and evaluation-aggregate endpoints serve reads from the read replica when one is configured.
+- Request strongly consistent reads from the Python SDK with `client.with_options(consistency="strong")`.
 - Vercel AI SDK 7 `ToolLoopAgent` support for typed, non-streaming agent generation with Kitaru recording and safe replay boundaries.
 - The server now serves the bundled Kitaru UI at its root URL with SPA fallback. Setting `KITARU_SERVER_EXTERNAL_UI=true` makes it redirect to the configured dashboard URL instead of serving files, and `GET /api/v1/info` reports the served UI version.
 - Every filterable entity list filters by `id`, including `in` over a list of ids.

@@ -27,12 +27,14 @@ from conftest import (
     FakeWorkerRepository,
     asgi_api_client,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.worker import WorkerCreateRequest, WorkerRuntime
 from kitaru.client.exceptions import NotFoundError
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
+    get_auth_session,
     get_worker_service,
 )
 from kitaru.server.api.app import create_app
@@ -87,6 +89,7 @@ async def _registration_app() -> tuple[FastAPI, _CountingWorkerRepository, str]:
         repository=repository, liveness_timeout_seconds=60
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     return app, repository, account_token
 
 

@@ -33,6 +33,7 @@ from conftest import (
     create_worker,
     local_settings,
     mint_worker_token,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import (
@@ -45,7 +46,11 @@ from kitaru.api_models.v1.task import (
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError, ValidationError
 from kitaru.server.adapters.auth.auth_service import AuthService
-from kitaru.server.adapters.rest.dependencies import get_auth_service, get_task_service
+from kitaru.server.adapters.rest.dependencies import (
+    get_auth_service,
+    get_auth_session,
+    get_task_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
@@ -97,6 +102,7 @@ async def api_client(
     app = create_app(local_settings())
     app.dependency_overrides[get_task_service] = lambda: services.task_service
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     client = asgi_api_client(app, api_key=account_token)
     async with client:
         yield client

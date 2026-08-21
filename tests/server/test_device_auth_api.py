@@ -27,11 +27,13 @@ from conftest import (
     FakeDeviceRepository,
     FakePasswordHasher,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_api_key_service,
     get_auth_service,
+    get_auth_session,
     get_device_service,
 )
 from kitaru.server.api.app import create_app
@@ -90,6 +92,7 @@ def build_app(
         device_service=device_service,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     api_key_service = ApiKeyService(repository=api_key_repository)
     app.dependency_overrides[get_api_key_service] = lambda: api_key_service
     return app

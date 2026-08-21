@@ -75,6 +75,8 @@ class Settings(BaseSettings):
     DB_PWD: str = "password"
     DB_NAME: str = "kitaru"
     DATABASE_URL: str | None = None
+    DB_READ_HOST: str | None = None
+    READ_DATABASE_URL: str | None = None
     DB_SSL_MODE: DatabaseSSLMode = DatabaseSSLMode.DISABLE
     DB_SSL_CA: str | None = None
     DB_SSL_CERT: str | None = None

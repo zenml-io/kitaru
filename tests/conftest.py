@@ -31,6 +31,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, NamedTuple, Protocol, TypeVar
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -450,11 +451,14 @@ async def drop_test_database(settings: APISettings) -> None:
 @asynccontextmanager
 async def lifespan_client(
     settings: APISettings,
+    mutate_app: Callable[[FastAPI], None] | None = None,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Run the app through its lifespan on a fresh test database.
 
     Args:
         settings: API server settings.
+        mutate_app: Optional hook to mutate the app before its lifespan
+            starts.
 
     Yields:
         HTTP client routed to the app.
@@ -464,6 +468,8 @@ async def lifespan_client(
     await DatabaseService.create_db(settings)
     try:
         app = create_app(settings)
+        if mutate_app is not None:
+            mutate_app(app)
         async with app.router.lifespan_context(app):
             transport = httpx.ASGITransport(app=app)
             async with httpx.AsyncClient(
@@ -508,6 +514,38 @@ async def pg_session() -> AsyncGenerator[AsyncSession, None]:
     """
     async with pg_session_with_engine() as (session, _):
         yield session
+
+
+def base_asgi_scope(**overrides: Any) -> dict[str, Any]:
+    """Build a minimal ASGI HTTP scope for driving a request by hand.
+
+    Args:
+        **overrides: Additional scope values.
+
+    Returns:
+        Scope dict with sensible defaults for local test requests.
+    """
+    values: dict[str, Any] = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "headers": [],
+        "query_string": b"",
+        "server": ("test", 80),
+        "client": ("test", 123),
+        "root_path": "",
+        **overrides,
+    }
+    return values
+
+
+def stub_auth_session() -> AsyncMock:
+    """Stand in for the auth session in apps that override authentication.
+
+    Returns:
+        Session double accepting the commit issued after authentication.
+    """
+    return AsyncMock()
 
 
 @pytest.fixture

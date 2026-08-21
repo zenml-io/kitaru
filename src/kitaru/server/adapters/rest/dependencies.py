@@ -95,7 +95,10 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
-from kitaru.server.adapters.rest.request_state import attach_request_session
+from kitaru.server.adapters.rest.request_state import (
+    attach_request_session,
+    request_uses_read_engine,
+)
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.interfaces.idempotency_key_repository import (
@@ -169,7 +172,8 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
 
     The session is attached to the request for ``KitaruAPIRoute`` to commit
     before the response is returned. Any exception skips the commit and
-    pending writes roll back when the session closes.
+    pending writes roll back when the session closes. Routes marked with
+    ``read_only`` bind the session to the read-replica engine.
 
     Args:
         request: Incoming request.
@@ -178,9 +182,38 @@ async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
         Session bound to the application database engine.
     """
     database: DatabaseService = request.app.state.database
-    async for session in database.get_async_session():
+    read_only = request_uses_read_engine(request)
+    async for session in database.get_async_session(read_only=read_only):
         attach_request_session(request, session)
         yield session
+
+
+async def get_auth_session(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AsyncGenerator[AsyncSession, None]:
+    """Provide the database session the auth path runs on.
+
+    On most routes this is the shared request session. A ``read_only``
+    route binds the request session to the read-replica engine, so the
+    auth path instead gets its own session on the writer engine here.
+    ``_resolve_auth_context`` commits the session once authentication
+    resolves, and closes it when it is the writer-bound one.
+
+    Args:
+        request: Incoming request.
+        session: Request-scoped database session.
+
+    Yields:
+        The request session, or a writer-bound session scoped to the auth
+        path on a read-only route.
+    """
+    if not request_uses_read_engine(request):
+        yield session
+        return
+    database: DatabaseService = request.app.state.database
+    async for auth_session in database.get_async_session():
+        yield auth_session
 
 
 def get_engine(request: Request) -> AsyncEngine:
@@ -778,24 +811,21 @@ def get_annotation_service(
     )
 
 
-def get_device_service(
-    request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
+def _build_device_service(
+    session: AsyncSession, engine: AsyncEngine, settings: APISettings
 ) -> DeviceService:
-    """Return a device service for the current request.
+    """Build a device service bound to the given session.
 
     Args:
-        request: Incoming request.
-        session: Request-scoped database session.
+        session: Database session backing the device repository.
+        engine: Application database engine.
         settings: API settings for this process.
 
     Returns:
         Device service bound to the SQL repository.
     """
-    database: DatabaseService = request.app.state.database
     return DeviceService(
-        repository=SQLDeviceRepository(session, database.engine),
+        repository=SQLDeviceRepository(session, engine),
         policy=DevicePolicy(
             auth_timeout_seconds=settings.DEVICE_AUTH_TIMEOUT_SECONDS,
             polling_interval_seconds=settings.DEVICE_AUTH_POLLING_INTERVAL_SECONDS,
@@ -804,6 +834,24 @@ def get_device_service(
             trusted_expiration_minutes=settings.TRUSTED_DEVICE_EXPIRATION_MINUTES,
         ),
     )
+
+
+def get_device_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> DeviceService:
+    """Return a device service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        engine: Application database engine.
+        settings: API settings for this process.
+
+    Returns:
+        Device service bound to the SQL repository.
+    """
+    return _build_device_service(session, engine, settings)
 
 
 def get_tag_service(
@@ -862,23 +910,27 @@ def get_idempotency_key_repository(
 
 def get_auth_service(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
-    device_service: Annotated[DeviceService, Depends(get_device_service)],
+    auth_session: Annotated[AsyncSession, Depends(get_auth_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> AuthService:
     """Return an authentication service for the current request.
 
+    Repositories are bound to the auth session so a ``read_only`` route
+    still writes authentication side effects, such as an API key's
+    ``last_used`` timestamp, to the writer engine.
+
     Args:
         request: Incoming request.
-        session: Request-scoped database session.
-        device_service: Device service for the current request.
+        auth_session: Database session the auth path writes through.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
         Authentication service bound to the SQL repositories.
     """
     settings = get_app_settings(request)
-    account_repository = SQLAccountRepository(session)
+    account_repository = SQLAccountRepository(auth_session)
     client: ControlPlaneClient | None = request.app.state.control_plane_client
     control_plane = None
     if client is not None:
@@ -894,9 +946,9 @@ def get_auth_service(
     return AuthService(
         settings=settings,
         account_repository=account_repository,
-        api_key_repository=SQLApiKeyRepository(session),
+        api_key_repository=SQLApiKeyRepository(auth_session),
         password_hasher=BcryptPasswordHasher(),
-        device_service=device_service,
+        device_service=_build_device_service(auth_session, engine, settings),
         control_plane=control_plane,
     )
 
@@ -963,21 +1015,25 @@ def require_local_account_management(
 
 
 async def _resolve_auth_context(
+    request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     credential: Annotated[
         RequestCredential | None, Depends(get_optional_bearer_credential)
     ],
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    auth_session: Annotated[AsyncSession, Depends(get_auth_session)],
 ) -> AsyncGenerator[AuthContext, None]:
     """Resolve a request into its auth context, gating on nothing but validity.
 
     The resolved account is published as the analytics actor for the rest of
-    the request.
+    the request. Auth writes commit once authentication succeeds.
 
     Args:
+        request: Incoming request.
         settings: Service settings governing auth behavior.
         credential: Bearer token plus optional CSRF token.
         auth_service: Authentication service for the current request.
+        auth_session: Database session the auth path runs on.
 
     Raises:
         HTTPException: The credential is missing or invalid.
@@ -987,6 +1043,14 @@ async def _resolve_auth_context(
         Resolved account and principal for use-case calls.
     """
     context = await _authenticate(settings, credential, auth_service)
+    # The credential was used no matter how the rest of the request ends,
+    # so auth writes such as last_used commit here instead of with the
+    # handler's work.
+    await auth_session.commit()
+    if request_uses_read_engine(request):
+        # Nothing after authentication uses the writer-bound auth session.
+        # Close it here so its connection frees before the handler runs.
+        await auth_session.close()
     token = current_actor.set(context.account)
     try:
         yield context

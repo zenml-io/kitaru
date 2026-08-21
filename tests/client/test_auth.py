@@ -24,6 +24,7 @@ from conftest import (
     asgi_api_client,
     create_api_key,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.api_models.v1.auth import (
     API_KEY_PREFIX,
@@ -34,7 +35,7 @@ from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import RenewingTokenAuth, StaticTokenAuth
 from kitaru.client.exceptions import AuthenticationError
 from kitaru.server.adapters.auth.auth_service import AuthService
-from kitaru.server.adapters.rest.dependencies import get_auth_service
+from kitaru.server.adapters.rest.dependencies import get_auth_service, get_auth_session
 from kitaru.server.api.app import create_app
 from kitaru.server.domain.account import Account
 
@@ -76,6 +77,7 @@ async def api_client(
         password_hasher=FakePasswordHasher(),
     )
     app.dependency_overrides[get_auth_service] = lambda: service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     async with asgi_api_client(app) as client:
         yield client
 

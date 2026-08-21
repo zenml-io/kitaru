@@ -31,6 +31,7 @@ from conftest import (
     asgi_api_client,
     control_plane_settings,
     local_settings,
+    stub_auth_session,
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.auth import CredentialStoreTokenSource
@@ -44,7 +45,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneError,
     ControlPlaneUser,
 )
-from kitaru.server.adapters.rest.dependencies import get_auth_service
+from kitaru.server.adapters.rest.dependencies import get_auth_service, get_auth_session
 from kitaru.server.api.app import create_app
 
 CONTROL_PLANE_URL = "https://control-plane.example.com"
@@ -159,6 +160,7 @@ async def api_client(
         ),
     )
     app.dependency_overrides[get_auth_service] = lambda: service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     async with asgi_api_client(app, credential_store=credential_store) as client:
         yield client
 

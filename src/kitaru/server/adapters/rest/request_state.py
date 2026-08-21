@@ -25,6 +25,7 @@ from kitaru.server.application.interfaces.idempotency_key_repository import (
 
 _SESSION_STATE_ATTR = "db_session"
 _IDEMPOTENCY_KEY_HANDLE_STATE_ATTR = "idempotency_key_handle"
+_READ_ONLY_STATE_ATTR = "read_only"
 
 
 class IdempotencyKeyHandle(NamedTuple):
@@ -54,6 +55,27 @@ def get_request_session(request: Request) -> AsyncSession | None:
         Session attached by ``attach_request_session``, or ``None``.
     """
     return getattr(request.state, _SESSION_STATE_ATTR, None)
+
+
+def mark_request_read_only(request: Request) -> None:
+    """Mark the request's database session for routing to the read engine.
+
+    Args:
+        request: Incoming request.
+    """
+    setattr(request.state, _READ_ONLY_STATE_ATTR, True)
+
+
+def request_uses_read_engine(request: Request) -> bool:
+    """Return whether the request's session should bind to the read engine.
+
+    Args:
+        request: Incoming request.
+
+    Returns:
+        Whether ``mark_request_read_only`` marked this request as read-only.
+    """
+    return getattr(request.state, _READ_ONLY_STATE_ATTR, False)
 
 
 def attach_idempotency_key_handle(

@@ -20,31 +20,28 @@ import pytest
 from fastapi import APIRouter, Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.rest.request_state import attach_request_session
-from kitaru.server.adapters.rest.route import KitaruAPIRoute
-
-_SCOPE: dict[str, Any] = {
-    "type": "http",
-    "asgi": {"version": "3.0"},
-    "http_version": "1.1",
-    "headers": [],
-    "query_string": b"",
-    "server": ("test", 80),
-    "client": ("test", 123),
-    "root_path": "",
-}
+from conftest import base_asgi_scope
+from kitaru.server.adapters.rest.request_state import (
+    attach_request_session,
+    request_uses_read_engine,
+)
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
 
 
 class _RecordingSession:
     """Fake session recording commits into a shared event list."""
 
-    def __init__(self, events: list[str]) -> None:
-        """Record commits into the given event list.
+    def __init__(self, events: list[str], new: bool = False) -> None:
+        """Record commits into the given event list, optionally starting dirty.
 
         Args:
             events: Shared list commit and send events are appended to.
+            new: Whether the session should report a pending new object.
         """
         self.events = events
+        self.new = {object()} if new else set()
+        self.dirty: set[object] = set()
+        self.deleted: set[object] = set()
 
     async def commit(self) -> None:
         """Record a commit event."""
@@ -95,7 +92,7 @@ async def test_route_commits_before_response_is_sent() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {**_SCOPE, "method": "POST", "path": "/items", "raw_path": b"/items"}
+    scope = base_asgi_scope(method="POST", path="/items", raw_path=b"/items")
     receive, send = _drive(scope, events)
     await app(scope, receive, send)
 
@@ -118,7 +115,7 @@ async def test_route_skips_commit_on_exception() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {**_SCOPE, "method": "GET", "path": "/boom", "raw_path": b"/boom"}
+    scope = base_asgi_scope(method="GET", path="/boom", raw_path=b"/boom")
     receive, send = _drive(scope, events)
     with pytest.raises(RuntimeError):
         await app(scope, receive, send)
@@ -138,13 +135,211 @@ async def test_route_without_session_returns_response() -> None:
     app = FastAPI()
     app.include_router(router)
 
-    scope = {
-        **_SCOPE,
-        "method": "GET",
-        "path": "/no-session",
-        "raw_path": b"/no-session",
-    }
+    scope = base_asgi_scope(method="GET", path="/no-session", raw_path=b"/no-session")
     receive, send = _drive(scope, events)
     await app(scope, receive, send)
 
     assert events == ["response_sent"]
+
+
+async def test_route_marks_request_state_for_a_read_only_endpoint() -> None:
+    """KitaruAPIRoute exposes the read-only flag before the handler runs."""
+    seen: list[bool] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def probe_dependency(request: Request) -> None:
+        seen.append(request_uses_read_engine(request))
+
+    @router.get("/read-only", dependencies=[Depends(probe_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @router.get("/normal", dependencies=[Depends(probe_dependency)])
+    async def normal_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    for path in ("/read-only", "/normal"):
+        scope = base_asgi_scope(method="GET", path=path, raw_path=path.encode())
+        receive, send = _drive(scope, events)
+        await app(scope, receive, send)
+
+    assert seen == [True, False]
+
+
+async def test_route_raises_when_a_read_only_route_has_pending_writes() -> None:
+    """A read-only route that dirties its session fails instead of committing."""
+    events: list[str] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
+        attach_request_session(
+            request, cast(AsyncSession, _RecordingSession(events, new=True))
+        )
+        yield
+
+    @router.get("/read-only", dependencies=[Depends(session_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    scope = base_asgi_scope(method="GET", path="/read-only", raw_path=b"/read-only")
+    receive, send = _drive(scope, events)
+    with pytest.raises(RuntimeError, match="pending database writes"):
+        await app(scope, receive, send)
+
+    assert "committed" not in events
+
+
+async def test_route_commits_pending_writes_on_an_unmarked_route() -> None:
+    """The pending-writes guard only applies to routes marked read-only."""
+    events: list[str] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def session_dependency(request: Request) -> AsyncGenerator[None, None]:
+        attach_request_session(
+            request, cast(AsyncSession, _RecordingSession(events, new=True))
+        )
+        yield
+
+    @router.get("/normal", dependencies=[Depends(session_dependency)])
+    async def normal_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    scope = base_asgi_scope(method="GET", path="/normal", raw_path=b"/normal")
+    receive, send = _drive(scope, events)
+    await app(scope, receive, send)
+
+    assert events == ["committed", "response_sent"]
+
+
+def _drive_with_headers(
+    scope: dict[str, Any], events: list[str], response_headers: dict[str, str]
+) -> Any:
+    """Build receive/send callables that also capture response headers.
+
+    Args:
+        scope: ASGI scope for the request.
+        events: Shared list commit and send events are appended to.
+        response_headers: Dict response headers are recorded into.
+
+    Returns:
+        Receive and send ASGI callables.
+    """
+    receive, send = _drive(scope, events)
+
+    async def send_capturing(message: dict[str, Any]) -> None:
+        if message["type"] == "http.response.start":
+            for name, value in message.get("headers", []):
+                response_headers[name.decode().lower()] = value.decode()
+        await send(message)
+
+    return receive, send_capturing
+
+
+@pytest.mark.parametrize(
+    "prefer",
+    [
+        "consistency=strong",
+        'respond-async, Consistency="Strong"',
+        "consistency = strong; wait=10",
+    ],
+)
+async def test_route_serves_strong_consistency_from_the_primary(
+    prefer: str,
+) -> None:
+    """A strong consistency preference keeps a read-only route on the primary."""
+    seen: list[bool] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def probe_dependency(request: Request) -> None:
+        seen.append(request_uses_read_engine(request))
+
+    @router.get("/read-only", dependencies=[Depends(probe_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    response_headers: dict[str, str] = {}
+    scope = base_asgi_scope(
+        method="GET",
+        path="/read-only",
+        raw_path=b"/read-only",
+        headers=[(b"prefer", prefer.encode())],
+    )
+    receive, send = _drive_with_headers(scope, events, response_headers)
+    await app(scope, receive, send)
+
+    assert seen == [False]
+    assert response_headers["preference-applied"] == "consistency=strong"
+
+
+@pytest.mark.parametrize("prefer", ["consistency=eventual", "respond-async"])
+async def test_route_ignores_other_preferences(prefer: str) -> None:
+    """A read-only route stays on the read engine for other preferences."""
+    seen: list[bool] = []
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    async def probe_dependency(request: Request) -> None:
+        seen.append(request_uses_read_engine(request))
+
+    @router.get("/read-only", dependencies=[Depends(probe_dependency)])
+    @read_only
+    async def read_only_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    response_headers: dict[str, str] = {}
+    scope = base_asgi_scope(
+        method="GET",
+        path="/read-only",
+        raw_path=b"/read-only",
+        headers=[(b"prefer", prefer.encode())],
+    )
+    receive, send = _drive_with_headers(scope, events, response_headers)
+    await app(scope, receive, send)
+
+    assert seen == [True]
+    assert "preference-applied" not in response_headers
+
+
+async def test_route_confirms_strong_consistency_on_an_unmarked_route() -> None:
+    """An unmarked route confirms the strong consistency preference."""
+    router = APIRouter(route_class=KitaruAPIRoute)
+
+    @router.get("/normal")
+    async def normal_endpoint() -> dict[str, str]:
+        return {"status": "ok"}
+
+    app = FastAPI()
+    app.include_router(router)
+
+    events: list[str] = []
+    response_headers: dict[str, str] = {}
+    scope = base_asgi_scope(
+        method="GET",
+        path="/normal",
+        raw_path=b"/normal",
+        headers=[(b"prefer", b"consistency=strong")],
+    )
+    receive, send = _drive_with_headers(scope, events, response_headers)
+    await app(scope, receive, send)
+
+    assert response_headers["preference-applied"] == "consistency=strong"

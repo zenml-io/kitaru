@@ -17,7 +17,7 @@ import copy
 import os
 from collections.abc import AsyncIterable
 from types import TracebackType
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 
@@ -110,6 +110,8 @@ class KitaruAPIClient:
 
         self._base_url = base_url
         self._owns_transport = True
+        self._owns_auth = True
+        self._request_headers: dict[str, str] = {}
         identification = format_client_header(analytics_source)
         headers = {"User-Agent": identification, CLIENT_HEADER: identification}
         if skill := os.environ.get("KITARU_ACTIVE_SKILL"):
@@ -212,6 +214,34 @@ class KitaruAPIClient:
         view = copy.copy(self)
         view._auth = auth
         view._owns_transport = False
+        view._owns_auth = True
+        view._bind_resources()
+        return view
+
+    def with_options(
+        self, consistency: Literal["strong"] | None = None
+    ) -> "KitaruAPIClient":
+        """Return a view of this client with request options applied.
+
+        The view shares this client's HTTP transport and auth flow, and
+        closing it leaves both open.
+
+        Args:
+            consistency: ``strong`` sends ``Prefer: consistency=strong`` on
+                every request, so endpoints that serve reads from a replica
+                serve the view from the primary database.
+
+        Returns:
+            Client view with the options applied.
+        """
+        view = copy.copy(self)
+        if consistency == "strong":
+            view._request_headers = {
+                **self._request_headers,
+                "Prefer": "consistency=strong",
+            }
+        view._owns_transport = False
+        view._owns_auth = False
         view._bind_resources()
         return view
 
@@ -253,6 +283,8 @@ class KitaruAPIClient:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
+        if self._request_headers:
+            headers = {**self._request_headers, **(headers or {})}
         response = await self._http.request(
             method,
             path,
@@ -275,8 +307,8 @@ class KitaruAPIClient:
         return response
 
     async def close(self) -> None:
-        """Close the auth flow, and the HTTP transport when this client owns it."""
-        if self._auth is not None:
+        """Close the auth flow and HTTP transport this client owns."""
+        if self._auth is not None and self._owns_auth:
             await self._auth.close()
         if self._owns_transport:
             await self._http.aclose()

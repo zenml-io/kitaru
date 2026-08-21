@@ -38,11 +38,13 @@ from conftest import (
     create_worker,
     local_settings,
     mint_worker_token,
+    stub_auth_session,
 )
 from kitaru.headers import CLIENT_HEADER
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
+    get_auth_session,
     get_task_service,
     get_worker_service,
 )
@@ -126,6 +128,7 @@ async def client(
     app.dependency_overrides[get_worker_service] = lambda: service
     app.dependency_overrides[get_task_service] = lambda: task_service
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_auth_session] = stub_auth_session
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(
         transport=transport,
