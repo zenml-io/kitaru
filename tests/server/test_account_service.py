@@ -741,8 +741,8 @@ async def test_ensure_account_identifies_the_account() -> None:
     ]
 
 
-async def test_ensure_account_identifies_an_existing_account() -> None:
-    """Identify the default account again when it already exists."""
+async def test_ensure_account_does_not_identify_an_existing_account() -> None:
+    """Leave the default account unidentified when it already exists."""
     analytics = _RecordingAnalytics()
     repository = FakeAccountRepository()
     await repository.create(Account(name="admin", is_admin=True))
@@ -753,12 +753,9 @@ async def test_ensure_account_identifies_an_existing_account() -> None:
         analytics=analytics,
     )
 
-    account = await service.ensure_account("admin", "secret")
+    await service.ensure_account("admin", "secret")
 
-    assert len(analytics.identified) == 1
-    user_id, traits = analytics.identified[0]
-    assert user_id == account.id
-    assert traits["account_origin"] == "bootstrap"
+    assert analytics.identified == []
     assert analytics.tracked == []
 
 

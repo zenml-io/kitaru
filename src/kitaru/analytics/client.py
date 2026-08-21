@@ -99,7 +99,7 @@ class AnalyticsClient:
         self._closed = False
 
     def set_context(self, context: dict[str, Any]) -> None:
-        """Set the context merged into every track message.
+        """Set the context merged into outgoing messages.
 
         Args:
             context: Values merged into event properties.
@@ -144,8 +144,11 @@ class AnalyticsClient:
             user_id: User ID.
             traits: User traits.
         """
+        traits = dict(traits or {})
+        if (server_id := self._context.get("server_id")) is not None:
+            traits["server_id"] = server_id
         self._enqueue(
-            IdentifyMessage(user_id=user_id, traits=traits or {}, debug=self._debug)
+            IdentifyMessage(user_id=user_id, traits=traits, debug=self._debug)
         )
 
     def alias(self, user_id: UUID, previous_id: UUID) -> None:

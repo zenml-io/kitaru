@@ -453,6 +453,7 @@ async def test_authenticate_new_account_identifies_and_aliases(
         "is_service_account": False,
         "account_origin": "control_plane",
         "email": user.email,
+        "control_plane_user_id": user.id,
     }
     assert analytics.tracked == [
         (

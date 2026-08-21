@@ -135,8 +135,8 @@ async def test_send_failure_is_swallowed() -> None:
     await client.aclose()
 
 
-async def test_set_context_merges_into_tracks_only() -> None:
-    """Merge the context into track properties and leave identify traits alone."""
+async def test_set_context_merges_into_tracks_and_the_identify_server_id() -> None:
+    """Merge the context into track properties and only the server id into traits."""
     client = AnalyticsClient()
     requests = record_requests(client)
     server_id = uuid.uuid4()
@@ -152,4 +152,19 @@ async def test_set_context_merges_into_tracks_only() -> None:
         "server_id": str(server_id),
         "environment": "docker",
     }
+    assert identify["traits"] == {
+        "email": "alice@example.com",
+        "server_id": str(server_id),
+    }
+
+
+async def test_identify_without_context_omits_the_server_id() -> None:
+    """Leave the server id out of the traits when no context is set."""
+    client = AnalyticsClient()
+    requests = record_requests(client)
+
+    client.identify(uuid.uuid4(), {"email": "alice@example.com"})
+    await client.aclose()
+
+    (identify,) = json.loads(requests[0].content)
     assert identify["traits"] == {"email": "alice@example.com"}
