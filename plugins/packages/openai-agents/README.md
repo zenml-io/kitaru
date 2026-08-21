@@ -31,3 +31,13 @@ print(result.final_output)
 ```
 
 `KitaruRunner.run()` and `KitaruRunner.run_sync()` accept the same run arguments as the OpenAI Agents SDK `Runner`. Kitaru workers provide task, replay, and authentication context through the standard task environment.
+
+The adapter supports bounded replay of non-streaming runs. See the [OpenAI Agents SDK adapter guide](https://docs.zenml.io/kitaru/adapters/openai-agents) for supported overrides and tool policies, capture limits, approval and resume boundaries, and recording-failure behavior.
+
+## Links
+
+- [Kitaru documentation](https://docs.zenml.io/kitaru)
+- [Source code](https://github.com/zenml-io/kitaru)
+- [Issue tracker](https://github.com/zenml-io/kitaru/issues)
+
+Licensed under Apache-2.0.

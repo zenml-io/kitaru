@@ -56,16 +56,18 @@ def release_repo(tmp_path: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
 
-    for manifest in (REPO_ROOT / "plugins" / "packages").glob("*/pyproject.toml"):
-        relative_path = manifest.relative_to(REPO_ROOT)
-        destination = tmp_path / relative_path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(manifest, destination)
+    for project in (REPO_ROOT / "plugins" / "packages").iterdir():
+        for filename in ("pyproject.toml", "README.md"):
+            source = project / filename
+            relative_path = source.relative_to(REPO_ROOT)
+            destination = tmp_path / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
 
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
+def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -282,6 +284,64 @@ def test_inventory_rejects_a_missing_plugin_project(release_repo: Path) -> None:
         load_inventory(release_repo)
 
 
+def test_inventory_rejects_plugin_metadata_without_a_readme(
+    release_repo: Path,
+) -> None:
+    manifest = (
+        release_repo / "plugins" / "packages" / "langfuse-importer" / "pyproject.toml"
+    )
+    manifest.write_text(manifest.read_text().replace('readme = "README.md"\n', ""))
+
+    with pytest.raises(ReleaseInventoryError, match="readme must be"):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_plugin_metadata_with_a_missing_readme_file(
+    release_repo: Path,
+) -> None:
+    readme = release_repo / "plugins" / "packages" / "langfuse-importer" / "README.md"
+    readme.unlink()
+
+    with pytest.raises(ReleaseInventoryError, match="non-empty file"):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_plugin_metadata_without_project_urls(
+    release_repo: Path,
+) -> None:
+    manifest = (
+        release_repo / "plugins" / "packages" / "langfuse-importer" / "pyproject.toml"
+    )
+    manifest.write_text(
+        manifest.read_text().replace(
+            'Documentation = "https://docs.zenml.io/kitaru/guides/import-langfuse-traces"\n',
+            "",
+        )
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError, match="missing project URL: Documentation"
+    ):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_plugin_metadata_without_keywords(
+    release_repo: Path,
+) -> None:
+    manifest = (
+        release_repo / "plugins" / "packages" / "langfuse-importer" / "pyproject.toml"
+    )
+    manifest.write_text(
+        manifest.read_text().replace(
+            'keywords = ["ai-agents", "kitaru", "langfuse", "observability", "traces"]',
+            "keywords = []",
+        )
+    )
+
+    with pytest.raises(ReleaseInventoryError, match="keywords must not be empty"):
+        load_inventory(release_repo)
+
+
 def test_inventory_rejects_an_adapter_in_the_default_catalog(
     release_repo: Path,
 ) -> None:
@@ -314,7 +374,7 @@ def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     assert all(unit.distribution in text_output for unit in inventory.units)
 
 
-def test_plugin_matrix_is_generated_from_the_nine_plugin_units() -> None:
+def test_plugin_matrix_is_generated_from_the_ten_plugin_units() -> None:
     matrix = build_plugin_matrix(load_inventory())
 
     assert matrix == {
@@ -338,6 +398,21 @@ def test_plugin_release_workflow_resolves_plugin_tags_from_the_inventory() -> No
     assert "scripts/release_ui.py --version" not in workflow
     assert "uv version" not in workflow
     assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
+
+
+def test_plugin_release_workflow_validates_wheel_metadata_before_publish() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+    build_job = workflow.split("\n  publish-python:\n", maxsplit=1)[0]
+
+    build_step = build_job.index("      - name: Build plugin\n")
+    metadata_step = build_job.index("      - name: Validate distribution metadata\n")
+    checksum_step = build_job.index("      - name: Record artifact checksums\n")
+
+    assert build_step < metadata_step < checksum_step
+    assert "scripts/smoke_plugin_artifacts.py" in build_job
+    assert '--validate-wheel "$wheel"' in build_job
+    assert '--distribution "$DISTRIBUTION"' in build_job
+    assert '--version "$VERSION"' in build_job
 
 
 def test_python_release_workflow_can_resume_after_partial_publication() -> None:

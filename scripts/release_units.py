@@ -19,6 +19,9 @@ PACKAGE_TAG_PATTERN = re.compile(
     r"python/(?P<distribution>[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)/v(?P<version>[^/]+)"
 )
 SLUG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+REQUIRED_PLUGIN_PROJECT_URLS = frozenset(
+    {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
+)
 
 
 class ReleaseInventoryError(ValueError):
@@ -146,7 +149,7 @@ def _resolve_repo_path(repo_root: Path, value: str, context: str) -> Path:
 
 def _parse_manifest(
     repo_root: Path, project_path: Path, version_source: str, context: str
-) -> tuple[str, str]:
+) -> tuple[str, str, dict[str, Any]]:
     manifest_path = _resolve_repo_path(repo_root, version_source, context)
     if not manifest_path.is_relative_to(project_path):
         raise ReleaseInventoryError(f"{context}: version source is outside the project")
@@ -156,7 +159,64 @@ def _parse_manifest(
         raise ReleaseInventoryError(f"{context}: version source has no [project] table")
     name = _get_string(project, "name", context)
     version = validate_version(_get_string(project, "version", context))
-    return name, version
+    return name, version, project
+
+
+def _validate_plugin_project_metadata(
+    project_path: Path, project: dict[str, Any], context: str
+) -> None:
+    """Require the metadata rendered on each plugin's PyPI page."""
+    _get_string(project, "description", context)
+    if _get_string(project, "license", context) != "Apache-2.0":
+        raise ReleaseInventoryError(f"{context}: license must be Apache-2.0")
+
+    readme_value = _get_string(project, "readme", context)
+    readme_path = Path(readme_value)
+    if readme_path.is_absolute():
+        raise ReleaseInventoryError(f"{context}: readme must be project-relative")
+    resolved_readme = (project_path / readme_path).resolve()
+    if not resolved_readme.is_relative_to(project_path.resolve()):
+        raise ReleaseInventoryError(f"{context}: readme escapes the project")
+    if not resolved_readme.is_file() or not resolved_readme.read_text().strip():
+        raise ReleaseInventoryError(
+            f"{context}: readme must reference a non-empty file"
+        )
+
+    authors = project.get("authors")
+    if not isinstance(authors, list) or not authors:
+        raise ReleaseInventoryError(f"{context}: authors must be a non-empty list")
+    for author in authors:
+        if not isinstance(author, dict):
+            raise ReleaseInventoryError(f"{context}: each author must be a table")
+        _get_string(author, "name", f"{context} author")
+        _get_string(author, "email", f"{context} author")
+
+    for key in ("classifiers", "keywords"):
+        values = _get_string_list(project, key, context)
+        if not values:
+            raise ReleaseInventoryError(f"{context}: {key} must not be empty")
+        if any(value != value.strip() for value in values):
+            raise ReleaseInventoryError(
+                f"{context}: {key} values must not contain outer whitespace"
+            )
+
+    urls = project.get("urls")
+    if not isinstance(urls, dict):
+        raise ReleaseInventoryError(f"{context}: [project.urls] must be a table")
+    missing_urls = sorted(REQUIRED_PLUGIN_PROJECT_URLS - urls.keys())
+    if missing_urls:
+        raise ReleaseInventoryError(
+            f"{context}: missing project URL: {missing_urls[0]}"
+        )
+    for label, value in urls.items():
+        if not isinstance(label, str) or not label:
+            raise ReleaseInventoryError(
+                f"{context}: project URL labels must be non-empty strings"
+            )
+        if not isinstance(value, str) or not value.startswith("https://"):
+            raise ReleaseInventoryError(
+                f"{context}: project URL {label} must be an HTTPS URL"
+            )
 
 
 def _parse_requirement(value: str, context: str) -> Requirement:
@@ -328,13 +388,17 @@ def load_inventory(
         if registry != "pypi":
             raise ReleaseInventoryError(f"{context}: unsupported registry {registry}")
         version_source = _get_string(raw_unit, "version-source", context)
-        manifest_name, version = _parse_manifest(
+        manifest_name, version, project_metadata = _parse_manifest(
             root, resolved_project, version_source, context
         )
         if manifest_name != distribution:
             raise ReleaseInventoryError(
                 f"{context}: manifest name {manifest_name} does not match "
                 f"{distribution}"
+            )
+        if slug != "kitaru":
+            _validate_plugin_project_metadata(
+                resolved_project, project_metadata, context
             )
 
         default_catalog = raw_unit.get("default-catalog")

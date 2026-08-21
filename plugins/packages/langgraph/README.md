@@ -33,3 +33,13 @@ print(result)
 ```
 
 Wrap an existing compiled graph directly with `KitaruGraphRunner(graph)` when you build the graph yourself. The runner accepts the same invocation arguments as the wrapped runnable. Kitaru workers provide task, replay, and authentication context through the standard task environment.
+
+Replay support depends on how the graph was constructed. See the [LangGraph adapter guide and capability matrix](https://docs.zenml.io/kitaru/adapters/langgraph) for supported invocation methods, overrides, tool policies, interrupts, and failure behavior.
+
+## Links
+
+- [Kitaru documentation](https://docs.zenml.io/kitaru)
+- [Source code](https://github.com/zenml-io/kitaru)
+- [Issue tracker](https://github.com/zenml-io/kitaru/issues)
+
+Licensed under Apache-2.0.

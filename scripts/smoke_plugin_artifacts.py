@@ -9,7 +9,10 @@ import subprocess
 import sys
 import tempfile
 import tomllib
+from email.parser import BytesParser
+from email.policy import default
 from pathlib import Path
+from zipfile import BadZipFile, ZipFile
 
 _SUBPROCESS_TIMEOUT_SECONDS = 300
 _SCRUBBED_ENVIRONMENT_VARIABLES = {
@@ -24,6 +27,9 @@ _SCRUBBED_ENVIRONMENT_VARIABLES = {
     "VIRTUAL_ENV",
     "VIRTUAL_ENV_PROMPT",
 }
+_REQUIRED_PROJECT_URLS = frozenset(
+    {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
+)
 
 
 class SmokeFailure(RuntimeError):
@@ -162,6 +168,58 @@ def _find_wheel(directory: Path, name: str, version: str) -> Path:
             f"Expected one wheel for {name}=={version}, found {len(matches)}"
         )
     return matches[0].resolve()
+
+
+def _validate_wheel_metadata(wheel: Path, name: str, version: str) -> None:
+    """Require the metadata that PyPI renders for one plugin wheel."""
+    try:
+        with ZipFile(wheel) as archive:
+            metadata_files = [
+                path
+                for path in archive.namelist()
+                if path.endswith(".dist-info/METADATA")
+            ]
+            if len(metadata_files) != 1:
+                raise SmokeFailure(
+                    f"{name}=={version}: expected one wheel METADATA file, "
+                    f"found {len(metadata_files)}"
+                )
+            message = BytesParser(policy=default).parsebytes(
+                archive.read(metadata_files[0])
+            )
+    except (BadZipFile, OSError) as error:
+        raise SmokeFailure(f"{name}=={version}: invalid wheel: {error}") from error
+
+    required_headers = {
+        "Name": name,
+        "Version": version,
+        "Description-Content-Type": "text/markdown",
+        "License-Expression": "Apache-2.0",
+    }
+    for header, expected in required_headers.items():
+        if message.get(header) != expected:
+            raise SmokeFailure(f"{name}=={version}: {header} must be {expected!r}")
+
+    for header in ("Summary", "Author-email", "Keywords"):
+        value = message.get(header)
+        if value is None or not str(value).strip():
+            raise SmokeFailure(f"{name}=={version}: missing {header}")
+    if not message.get_all("Classifier"):
+        raise SmokeFailure(f"{name}=={version}: missing Classifier")
+
+    payload = message.get_payload()
+    if not isinstance(payload, str) or not payload.strip():
+        raise SmokeFailure(f"{name}=={version}: wheel description is empty")
+
+    project_urls: set[str] = set()
+    for value in message.get_all("Project-URL", []):
+        label, separator, url = str(value).partition(",")
+        if not separator or not label.strip() or not url.strip().startswith("https://"):
+            raise SmokeFailure(f"{name}=={version}: invalid Project-URL {value!r}")
+        project_urls.add(label.strip())
+    missing_urls = sorted(_REQUIRED_PROJECT_URLS - project_urls)
+    if missing_urls:
+        raise SmokeFailure(f"{name}=={version}: missing Project-URL {missing_urls[0]}")
 
 
 def _build_wheel(
@@ -318,6 +376,19 @@ def main() -> int:
     """Build plugin wheels and validate their installed contracts."""
     parser = argparse.ArgumentParser()
     parser.add_argument(
+        "--validate-wheel",
+        type=Path,
+        help="Validate one existing plugin wheel and exit.",
+    )
+    parser.add_argument(
+        "--distribution",
+        help="Expected distribution name for --validate-wheel.",
+    )
+    parser.add_argument(
+        "--version",
+        help="Expected distribution version for --validate-wheel.",
+    )
+    parser.add_argument(
         "--package",
         action="append",
         default=[],
@@ -336,6 +407,24 @@ def main() -> int:
         help="Existing Kitaru wheel or directory containing one candidate wheel.",
     )
     arguments = parser.parse_args()
+
+    if arguments.validate_wheel is not None:
+        if arguments.distribution is None or arguments.version is None:
+            parser.error("--validate-wheel requires --distribution and --version")
+        try:
+            _validate_wheel_metadata(
+                arguments.validate_wheel,
+                arguments.distribution,
+                arguments.version,
+            )
+        except SmokeFailure as error:
+            print(f"Plugin artifact smoke failed: {error}", file=sys.stderr)
+            return 1
+        print(
+            "Validated plugin wheel metadata: "
+            f"{arguments.distribution}=={arguments.version}"
+        )
+        return 0
 
     uv = shutil.which("uv")
     if uv is None:
@@ -380,11 +469,11 @@ def main() -> int:
                     raise SmokeFailure(
                         f"{name}=={version} is not pinned in default-requirements.txt"
                     )
-                plugin_wheels.append(
-                    _build_wheel(
-                        uv, repository, project, candidate_directory, environment
-                    )
+                wheel = _build_wheel(
+                    uv, repository, project, candidate_directory, environment
                 )
+                _validate_wheel_metadata(wheel, name, version)
+                plugin_wheels.append(wheel)
                 if requirement is not None:
                     requirements.append(requirement)
                 if import_module is not None:
