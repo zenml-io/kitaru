@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.hook import TaskHook
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.api_models.v1.task import (
@@ -99,6 +100,7 @@ def make_agent_spec(
     secret_env: dict[str, str] | None = None,
     working_dir: str | None = None,
     replay_id: uuid.UUID | None = None,
+    hooks: list[TaskHook] | None = None,
 ) -> TaskSpecResponse:
     """Build an agent task spec.
 
@@ -112,6 +114,7 @@ def make_agent_spec(
         secret_env: Secrets merged into the process environment.
         working_dir: Working directory.
         replay_id: Replay the task runs for.
+        hooks: Hooks run around the task process.
 
     Returns:
         Agent task spec.
@@ -123,6 +126,7 @@ def make_agent_spec(
         run=TaskRunSpec(command=command, working_dir=working_dir, env=run_env or {}),
         env=extra_env or {},
         secret_env=secret_env or {},
+        hooks=hooks or [],
         details=AgentTaskDetails(inputs=inputs, replay_id=replay_id),
     )
 

@@ -4378,6 +4378,17 @@ export interface components {
             display_version?: string | null;
         };
         /**
+         * CopyWorkdirHook
+         * @description Copy workdir hook.
+         */
+        CopyWorkdirHook: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "copy_workdir";
+        };
+        /**
          * DeviceAuthorizationResponse
          * @description Device authorization response.
          */
@@ -5270,6 +5281,43 @@ export interface components {
          * @enum {string}
          */
         FilterOp: "eq" | "ne" | "lt" | "le" | "gt" | "ge" | "in" | "is_null" | "startswith" | "endswith" | "contains";
+        /**
+         * GitCloneHook
+         * @description Git clone hook.
+         */
+        GitCloneHook: {
+            /**
+             * Ref
+             * @description Ref checked out after the clone.
+             */
+            ref?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "git_clone";
+            /**
+             * Url
+             * @description Repository to clone.
+             */
+            url: string;
+        };
+        /**
+         * GitPushHook
+         * @description Git push hook.
+         */
+        GitPushHook: {
+            /**
+             * Branch
+             * @description Branch pushed to.
+             */
+            branch?: string | null;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "git_push";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -6571,6 +6619,11 @@ export interface components {
             env?: {
                 [key: string]: string;
             };
+            /**
+             * Hooks
+             * @description Hooks run around the task process.
+             */
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["GitCloneHook"] | components["schemas"]["GitPushHook"])[];
             /**
              * Secret Ids
              * @description Secrets merged into the process environment.
@@ -7980,6 +8033,11 @@ export interface components {
             env: {
                 [key: string]: string;
             };
+            /**
+             * Hooks
+             * @description Hooks run around the task process.
+             */
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["GitCloneHook"] | components["schemas"]["GitPushHook"])[];
             /** @description Kind of work the task runs. */
             kind: components["schemas"]["TaskKind"];
             /** @description Command to run, unset for evaluator and importer tasks. */

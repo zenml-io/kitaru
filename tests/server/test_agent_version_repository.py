@@ -33,6 +33,7 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.session import SessionOrigin
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.encryption import AesGcmCipher
+from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -79,6 +80,7 @@ from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.hook import CopyWorkdirHook, GitCloneHook, GitPushHook
 from kitaru.server.domain.replay_config import (
     PassthroughConfig,
     ReplayConfig,
@@ -300,6 +302,43 @@ async def test_create_with_run_spec_and_secret_order(setup: Setup) -> None:
     assert loaded.run_spec.secret_ids == secret_ids
 
 
+async def test_create_with_run_spec_hooks(setup: Setup) -> None:
+    """Round-trip a run spec's hooks, preserving each variant and its fields."""
+    repository, owner_id, agent_id, _, _, _, _, _ = setup
+    hooks = [
+        CopyWorkdirHook(),
+        GitCloneHook(url="https://example.com/repo.git", ref="main"),
+        GitPushHook(branch="results"),
+    ]
+    version = await repository.create(
+        AgentVersion(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            run_spec=RunSpec(command="run.sh", hooks=hooks),
+        )
+    )
+    assert version.run_spec is not None
+    assert version.run_spec.hooks == hooks
+    loaded = await repository.get(version.id)
+    assert loaded.run_spec is not None
+    assert loaded.run_spec.hooks == hooks
+
+
+async def test_create_with_run_spec_without_hooks(setup: Setup) -> None:
+    """Read back an empty hooks list for a run spec created without hooks."""
+    repository, owner_id, agent_id, _, _, _, _, _ = setup
+    version = await repository.create(
+        AgentVersion(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            run_spec=RunSpec(command="run.sh"),
+        )
+    )
+    loaded = await repository.get(version.id)
+    assert loaded.run_spec is not None
+    assert loaded.run_spec.hooks == []
+
+
 async def test_create_with_unknown_secret_id_rejected() -> None:
     """Reject a run spec that references a secret that does not exist."""
     if not await postgres_available():
@@ -318,6 +357,32 @@ async def test_create_with_unknown_secret_id_rejected() -> None:
                     run_spec=RunSpec(command="run.sh", secret_ids=[uuid.uuid4()]),
                 )
             )
+
+
+async def test_null_run_hooks_column_reads_back_empty() -> None:
+    """Read back an empty hooks list from a row stored before the hooks column."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name=f"agent-{uuid.uuid4().hex[:8]}")
+        )
+        repository = SQLAgentVersionRepository(session)
+        created = await repository.create(
+            AgentVersion(
+                owner_id=owner.id,
+                agent_id=agent.id,
+                run_spec=RunSpec(command="run.sh"),
+            )
+        )
+        row = await session.get(AgentVersionORM, created.id)
+        assert row is not None
+        row.run_hooks = None
+        await session.flush()
+        loaded = await repository.get(created.id)
+        assert loaded.run_spec is not None
+        assert loaded.run_spec.hooks == []
 
 
 async def test_get(setup: Setup) -> None:
@@ -457,6 +522,30 @@ async def test_update_replaces_run_spec_and_secret_links(setup: Setup) -> None:
     loaded = await repository.get(created.id)
     assert loaded.run_spec is not None
     assert loaded.run_spec.secret_ids == new_secret_ids
+
+
+async def test_update_replaces_run_spec_hooks(setup: Setup) -> None:
+    """Replace the run spec's hooks on update."""
+    repository, owner_id, agent_id, _, _, _, _, _ = setup
+    created = await repository.create(
+        AgentVersion(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            run_spec=RunSpec(command="run.sh", hooks=[CopyWorkdirHook()]),
+        )
+    )
+    new_hooks = [
+        GitCloneHook(url="https://example.com/repo.git", ref="main"),
+        GitPushHook(branch="results"),
+    ]
+    created.update_run_spec(RunSpec(command="run.sh", hooks=new_hooks))
+    updated = await repository.update(created)
+    assert updated.run_spec is not None
+    assert updated.run_spec.hooks == new_hooks
+
+    loaded = await repository.get(created.id)
+    assert loaded.run_spec is not None
+    assert loaded.run_spec.hooks == new_hooks
 
 
 async def test_update_clears_run_spec_and_secret_links(setup: Setup) -> None:
