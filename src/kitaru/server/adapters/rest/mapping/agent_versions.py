@@ -25,6 +25,18 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionUpdateRequest,
 )
 from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
+from kitaru.api_models.v1.hook import (
+    CopyWorkdirHook as WireCopyWorkdirHook,
+)
+from kitaru.api_models.v1.hook import (
+    GitCloneHook as WireGitCloneHook,
+)
+from kitaru.api_models.v1.hook import (
+    GitPushHook as WireGitPushHook,
+)
+from kitaru.api_models.v1.hook import (
+    TaskHook as WireTaskHook,
+)
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
@@ -35,6 +47,44 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.hook import (
+    CopyWorkdirHook,
+    GitCloneHook,
+    GitPushHook,
+    TaskHook,
+)
+
+
+def _hook_to_domain(hook: WireTaskHook) -> TaskHook:
+    """Convert a wire task hook to its domain value object.
+
+    Args:
+        hook: Wire task hook.
+
+    Returns:
+        Domain task hook.
+    """
+    if isinstance(hook, WireCopyWorkdirHook):
+        return CopyWorkdirHook()
+    if isinstance(hook, WireGitCloneHook):
+        return GitCloneHook(url=hook.url, ref=hook.ref)
+    return GitPushHook(branch=hook.branch)
+
+
+def _hook_to_response(hook: TaskHook) -> WireTaskHook:
+    """Convert a domain task hook to its wire value object.
+
+    Args:
+        hook: Domain task hook.
+
+    Returns:
+        Wire task hook.
+    """
+    if isinstance(hook, CopyWorkdirHook):
+        return WireCopyWorkdirHook()
+    if isinstance(hook, GitCloneHook):
+        return WireGitCloneHook(url=hook.url, ref=hook.ref)
+    return WireGitPushHook(branch=hook.branch)
 
 
 def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
@@ -51,6 +101,7 @@ def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
         working_dir=run_spec.working_dir,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
+        hooks=[_hook_to_domain(hook) for hook in run_spec.hooks],
         timeout_seconds=run_spec.timeout_seconds,
     )
 
@@ -69,6 +120,7 @@ def _run_spec_to_response(run_spec: RunSpec) -> WireRunSpec:
         working_dir=run_spec.working_dir,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
+        hooks=[_hook_to_response(hook) for hook in run_spec.hooks],
         timeout_seconds=run_spec.timeout_seconds,
     )
 

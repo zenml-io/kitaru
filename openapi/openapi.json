@@ -1349,6 +1349,20 @@
         "title": "CohortVersionUpdateRequest",
         "type": "object"
       },
+      "CopyWorkdirHook": {
+        "additionalProperties": false,
+        "description": "Copy workdir hook.",
+        "properties": {
+          "type": {
+            "const": "copy_workdir",
+            "default": "copy_workdir",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "CopyWorkdirHook",
+        "type": "object"
+      },
       "DeviceAuthorizationResponse": {
         "description": "Device authorization response.",
         "properties": {
@@ -2940,6 +2954,66 @@
         ],
         "title": "FilterOp",
         "type": "string"
+      },
+      "GitCloneHook": {
+        "additionalProperties": false,
+        "description": "Git clone hook.",
+        "properties": {
+          "ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ref checked out after the clone.",
+            "title": "Ref"
+          },
+          "type": {
+            "const": "git_clone",
+            "default": "git_clone",
+            "title": "Type",
+            "type": "string"
+          },
+          "url": {
+            "description": "Repository to clone.",
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "url"
+        ],
+        "title": "GitCloneHook",
+        "type": "object"
+      },
+      "GitPushHook": {
+        "additionalProperties": false,
+        "description": "Git push hook.",
+        "properties": {
+          "branch": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Branch pushed to.",
+            "title": "Branch"
+          },
+          "type": {
+            "const": "git_push",
+            "default": "git_push",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "GitPushHook",
+        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -5413,6 +5487,32 @@
             "description": "Process environment.",
             "title": "Env",
             "type": "object"
+          },
+          "hooks": {
+            "description": "Hooks run around the task process.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "git_clone": "#/components/schemas/GitCloneHook",
+                  "git_push": "#/components/schemas/GitPushHook"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CopyWorkdirHook"
+                },
+                {
+                  "$ref": "#/components/schemas/GitCloneHook"
+                },
+                {
+                  "$ref": "#/components/schemas/GitPushHook"
+                }
+              ]
+            },
+            "title": "Hooks",
+            "type": "array"
           },
           "secret_ids": {
             "description": "Secrets merged into the process environment.",
@@ -8006,6 +8106,32 @@
             "description": "Creator-set process environment extras.",
             "title": "Env",
             "type": "object"
+          },
+          "hooks": {
+            "description": "Hooks run around the task process.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "git_clone": "#/components/schemas/GitCloneHook",
+                  "git_push": "#/components/schemas/GitPushHook"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CopyWorkdirHook"
+                },
+                {
+                  "$ref": "#/components/schemas/GitCloneHook"
+                },
+                {
+                  "$ref": "#/components/schemas/GitPushHook"
+                }
+              ]
+            },
+            "title": "Hooks",
+            "type": "array"
           },
           "kind": {
             "$ref": "#/components/schemas/TaskKind",

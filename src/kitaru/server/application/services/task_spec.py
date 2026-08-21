@@ -128,6 +128,7 @@ class TaskSpecBuilder:
             ),
             env=task.env,
             secret_env=secret_env,
+            hooks=run_spec.hooks,
             details=AgentTaskDetails(
                 inputs=task.inputs,
                 replay_id=replay.id if replay is not None else None,

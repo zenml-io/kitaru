@@ -28,6 +28,7 @@ from kitaru.api_models.v1.base import (
     TimestampedResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
+from kitaru.api_models.v1.hook import TaskHook
 
 
 class TaskKind(StrEnum):
@@ -225,6 +226,9 @@ class TaskSpecResponse(ResponseModel):
     env: dict[str, str] = Field(description="Creator-set process environment extras.")
     secret_env: dict[str, str] = Field(
         description="Secrets merged into the process environment."
+    )
+    hooks: list[TaskHook] = Field(
+        default_factory=list, description="Hooks run around the task process."
     )
     details: TaskDetails = Field(description="Kind-specific task details.")
 

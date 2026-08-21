@@ -26,6 +26,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.hook import TaskHook
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import VersionName
 
@@ -114,6 +115,7 @@ class RunSpec(FrozenModel):
     working_dir: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: list[uuid.UUID] = Field(default_factory=list)
+    hooks: list[TaskHook] = Field(default_factory=list)
     timeout_seconds: TimeoutSeconds = 3600
 
 
