@@ -716,6 +716,24 @@ async def test_ensure_account_promotes_existing_non_admin(
     assert account.is_admin is True
 
 
+async def test_ensure_account_reactivates_a_deactivated_account(
+    service_and_repository: tuple[AccountService, FakeAccountRepository],
+) -> None:
+    """Reactivate an existing deactivated account of the same name."""
+    service, repository = service_and_repository
+    await repository.create(
+        Account(
+            name="admin",
+            is_admin=True,
+            active=False,
+            activation_token_hash="hashed-token",
+        )
+    )
+    account = await service.ensure_account("admin", "secret")
+    assert account.active is True
+    assert account.activation_token_hash is None
+
+
 async def test_ensure_account_identifies_the_account() -> None:
     """Identify the ensured account with the bootstrap origin."""
     analytics = _RecordingAnalytics()

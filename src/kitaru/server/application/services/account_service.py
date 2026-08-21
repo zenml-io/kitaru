@@ -182,8 +182,10 @@ class AccountService:
         except AccountNotFound:
             account = None
         if account is not None:
-            if not account.is_admin:
+            if not account.is_admin or not account.active:
                 account.update_is_admin(True)
+                account.update_active(True)
+                account.update_activation_token_hash(None)
                 account = await self._repository.update(account)
         else:
             password_hash = None
