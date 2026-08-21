@@ -8,7 +8,7 @@ from typing import Any
 
 _HOME_PATH = re.compile(r"/(?:Users|home)/[^/\s]+")
 _MACOS_TEMP_PATH = re.compile(r"/(?:private/)?var/folders/[^\s\"']+")
-_SECRET = re.compile(r"\b(?:sk|rk|pk)_[A-Za-z0-9_-]{12,}\b")
+_SECRET = re.compile(r"\b(?:sk|rk|pk)[_-][A-Za-z0-9_-]{12,}\b")
 _HOOK_TRUST_WARNING = "`--dangerously-bypass-hook-trust` is enabled."
 _GENAI_PRICES_SOURCE = (
     "https://github.com/pydantic/genai-prices/blob/main/prices/new_data/v2/data.json"

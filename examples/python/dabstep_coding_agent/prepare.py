@@ -25,6 +25,11 @@ def prepare_fixture(destination: Path, task_id: str) -> dict[str, Any]:
     Raises:
         ValueError: The requested development task does not exist.
     """
+    if destination.exists():
+        raise ValueError(
+            f"Refusing to overwrite existing fixture directory: {destination}. "
+            "Choose a new destination."
+        )
     tasks = _download_jsonl(DEV_TASKS_URL)
     task = next((item for item in tasks if _task_id(item) == task_id), None)
     if task is None:
@@ -32,11 +37,6 @@ def prepare_fixture(destination: Path, task_id: str) -> dict[str, Any]:
 
     public_dir = destination / "public"
     private_dir = destination / "private"
-    if destination.exists():
-        raise ValueError(
-            f"Refusing to overwrite existing fixture directory: {destination}. "
-            "Choose a new destination."
-        )
     (public_dir / "context").mkdir(parents=True)
     private_dir.mkdir()
 

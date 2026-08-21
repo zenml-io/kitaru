@@ -269,7 +269,8 @@ def test_converts_tool_trace_and_redacts_local_path(tmp_path: Path) -> None:
                             "call_id": "call-1",
                             "output": (
                                 "/Users/alex/private-workdir "
-                                "/private/var/folders/qf/demo/T/workdir/answer.txt"
+                                "/private/var/folders/qf/demo/T/workdir/answer.txt "
+                                "sk-exampletoken12345"
                             ),
                         },
                     }
@@ -313,6 +314,7 @@ def test_converts_tool_trace_and_redacts_local_path(tmp_path: Path) -> None:
     assert session["nodes"][-1]["status"] == "failed"
     assert "<redacted-home>" in json.dumps(session)
     assert "<redacted-temp>" in json.dumps(session)
+    assert "<redacted-token>" in json.dumps(session)
     ImportedSession.model_validate(session)
 
 
