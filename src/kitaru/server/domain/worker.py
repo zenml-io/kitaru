@@ -19,7 +19,12 @@ from datetime import datetime
 from pydantic import Field
 
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
-from kitaru.server.domain.base import DomainModel, ForbiddenError, NotFoundError
+from kitaru.server.domain.base import (
+    DomainModel,
+    ForbiddenError,
+    NotFoundError,
+    UpgradeRequiredError,
+)
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import Name
 
@@ -42,6 +47,23 @@ class WorkerCredentialRequired(ForbiddenError):
     def __init__(self) -> None:
         """Initialize the error."""
         super().__init__("This operation requires a worker credential")
+
+
+class WorkerClientUnsupported(UpgradeRequiredError):
+    """Raised when a worker registers from a client below the supported version."""
+
+    def __init__(self, client_version: str, last_unsupported_version: str) -> None:
+        """Initialize the error.
+
+        Args:
+            client_version: Version the client reported.
+            last_unsupported_version: Newest version not allowed to register.
+        """
+        super().__init__(
+            f"Registering a worker requires kitaru newer than "
+            f"{last_unsupported_version}, this client reports {client_version}. "
+            "Upgrade the worker"
+        )
 
 
 class WorkerAccessDenied(ForbiddenError):
@@ -68,26 +90,6 @@ class Worker(DomainModel):
     metadata: dict[str, str] = Field(default_factory=dict)
     created: datetime | None = None
     updated: datetime | None = None
-
-    def refresh(
-        self,
-        scope: WorkerScope,
-        runtime: WorkerRuntime,
-        metadata: dict[str, str],
-        now: datetime,
-    ) -> None:
-        """Replace the reported scope, runtime, and metadata, and stamp last_seen_at.
-
-        Args:
-            scope: New claim scope.
-            runtime: New reported runtime.
-            metadata: New metadata.
-            now: Current time.
-        """
-        self.scope = scope
-        self.runtime = runtime
-        self.metadata = metadata
-        self.last_seen_at = now
 
     def is_live(self, now: datetime, timeout_seconds: int) -> bool:
         """Report whether the worker was seen within the liveness window.

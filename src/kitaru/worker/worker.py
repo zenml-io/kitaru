@@ -174,7 +174,7 @@ class Worker:
             worker = response.worker
             logger.info("Registered worker %s (%s).", name, worker.id)
             source = WorkerTokenSource(
-                registration_client, registration, response.token.get_secret_value()
+                registration_client, worker.id, response.token.get_secret_value()
             )
             client = registration_client.with_auth(RenewingTokenAuth(source))
             ctx = ExecutionContext(

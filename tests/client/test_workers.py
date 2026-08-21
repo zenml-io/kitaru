@@ -129,7 +129,10 @@ async def api_client(
 ) -> AsyncGenerator[KitaruAPIClient, None]:
     """Provide an API client authenticated as the fixture account by default."""
     app = create_app(local_settings())
-    service = WorkerService(repository=worker_repository)
+    service = WorkerService(
+        repository=worker_repository,
+        liveness_timeout_seconds=local_settings().WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
     agents = FakeAgentRepository()
     transitions = TaskTransitions(
         task_repository=task_repository,
@@ -175,8 +178,8 @@ async def test_create(api_client: KitaruAPIClient, account: Account) -> None:
     assert registered.token.get_secret_value()
 
 
-async def test_create_upsert(api_client: KitaruAPIClient) -> None:
-    """Re-registering under the same name keeps the id through the SDK."""
+async def test_create_same_name(api_client: KitaruAPIClient) -> None:
+    """Registering under an existing name creates a second worker through the SDK."""
     first = await api_client.workers.create(
         WorkerCreateRequest(
             name="worker-1",
@@ -193,10 +196,28 @@ async def test_create_upsert(api_client: KitaruAPIClient) -> None:
             metadata={},
         )
     )
-    assert second.worker.id == first.worker.id
-    assert second.worker.scope == WorkerScope(
-        claims=[WorkerClaim(kind=TaskKind.IMPORTER)]
+    assert second.worker.id != first.worker.id
+    assert (await api_client.workers.get(first.worker.id)).scope == WorkerScope(
+        claims=[WorkerClaim(kind=TaskKind.AGENT)]
     )
+
+
+async def test_renew_token(api_client: KitaruAPIClient) -> None:
+    """Renew a worker token through the SDK."""
+    registered = await api_client.workers.create(
+        WorkerCreateRequest(
+            name="worker-1", scope=UNSCOPED_WORKER_SCOPE, runtime=RUNTIME, metadata={}
+        )
+    )
+    renewed = await api_client.workers.renew_token(registered.worker.id)
+    assert renewed.token.get_secret_value()
+    assert renewed.token_expires_at
+
+
+async def test_renew_token_not_found(api_client: KitaruAPIClient) -> None:
+    """Observe NotFoundError when renewing an unknown worker."""
+    with pytest.raises(NotFoundError):
+        await api_client.workers.renew_token(uuid.uuid4())
 
 
 async def test_get(api_client: KitaruAPIClient) -> None:

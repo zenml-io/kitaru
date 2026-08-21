@@ -15,16 +15,12 @@
 
 import uuid
 from collections.abc import Mapping
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import select, update
-from sqlalchemy.dialects.postgresql import insert
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
-from kitaru.server.adapters.db.orm.worker import (
-    WORKER_NAME_UNIQUE_CONSTRAINT,
-    WorkerORM,
-)
+from kitaru.server.adapters.db.orm.worker import WorkerORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.worker import WorkerFilter
@@ -54,39 +50,16 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         return WorkerNotFound(entity_id)
 
     async def register(self, worker: Worker) -> Worker:
-        """Persist a worker, refreshing an existing row with the same name.
-
-        The insert races no fallback lookup: a concurrent registration under
-        the same name resolves through the database's own conflict handling,
-        never through a read-then-write from this repository.
+        """Persist a new worker.
 
         Args:
-            worker: Worker to store or refresh.
+            worker: Worker to store.
 
         Returns:
             Stored worker with its id, created, and updated timestamp set.
         """
-        now = datetime.now(UTC)
-        statement = insert(WorkerORM).values(**WorkerORM.column_values(worker))
-        # The client-side onupdate hook on TimestampMixin.updated never fires
-        # for this Core-level statement, so the conflict branch renews it
-        # explicitly. owner_id, id, and created stay out of the SET clause so
-        # re-registration keeps the original owner and creation time.
-        statement = statement.on_conflict_do_update(
-            constraint=WORKER_NAME_UNIQUE_CONSTRAINT,
-            set_={
-                "scope": statement.excluded.scope,
-                "runtime": statement.excluded.runtime,
-                "last_seen_at": statement.excluded.last_seen_at,
-                "metadata": statement.excluded["metadata"],
-                "updated": now,
-            },
-        ).returning(WorkerORM)
-        row = (
-            await self._session.scalars(
-                statement, execution_options={"populate_existing": True}
-            )
-        ).one()
+        row = WorkerORM.from_domain(worker)
+        await self._add(row)
         return row.to_domain()
 
     async def get(self, worker_id: uuid.UUID) -> Worker:
@@ -131,21 +104,21 @@ class SQLWorkerRepository(BaseSQLRepository[WorkerORM]):
         await self._session.flush()
 
     async def query(
-        self, worker_filter: WorkerFilter
+        self, worker_filter: WorkerFilter, live_cutoff: datetime | None
     ) -> tuple[list[Worker], str | None]:
         """Query workers matching a filter.
 
         Args:
             worker_filter: Filter and pagination parameters.
+            live_cutoff: Bound the last heartbeat must be at or after, None
+                keeps stale workers.
 
         Returns:
             Page of matching workers and the next cursor.
         """
         statement = select(WorkerORM)
-        if worker_filter.seen_after is not None:
-            statement = statement.where(
-                WorkerORM.last_seen_at >= worker_filter.seen_after
-            )
+        if live_cutoff is not None:
+            statement = statement.where(WorkerORM.last_seen_at >= live_cutoff)
         if worker_filter.expression is not None:
             statement = statement.where(
                 compile_filter_expression(

@@ -113,5 +113,6 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/workers",
         "/api/v1/workers/{worker_id}",
         "/api/v1/workers/{worker_id}/heartbeat",
+        "/api/v1/workers/{worker_id}/token",
     }
     assert paths == expected

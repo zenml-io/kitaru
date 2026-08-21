@@ -16,10 +16,6 @@
 from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import StrEnum
-from importlib.metadata import version
-
-CLIENT_HEADER = "X-Kitaru-Client"
-SKILL_HEADER = "X-Kitaru-Skill"
 
 
 class AnalyticsSource(StrEnum):
@@ -38,6 +34,7 @@ class AnalyticsAttribution:
     """Analytics attribution."""
 
     source: AnalyticsSource = AnalyticsSource.PYTHON
+    version: str | None = None
     skill: str | None = None
 
 
@@ -46,33 +43,3 @@ _DEFAULT_ATTRIBUTION = AnalyticsAttribution()
 current_attribution: ContextVar[AnalyticsAttribution] = ContextVar(
     "kitaru_analytics_attribution", default=_DEFAULT_ATTRIBUTION
 )
-
-
-def format_client_header(source: AnalyticsSource) -> str:
-    """Format the client identification header value.
-
-    Args:
-        source: Client sending the requests.
-
-    Returns:
-        ``<source>/<version>`` header value.
-    """
-    return f"{source.value}/{version('kitaru')}"
-
-
-def parse_client_header(value: str) -> AnalyticsSource | None:
-    """Parse the source from a client identification header value.
-
-    Args:
-        value: ``<source>/<version>`` header value.
-
-    Returns:
-        Parsed source, or None for an unknown client.
-    """
-    if not value:
-        return None
-    name, _, _ = value.partition("/")
-    try:
-        return AnalyticsSource(name)
-    except ValueError:
-        return None

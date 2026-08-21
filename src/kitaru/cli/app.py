@@ -3852,7 +3852,7 @@ _WORKER_START_PARAMETERS = (
             "creates_remote_state",
             "executes_local_code",
         ),
-        idempotency="runtime_registration_upsert_by_name",
+        idempotency="non_idempotent_remote_create",
         errors=_ASSET_READ_ERRORS,
         streams=True,
     ),
@@ -3908,8 +3908,17 @@ async def worker_start(
     worker_app,
     _spec(
         ("worker", "list"),
-        "List workers, describing each server record as live or stale.",
-        parameters=_LIST_PARAMETERS,
+        "List live workers, or every server record with --include-stale.",
+        parameters=(
+            *_LIST_PARAMETERS,
+            ParameterSpec(
+                "--include-stale",
+                "boolean",
+                "option",
+                False,
+                "Include workers past the liveness window.",
+            ),
+        ),
         errors=_ASSET_READ_ERRORS,
     ),
 )
@@ -3919,11 +3928,19 @@ async def worker_list(
     cursor: str | None = None,
     sort: str = "created:desc",
     filter: str | None = None,
+    include_stale: Annotated[
+        bool, Parameter(name="--include-stale", negative=False)
+    ] = False,
 ) -> CommandResult:
     """List one server page of worker records."""
     async with _open_asset_client() as client:
         return await workers.list_workers(
-            client, size=size, cursor=cursor, sort=sort, filter=filter
+            client,
+            size=size,
+            cursor=cursor,
+            sort=sort,
+            filter=filter,
+            include_stale=include_stale,
         )
 
 
@@ -3931,16 +3948,12 @@ async def worker_list(
     worker_app,
     _spec(
         ("worker", "get"),
-        "Get a worker by exact UUID or case-sensitive name.",
-        parameters=(
-            ParameterSpec(
-                "WORKER", "reference", "argument", True, "Worker UUID or exact name."
-            ),
-        ),
-        errors=_ASSET_READ_ERRORS,
+        "Get a worker by exact UUID.",
+        parameters=(ParameterSpec("WORKER", "UUID", "argument", True, "Worker ID."),),
+        errors=_UUID_READ_ERRORS,
     ),
 )
-async def worker_get(worker: str, /) -> CommandResult:
+async def worker_get(worker: uuid.UUID, /) -> CommandResult:
     """Get one exact worker record."""
     async with _open_asset_client() as client:
         return await workers.get_worker(client, worker)

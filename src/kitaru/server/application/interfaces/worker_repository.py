@@ -25,10 +25,10 @@ class WorkerRepository(Protocol):
     """Worker persistence operations."""
 
     async def register(self, worker: Worker) -> Worker:
-        """Persist a worker, refreshing an existing row with the same name.
+        """Persist a new worker.
 
         Args:
-            worker: Worker to store or refresh.
+            worker: Worker to store.
 
         Returns:
             Stored worker with its id, created, and updated timestamp set.
@@ -62,12 +62,14 @@ class WorkerRepository(Protocol):
         ...
 
     async def query(
-        self, worker_filter: WorkerFilter
+        self, worker_filter: WorkerFilter, live_cutoff: datetime | None
     ) -> tuple[list[Worker], str | None]:
         """Query workers matching a filter.
 
         Args:
             worker_filter: Filter and pagination parameters.
+            live_cutoff: Bound the last heartbeat must be at or after, None
+                keeps stale workers.
 
         Returns:
             Page of matching workers and the next cursor.

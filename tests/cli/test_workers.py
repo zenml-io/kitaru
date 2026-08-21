@@ -72,7 +72,7 @@ class DrainWorker:
 
 @dataclass
 class StubWorkers:
-    """Worker resource fake for list and exact-name lookup."""
+    """Worker resource fake for list and exact-id lookup."""
 
     items: list[WorkerResponse]
     list_calls: list[Any] = field(default_factory=list)
@@ -487,7 +487,7 @@ async def test_list_and_get_report_live_or_stale() -> None:
     )
     assert [item["status"] for item in listed.items or []] == ["live", "stale"]
 
-    fetched = await workers.get_worker(client, "old")
+    fetched = await workers.get_worker(client, stale.id)
     assert fetched.item["id"] == str(stale.id)
     assert fetched.item["status"] == "stale"
 
@@ -517,16 +517,14 @@ def test_worker_list_defaults_to_newest_first() -> None:
     assert WorkerListParams(sort=default_sort).sort == "created:desc"
 
 
-async def test_exact_worker_name_conflicts_before_returning_a_record() -> None:
-    """Duplicate exact names remain a stable conflict instead of guessing."""
-    client = SimpleNamespace(
-        workers=StubWorkers(
-            [_response("duplicate", live=True), _response("duplicate", live=False)]
-        )
-    )
-    with pytest.raises(CLIError) as error:
-        await workers.get_worker(client, "duplicate")
-    assert error.value.kind == "conflict"
+async def test_worker_get_reads_one_record_by_id_among_shared_names() -> None:
+    """Workers sharing a name stay individually addressable by id."""
+    first = _response("duplicate", live=True)
+    second = _response("duplicate", live=False)
+    client = SimpleNamespace(workers=StubWorkers([first, second]))
+
+    assert (await workers.get_worker(client, first.id)).item["id"] == str(first.id)
+    assert (await workers.get_worker(client, second.id)).item["id"] == str(second.id)
 
 
 def test_missing_worker_extra_has_actionable_hint(

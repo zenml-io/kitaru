@@ -64,9 +64,9 @@ This is intended for local developer workflows. It reads the CLI store without m
 
 ## Workers and tasks get scoped tokens
 
-An API key is the only long-lived credential a worker holds. It uses the key to register and again whenever it re-registers to renew its worker token. Credentials narrow for task execution:
+An API key is the only long-lived credential a worker holds. It uses the key to register and again whenever it renews its worker token. Credentials narrow for task execution:
 
-- Registering (`kitaru worker start`) returns a **worker token**, a bearer token scoped to that one worker, which the worker renews on its own by re-registering under the same name.
+- Registering (`kitaru worker start`) returns a **worker token**, a bearer token scoped to that one worker, which the worker renews on its own through `POST /api/v1/workers/{worker_id}/token`.
 - Each claimed task comes with a **task token** scoped to that single task and attempt, carrying an explicit allowlist of the sessions and blobs the task may touch. The worker hands _that_ to your agent subprocess as `KITARU_API_TOKEN`, and your broad API key is stripped from the child environment.
 
 Clients that consume `KITARU_API_TOKEN`, including `KitaruAPIClient`, use the task-scoped credential. Its expiry is set when the task is claimed to the task's execution timeout plus a server-configured leeway; completing the attempt does not revoke it immediately. The CLI does not currently consume that variable and may fall back to a stored login credential. Run workers under a dedicated OS or container identity with no broader stored Kitaru credentials when agent code can invoke the CLI.

@@ -17,8 +17,10 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Header, Query, status
+from packaging.version import InvalidVersion, Version
 
+from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.worker import (
     WorkerCreateRequest,
@@ -27,7 +29,9 @@ from kitaru.api_models.v1.worker import (
     WorkerListParams,
     WorkerRegistrationResponse,
     WorkerResponse,
+    WorkerTokenResponse,
 )
+from kitaru.headers import CLIENT_HEADER
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -47,8 +51,41 @@ from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerAuthContext
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.worker_service import WorkerService
+from kitaru.server.client_identity import parse_client_identity
+from kitaru.server.domain.worker import WorkerClientUnsupported
 
 router = APIRouter(route_class=KitaruAPIRoute)
+
+LAST_UNSUPPORTED_WORKER_CLIENT_VERSION = "0.22.2"
+
+
+def _check_worker_client(client: str) -> None:
+    """Reject an SDK older than the oldest version that renews its token.
+
+    A caller that is not the Python SDK, or reports no readable version, is
+    left alone.
+
+    Args:
+        client: Client identification header value.
+
+    Raises:
+        WorkerClientUnsupported: The client predates token renewal.
+    """
+    identity = parse_client_identity(client)
+    if (
+        identity is None
+        or identity.source is not AnalyticsSource.PYTHON
+        or identity.version is None
+    ):
+        return
+    try:
+        client_version = Version(identity.version)
+    except InvalidVersion:
+        return
+    if client_version <= Version(LAST_UNSUPPORTED_WORKER_CLIENT_VERSION):
+        raise WorkerClientUnsupported(
+            identity.version, LAST_UNSUPPORTED_WORKER_CLIENT_VERSION
+        )
 
 
 @router.post("")
@@ -58,14 +95,13 @@ async def register_worker(
     auth_service: Annotated[AuthService, Depends(get_auth_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
+    client: Annotated[str, Header(alias=CLIENT_HEADER)] = "",
 ) -> WorkerRegistrationResponse:
-    """Register a worker, upserting by name.
+    """Register a worker.
 
-    Re-registration refreshes the scope, runtime, and metadata, stamps
-    last_seen_at, and mints a fresh token, keeping the id and created time.
-    Re-registering with a fresh token is how a worker renews before its
-    current token expires. Clients observe HTTP 200 on both the first
-    registration and every re-registration, and 422 on invalid input.
+    Every registration creates a new worker, names are labels and need not
+    be unique. Clients observe HTTP 200 on success, 426 from an SDK that
+    renews by re-registering, and 422 on invalid input.
 
     Args:
         body: Worker create request.
@@ -73,10 +109,12 @@ async def register_worker(
         auth_service: Authentication service for the current request.
         actor: Caller context.
         settings: API settings for this process.
+        client: Client identification header value.
 
     Returns:
         Stored worker with a bearer token scoped to it.
     """
+    _check_worker_client(client)
     worker = await service.register_worker(
         name=body.name,
         scope=body.scope,
@@ -96,6 +134,35 @@ async def register_worker(
     )
 
 
+@router.post("/{worker_id}/token")
+async def renew_worker_token(
+    worker_id: uuid.UUID,
+    service: Annotated[WorkerService, Depends(get_worker_service)],
+    auth_service: Annotated[AuthService, Depends(get_auth_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> WorkerTokenResponse:
+    """Issue a fresh token for a registered worker.
+
+    Renewal stamps last_seen_at. Clients observe HTTP 200 on success, 403
+    when the worker belongs to another account, and 404 when no worker has
+    this id.
+
+    Args:
+        worker_id: Id of the worker.
+        service: Worker service.
+        auth_service: Authentication service for the current request.
+        actor: Caller context.
+
+    Returns:
+        Bearer token scoped to the worker.
+    """
+    await service.renew_worker(worker_id, actor=actor)
+    issued = auth_service.issue_worker_token(
+        worker_id=worker_id, account_id=actor.account.id
+    )
+    return WorkerTokenResponse(token=issued.token, token_expires_at=issued.expires_at)
+
+
 @router.get("")
 async def list_workers(
     service: Annotated[WorkerService, Depends(get_worker_service)],
@@ -105,7 +172,8 @@ async def list_workers(
 ) -> Page[WorkerResponse]:
     """List workers.
 
-    Clients observe HTTP 200 on success and 422 on invalid pagination
+    Workers past the liveness window are left out unless include_stale is
+    set. Clients observe HTTP 200 on success and 422 on invalid pagination
     parameters.
 
     Args:

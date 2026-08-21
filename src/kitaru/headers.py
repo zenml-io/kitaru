@@ -11,22 +11,23 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Worker filter model."""
+"""Kitaru request headers."""
 
-import uuid
-from collections.abc import Mapping
-from typing import ClassVar
+from importlib.metadata import version
 
-from kitaru.server.base import ListFilter
-from kitaru.server.filtering import EQUALITY_OPS, STRING_OPS, FilterField
+from kitaru.analytics.source import AnalyticsSource
+
+CLIENT_HEADER = "X-Kitaru-Client"
+SKILL_HEADER = "X-Kitaru-Skill"
 
 
-class WorkerFilter(ListFilter):
-    """Worker list filter."""
+def format_client_header(source: AnalyticsSource) -> str:
+    """Format the client identification header value.
 
-    filterable_fields: ClassVar[Mapping[str, FilterField]] = {
-        "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
-        "name": FilterField(value_type=str, ops=STRING_OPS),
-    }
+    Args:
+        source: Client sending the requests.
 
-    include_stale: bool = False
+    Returns:
+        ``<source>/<version>`` header value.
+    """
+    return f"{source.value}/{version('kitaru')}"

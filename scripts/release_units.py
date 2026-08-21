@@ -89,6 +89,22 @@ class ReleaseInventory:
         return json.dumps(self.to_dict(), sort_keys=True, separators=(",", ":"))
 
 
+def validate_canonical_version(value: str) -> str:
+    """Validate and return a canonical PEP 440 version."""
+    try:
+        version = Version(value)
+    except InvalidVersion as error:
+        raise ReleaseInventoryError(
+            f"version must be canonical PEP 440: {value}"
+        ) from error
+    canonical = str(version)
+    if canonical != value:
+        raise ReleaseInventoryError(
+            f"version must be canonical PEP 440: {value} normalizes to {canonical}"
+        )
+    return canonical
+
+
 def validate_version(value: str) -> str:
     """Validate and return a canonical PEP 440 public version."""
     try:
@@ -158,7 +174,7 @@ def _parse_manifest(
     if not isinstance(project, dict):
         raise ReleaseInventoryError(f"{context}: version source has no [project] table")
     name = _get_string(project, "name", context)
-    version = validate_version(_get_string(project, "version", context))
+    version = validate_canonical_version(_get_string(project, "version", context))
     return name, version, project
 
 

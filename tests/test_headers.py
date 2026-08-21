@@ -11,15 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Tests for the analytics source helpers."""
+"""Tests for the request header helpers."""
 
 from importlib.metadata import version
 
-from kitaru.analytics.source import (
-    AnalyticsSource,
-    format_client_header,
-    parse_client_header,
-)
+from kitaru.analytics.source import AnalyticsSource
+from kitaru.headers import format_client_header
 
 
 def test_format_client_header() -> None:
@@ -27,18 +24,3 @@ def test_format_client_header() -> None:
     assert format_client_header(AnalyticsSource.PYTHON) == (
         f"kitaru-python/{version('kitaru')}"
     )
-
-
-def test_parse_client_header() -> None:
-    """Parse the source from well-formed header values."""
-    assert parse_client_header("kitaru-python/0.21.0") is AnalyticsSource.PYTHON
-    assert parse_client_header("kitaru-typescript") is AnalyticsSource.TYPESCRIPT
-    assert parse_client_header("kitaru-ui/1.2.3") is AnalyticsSource.UI
-    assert parse_client_header("kitaru-cli") is AnalyticsSource.CLI
-
-
-def test_parse_client_header_rejects_unknown_clients() -> None:
-    """Return None for unknown or malformed header values."""
-    assert parse_client_header("") is None
-    assert parse_client_header("curl/8.0") is None
-    assert parse_client_header("python-httpx/0.27.0") is None

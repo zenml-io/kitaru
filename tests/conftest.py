@@ -3326,25 +3326,14 @@ class FakeWorkerRepository:
         self._workers: dict[uuid.UUID, Worker] = {}
 
     async def register(self, worker: Worker) -> Worker:
-        """Persist a worker, refreshing an existing row with the same name.
+        """Persist a new worker.
 
         Args:
-            worker: Worker to store or refresh.
+            worker: Worker to store.
 
         Returns:
             Stored worker with its id, created, and updated timestamp set.
         """
-        for stored in self._workers.values():
-            if stored.name == worker.name:
-                refreshed = stored.model_copy()
-                refreshed.refresh(
-                    worker.scope, worker.runtime, worker.metadata, worker.last_seen_at
-                )
-                refreshed = refreshed.model_copy(
-                    update={"updated": _renewed_timestamp(stored.updated)}
-                )
-                self._workers[stored.id] = refreshed
-                return refreshed.model_copy()
         now = datetime.now(UTC)
         stored = worker.model_copy(update={"created": now, "updated": now})
         self._workers[stored.id] = stored
@@ -3388,22 +3377,22 @@ class FakeWorkerRepository:
         )
 
     async def query(
-        self, worker_filter: WorkerFilter
+        self, worker_filter: WorkerFilter, live_cutoff: datetime | None
     ) -> tuple[list[Worker], str | None]:
         """Query workers matching a filter.
 
         Args:
             worker_filter: Filter and pagination parameters.
+            live_cutoff: Bound the last heartbeat must be at or after, None
+                keeps stale workers.
 
         Returns:
             Page of matching workers and the next cursor.
         """
         workers = list(self._workers.values())
-        if worker_filter.seen_after is not None:
+        if live_cutoff is not None:
             workers = [
-                worker
-                for worker in workers
-                if worker.last_seen_at >= worker_filter.seen_after
+                worker for worker in workers if worker.last_seen_at >= live_cutoff
             ]
         if worker_filter.expression is not None:
             workers = [

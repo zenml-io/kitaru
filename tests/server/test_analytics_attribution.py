@@ -14,6 +14,7 @@
 """Tests for the analytics attribution middleware."""
 
 from collections.abc import AsyncGenerator
+from importlib.metadata import version as package_version
 
 import httpx
 import pytest
@@ -31,7 +32,11 @@ def create_app_with_attribution_probe() -> FastAPI:
     async def read_attribution() -> dict[str, str | None]:
         """Return the analytics attribution seen by the route handler."""
         attribution = current_attribution.get()
-        return {"source": attribution.source.value, "skill": attribution.skill}
+        return {
+            "source": attribution.source.value,
+            "version": attribution.version,
+            "skill": attribution.skill,
+        }
 
     # Register the probe ahead of the UI catch-all route so it stays
     # reachable when a UI bundle is present.
@@ -51,24 +56,28 @@ async def client() -> AsyncGenerator[httpx.AsyncClient, None]:
 async def test_source_defaults_to_api(client: httpx.AsyncClient) -> None:
     """Attribute requests without a client header to the API source."""
     response = await client.get("/probe-attribution")
-    assert response.json() == {"source": "kitaru-api", "skill": None}
+    assert response.json() == {"source": "kitaru-api", "version": None, "skill": None}
 
 
 @pytest.mark.parametrize(
-    ("header", "source"),
+    ("header", "source", "client_version"),
     [
-        ("kitaru-ui/0.3.0", "kitaru-ui"),
-        ("kitaru-typescript", "kitaru-typescript"),
+        ("kitaru-ui/0.3.0", "kitaru-ui", "0.3.0"),
+        ("kitaru-typescript", "kitaru-typescript", None),
     ],
 )
 async def test_source_parsed_from_client_header(
-    client: httpx.AsyncClient, header: str, source: str
+    client: httpx.AsyncClient, header: str, source: str, client_version: str | None
 ) -> None:
     """Attribute requests to the source named in the client header."""
     response = await client.get(
         "/probe-attribution", headers={"X-Kitaru-Client": header}
     )
-    assert response.json() == {"source": source, "skill": None}
+    assert response.json() == {
+        "source": source,
+        "version": client_version,
+        "skill": None,
+    }
 
 
 async def test_unknown_client_header_falls_back_to_api(
@@ -78,7 +87,7 @@ async def test_unknown_client_header_falls_back_to_api(
     response = await client.get(
         "/probe-attribution", headers={"X-Kitaru-Client": "curl/8.0"}
     )
-    assert response.json() == {"source": "kitaru-api", "skill": None}
+    assert response.json() == {"source": "kitaru-api", "version": None, "skill": None}
 
 
 async def test_skill_parsed_from_skill_header(client: httpx.AsyncClient) -> None:
@@ -86,7 +95,11 @@ async def test_skill_parsed_from_skill_header(client: httpx.AsyncClient) -> None
     response = await client.get(
         "/probe-attribution", headers={"X-Kitaru-Skill": "data-analysis"}
     )
-    assert response.json() == {"source": "kitaru-api", "skill": "data-analysis"}
+    assert response.json() == {
+        "source": "kitaru-api",
+        "version": None,
+        "skill": "data-analysis",
+    }
 
 
 async def test_empty_skill_header_reads_as_no_skill(
@@ -94,14 +107,18 @@ async def test_empty_skill_header_reads_as_no_skill(
 ) -> None:
     """Attribute requests with an empty skill header to no skill."""
     response = await client.get("/probe-attribution", headers={"X-Kitaru-Skill": ""})
-    assert response.json() == {"source": "kitaru-api", "skill": None}
+    assert response.json() == {"source": "kitaru-api", "version": None, "skill": None}
 
 
 async def test_sdk_client_reports_python_source() -> None:
     """Attribute SDK requests to the Python source via the default headers."""
     api_client = asgi_api_client(create_app_with_attribution_probe())
     response = await api_client.request("GET", "/probe-attribution")
-    assert response.json() == {"source": "kitaru-python", "skill": None}
+    assert response.json() == {
+        "source": "kitaru-python",
+        "version": package_version("kitaru"),
+        "skill": None,
+    }
     await api_client.close()
 
 
@@ -111,7 +128,11 @@ async def test_sdk_client_reports_configured_source() -> None:
         create_app_with_attribution_probe(), analytics_source=AnalyticsSource.CLI
     )
     response = await api_client.request("GET", "/probe-attribution")
-    assert response.json() == {"source": "kitaru-cli", "skill": None}
+    assert response.json() == {
+        "source": "kitaru-cli",
+        "version": package_version("kitaru"),
+        "skill": None,
+    }
     await api_client.close()
 
 
@@ -122,5 +143,23 @@ async def test_sdk_client_reports_active_skill(
     monkeypatch.setenv("KITARU_ACTIVE_SKILL", "data-analysis")
     api_client = asgi_api_client(create_app_with_attribution_probe())
     response = await api_client.request("GET", "/probe-attribution")
-    assert response.json() == {"source": "kitaru-python", "skill": "data-analysis"}
+    assert response.json() == {
+        "source": "kitaru-python",
+        "version": package_version("kitaru"),
+        "skill": "data-analysis",
+    }
     await api_client.close()
+
+
+async def test_client_version_parsed_from_client_header(
+    client: httpx.AsyncClient,
+) -> None:
+    """Attribute requests to the version the client header reports."""
+    response = await client.get(
+        "/probe-attribution", headers={"X-Kitaru-Client": "kitaru-cli/1.2.3"}
+    )
+    assert response.json() == {
+        "source": "kitaru-cli",
+        "version": "1.2.3",
+        "skill": None,
+    }

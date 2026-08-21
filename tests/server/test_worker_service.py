@@ -34,7 +34,7 @@ from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.worker import WorkerNotFound
+from kitaru.server.domain.worker import WorkerAccessDenied, WorkerNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -72,7 +72,7 @@ def repository() -> FakeWorkerRepository:
 @pytest.fixture
 def service(repository: FakeWorkerRepository) -> WorkerService:
     """Provide a worker service backed by the fake repository."""
-    return WorkerService(repository=repository)
+    return WorkerService(repository=repository, liveness_timeout_seconds=60)
 
 
 async def test_register_worker(service: WorkerService) -> None:
@@ -91,12 +91,14 @@ async def test_register_worker(service: WorkerService) -> None:
     assert worker.updated is not None
 
 
-async def test_register_worker_tracks_only_new_registrations(
+async def test_register_worker_tracks_every_registration(
     repository: FakeWorkerRepository,
 ) -> None:
-    """Track the worker registered event on creation but not on a refresh."""
+    """Track the worker registered event on every registration."""
     analytics = _RecordingAnalytics()
-    service = WorkerService(repository=repository, analytics=analytics)
+    service = WorkerService(
+        repository=repository, liveness_timeout_seconds=60, analytics=analytics
+    )
 
     for _ in range(2):
         await service.register_worker(
@@ -107,19 +109,23 @@ async def test_register_worker_tracks_only_new_registrations(
             actor=ACTOR,
         )
 
-    assert analytics.tracked == [
-        (
-            ACTOR.account.id,
-            AnalyticsEvent.WORKER_REGISTERED,
-            {"worker_platform": "docker"},
-        )
-    ]
+    assert (
+        analytics.tracked
+        == [
+            (
+                ACTOR.account.id,
+                AnalyticsEvent.WORKER_REGISTERED,
+                {"worker_platform": "docker"},
+            )
+        ]
+        * 2
+    )
 
 
-async def test_register_worker_upsert_keeps_id_and_renews_timestamps(
+async def test_register_worker_same_name_creates_a_second_worker(
     service: WorkerService,
 ) -> None:
-    """Re-registering under the same name keeps id and created, renews updated."""
+    """Registering under an existing name creates a separate worker."""
     first = await service.register_worker(
         name="worker-1",
         scope=WorkerScope(claims=[WorkerClaim(kind=TaskKind.AGENT)]),
@@ -134,15 +140,43 @@ async def test_register_worker_upsert_keeps_id_and_renews_timestamps(
         metadata={"region": "us"},
         actor=ACTOR,
     )
-    assert second.id == first.id
-    assert second.created == first.created
-    assert second.scope == WorkerScope(claims=[WorkerClaim(kind=TaskKind.IMPORTER)])
-    assert second.runtime.platform == "docker"
-    assert second.metadata == {"region": "us"}
-    assert second.last_seen_at >= first.last_seen_at
-    assert second.updated is not None
-    assert first.updated is not None
-    assert second.updated > first.updated
+    assert second.id != first.id
+    assert (await service.get_worker(first.id, actor=ACTOR)).scope == first.scope
+    assert (await service.get_worker(second.id, actor=ACTOR)).scope == second.scope
+
+
+async def test_renew_worker_stamps_last_seen_at(service: WorkerService) -> None:
+    """Renewing a worker stamps it as seen."""
+    created = await service.register_worker(
+        name="worker-1",
+        scope=UNSCOPED_WORKER_SCOPE,
+        runtime=WorkerRuntime(platform="bare"),
+        metadata={},
+        actor=ACTOR,
+    )
+    await service.renew_worker(created.id, actor=ACTOR)
+    reloaded = await service.get_worker(created.id, actor=ACTOR)
+    assert reloaded.last_seen_at >= created.last_seen_at
+
+
+async def test_renew_worker_not_found(service: WorkerService) -> None:
+    """Renewing an unknown worker raises WorkerNotFound."""
+    with pytest.raises(WorkerNotFound):
+        await service.renew_worker(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_renew_worker_of_another_account(service: WorkerService) -> None:
+    """Renewing a worker of another account raises WorkerAccessDenied."""
+    created = await service.register_worker(
+        name="worker-1",
+        scope=UNSCOPED_WORKER_SCOPE,
+        runtime=WorkerRuntime(platform="bare"),
+        metadata={},
+        actor=ACTOR,
+    )
+    other = AuthContext(account=Account(id=uuid.uuid4(), name="bob"))
+    with pytest.raises(WorkerAccessDenied):
+        await service.renew_worker(created.id, actor=other)
 
 
 async def test_get_worker(service: WorkerService) -> None:
@@ -190,10 +224,10 @@ async def test_list_workers(service: WorkerService) -> None:
     assert workers[0].name == "worker-2"
 
 
-async def test_list_workers_seen_after(
+async def test_list_workers_hides_stale_unless_included(
     service: WorkerService, repository: FakeWorkerRepository
 ) -> None:
-    """Filter workers by last_seen_at, an internal filter field."""
+    """Leave workers past the liveness window out unless the filter includes them."""
     now = datetime.now(UTC)
     stale = await create_worker(
         repository,
@@ -205,12 +239,14 @@ async def test_list_workers_seen_after(
         repository, ACTOR.account.id, name="fresh", last_seen_at=now
     )
 
-    workers, next_cursor = await service.list_workers(
-        WorkerFilter(seen_after=now - timedelta(minutes=1)), actor=ACTOR
-    )
+    workers, next_cursor = await service.list_workers(WorkerFilter(), actor=ACTOR)
     assert next_cursor is None
     assert [worker.id for worker in workers] == [fresh.id]
-    assert stale.id not in [worker.id for worker in workers]
+
+    workers, _ = await service.list_workers(
+        WorkerFilter(include_stale=True), actor=ACTOR
+    )
+    assert {worker.id for worker in workers} == {stale.id, fresh.id}
 
 
 async def test_delete_worker(service: WorkerService) -> None:

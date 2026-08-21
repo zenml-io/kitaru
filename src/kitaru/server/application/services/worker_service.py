@@ -14,7 +14,7 @@
 """Worker use cases."""
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.worker import WorkerRuntime, WorkerScope
@@ -34,15 +34,18 @@ class WorkerService:
     def __init__(
         self,
         repository: WorkerRepository,
+        liveness_timeout_seconds: int,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
 
         Args:
             repository: Worker repository.
+            liveness_timeout_seconds: Liveness window in seconds.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
+        self._liveness_timeout_seconds = liveness_timeout_seconds
         self._analytics = analytics
 
     async def register_worker(
@@ -53,7 +56,7 @@ class WorkerService:
         metadata: dict[str, str],
         actor: AuthContext,
     ) -> Worker:
-        """Register a worker, refreshing an existing row with the same name.
+        """Register a worker.
 
         Args:
             name: Worker name.
@@ -74,9 +77,7 @@ class WorkerService:
             last_seen_at=datetime.now(UTC),
         )
         stored = await self._repository.register(worker)
-        # A refresh keeps the existing row's id, so a returned row carrying
-        # the requested id is a new registration.
-        if self._analytics is not None and stored.id == worker.id:
+        if self._analytics is not None:
             self._analytics.track(
                 actor.account.id,
                 AnalyticsEvent.WORKER_REGISTERED,
@@ -108,6 +109,22 @@ class WorkerService:
             raise WorkerAccessDenied(worker_id)
         return await self._repository.get(worker_id)
 
+    async def renew_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> None:
+        """Stamp a worker as seen ahead of issuing it a fresh token.
+
+        Args:
+            worker_id: Id of the worker.
+            actor: Caller context.
+
+        Raises:
+            WorkerAccessDenied: The worker belongs to another account.
+            WorkerNotFound: No worker has this id.
+        """
+        worker = await self._repository.get(worker_id)
+        if worker.owner_id != actor.account.id:
+            raise WorkerAccessDenied(worker_id)
+        await self._repository.update_last_seen_at(worker_id, datetime.now(UTC))
+
     async def list_workers(
         self, worker_filter: WorkerFilter, actor: AuthContext
     ) -> tuple[list[Worker], str | None]:
@@ -121,7 +138,12 @@ class WorkerService:
             Page of matching workers and the next cursor.
         """
         _ = actor
-        return await self._repository.query(worker_filter)
+        live_cutoff = None
+        if not worker_filter.include_stale:
+            live_cutoff = datetime.now(UTC) - timedelta(
+                seconds=self._liveness_timeout_seconds
+            )
+        return await self._repository.query(worker_filter, live_cutoff)
 
     async def delete_worker(self, worker_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a worker.

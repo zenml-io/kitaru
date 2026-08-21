@@ -25,6 +25,7 @@ from kitaru.api_models.v1.worker import (
     WorkerListParams,
     WorkerRegistrationResponse,
     WorkerResponse,
+    WorkerTokenResponse,
 )
 from kitaru.client.resources.pagination import iterate_pages
 
@@ -44,7 +45,7 @@ class WorkersResource:
         self._client = client
 
     async def create(self, request: WorkerCreateRequest) -> WorkerRegistrationResponse:
-        """Register a worker, upserting by name.
+        """Register a worker.
 
         Args:
             request: Worker create request.
@@ -61,6 +62,23 @@ class WorkersResource:
             json=request.model_dump(mode="json", exclude_unset=True),
         )
         return WorkerRegistrationResponse.model_validate(response.json())
+
+    async def renew_token(self, worker_id: uuid.UUID) -> WorkerTokenResponse:
+        """Issue a fresh token for a registered worker.
+
+        Args:
+            worker_id: Id of the worker.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing worker.
+
+        Returns:
+            Worker token and its expiry.
+        """
+        response = await self._client.request(
+            "POST", f"/api/v1/workers/{worker_id}/token"
+        )
+        return WorkerTokenResponse.model_validate(response.json())
 
     async def heartbeat(
         self, worker_id: uuid.UUID, request: WorkerHeartbeatRequest

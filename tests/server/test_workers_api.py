@@ -22,6 +22,7 @@ import httpx
 import pytest
 
 from conftest import (
+    FakeAccountRepository,
     FakeAgentRepository,
     FakeAgentVersionRepository,
     FakeBlobRepository,
@@ -38,6 +39,7 @@ from conftest import (
     local_settings,
     mint_worker_token,
 )
+from kitaru.headers import CLIENT_HEADER
 from kitaru.server.adapters.auth.auth_service import AuthService
 from kitaru.server.adapters.rest.dependencies import (
     get_auth_service,
@@ -92,7 +94,10 @@ async def client(
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client authenticated as the fixture account by default."""
     app = create_app(local_settings())
-    service = WorkerService(repository=repository)
+    service = WorkerService(
+        repository=repository,
+        liveness_timeout_seconds=local_settings().WORKER_LIVENESS_TIMEOUT_SECONDS,
+    )
     transitions = TaskTransitions(
         task_repository=task_repository,
         job_repository=job_repository,
@@ -151,8 +156,8 @@ async def test_register_worker(client: httpx.AsyncClient, account: Account) -> N
     assert body["token_expires_at"]
 
 
-async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
-    """Re-registering under the same name keeps the id and renews the state."""
+async def test_register_worker_same_name(client: httpx.AsyncClient) -> None:
+    """Registering under an existing name creates a separate worker."""
     first = (
         await client.post(
             "/api/v1/workers",
@@ -175,15 +180,111 @@ async def test_register_worker_upsert(client: httpx.AsyncClient) -> None:
             },
         )
     ).json()
-    assert second["worker"]["id"] == first["worker"]["id"]
-    assert second["worker"]["created"] == first["worker"]["created"]
-    assert second["worker"]["scope"]["claims"] == [
-        {"kind": "importer", "agent_version_id": None}
-    ]
-    assert second["worker"]["runtime"]["platform"] == "docker"
-    assert second["worker"]["metadata"] == {"region": "us"}
-    assert second["worker"]["updated"] > first["worker"]["updated"]
+    assert second["worker"]["id"] != first["worker"]["id"]
     assert isinstance(second["token"], str) and second["token"]
+    response = await client.get(f"/api/v1/workers/{first['worker']['id']}")
+    assert response.json()["scope"]["claims"] == [
+        {"kind": "agent", "agent_version_id": None}
+    ]
+
+
+async def test_renew_worker_token(client: httpx.AsyncClient) -> None:
+    """Renew a worker token and observe a fresh token plus a seen stamp."""
+    created = (
+        await client.post(
+            "/api/v1/workers",
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
+        )
+    ).json()
+    response = await client.post(f"/api/v1/workers/{created['worker']['id']}/token")
+    assert response.status_code == 200
+    body = response.json()
+    assert isinstance(body["token"], str) and body["token"]
+    assert body["token_expires_at"]
+    response = await client.get(f"/api/v1/workers/{created['worker']['id']}")
+    assert response.json()["last_seen_at"] >= created["worker"]["last_seen_at"]
+
+
+async def test_renew_worker_token_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when renewing an unknown worker."""
+    response = await client.post(f"/api/v1/workers/{uuid.uuid4()}/token")
+    assert response.status_code == 404
+
+
+async def test_renew_worker_token_of_another_account(
+    client: httpx.AsyncClient,
+    auth_service: AuthService,
+    account_repository: FakeAccountRepository,
+) -> None:
+    """Observe HTTP 403 when renewing a worker owned by another account."""
+    created = (
+        await client.post(
+            "/api/v1/workers",
+            json={
+                "name": "worker-1",
+                "scope": SCOPE,
+                "runtime": RUNTIME,
+                "metadata": {},
+            },
+        )
+    ).json()
+    other = await account_repository.create(Account(name="bob"))
+    token = auth_service.issue_token(AuthContext(account=other)).token
+    response = await client.post(
+        f"/api/v1/workers/{created['worker']['id']}/token",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize(
+    "client_header",
+    ["kitaru-python/0.22.2", "kitaru-python/0.22.0rc10", "kitaru-python/0.9"],
+)
+async def test_register_worker_rejects_reregistering_client(
+    client: httpx.AsyncClient, client_header: str
+) -> None:
+    """Observe HTTP 426 for an SDK version that renews by re-registering."""
+    response = await client.post(
+        "/api/v1/workers",
+        json={"name": "worker-1", "scope": SCOPE, "runtime": RUNTIME, "metadata": {}},
+        headers={CLIENT_HEADER: client_header},
+    )
+    assert response.status_code == 426
+    assert "newer than 0.22.2" in response.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    "client_header",
+    [
+        "kitaru-python/0.22.3.dev0",
+        "kitaru-python/0.23.0.dev0",
+        "kitaru-python/1.0.0",
+        "kitaru-cli/0.22.2",
+        "kitaru-mcp/0.9",
+        "kitaru-ui/0.9",
+        "kitaru-typescript/0.1.1",
+        "curl/8.4.0",
+        "kitaru-python",
+        "kitaru-python/not-a-version",
+        "",
+    ],
+)
+async def test_register_worker_admits_supported_client(
+    client: httpx.AsyncClient, client_header: str
+) -> None:
+    """Admit any non-SDK client and every SDK at or above the minimum."""
+    response = await client.post(
+        "/api/v1/workers",
+        json={"name": "worker-1", "scope": SCOPE, "runtime": RUNTIME, "metadata": {}},
+        headers={CLIENT_HEADER: client_header},
+    )
+    assert response.status_code == 200
 
 
 async def test_register_worker_invalid_name(client: httpx.AsyncClient) -> None:
@@ -304,6 +405,25 @@ async def test_list_workers(client: httpx.AsyncClient) -> None:
     )
     assert response.status_code == 200
     assert response.json()["items"][0]["name"] == "worker-2"
+
+
+async def test_list_workers_hides_stale_unless_asked(
+    client: httpx.AsyncClient, repository: FakeWorkerRepository, account: Account
+) -> None:
+    """Leave stale workers out of the list unless include_stale is set."""
+    await create_worker(repository, account.id, name="live")
+    await create_worker(
+        repository,
+        account.id,
+        name="stale",
+        last_seen_at=datetime.now(UTC) - timedelta(minutes=5),
+    )
+
+    response = await client.get("/api/v1/workers")
+    assert [item["name"] for item in response.json()["items"]] == ["live"]
+
+    response = await client.get("/api/v1/workers", params={"include_stale": "true"})
+    assert [item["name"] for item in response.json()["items"]] == ["stale", "live"]
 
 
 async def test_delete_worker(client: httpx.AsyncClient) -> None:

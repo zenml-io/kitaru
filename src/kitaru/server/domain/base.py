@@ -38,6 +38,10 @@ class ConflictError(DomainError):
     """Raised when an operation conflicts with existing state."""
 
 
+class UpgradeRequiredError(DomainError):
+    """Raised when the caller must upgrade before performing an operation."""
+
+
 class PayloadTooLargeError(DomainError):
     """Raised when a request payload exceeds a size limit."""
 

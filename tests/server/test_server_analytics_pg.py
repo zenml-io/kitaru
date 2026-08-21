@@ -21,7 +21,11 @@ import pytest
 from conftest import pg_session, postgres_available
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.events import AnalyticsEvent
-from kitaru.analytics.source import AnalyticsAttribution, current_attribution
+from kitaru.analytics.source import (
+    AnalyticsAttribution,
+    AnalyticsSource,
+    current_attribution,
+)
 from kitaru.server.adapters.db.analytics import register_analytics_listeners
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
@@ -274,6 +278,50 @@ async def test_track_merges_the_current_skill() -> None:
     assert properties["skill"] == "data-analysis"
     _, traits = client.identified[0]
     assert "skill" not in traits
+
+
+async def test_track_merges_the_client_with_its_version() -> None:
+    """A client that reports a version lands under source and version."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    user_id = uuid.uuid4()
+    token = current_attribution.set(
+        AnalyticsAttribution(source=AnalyticsSource.UI, version="0.2.2")
+    )
+    try:
+        async with pg_session() as session:
+            analytics = ServerAnalytics(client=client, session=session)
+            analytics.track(user_id, AnalyticsEvent.SESSION_COMPLETED)
+            await session.commit()
+    finally:
+        current_attribution.reset(token)
+
+    _, _, properties = client.tracked[0]
+    assert properties["client_version"] == "kitaru-ui/0.2.2"
+
+
+async def test_track_omits_the_client_without_a_version() -> None:
+    """A client that reports no version contributes no client property."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+
+    client = _RecordingAnalyticsClient()
+    user_id = uuid.uuid4()
+    token = current_attribution.set(
+        AnalyticsAttribution(source=AnalyticsSource.API, version=None)
+    )
+    try:
+        async with pg_session() as session:
+            analytics = ServerAnalytics(client=client, session=session)
+            analytics.track(user_id, AnalyticsEvent.SESSION_COMPLETED)
+            await session.commit()
+    finally:
+        current_attribution.reset(token)
+
+    _, _, properties = client.tracked[0]
+    assert "client_version" not in properties
 
 
 async def test_track_omits_control_plane_user_id_without_external_id() -> None:

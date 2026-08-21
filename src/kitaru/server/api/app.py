@@ -25,14 +25,12 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
-    CLIENT_HEADER,
-    SKILL_HEADER,
     AnalyticsAttribution,
     AnalyticsSource,
     current_attribution,
-    parse_client_header,
 )
 from kitaru.api_models.v1.info import AuthScheme
+from kitaru.headers import CLIENT_HEADER, SKILL_HEADER
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
 from kitaru.server.adapters.db.errors import is_connection_unavailable, is_deadlock
 from kitaru.server.adapters.db.repositories.account_repository import (
@@ -90,6 +88,7 @@ from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
     build_analytics_context,
 )
+from kitaru.server.client_identity import parse_client_identity
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.base import (
     ConflictError,
@@ -98,6 +97,7 @@ from kitaru.server.domain.base import (
     NotFoundError,
     PayloadTooLargeError,
     QueryTimeoutError,
+    UpgradeRequiredError,
     ValidationError,
 )
 
@@ -107,8 +107,9 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
 
     Clients receive HTTP 403 for ``ForbiddenError``, 404 for ``NotFoundError``,
     409 for ``ConflictError``, 413 for ``PayloadTooLargeError``, 422 for
-    ``ValidationError``, 503 for ``QueryTimeoutError``, and 500 for other
-    ``DomainError`` subclasses. Each body is ``{"detail": "<message>"}``.
+    ``ValidationError``, 426 for ``UpgradeRequiredError``, 503 for
+    ``QueryTimeoutError``, and 500 for other ``DomainError`` subclasses. Each
+    body is ``{"detail": "<message>"}``.
 
     Args:
         app: FastAPI application that will serve the v1 API.
@@ -128,6 +129,13 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
     async def conflict(request: Request, exc: ConflictError) -> JSONResponse:
         _ = request
         return JSONResponse(status_code=409, content={"detail": str(exc)})
+
+    @app.exception_handler(UpgradeRequiredError)
+    async def upgrade_required(
+        request: Request, exc: UpgradeRequiredError
+    ) -> JSONResponse:
+        _ = request
+        return JSONResponse(status_code=426, content={"detail": str(exc)})
 
     @app.exception_handler(PayloadTooLargeError)
     async def payload_too_large(
@@ -227,10 +235,11 @@ async def _set_analytics_attribution(
     Returns:
         HTTP response.
     """
-    source = parse_client_header(request.headers.get(CLIENT_HEADER, ""))
+    identity = parse_client_identity(request.headers.get(CLIENT_HEADER, ""))
     token = current_attribution.set(
         AnalyticsAttribution(
-            source=source or AnalyticsSource.API,
+            source=identity.source if identity else AnalyticsSource.API,
+            version=identity.version if identity else None,
             skill=request.headers.get(SKILL_HEADER) or None,
         )
     )

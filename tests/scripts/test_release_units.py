@@ -6,12 +6,14 @@ import sys
 from pathlib import Path
 
 import pytest
+from packaging.version import Version
 from scripts.release_units import (
     ReleaseInventoryError,
     build_plugin_matrix,
     format_inventory,
     load_inventory,
     parse_package_tag,
+    validate_canonical_version,
     validate_version,
 )
 
@@ -83,9 +85,12 @@ def test_inventory_versions_and_tags_match_project_manifests() -> None:
     inventory = load_inventory()
 
     for unit in inventory.units:
-        resolved = parse_package_tag(unit.tag, inventory)
-        assert resolved == unit
         assert unit.tag == f"python/{unit.distribution}/v{unit.version}"
+        if Version(unit.version).local is not None:
+            with pytest.raises(ReleaseInventoryError, match="local segment"):
+                parse_package_tag(unit.tag, inventory)
+            continue
+        assert parse_package_tag(unit.tag, inventory) == unit
 
 
 @pytest.mark.parametrize("version", ["0.22.0rc1", "0.22.0", "1.0.dev1"])
@@ -105,6 +110,21 @@ def test_noncanonical_python_versions_are_rejected(version: str) -> None:
 def test_local_python_versions_are_rejected_for_pypi() -> None:
     with pytest.raises(ReleaseInventoryError, match="local segment"):
         validate_version("1.0+build.1")
+
+
+@pytest.mark.parametrize("version", ["0.22.2+dev", "0.22.0rc1", "1.0.dev1"])
+def test_manifest_versions_keep_their_local_segment(version: str) -> None:
+    assert validate_canonical_version(version) == version
+
+
+def test_noncanonical_manifest_versions_are_rejected() -> None:
+    with pytest.raises(ReleaseInventoryError, match="canonical PEP 440"):
+        validate_canonical_version("v0.22.0")
+
+
+def test_local_package_tags_are_rejected_for_pypi() -> None:
+    with pytest.raises(ReleaseInventoryError, match="local segment"):
+        parse_package_tag("python/kitaru/v0.22.2+dev", load_inventory())
 
 
 def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
@@ -557,12 +577,23 @@ def test_cli_json_commands_succeed(arguments: list[str], expected_key: str) -> N
 
 
 def test_cli_resolves_the_current_package_tag() -> None:
-    tag = load_inventory().units[0].tag
+    tag = next(
+        unit.tag
+        for unit in load_inventory().units
+        if Version(unit.version).local is None
+    )
     result = _run_cli("resolve", "--tag", tag, "--format", "json")
 
     assert result.returncode == 0
     assert json.loads(result.stdout)["unit"]["tag"] == tag
     assert result.stderr == ""
+
+
+def test_cli_refuses_to_release_a_local_version_tag() -> None:
+    result = _run_cli("resolve", "--tag", "python/kitaru/v0.22.2+dev")
+
+    assert result.returncode == 2
+    assert "local segment" in result.stderr
 
 
 def test_cli_json_errors_are_structured() -> None:

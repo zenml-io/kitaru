@@ -25,7 +25,6 @@ from typing import Any, Literal, Protocol
 
 from pydantic import ValidationError
 
-from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
     LabelSelector,
@@ -367,6 +366,7 @@ async def list_workers(
     cursor: str | None,
     sort: str,
     filter: str | None,
+    include_stale: bool = False,
 ) -> CommandResult:
     """List one server page of workers with explicit live/stale wording."""
     params = build_list_params(
@@ -376,6 +376,10 @@ async def list_workers(
         sort=sort,
         filter=filter,
     )
+    # Leave include_stale unset unless it was asked for, so the default
+    # listing stays a request a server without the parameter still accepts.
+    if include_stale:
+        params = params.model_copy(update={"include_stale": True})
     page = await client.workers.list(params)
     return CommandResult(
         items=[_worker_item(item) for item in page.items],
@@ -387,34 +391,10 @@ async def list_workers(
     )
 
 
-async def get_worker(client: Any, reference: str) -> CommandResult:
-    """Get a worker by exact UUID or one bounded exact-name lookup."""
-    normalized = reference.strip()
-    if not normalized:
-        raise CLIError("invalid_arguments", "Worker reference cannot be blank.")
-    try:
-        worker_id = uuid.UUID(normalized)
-    except ValueError:
-        worker_id = None
-    if worker_id is not None:
-        item = await client.workers.get(worker_id)
-        return CommandResult(item=_worker_item(item))
-
-    params = WorkerListParams(
-        size=2,
-        filter=FilterCondition(field="name", op=FilterOp.EQ, value=normalized),
-    )
-    page = await client.workers.list(params)
-    matches = [worker for worker in page.items if worker.name == normalized]
-    if not matches:
-        raise CLIError("not_found", f"Worker {normalized!r} was not found.")
-    if len(matches) > 1:
-        raise CLIError(
-            "conflict",
-            f"More than one worker has the exact name {normalized!r}.",
-            details={"ids": [str(worker.id) for worker in matches[:2]]},
-        )
-    return CommandResult(item=_worker_item(matches[0]))
+async def get_worker(client: Any, worker_id: uuid.UUID) -> CommandResult:
+    """Get one worker by id."""
+    item = await client.workers.get(worker_id)
+    return CommandResult(item=_worker_item(item))
 
 
 def _worker_item(worker: Any) -> dict[str, Any]:
