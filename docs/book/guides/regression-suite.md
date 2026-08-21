@@ -5,7 +5,7 @@ icon: vials
 
 # Build a regression suite from production
 
-Replaying a change against one session shows how it affects that case. A regression suite repeats the comparison across a fixed set of recorded or imported sessions. These sessions complement synthetic fixtures: they preserve inputs and behavior seen in real runs, while synthetic cases can cover conditions that have not occurred in production.
+Replaying a change against one session shows how it affects that case. A regression suite repeats the comparison across a fixed set of recorded or imported sessions. These sessions complement synthetic fixtures: they preserve inputs and behavior seen in real runs, while synthetic cases can cover conditions that have not happened in production.
 
 This guide selects a population, freezes it as a cohort version, defines a change as an experiment, and runs that experiment in CI.
 
@@ -61,7 +61,7 @@ version = await client.cohorts.create_version(
 )
 ```
 
-[Cohort versions are immutable](../concepts/cohorts.md). Version 1 therefore keeps the same 50 sessions. To add or remove sessions, create a new version so later comparisons show that the population changed.
+[Cohort versions are immutable](../concepts/cohorts.md). Version 1 keeps the same 50 sessions. To add or remove sessions, create a new version so later comparisons show that the population changed.
 
 ## 3. Make the change an experiment
 

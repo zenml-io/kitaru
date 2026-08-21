@@ -97,12 +97,14 @@ Setup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each cohort version repository implementation, a session
-    repository sharing its backend, an owner id, a cohort id to attach
-    versions to, a factory for further cohort ids, a factory for further
-    session ids on the cohort's agent, a factory attaching an experiment
-    run to a given cohort version id, and a tag repository sharing the
-    backend."""
+    """Provide each cohort version repository implementation and its collaborators.
+
+    Yields the repository, a session repository sharing its backend, an owner
+    id, a cohort id to attach versions to, a factory for further cohort ids, a
+    factory for further session ids on the cohort's agent, a factory attaching
+    an experiment run to a given cohort version id, and a tag repository
+    sharing the backend.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         cohorts = FakeCohortRepository()

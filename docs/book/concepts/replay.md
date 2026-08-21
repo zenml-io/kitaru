@@ -5,13 +5,13 @@ icon: rotate-left
 
 # Replay
 
-Replay is the verb the whole product hangs off. A [session](agents-and-sessions.md) is a recording; a **replay** re-executes it: your agent's real code runs again, and the recording answers for the world the original run saw. With a `history` [tool policy](#tool-policies), tool calls are served from the recorded session, so nothing touches your real systems.
+Replay is the verb the whole product hangs on. A [session](agents-and-sessions.md) is a recording; a **replay** re-executes it. Your agent's real code runs again, and the recording answers for the world the original run saw. With a `history` [tool policy](#tool-policies), tool calls are served from the recorded session, so nothing touches your real systems.
 
 The discipline comes first: **replay unchanged before you change anything.** An unchanged replay that reproduces the original is your faithful baseline. Fork from that baseline with exactly one thing different (a model, a prompt, a code change) and the diff you read is your change, not replay noise.
 
 ## What a replay is
 
-A replay names a **baseline session**, the **agent version** to run (by default, the version the baseline was recorded with), an optional **override**, a **tool policy**, and at least one [evaluator](evaluators.md). The server turns it into a job; a [worker](workers.md) in your environment starts your agent from its run spec, feeding it the baseline's inputs. The re-run records a fresh session (`origin: replay`), and the evaluators score it as soon as it completes.
+A replay names a **baseline session**, the **agent version** to run (by default, the version the baseline was recorded with), an optional **override**, a **tool policy**, and at least one [evaluator](evaluators.md). The server turns it into a job; a [worker](workers.md) in your environment starts your agent from its run spec, feeding it the baseline's inputs. The re-run records a fresh session (`origin: replay`), and the evaluators evaluate it as soon as it completes.
 
 For a one-off replay, the CLI exposes the same create, list, and get flow:
 
@@ -57,13 +57,13 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
-`evaluate_baselines=True` scores the baseline session with the same evaluators, so the comparison you want, baseline evaluations next to replay evaluations, exists as soon as the replay settles. Watch the job with `kitaru job watch <job-id>`, then read `result_session_id` off the replay.
+`evaluate_baselines=True` evaluates the baseline session with the same evaluators, so the comparison you want, baseline evaluations next to replay evaluations, exists as soon as the replay settles. Watch the job with `kitaru job watch <job-id>`, then read `result_session_id` off the replay.
 
-A replay moves `pending → evaluating → completed` (or `failed` / `canceled`). Its output is deliberately plain: the result session plus its evaluation rows. You compare baseline and result by reading both sessions' evaluations, cost, and tokens. See [Replay a failure and fork it](../guides/replay-and-overrides.md) for the full loop.
+A replay moves `pending → evaluating → completed` (or `failed` / `canceled`). Its output is intentionally plain: the result session plus its evaluation rows. You compare baseline and result by reading both sessions' evaluations, cost, and tokens. See [Replay a failure and fork it](../guides/replay-and-overrides.md) for the full loop.
 
 ## Forking: the override
 
-There is no separate fork operation in the API; a "fork" is just a replay that carries an `override`. The word is shorthand for that, the way "baseline" is shorthand for a replay without one. Both are the same call.
+There is no separate fork operation in the API; a "fork" is a replay that carries an `override`. The word is shorthand for that, the way "baseline" is shorthand for a replay without one. Both are the same call.
 
 An override changes one thing about the re-run and leaves everything else alone:
 

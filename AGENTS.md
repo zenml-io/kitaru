@@ -11,7 +11,7 @@ server) and the SDK reference docs app. The public marketing site and
 - `src/kitaru/client/`: async SDK making REST calls
 - `src/kitaru/server/`: FastAPI server (API, application, domain, adapters layers)
 - `tests/`: pytest suite; see `tests/AGENTS.md` when working there
-- `examples/`: runnable SDK examples
+- `examples/`: runnable SDK examples, grouped as `python/` and `typescript/`
 - `docs/book/`: hand-written GitBook docs; see `docs/book/AGENTS.md`
 - `docs/content/docs/`: generated SDK reference content
 - `docs/app/`, `docs/scripts/`, `docs/worker/`: reference app, generation, and redirect worker code
@@ -19,8 +19,10 @@ server) and the SDK reference docs app. The public marketing site and
 - `docker/`: Dockerfiles
 - `design/`: gitignored design notes; never commit anything from this directory
 
-For docs routing, CI/release details, and task-specific runbooks, load the
-Kitaru repo skills under `.agents/skills/`.
+For adapter, importer, specialized UI API, docs, CI, and release work, load the
+matching Kitaru repo skill under `.agents/skills/`. Keep each logical repo skill
+available under the same name in `.claude/skills/`; share host-neutral guidance
+and diverge only for a documented host-specific reason.
 
 ## Core Commands
 
@@ -76,6 +78,12 @@ include a regression test that fails before the fix and passes after it.
 
 When you work under `tests/`, also read `tests/AGENTS.md`.
 
+Tests cover ordinary changes. When a change can only be proven against a live
+stack, such as import, replay, experiment, job, or worker behavior, `devtools/`
+runs one locally: `uv run python devtools/seed.py --db-name kitaru_<yourtask>
+--keep` seeds a server end to end. Read `devtools/AGENTS.md` first, and clean up
+the stacks and databases you create.
+
 ## Docs
 
 - Never hard-wrap prose in Markdown files. Keep each paragraph and each list item on one logical line; use line breaks only for Markdown structure such as headings, blank lines, list items, tables, and fenced code blocks.
@@ -105,6 +113,7 @@ The canonical returns implementation lives in the public [`zenml-io/kitaru-templ
 - Link related issues when applicable.
 - Every PR description should include a `Reviewer Notes` H2 or H3 section with
   a concrete reproduction path for reviewers.
+- Never merge a PR that has not received an approving human review — this includes dependabot bumps and trivial changes, and it must not be bypassed with `gh pr merge --admin` or similar. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2). Prepare the PR, request review, and wait.
 
 ## CI/CD
 

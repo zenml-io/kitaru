@@ -72,6 +72,8 @@ export interface KitaruTransportOptions {
 const KITARU_CLIENT_HEADER = "X-Kitaru-Client";
 const KITARU_CLIENT_IDENTIFICATION = "kitaru-typescript";
 const KITARU_SKILL_HEADER = "X-Kitaru-Skill";
+const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(["POST"]);
 
 function cloneBytes(value: ArrayBuffer | Uint8Array): Uint8Array<ArrayBuffer> {
   const bytes = value instanceof Uint8Array ? value : new Uint8Array(value);
@@ -370,6 +372,12 @@ export class KitaruTransport {
       }
     }
 
+    // One key per logical request, reused on every attempt so the server
+    // replays the first committed response instead of running it again.
+    const method = request.method.toUpperCase();
+    const idempotencyKey = IDEMPOTENT_METHODS.has(method)
+      ? globalThis.crypto.randomUUID()
+      : undefined;
     let attempt = 0;
     let authenticationRetried = false;
     while (attempt < attempts) {
@@ -387,7 +395,7 @@ export class KitaruTransport {
           response = await this.#fetch(
             `${this.#apiUrl}${request.path}${encodeQuery(request.query)}`,
             {
-              method: request.method,
+              method,
               redirect: "manual",
               headers: {
                 Accept: "application/json",
@@ -401,6 +409,9 @@ export class KitaruTransport {
                 ...(credential === undefined
                   ? {}
                   : { Authorization: `Bearer ${credential.token}` }),
+                ...(idempotencyKey === undefined
+                  ? {}
+                  : { [IDEMPOTENCY_KEY_HEADER]: idempotencyKey }),
                 ...request.headers,
               },
               body: createdBody?.body,

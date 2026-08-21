@@ -23,7 +23,6 @@ from kitaru.api_models.v1.account import (
     AccountResponse,
 )
 from kitaru.api_models.v1.base import Page
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_account_service,
@@ -32,10 +31,11 @@ from kitaru.server.adapters.rest.mapping.accounts import (
     account_list_params_to_filter,
     account_to_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.get("")

@@ -125,6 +125,8 @@ class _FakeReplays:
 
     async def tool_lookup(self, replay_id: uuid.UUID, request: Any) -> Any:
         self.lookups.append((replay_id, request))
+        if self._client.lookup_responses:
+            return self._client.lookup_responses.pop(0)
         return self._client.lookup_response
 
 
@@ -134,6 +136,7 @@ class _FakeClient:
     next_lookup_response: ClassVar[ToolLookupResponse] = ToolLookupResponse(
         found=False, result=None
     )
+    next_lookup_responses: ClassVar[list[ToolLookupResponse] | None] = None
     next_ingest_error: ClassVar[BaseException | None] = None
     next_ingest_error_after: ClassVar[int | None] = None
     next_update_error: ClassVar[BaseException | None] = None
@@ -146,6 +149,7 @@ class _FakeClient:
         self.replay = fixture.replay if fixture else None
         self.inputs = fixture.inputs if fixture else None
         self.lookup_response = type(self).next_lookup_response
+        self.lookup_responses = list(type(self).next_lookup_responses or [])
         self.ingest_error = type(self).next_ingest_error
         self.ingest_error_after = type(self).next_ingest_error_after
         self.update_error = type(self).next_update_error
@@ -176,6 +180,7 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _FakeClient.instances.clear()
     _FakeClient.next_fixture = None
     _FakeClient.next_lookup_response = ToolLookupResponse(found=False, result=None)
+    _FakeClient.next_lookup_responses = None
     _FakeClient.next_ingest_error = None
     _FakeClient.next_ingest_error_after = None
     _FakeClient.next_update_error = None
@@ -1097,6 +1102,125 @@ async def test_tool_policies(
         lookup = client.replays.lookups[0][1]
         arguments = {"city": "Paris", "units": "metric"}
         assert lookup.cache_key == compute_tool_cache_key("lookup", arguments)
+
+
+def _repeating_tool_agent(
+    real_calls: list[dict[str, Any]], returned_results: list[Any], call_count: int
+) -> Agent[None, str]:
+    def model(messages: list[ModelMessage], _: AgentInfo) -> ModelResponse:
+        returns = [
+            part
+            for message in messages
+            if isinstance(message, ModelRequest)
+            for part in message.parts
+            if isinstance(part, ToolReturnPart)
+        ]
+        del returned_results[:]
+        returned_results.extend(part.content for part in returns)
+        if len(returns) >= call_count:
+            return ModelResponse(parts=[TextPart("finished")])
+        return ModelResponse(
+            parts=[ToolCallPart("lookup", {"city": "Paris", "units": "metric"})]
+        )
+
+    agent = Agent(FunctionModel(model, model_name="tools"))
+
+    @agent.tool_plain
+    def lookup(city: str, units: str) -> dict[str, Any]:
+        arguments = {"city": city, "units": units}
+        real_calls.append(arguments)
+        return {"source": "real", **arguments}
+
+    return agent
+
+
+async def test_history_policy_consumes_baseline_occurrences_in_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated identical calls look up successive baseline occurrences."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL)
+        ),
+    )
+    _FakeClient.next_lookup_responses = [
+        ToolLookupResponse(found=True, result={"ticket": ticket})
+        for ticket in ["a", "b", "c"]
+    ]
+    agent = KitaruAgent(
+        _repeating_tool_agent(real_calls, returned_results, 3),
+        agent_id=uuid.uuid4(),
+    )
+
+    result = await agent.run("tickets")
+
+    assert result.output == "finished"
+    assert returned_results == [{"ticket": "a"}, {"ticket": "b"}, {"ticket": "c"}]
+    assert real_calls == []
+    client = _FakeClient.instances[0]
+    assert [request.occurrence for _, request in client.replays.lookups] == [0, 1, 2]
+
+
+async def test_history_policy_miss_does_not_advance_occurrence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missed lookup leaves the next identical call on the same occurrence."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.PASSTHROUGH
+            )
+        ),
+    )
+    _FakeClient.next_lookup_responses = [
+        ToolLookupResponse(found=False, result=None),
+        ToolLookupResponse(found=True, result={"ticket": "a"}),
+    ]
+    agent = KitaruAgent(
+        _repeating_tool_agent(real_calls, returned_results, 2),
+        agent_id=uuid.uuid4(),
+    )
+
+    result = await agent.run("tickets")
+
+    assert result.output == "finished"
+    assert len(real_calls) == 1
+    client = _FakeClient.instances[0]
+    assert [request.occurrence for _, request in client.replays.lookups] == [0, 0]
+
+
+async def test_history_policy_non_baseline_scope_sends_no_occurrence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent-scoped history lookups carry no occurrence."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(scope=HistoryScope.AGENT, on_miss=ToolPolicyOnMiss.FAIL)
+        ),
+    )
+    _FakeClient.next_lookup_response = ToolLookupResponse(
+        found=True, result={"source": "history"}
+    )
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+    )
+
+    result = await agent.run("weather")
+
+    assert result.output == "finished"
+    client = _FakeClient.instances[0]
+    assert len(client.replays.lookups) == 1
+    assert client.replays.lookups[0][1].occurrence is None
 
 
 async def test_history_policy_without_cache_key_uses_miss_behavior(

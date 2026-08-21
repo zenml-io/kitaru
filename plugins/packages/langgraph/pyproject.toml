@@ -1,12 +1,29 @@
 [project]
 name = "kitaru-langgraph"
-version = "0.1.0rc0"
+version = "0.1.0"
 description = "LangGraph recording and replay adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+    { name = "ZenML GmbH", email = "info@zenml.io" },
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+keywords = ["ai-agents", "kitaru", "langgraph", "recording", "replay"]
 dependencies = [
-    "kitaru>=0.22.0rc0,<0.23",
+    "kitaru>=0.22.0",
     "langchain>=1.3.14,<2",
     "langchain-core>=1.5.3,<2",
     "langgraph>=1.2.10,<2",
@@ -14,6 +31,13 @@ dependencies = [
 
 [project.optional-dependencies]
 deepagents = ["deepagents>=0.7.4,<0.8"]
+
+[project.urls]
+Homepage = "https://kitaru.ai"
+Documentation = "https://docs.zenml.io/kitaru/adapters/langgraph"
+Repository = "https://github.com/zenml-io/kitaru"
+Issues = "https://github.com/zenml-io/kitaru/issues"
+Changelog = "https://github.com/zenml-io/kitaru/blob/develop/plugins/packages/langgraph/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling==1.32.0"]

@@ -25,7 +25,7 @@ from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.investigation import Investigation
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, PluginSource
-from kitaru.server.domain.replay_config import ReplayOverride
+from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
 from kitaru.server.domain.worker import Worker
@@ -216,15 +216,16 @@ def build_job_completed_properties(job: Job, tasks: list[Task]) -> dict[str, Any
     }
 
 
-def build_replay_created_properties(override: ReplayOverride | None) -> dict[str, Any]:
-    """Build the properties naming which override kinds a replay sets.
+def _replay_config_properties(config: ReplayConfig) -> dict[str, Any]:
+    """Build the properties describing a replay config.
 
     Args:
-        override: Replay override, if any.
+        config: Replay config.
 
     Returns:
-        Event properties.
+        Replay config properties.
     """
+    override = config.override
     return {
         "model_override": override is not None and override.model is not None,
         "system_prompt_override": (
@@ -234,25 +235,37 @@ def build_replay_created_properties(override: ReplayOverride | None) -> dict[str
         "model_params_override": (
             override is not None and override.model_params is not None
         ),
+        "tool_policy_default": config.tool_policy.default.type,
+        "tool_override_count": len(config.tool_policy.tools),
+        "tool_override_types": sorted(
+            {tool.type for tool in config.tool_policy.tools.values()}
+        ),
+        "evaluator_count": len(config.evaluators),
     }
 
 
-def build_experiment_created_properties(
-    evaluator_count: int, tool_override_count: int
-) -> dict[str, Any]:
-    """Build the properties of an experiment creation.
+def build_replay_created_properties(config: ReplayConfig) -> dict[str, Any]:
+    """Build the properties of a replay creation.
 
     Args:
-        evaluator_count: Evaluators attached to the experiment.
-        tool_override_count: Tools overridden by the replay config.
+        config: Replay config of the replay.
 
     Returns:
         Event properties.
     """
-    return {
-        "evaluator_count": evaluator_count,
-        "tool_override_count": tool_override_count,
-    }
+    return _replay_config_properties(config)
+
+
+def build_experiment_created_properties(config: ReplayConfig) -> dict[str, Any]:
+    """Build the properties of an experiment creation.
+
+    Args:
+        config: Replay config of the experiment.
+
+    Returns:
+        Event properties.
+    """
+    return _replay_config_properties(config)
 
 
 def build_experiment_run_completed_properties(

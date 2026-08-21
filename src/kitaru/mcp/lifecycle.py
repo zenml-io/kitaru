@@ -24,6 +24,7 @@ class MCPServerState:
     _closed: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
+        """Create the semaphore from the configured maximum concurrency."""
         self.semaphore = asyncio.Semaphore(self.settings.max_concurrency)
 
     async def execute(self, operation: Callable[[], Awaitable[ResultT]]) -> ResultT:

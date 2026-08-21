@@ -199,10 +199,7 @@ class ExperimentService:
             self._analytics.track(
                 actor.account.id,
                 AnalyticsEvent.EXPERIMENT_CREATED,
-                analytics_events.build_experiment_created_properties(
-                    evaluator_count=len(evaluators),
-                    tool_override_count=len(config.tool_policy.tools),
-                ),
+                analytics_events.build_experiment_created_properties(config),
             )
         return experiment, config
 

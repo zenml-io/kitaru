@@ -27,6 +27,7 @@ from conftest import (
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
+    FakeIdempotencyKeyRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
@@ -39,6 +40,7 @@ from conftest import (
     create_cohort_version,
     create_session,
     local_settings,
+    override_idempotency,
 )
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.adapters.auth.auth_service import AuthService
@@ -48,6 +50,7 @@ from kitaru.server.adapters.rest.dependencies import (
     authorize_with_task,
     get_auth_service,
     get_evaluation_service,
+    get_idempotency_key_repository,
     get_session_node_service,
     get_session_service,
     get_tag_service,
@@ -83,8 +86,7 @@ def session_repository(
     tag_repository: FakeTagRepository,
     evaluation_repository: FakeEvaluationRepository,
 ) -> FakeSessionRepository:
-    """Provide the fake session repository backing the app, tag- and
-    evaluation-aware."""
+    """Provide the tag- and evaluation-aware fake session repository for the app."""
     return FakeSessionRepository(tags=tag_repository, evaluations=evaluation_repository)
 
 
@@ -105,8 +107,10 @@ def cohort_version_repository(
     cohort_repository: FakeCohortRepository,
     session_repository: FakeSessionRepository,
 ) -> FakeCohortVersionRepository:
-    """Provide the fake cohort version repository wired to the session
-    repository backing the app."""
+    """Provide the fake cohort version repository backing the app.
+
+    The repository is wired to the fake session repository.
+    """
     return FakeCohortVersionRepository(
         cohorts=cohort_repository, sessions=session_repository
     )
@@ -170,6 +174,7 @@ async def client(
     app.dependency_overrides[get_evaluation_service] = lambda: evaluation_service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
         yield client
@@ -624,8 +629,7 @@ async def test_update_session_status_cannot_be_cleared(
 async def test_update_session_rejects_terminal_back_to_in_progress(
     client: httpx.AsyncClient,
 ) -> None:
-    """Observe HTTP 409 when the update moves a terminal session back to
-    in_progress."""
+    """Return HTTP 409 when an update moves a terminal session to in_progress."""
     created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.patch(f"/api/v1/sessions/{created['id']}", json={"status": "failed"})
     response = await client.patch(
@@ -925,6 +929,9 @@ def _build_task_scoped_app(
         repository=evaluation_repository, session_repository=session_repository
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
+    app.dependency_overrides[get_idempotency_key_repository] = lambda: (
+        FakeIdempotencyKeyRepository()
+    )
     transport = httpx.ASGITransport(app=app)
     return httpx.AsyncClient(transport=transport, base_url="http://test")
 

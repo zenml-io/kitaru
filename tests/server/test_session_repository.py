@@ -126,9 +126,12 @@ CohortSetup = tuple[
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
-    """Provide each session repository implementation, an owner id, an agent
-    id to attach sessions to, a tag repository, and an evaluation repository,
-    the last two sharing the session repository's backend."""
+    """Provide each session repository implementation and its collaborators.
+
+    Yields the repository, an owner id, an agent id to attach sessions to, a
+    tag repository, and an evaluation repository, the last two sharing the
+    session repository's backend.
+    """
     if request.param == "fake":
         tags = FakeTagRepository()
         evaluations = FakeEvaluationRepository()
@@ -160,8 +163,11 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
 async def cohort_setup(
     request: pytest.FixtureRequest,
 ) -> AsyncGenerator[CohortSetup, None]:
-    """Provide a session repository wired to cohort and cohort version
-    repositories sharing its backend, an owner id, and an agent id."""
+    """Provide a cohort-aware session repository and its collaborators.
+
+    Yields a session repository wired to cohort and cohort version
+    repositories sharing its backend, an owner id, and an agent id.
+    """
     if request.param == "fake":
         sessions = FakeSessionRepository()
         cohorts = FakeCohortRepository()
@@ -610,8 +616,7 @@ async def test_update_not_found(setup: Setup) -> None:
 
 
 async def test_update_duplicate_external_id(setup: Setup) -> None:
-    """Reject an update that collides with another session's imported_from and
-    external id."""
+    """Reject an update colliding on another session's imported_from + external id."""
     repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Session(
@@ -1261,8 +1266,10 @@ async def test_query_filters_by_in_expression(setup: Setup) -> None:
 
 
 async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
-    """Match name with startswith, endswith, and contains, autoescaping SQL
-    wildcards in the contains value."""
+    """Match name with startswith, endswith, and contains.
+
+    SQL wildcards in the contains value are autoescaped.
+    """
     repository, owner_id, agent_id, _, _ = setup
     web_run = await repository.create(
         Session(

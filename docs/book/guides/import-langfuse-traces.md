@@ -5,7 +5,7 @@ icon: bolt
 
 # Langfuse
 
-[Import your traces](../getting-started/import-your-traces.md) covers the happy path: one `kitaru session import` against the built-in Langfuse importer. This guide is the full contract: what the importer understands, how re-runs dedup, and how to write an importer for any other format.
+[Import your traces](../getting-started/import-your-traces.md) covers the shortest path: one `kitaru session import` against the built-in Langfuse importer. This guide is the full contract: what the importer understands, how re-runs dedup, and how to write an importer for any other format.
 
 ## How an import executes
 
@@ -42,7 +42,7 @@ Set `agent_version_id` when you know which code produced the traces; it's what l
 
 ## The built-in importers
 
-Kitaru ships four importers as default plugins, registered at server startup under the `kitaru/` namespace: `kitaru/langfuse`, `kitaru/langsmith`, `kitaru/braintrust`, and `kitaru/kitaru-jsonl` (a native JSONL shape), so `--importer kitaru/langfuse@latest` always resolves. They run on your worker like any other importer; there is nothing to write.
+Kitaru ships provider importers as default plugins, registered at server startup under the `kitaru/` namespace, so `--importer kitaru/langfuse@latest` always resolves. They run on your worker like any other importer; there is nothing to write. See [Import your traces](../getting-started/import-your-traces.md) for the current built-in list.
 
 The Langfuse importer parses **Langfuse JSONL exports**, up to 50 MiB per payload (the importer's own cap, separate from the server's configurable blob limit), and understands three record shapes: `trace`, `observation`, and raw `ingestion_event` lines. Traces map to sessions; observations map to nodes with their parent relationships, timings, model names, token usage, and cost preserved. `params`:
 
@@ -66,4 +66,4 @@ The importer contract is deliberately small, about a page of Python, and the shi
 
 ## After the import
 
-Imported sessions are full citizens: score them with [evaluators](write-an-evaluator.md) (backfilling your history is a single batch call), freeze them into [cohorts](../concepts/cohorts.md), and [replay](replay-and-overrides.md) them, provided the agent's code is registered as an agent version with a run command, since replay re-runs your code, which no trace export contains.
+Imported sessions are full Kitaru sessions: evaluate them with [evaluators](write-an-evaluator.md) (backfilling your history is a single batch call), freeze them into [cohorts](../concepts/cohorts.md), and [replay](replay-and-overrides.md) them. Replay re-runs your code, which no trace export contains, so the agent's code must be registered as an agent version with a run command.

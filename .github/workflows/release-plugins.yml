@@ -73,14 +73,23 @@ jobs:
       - name: Validate release source
         run: |
           set -euo pipefail
-          git fetch origin develop
+          git fetch origin main
           release_sha=$(git rev-parse HEAD)
-          if ! git merge-base --is-ancestor "$release_sha" origin/develop; then
-            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on develop."
+          if ! git merge-base --is-ancestor "$release_sha" origin/main; then
+            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on main."
             exit 1
           fi
       - name: Build plugin
         run: uv build --project "$PROJECT_DIR" --out-dir package-dist
+      - name: Validate distribution metadata
+        run: |
+          set -euo pipefail
+          wheel=$(find package-dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          python scripts/smoke_plugin_artifacts.py \
+            --validate-wheel "$wheel" \
+            --distribution "$DISTRIBUTION" \
+            --version "$VERSION"
       - name: Test installed distribution
         run: |
           set -euo pipefail
@@ -150,12 +159,15 @@ jobs:
             exit 0
           fi
           prerelease=()
+          latest=(--latest=false)
           if [ "$IS_PRERELEASE" = true ]; then
             prerelease+=(--prerelease)
+          else
+            latest=(--latest)
           fi
           gh release create "$PACKAGE_TAG" package-dist/* evidence/* \
             "${prerelease[@]}" \
             --verify-tag \
-            --latest=false \
+            "${latest[@]}" \
             --title "$DISTRIBUTION $VERSION" \
             --generate-notes

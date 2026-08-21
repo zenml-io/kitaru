@@ -2510,6 +2510,7 @@
         },
         "SessionNodesRequest": {
           "additionalProperties": false,
+          "description": "List a session's child nodes.",
           "properties": {
             "cursor": {
               "anyOf": [
@@ -2561,6 +2562,7 @@
         },
         "SortedChildrenRequest": {
           "additionalProperties": false,
+          "description": "List an experiment run's jobs or a job's tasks, sorted.",
           "properties": {
             "cursor": {
               "anyOf": [

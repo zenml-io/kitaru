@@ -113,6 +113,21 @@ class SessionNodeRepository(Protocol):
         """
         ...
 
+    async def find_nth_by_cache_key_in_session(
+        self, session_id: uuid.UUID, cache_key: str, occurrence: int
+    ) -> SessionNode | None:
+        """Find the nth node with a cache key within one session, in index order.
+
+        Args:
+            session_id: Id of the session to search.
+            cache_key: Tool call cache key to match.
+            occurrence: Zero-based match position in index order.
+
+        Returns:
+            Matching node at the position, or ``None`` on a miss.
+        """
+        ...
+
     async def find_latest_by_cache_key_in_agent(
         self, agent_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:

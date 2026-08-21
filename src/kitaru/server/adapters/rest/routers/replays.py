@@ -26,7 +26,6 @@ from kitaru.api_models.v1.replay import (
     ToolLookupRequest,
     ToolLookupResponse,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -38,13 +37,15 @@ from kitaru.server.adapters.rest.mapping.replays import (
     replay_to_response,
     tool_lookup_result_to_response,
 )
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.replay_service import ReplayService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_replay(
     body: ReplayCreateRequest,
     service: Annotated[ReplayService, Depends(get_replay_service)],
@@ -135,7 +136,8 @@ async def tool_lookup(
 
     Clients observe HTTP 200 on success, 403 when a task token names a task
     outside this replay's job, 404 when no replay has this id, and 422 when
-    the tool is not configured for history.
+    the tool is not configured for history or an occurrence was given for a
+    non-baseline history scope.
 
     Args:
         replay_id: Id of the replay.
@@ -147,6 +149,6 @@ async def tool_lookup(
         Whether a cached result was found, and the result if so.
     """
     result = await service.tool_lookup(
-        replay_id, body.tool_name, body.cache_key, actor=actor
+        replay_id, body.tool_name, body.cache_key, body.occurrence, actor=actor
     )
     return tool_lookup_result_to_response(result)

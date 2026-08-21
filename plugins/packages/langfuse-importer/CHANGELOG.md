@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.1
+
+- Resolve legacy ingestion updates independently of JSONL row order and preserve explicit zero token counts.
+
+## 0.1.0
+
+- Promote the Langfuse importer, including inferred tool-call links and normalized tool outputs, to stable.
+
 ## 0.1.0rc3
 
 - Nest matched tool calls under requesting LLM calls, retain their source parent as a secondary link, decode JSON tool-call arguments, and select structured final-answer text.

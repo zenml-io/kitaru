@@ -7,8 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+## [0.22.2]
+
 ### Changed
 
+- Updated the bundled frontend to `kitaru-ui-v0.2.2`.
+
+### Added
+
+- Added user-facing methods to `KitaruClient` and `KitaruSyncClient`: get agents and experiments by name or id, list sessions and session nodes, replay a session or start an experiment run and wait for the result. The one-method-per-endpoint API client stays reachable as `client.api`.
+- Added server-side idempotency keys: a retried POST request with the same `Idempotency-Key` (stamped by both the Python and TypeScript clients) replays the first committed response instead of re-executing, marked with an `Idempotent-Replayed: true` header. The same key with a different request body is rejected with 422. Keys are retained for `KITARU_SERVER_IDEMPOTENCY_KEY_RETENTION_SECONDS` (default 900 seconds).
+
+### Fixed
+
+- Repeated identical tool calls with baseline-scoped history replay their distinct recorded results in baseline order instead of all resolving to the newest match. Replayed calls past the last recorded occurrence follow the configured `on_miss` behavior.
+- The TypeScript adapters (Mastra and Vercel AI SDK) now apply the same baseline occurrence ordering: repeated identical tool calls send a zero-based `occurrence` with each history lookup and advance it only on a found result.
+
+### Changed
+
+- Unified all runnable examples under a single `examples/` tree: the Python adapter examples moved from `examples/integrations/` to `examples/python/`, and the TypeScript examples moved from `v2_examples/` to `examples/typescript/`. The `examples/v2/mcp` configuration example was removed in favor of the MCP setup documentation.
+
+## [0.22.1]
+
+### Changed
+
+- Updated the bundled frontend to `kitaru-ui-v0.2.1`.
+- Included all nine stable Python plugin distributions in `plugins/default-requirements.txt`, while keeping adapter distributions out of the server plugin catalog.
+
+## [0.22.0]
+
+### Changed
+
+- Released Kitaru 0.22 with `kitaru-ui-v0.2.0`, nine stable `0.1.0` Python plugin distributions, and the stable `0.1.1` TypeScript packages.
 - Raised the default worker concurrency from 1 to 10, so `kitaru worker start` runs up to ten tasks in parallel without a flag. Set `--concurrency` or `KITARU_WORKER_CONCURRENCY` to restore the previous single-slot behavior.
 
 ## [0.22.0rc10]

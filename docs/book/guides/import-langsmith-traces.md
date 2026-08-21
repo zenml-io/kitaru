@@ -5,7 +5,7 @@ icon: hammer
 
 # LangSmith
 
-If your agent already reports to LangSmith, you don't need to re-instrument anything to start using Kitaru. Export the runs, import them, and each one lands as a [session](../concepts/agents-and-sessions.md) with `origin: imported`, the same object a live-recorded run produces. LangSmith stays your system of record; Kitaru takes a runnable copy of the runs you want to evaluate and replay.
+If your agent already reports to LangSmith, you do not need to re-instrument anything to start using Kitaru. Export the runs, import them, and each one lands as a [session](../concepts/agents-and-sessions.md) with `origin: imported`, the same object a live-recorded run produces. LangSmith stays your system of record; Kitaru takes a runnable copy of the runs you want to evaluate and replay.
 
 [Import your traces](../getting-started/import-your-traces.md) covers the shortest path. This guide is the LangSmith contract: what the built-in importer accepts, how it decides where one session ends and the next begins, and where it tells you it lost fidelity.
 
@@ -26,7 +26,7 @@ Each run record is read for the fields LangSmith already writes: `id`, `trace_id
 
 ## Import the export
 
-Register the agent these runs belong to, if you haven't, then start a [worker](../concepts/workers.md) in another terminal (`kitaru worker start`) and import:
+Register the agent these runs belong to, if you have not, then start a [worker](../concepts/workers.md) in another terminal (`kitaru worker start`) and import:
 
 ```bash
 kitaru agent register support-agent --command "python support.py"
@@ -83,11 +83,11 @@ At session level you get the thread's trace ids, the join paths used, the union 
 
 Every imported session records `imported_from: langsmith` plus an `external_id` of `<source_instance>:<thread>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Nodes upsert by index within a session, so a re-parse restates each node's full content.
 
-This is what makes "export the last 24 hours every night" a safe cron job. It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same runs, the same thread lands as a second session rather than deduping against the first.
+This is what makes "export the last 24 hours every night" safe. It also means the grouping key matters: if you change `source_instance` or `join_on` between imports of the same runs, the same thread lands as a second session rather than deduping against the first.
 
 ## Limitations
 
-- **Only what the export contains.** Anything LangSmith didn't record (intermediate state, code, environment) isn't recoverable from the file.
+- **Only what the export contains.** Anything LangSmith did not record (intermediate state, code, environment) is not recoverable from the file.
 - **Imported threads are frozen.** Once a thread is imported, later traces in the same thread are skipped by dedup rather than appended. Import a thread after it is finished, or scope `join_on` to something that closes.
 - **Partial graphs import with a warning.** A trace with more than one root run, a run whose parent is missing from the export, or model output containing `tool_calls` with no corresponding tool runs all set `source_completeness: partial` and add a line to `normalization_warnings`. The session still imports.
 - **A bad trace is isolated, not fatal.** A run with no trace id or run id, a trace with conflicting project identities or conflicting thread values, or a trace missing your chosen `join_on` value is reported as a failure and the rest of the file still imports. A malformed file (invalid JSON, non-UTF-8, empty, or over 50 MiB) fails the task as a whole.
@@ -97,4 +97,4 @@ This is what makes "export the last 24 hours every night" a safe cron job. It al
 
 ## Next
 
-Score the history you just imported with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put your next change to the test with [Build a regression suite from production](regression-suite.md).
+Evaluate the history you imported with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put your next change to the test with [Build a regression suite from production](regression-suite.md).

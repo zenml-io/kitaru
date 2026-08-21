@@ -14,7 +14,9 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer |
 | `langgraph` | `kitaru-langgraph` | LangGraph recording and replay adapter |
 | `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer |
+| `logfire-importer` | `kitaru-logfire-importer` | Logfire importer |
 | `openai-agents` | `kitaru-openai-agents` | OpenAI Agents SDK recording adapter |
+| `phoenix-importer` | `kitaru-phoenix-importer` | Arize Phoenix importer |
 | `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
 
 ## Development and releases
@@ -31,4 +33,4 @@ Run the main package gate from the repository root:
 just plugin-artifact-smoke
 ```
 
-`default-requirements.txt` mirrors the exact package versions in Kitaru's default catalog. Adapter distributions are installed by agent projects and are not included in that file. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
+`default-requirements.txt` pins every independently released plugin distribution that is bundled with Kitaru. The server catalog remains limited to importers and evaluators; adapter distributions are installed directly by agent projects and are not registered as server plugins. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.

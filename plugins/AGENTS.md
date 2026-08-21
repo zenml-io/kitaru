@@ -14,8 +14,9 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 ## Required updates
 
 - Update the selected package version with `uv version --project plugins --package DISTRIBUTION VERSION --no-sync`.
-- For a default importer or evaluator, update the same distribution pin in `plugins/default-requirements.txt` and the same requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
-- Do not add adapter distributions to the default requirements or server catalog.
+- Update the released distribution pin in `plugins/default-requirements.txt`.
+- For a default importer or evaluator, update the same requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+- Keep adapter distributions out of the server catalog.
 - Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
 - Commit the resulting `plugins/uv.lock` change.
 - Keep `.github/workflows/ci.yml`, `.github/workflows/release-plugins.yml`, and `plugins/packages/` aligned when you add or remove a distribution.

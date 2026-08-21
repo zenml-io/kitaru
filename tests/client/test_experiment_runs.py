@@ -30,6 +30,7 @@ from conftest import (
     create_cohort_version,
     create_plugin,
     create_session,
+    override_idempotency,
 )
 from kitaru.api_models.v1.experiment import ExperimentCreateRequest
 from kitaru.api_models.v1.experiment_run import (
@@ -99,6 +100,7 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
     app.dependency_overrides[get_run_canceler] = lambda: partial(
         _cancel_run, services.experiment_run_service
     )
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 
@@ -114,8 +116,10 @@ async def agent_id(services: ReplayServices) -> uuid.UUID:
 async def run_request(
     services: ReplayServices, agent_id: uuid.UUID
 ) -> ExperimentRunCreateRequest:
-    """Provide a run request naming a non-empty cohort version and a runnable
-    version."""
+    """Provide a run request for an experiment run.
+
+    The request names a non-empty cohort version and a runnable version.
+    """
     version = await create_agent_version(
         services.agent_versions,
         agent_id=agent_id,

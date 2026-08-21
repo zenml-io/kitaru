@@ -112,10 +112,10 @@ jobs:
       - run: pnpm --filter @zenml-io/kitaru-vercel-ai build
       - run: uv sync --frozen --extra server --extra cli --extra worker
       - name: Install standalone example
-        working-directory: v2_examples/vercel_ai_ticket_resolver
+        working-directory: examples/typescript/vercel_ai_ticket_resolver
         run: CI=true pnpm --ignore-workspace install --frozen-lockfile
       - name: Validate standalone example
-        working-directory: v2_examples/vercel_ai_ticket_resolver
+        working-directory: examples/typescript/vercel_ai_ticket_resolver
         run: |
           pnpm build
           pnpm test
@@ -168,9 +168,13 @@ jobs:
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
       - run: uv sync --frozen --all-extras
       - name: Run pip-audit (with documented ignore list)
+        # Build the flags as an array instead of piping into xargs so an empty
+        # ignore list still runs the audit (BSD xargs skips the command
+        # entirely on empty input, and quoting keeps shellcheck happy).
         run: |
-          awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' \
-            .github/pip-audit-ignored.txt | xargs uv run pip-audit
+          readarray -t ignore_flags < <(awk '/^(CVE|GHSA|PYSEC)-/ {print "--ignore-vuln"; print $1}' \
+            .github/pip-audit-ignored.txt)
+          uv run pip-audit "${ignore_flags[@]}"
   public-template-contract:
     name: Public template against current Kitaru
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}

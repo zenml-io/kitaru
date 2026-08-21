@@ -25,6 +25,7 @@ from conftest import (
     build_replay_services,
     create_agent,
     create_plugin,
+    override_idempotency,
 )
 from kitaru.api_models.v1.experiment import (
     ExperimentCreateRequest,
@@ -77,6 +78,7 @@ async def api_client(services: ReplayServices) -> AsyncGenerator[KitaruAPIClient
         services.experiment_service
     )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
+    override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
         yield client
 

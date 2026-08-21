@@ -15,7 +15,7 @@ src/kitaru/           # Python package (src layout) — see src/kitaru/AGENTS.md
   client/             # Async SDK making REST calls
   server/             # FastAPI server (API, application, domain, adapters layers)
 tests/                # pytest tests — see tests/AGENTS.md
-examples/             # Runnable SDK examples
+examples/             # Runnable SDK examples: python/ (adapter examples) and typescript/ (SDK + adapter examples)
 docs/                 # Three docs surfaces — see "Documentation surfaces" below
   book/               # GitBook source for docs.zenml.io/kitaru (hand-written .md)
   content/docs/       # FumaDocs SDK reference content (generated)
@@ -109,6 +109,8 @@ When working with Python, invoke the relevant /astral:<skill> for uv, ty, and ru
 
 The server follows a layered architecture (API, application, domain, infrastructure adapters). The client SDK and server never import each other and both sit on the shared `api_models` package. The binding conventions, including the new-resource checklist, live in scoped `AGENTS.md` files: `src/kitaru/AGENTS.md`, the per-layer files under `src/kitaru/server/`, `src/kitaru/api_models/AGENTS.md`, `src/kitaru/client/AGENTS.md`, and `tests/AGENTS.md`.
 
+For adapter, importer, specialized UI API, docs, CI, and release work, load the matching Kitaru repo skill under `.claude/skills/`. The same logical skills live under `.agents/skills/` for Codex; keep host-neutral guidance synchronized and diverge only for a documented host-specific reason.
+
 ## Code style
 
 - **US English spelling** everywhere (code, comments, docs): "initialize", "color", "serialize"
@@ -128,6 +130,7 @@ The server follows a layered architecture (API, application, domain, infrastruct
 
 ## Commits and PRs
 
+- **Never merge a PR that has not been human-reviewed.** Every PR — including dependabot bumps and small hygiene changes — needs an approving review from a human before it merges. Do not bypass the review requirement with `gh pr merge --admin` or any other mechanism, even when all checks are green and the change looks trivial. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2), so an unreviewed merge is a process violation, not just a style issue. Prepare the PR, request review, and wait.
 - **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, actions lint, links, and tests.
 - **Keep pre-existing failures separate.** If `just check` or `just test` surfaces a failure unrelated to the requested change, diagnose and report it. Fix it only when it blocks the scoped change or the user explicitly approves expanding the task; do not absorb another contributor's work into the current commit by default.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).

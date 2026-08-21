@@ -33,16 +33,17 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorVersionResponse,
     EvaluatorVersionUpdateRequest,
 )
-from kitaru.server.adapters.rest.commit_route import CommitRoute
 from kitaru.server.adapters.rest.dependencies import authorize, get_evaluator_service
+from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.adapters.rest.routers import plugins
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.plugin_service import PluginService
 
-router = APIRouter(route_class=CommitRoute)
+router = APIRouter(route_class=KitaruAPIRoute)
 
 
 @router.post("", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_evaluator(
     body: EvaluatorCreateRequest,
     service: Annotated[PluginService, Depends(get_evaluator_service)],

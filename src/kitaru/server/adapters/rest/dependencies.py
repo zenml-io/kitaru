@@ -66,6 +66,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.idempotency_key_repository import (
+    SQLIdempotencyKeyRepository,
+)
 from kitaru.server.adapters.db.repositories.investigation_repository import (
     SQLInvestigationRepository,
 )
@@ -92,9 +95,12 @@ from kitaru.server.adapters.db.repositories.worker_repository import (
 )
 from kitaru.server.adapters.permissions.admin_flag import AdminFlagPermissionProvider
 from kitaru.server.adapters.permissions.allow_all import AllowAllPermissionProvider
-from kitaru.server.adapters.rest.commit_route import attach_request_session
+from kitaru.server.adapters.rest.request_state import attach_request_session
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.idempotency_key_repository import (
+    IdempotencyKeyRepository,
+)
 from kitaru.server.application.models.auth import (
     AuthContext,
     TaskAuthContext,
@@ -161,7 +167,7 @@ class RequestCredential(NamedTuple):
 async def get_session(request: Request) -> AsyncGenerator[AsyncSession, None]:
     """Provide a request-scoped database session.
 
-    The session is attached to the request for ``CommitRoute`` to commit
+    The session is attached to the request for ``KitaruAPIRoute`` to commit
     before the response is returned. Any exception skips the commit and
     pending writes roll back when the session closes.
 
@@ -826,6 +832,24 @@ def get_worker_service(
         Worker service bound to the SQL repository.
     """
     return WorkerService(repository=SQLWorkerRepository(session), analytics=analytics)
+
+
+def get_idempotency_key_repository(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> IdempotencyKeyRepository:
+    """Return an idempotency key repository for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Idempotency key repository bound to the SQL implementation.
+    """
+    return SQLIdempotencyKeyRepository(
+        session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
+    )
 
 
 def get_auth_service(

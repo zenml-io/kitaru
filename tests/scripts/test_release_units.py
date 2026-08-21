@@ -28,6 +28,7 @@ EXPECTED_UNITS = {
     "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
+    "phoenix-importer": "kitaru-phoenix-importer",
     "pydantic-ai": "kitaru-pydantic-ai",
 }
 
@@ -38,6 +39,7 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
     "kitaru-langfuse-importer",
     "kitaru-logfire-importer",
     "kitaru-langsmith-importer",
+    "kitaru-phoenix-importer",
 }
 
 
@@ -54,16 +56,18 @@ def release_repo(tmp_path: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
 
-    for manifest in (REPO_ROOT / "plugins" / "packages").glob("*/pyproject.toml"):
-        relative_path = manifest.relative_to(REPO_ROOT)
-        destination = tmp_path / relative_path
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(manifest, destination)
+    for project in (REPO_ROOT / "plugins" / "packages").iterdir():
+        for filename in ("pyproject.toml", "README.md"):
+            source = project / filename
+            relative_path = source.relative_to(REPO_ROOT)
+            destination = tmp_path / relative_path
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, destination)
 
     return tmp_path
 
 
-def test_inventory_describes_exactly_the_ten_python_distributions() -> None:
+def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -237,7 +241,7 @@ def test_release_wheel_install_fails_after_the_attempt_limit(
         ("kitaru-v0.21.0", "package tag"),
         ("python/unknown/v0.1.0", "unknown distribution"),
         ("python/kitaru/v0.22.0-rc.1", "canonical PEP 440"),
-        ("python/kitaru/v0.22.0", "does not match manifest version"),
+        ("python/kitaru/v0.22.3", "does not match manifest version"),
     ],
 )
 def test_invalid_or_mismatched_package_tags_are_rejected(
@@ -280,6 +284,64 @@ def test_inventory_rejects_a_missing_plugin_project(release_repo: Path) -> None:
         load_inventory(release_repo)
 
 
+def test_inventory_rejects_plugin_metadata_without_a_readme(
+    release_repo: Path,
+) -> None:
+    manifest = (
+        release_repo / "plugins" / "packages" / "langfuse-importer" / "pyproject.toml"
+    )
+    manifest.write_text(manifest.read_text().replace('readme = "README.md"\n', ""))
+
+    with pytest.raises(ReleaseInventoryError, match="readme must be"):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_plugin_metadata_with_a_missing_readme_file(
+    release_repo: Path,
+) -> None:
+    readme = release_repo / "plugins" / "packages" / "langfuse-importer" / "README.md"
+    readme.unlink()
+
+    with pytest.raises(ReleaseInventoryError, match="non-empty file"):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_plugin_metadata_without_project_urls(
+    release_repo: Path,
+) -> None:
+    manifest = (
+        release_repo / "plugins" / "packages" / "langfuse-importer" / "pyproject.toml"
+    )
+    manifest.write_text(
+        manifest.read_text().replace(
+            'Documentation = "https://docs.zenml.io/kitaru/guides/import-langfuse-traces"\n',
+            "",
+        )
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError, match="missing project URL: Documentation"
+    ):
+        load_inventory(release_repo)
+
+
+def test_inventory_rejects_plugin_metadata_without_keywords(
+    release_repo: Path,
+) -> None:
+    manifest = (
+        release_repo / "plugins" / "packages" / "langfuse-importer" / "pyproject.toml"
+    )
+    manifest.write_text(
+        manifest.read_text().replace(
+            'keywords = ["ai-agents", "kitaru", "langfuse", "observability", "traces"]',
+            "keywords = []",
+        )
+    )
+
+    with pytest.raises(ReleaseInventoryError, match="keywords must not be empty"):
+        load_inventory(release_repo)
+
+
 def test_inventory_rejects_an_adapter_in_the_default_catalog(
     release_repo: Path,
 ) -> None:
@@ -312,7 +374,7 @@ def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     assert all(unit.distribution in text_output for unit in inventory.units)
 
 
-def test_plugin_matrix_is_generated_from_the_nine_plugin_units() -> None:
+def test_plugin_matrix_is_generated_from_the_ten_plugin_units() -> None:
     matrix = build_plugin_matrix(load_inventory())
 
     assert matrix == {
@@ -338,6 +400,21 @@ def test_plugin_release_workflow_resolves_plugin_tags_from_the_inventory() -> No
     assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
 
 
+def test_plugin_release_workflow_validates_wheel_metadata_before_publish() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+    build_job = workflow.split("\n  publish-python:\n", maxsplit=1)[0]
+
+    build_step = build_job.index("      - name: Build plugin\n")
+    metadata_step = build_job.index("      - name: Validate distribution metadata\n")
+    checksum_step = build_job.index("      - name: Record artifact checksums\n")
+
+    assert build_step < metadata_step < checksum_step
+    assert "scripts/smoke_plugin_artifacts.py" in build_job
+    assert '--validate-wheel "$wheel"' in build_job
+    assert '--distribution "$DISTRIBUTION"' in build_job
+    assert '--version "$VERSION"' in build_job
+
+
 def test_python_release_workflow_can_resume_after_partial_publication() -> None:
     workflows = [
         (REPO_ROOT / ".github" / "workflows" / name).read_text()
@@ -350,6 +427,18 @@ def test_python_release_workflow_can_resume_after_partial_publication() -> None:
         assert 'gh release view "$PACKAGE_TAG"' in workflow
         assert "already exists; leaving it unchanged" in workflow
         assert "gh release upload" not in workflow
+
+
+def test_stable_github_releases_are_marked_latest() -> None:
+    workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml", "release-typescript.yml")
+    ]
+
+    for workflow in workflows:
+        assert "latest=(--latest=false)" in workflow
+        assert "latest=(--latest)" in workflow
+        assert '"${latest[@]}"' in workflow
 
 
 def test_core_github_release_is_created_after_registry_publication() -> None:
@@ -437,7 +526,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 10 release units."),
+        (["validate"], "Validated 11 release units."),
     ],
 )
 def test_cli_text_commands_succeed(

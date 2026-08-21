@@ -332,13 +332,13 @@ async def test_tool_lookup_baseline_scope_hit_and_miss(
     )
 
     hit = await services.replay_service.tool_lookup(
-        replay_id, "search", cache_key, actor=ACTOR
+        replay_id, "search", cache_key, None, actor=ACTOR
     )
     assert hit.found is True
     assert hit.result == {"result": "hit"}
 
     miss = await services.replay_service.tool_lookup(
-        replay_id, "search", "c" * 64, actor=ACTOR
+        replay_id, "search", "c" * 64, None, actor=ACTOR
     )
     assert miss.found is False
     assert miss.result is None
@@ -369,7 +369,7 @@ async def test_tool_lookup_agent_scope_across_sessions(
     replay_id = await _replay_with_history_scope(services, HistoryScope.AGENT, baseline)
 
     result = await services.replay_service.tool_lookup(
-        replay_id, "search", cache_key, actor=ACTOR
+        replay_id, "search", cache_key, None, actor=ACTOR
     )
     assert result.found is True
     assert result.result == {"result": "from-sibling"}
@@ -418,7 +418,7 @@ async def test_tool_lookup_cohort_version_scope_within_the_runs_cohort_version(
     )
 
     result = await services.replay_service.tool_lookup(
-        replay_id, "search", cache_key, actor=ACTOR
+        replay_id, "search", cache_key, None, actor=ACTOR
     )
     assert result.found is True
     assert result.result == {"result": "in-cohort-version"}
@@ -446,12 +446,14 @@ async def test_tool_lookup_non_history_tool_is_rejected(
     )
     with pytest.raises(ValidationError, match="not configured for history"):
         await services.replay_service.tool_lookup(
-            replay.id, "search", "f" * 64, actor=ACTOR
+            replay.id, "search", "f" * 64, None, actor=ACTOR
         )
 
 
-async def test_tool_lookup_newest_node_wins(services: ReplayServices) -> None:
-    """The highest-id node wins when more than one matches."""
+async def test_tool_lookup_without_occurrence_newest_node_wins(
+    services: ReplayServices,
+) -> None:
+    """The highest-id node wins when several match and no occurrence is given."""
     agent_version = await _agent_version(services)
     baseline = await _session(services, agent_version)
     cache_key = "g" * 64
@@ -466,10 +468,96 @@ async def test_tool_lookup_newest_node_wins(services: ReplayServices) -> None:
     )
 
     result = await services.replay_service.tool_lookup(
-        replay_id, "search", cache_key, actor=ACTOR
+        replay_id, "search", cache_key, None, actor=ACTOR
     )
     assert result.found is True
     assert result.result == {"result": "newer"}
+
+
+async def test_tool_lookup_occurrence_replays_baseline_order(
+    services: ReplayServices,
+) -> None:
+    """Occurrences resolve repeated identical calls in baseline order."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    cache_key = "h" * 64
+    await services.session_nodes.upsert_batch(
+        baseline.id,
+        [
+            _cache_node(baseline.id, index, cache_key, {"ticket": ticket})
+            for index, ticket in enumerate(["a", "b", "c"])
+        ],
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    results = [
+        await services.replay_service.tool_lookup(
+            replay_id, "search", cache_key, occurrence, actor=ACTOR
+        )
+        for occurrence in range(3)
+    ]
+    assert all(result.found for result in results)
+    assert [result.result for result in results] == [
+        {"ticket": "a"},
+        {"ticket": "b"},
+        {"ticket": "c"},
+    ]
+
+    exhausted = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, 3, actor=ACTOR
+    )
+    assert exhausted.found is False
+    assert exhausted.result is None
+
+
+async def test_tool_lookup_occurrence_interleaves_cache_keys(
+    services: ReplayServices,
+) -> None:
+    """Occurrences advance per cache key, unaffected by other keys in between."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    first_key = "i" * 64
+    second_key = "j" * 64
+    await services.session_nodes.upsert_batch(
+        baseline.id,
+        [
+            _cache_node(baseline.id, 0, first_key, {"ticket": "a"}),
+            _cache_node(baseline.id, 1, second_key, {"ticket": "x"}),
+            _cache_node(baseline.id, 2, first_key, {"ticket": "b"}),
+        ],
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    first = await services.replay_service.tool_lookup(
+        replay_id, "search", first_key, 0, actor=ACTOR
+    )
+    second = await services.replay_service.tool_lookup(
+        replay_id, "search", second_key, 0, actor=ACTOR
+    )
+    third = await services.replay_service.tool_lookup(
+        replay_id, "search", first_key, 1, actor=ACTOR
+    )
+    assert first.result == {"ticket": "a"}
+    assert second.result == {"ticket": "x"}
+    assert third.result == {"ticket": "b"}
+
+
+async def test_tool_lookup_occurrence_rejected_for_non_baseline_scope(
+    services: ReplayServices,
+) -> None:
+    """An occurrence is rejected when the tool's history scope is not baseline."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    replay_id = await _replay_with_history_scope(services, HistoryScope.AGENT, baseline)
+
+    with pytest.raises(ValidationError, match="does not support occurrence"):
+        await services.replay_service.tool_lookup(
+            replay_id, "search", "k" * 64, 0, actor=ACTOR
+        )
 
 
 async def test_get_replay_result_session_id_appears_after_agent_task_links_it(
@@ -597,7 +685,7 @@ def _replay_service_with_analytics(
 
 
 async def test_create_replay_tracks_replay_created(services: ReplayServices) -> None:
-    """Fire REPLAY_CREATED with booleans naming the set override kinds."""
+    """Fire REPLAY_CREATED with the override, tool policy and evaluator info."""
     agent_version = await _agent_version(services)
     await _evaluator(services)
     baseline = await _session(services, agent_version)
@@ -622,6 +710,10 @@ async def test_create_replay_tracks_replay_created(services: ReplayServices) -> 
         "system_prompt_override": False,
         "prompt_override": True,
         "model_params_override": False,
+        "tool_policy_default": "passthrough",
+        "tool_override_count": 0,
+        "tool_override_types": [],
+        "evaluator_count": 1,
     }
 
 
@@ -707,6 +799,7 @@ async def test_tool_lookup_denies_a_task_principal_from_another_job(
             bundle.replay.id,
             "search",
             "cache-key",
+            None,
             actor=_task_actor_for(foreign_task.id, foreign_job_id),
         )
 

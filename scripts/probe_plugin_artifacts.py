@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Validate installed default-plugin entrypoints and registration."""
+"""Validate installed bundled-plugin artifacts and default registration."""
 
 import argparse
 import asyncio
 import importlib
+import importlib.metadata
 import uuid
 from typing import cast
 
@@ -80,6 +81,17 @@ class _MemoryPluginRepository:
 
 
 async def _probe(expected_requirements: set[str], import_modules: set[str]) -> None:
+    for requirement in expected_requirements:
+        distribution, separator, expected_version = requirement.partition("==")
+        if not separator:
+            raise RuntimeError(f"Bundled requirement is not exact: {requirement!r}")
+        installed_version = importlib.metadata.version(distribution)
+        if installed_version != expected_version:
+            raise RuntimeError(
+                f"Bundled requirement {requirement!r} installed as "
+                f"{installed_version!r}"
+            )
+
     for module_name in import_modules:
         module = importlib.import_module(module_name)
         if not getattr(module, "__all__", None):
@@ -143,7 +155,7 @@ def main() -> int:
         "--requirement",
         action="append",
         default=[],
-        help="Exact installed plugin requirement expected in the default catalog.",
+        help="Exact installed plugin requirement expected in the bundle.",
     )
     parser.add_argument(
         "--module",

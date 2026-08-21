@@ -5,7 +5,7 @@ icon: brain
 
 # Braintrust
 
-If your agent already logs to Braintrust, you don't need to instrument anything to start using Kitaru. Export the logs, run one import, and each trace lands as a [session](../concepts/agents-and-sessions.md): the same object a live-recorded run produces, ready to evaluate and replay.
+If your agent already logs to Braintrust, you do not need to instrument anything to start using Kitaru. Export the logs, run one import, and each trace lands as a [session](../concepts/agents-and-sessions.md): the same object a live-recorded run produces, ready to evaluate and replay.
 
 **Braintrust stays your system of record.** Kitaru takes a runnable copy of the runs you care about so that last Tuesday's incident becomes a test case and last month's traffic becomes a regression population.
 
@@ -13,7 +13,7 @@ Like every import, this one executes on a [worker](../concepts/workers.md) in yo
 
 ## 1. Export your Braintrust logs
 
-The importer is deliberately permissive about the container, because Braintrust logs reach you in more than one shape. It accepts a UTF-8 file that is any of:
+The importer is permissive about the container because Braintrust logs reach you in more than one shape. It accepts a UTF-8 file that is any of:
 
 - **JSONL**, one Braintrust event object per line.
 - **A JSON array** of event objects.
@@ -46,7 +46,7 @@ Rows that carry `span_id`, `root_span_id`, or `span_attributes` are treated as a
 
 ## 2. Import it
 
-Register the agent the traces belong to, if you haven't, and start a worker:
+Register the agent the traces belong to, if you have not, and start a worker:
 
 ```bash
 kitaru agent register support-agent --command "python support.py"
@@ -120,7 +120,7 @@ Session metadata records the provenance you'll want when reading the import back
 
 ## Re-runs skip what is already there
 
-Every imported session records its source identity: `imported_from` (`braintrust`) and an `external_id` of `<project>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is a safe cron job, not a duplication engine.
+Every imported session records its source identity: `imported_from` (`braintrust`) and an `external_id` of `<project>:<session>`. That pair is unique on the server, so re-importing an overlapping export **skips** what is already stored and reports it as `skipped`, not as an error. Exporting the last 24 hours every night is safe; it will not duplicate earlier sessions.
 
 ## Limitations
 
@@ -133,7 +133,7 @@ The importer is explicit about fidelity it cannot recover, and writes what it no
 
 Two more things worth knowing before you rely on an import:
 
-- Non-allowlisted `metadata` keys and Braintrust's own evaluations do not come across. Score imported sessions with Kitaru [evaluators](../concepts/evaluators.md) instead; backfilling your history is a single batch call.
+- Non-allowlisted `metadata` keys and Braintrust's own evaluations do not come across. Evaluate imported sessions with Kitaru [evaluators](../concepts/evaluators.md) instead; backfilling your history is a single batch call.
 - Replay re-runs your agent's real code, which no trace export contains. Register the agent version whose code produced these traces, with its run command, and imported sessions replay exactly like recorded ones.
 
 ### Lower-fidelity exports
@@ -144,4 +144,4 @@ A flat export (rows with `input`, `output`, `metadata`, and `metrics`, but no `s
 
 ## Next
 
-Score your imported history with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put a change to the test with [Build a regression suite from production](regression-suite.md).
+Evaluate your imported history with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put a change to the test with [Build a regression suite from production](regression-suite.md).

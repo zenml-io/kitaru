@@ -65,18 +65,20 @@ zizmor:
     uvx zizmor --config=.github/zizmor.yml .github/workflows/ .github/dependabot.yml
 
 # Audit Python dependencies for known vulnerabilities (honors .github/pip-audit-ignored.txt)
+# Command substitution instead of xargs: BSD xargs skips the command entirely
+# on empty input, which would turn an empty ignore list into a no-op audit.
 audit:
-    awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt | xargs uv run pip-audit
+    uv run pip-audit $(awk '/^(CVE|GHSA|PYSEC)-/ {printf "--ignore-vuln %s ", $1}' .github/pip-audit-ignored.txt)
 
 # Check raw Markdown links — offline only (requires lychee: brew install lychee).
 # Source MDX uses docs-app-root routes such as /guides/...; site-build validates
 # those after materializing public /docs/... links, where lychee can resolve them.
 links:
-    lychee --offline --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
+    lychee --offline --root-dir . './**/*.md'
 
 # Check raw Markdown links including external URLs (slow, used in CI)
 links-external:
-    lychee --root-dir . --exclude-path '.venv' --exclude-path 'docs/node_modules' --exclude-path 'docs/out' --exclude-path 'design' './**/*.md'
+    lychee --root-dir . './**/*.md'
 
 # Auto-fix formatting, lint issues, and YAML
 fix:

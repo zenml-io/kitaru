@@ -5,9 +5,9 @@ icon: rotate-left
 
 # Replay a failure and fork it
 
-Replay re-executes a recorded [session](../concepts/agents-and-sessions.md) to produce a **new session**: the same run, with exactly the changes you specify. One mechanism, two jobs:
+Replay re-executes a recorded [session](../concepts/agents-and-sessions.md) to produce a **new session**: the same run, with exactly the changes you specify. One mechanism covers two jobs:
 
-- **Debug a failure.** A production run went wrong. Replay it unchanged and you have the failure on your desk, reproducible, without touching production.
+- **Debug a failure.** A production run went wrong. Replay it unchanged and you have the failure on your desk, reproducible without touching production.
 - **Test a change.** You want to swap the model, tighten the prompt, or ship the code in your working tree. Fork the run with that one change and read what it did.
 
 This guide assumes you prepared the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) and completed the setup and Define phases of the [returns-agent tutorial](../tutorials/returns-agent/README.md): a registered agent with a run command, a registered [evaluator](../concepts/evaluators.md), and a [worker](../concepts/workers.md) running in the agent's environment.
@@ -32,14 +32,14 @@ kitaru replay get <replay-id> --output json
 
 Use `kitaru job get <job-id> --tasks` for task errors and `kitaru job cancel <job-id>` to request cancellation. `kitaru replay list --output json` lists both standalone and experiment-created replays.
 
-{% hint style="warning" %} Replay creation is not idempotent. An ambiguous network failure can mean the server created the replay and job even though the CLI did not receive the response. Check `kitaru replay list` before retrying, or the retry may create a duplicate replay and job. Omitting `--tool-policy` uses the server default and may execute live tools. {% endhint %}
+{% hint style="warning" %} The SDK's automatic retries (timeouts, dropped connections, 5xx) are safe: they reuse the same idempotency key, so a retried create settles as at most one replay. Manually re-running `kitaru replay create` after an ambiguous failure is not, since each invocation mints its own key. Check `kitaru replay list` before retrying by hand, or the manual retry may create a duplicate replay and job. Omitting `--tool-policy` uses the server default and may execute live tools. {% endhint %}
 
 ## The three-session discipline
 
 Every trustworthy comparison involves three sessions:
 
 1. **Observed:** the original recording (recorded or imported).
-2. **Reproduced:** an unchanged replay of it. If this doesn't hold up (evaluations disagree, the path is wildly different), stop. Your run depends on something the recording doesn't answer (live tool traffic, nondeterminism you haven't pinned), and no fork from it can be trusted.
+2. **Reproduced:** an unchanged replay of it. If this does not hold up, because evaluations disagree or the path is wildly different, stop. Your run depends on something the recording does not answer, such as live tool traffic or nondeterminism you have not pinned, and no fork from it can be trusted.
 3. **Forked:** the replay with one thing changed. Because the baseline reproduced, the difference between it and the fork is your change.
 
 ## Anatomy of a replay
@@ -79,11 +79,11 @@ asyncio.run(main())
 Field by field:
 
 - `baseline_session_id`: the recording to re-run.
-- `agent_version_id`: which code runs. Omitted, it's the version the baseline was recorded with (the faithful choice). Point it at a newly registered version to replay old traffic **against your working tree**.
+- `agent_version_id`: which code runs. Omitted, it is the version the baseline was recorded with, which is the faithful choice. Point it at a newly registered version to replay old traffic **against your working tree**.
 - `override`: the fork. Omit it for a pure reproduction.
 - `tool_policy`: what tool calls hit. If omitted, the server applies its default, which currently passes calls through to live tools. For a replay that touches nothing real, set a `history` policy as above. Details in [Tool policies](tool-policies.md).
-- `evaluators`: at least one, always. A replay is never just "it ran"; it's evaluated on arrival.
-- `evaluate_baselines`: score the original session with the same evaluators, so the comparison exists as soon as the replay settles.
+- `evaluators`: at least one, always. A replay is evaluated on arrival.
+- `evaluate_baselines`: evaluate the original session with the same evaluators, so the comparison exists as soon as the replay settles.
 
 Watch it with `kitaru job watch <job-id>`; when the replay reads `completed`, `client.replays.get(replay.id)` carries the `result_session_id`.
 
@@ -131,16 +131,16 @@ for name, b in baseline_evals.items():
     print(name, "baseline:", b.score, "fork:", f.score if f else "-")
 ```
 
-Session rollups carry the operational deltas (`cost`, `tokens`, `llm_call_count`, `tool_call_count`), so "same pass rate, 40% cheaper, one extra model call" is three field reads. For node-level inspection, `list_nodes(include_payloads=True)` on both sessions shows you exactly where the paths diverged.
+Session rollups carry the operational deltas (`cost`, `tokens`, `llm_call_count`, `tool_call_count`), so "same pass rate, 40% cheaper, one extra model call" is three field reads. For node-level inspection, `list_nodes(include_payloads=True)` on both sessions shows where the paths diverged.
 
 ## When a replay fails
 
-A replay settles `failed` when its pipeline can't produce the comparison: the agent process exited nonzero, a tool call missed under `on_miss="fail"`, or an evaluator crashed. The job's tasks carry the error and a log tail; `kitaru job get <job-id>` and `kitaru job watch` surface them, and [Troubleshooting](../getting-started/troubleshooting.md) walks the diagnosis. The common causes:
+A replay settles `failed` when its pipeline cannot produce the comparison: the agent process exited nonzero, a tool call missed under `on_miss="fail"`, or an evaluator crashed. The job's tasks carry the error and a log tail; `kitaru job get <job-id>` and `kitaru job watch` surface them, and [Troubleshooting](../getting-started/troubleshooting.md) walks the diagnosis. The common causes:
 
 - **No run spec:** the agent version must carry a run command; registering with `--command` is what makes a session replayable.
 - **Worker environment:** the subprocess needs your agent's dependencies and provider keys; it inherits them from the worker's environment.
-- **Unrecorded tool call:** the fork took a path the baseline never took. That's information, not noise: widen the history scope, add a `static` case for it, or accept `error_result` and let the agent handle it.
+- **Unrecorded tool call:** the fork took a path the baseline never took. That is information: widen the history scope, add a `static` case for it, or accept `error_result` and let the agent handle it.
 
 ## From one replay to many
 
-The same request against many sessions is a [cohort](../concepts/cohorts.md) plus an [experiment](../concepts/experiments.md): one replay per session, fanned out and evaluated identically. That's the subject of [Build a regression suite from production](regression-suite.md).
+The same request against many sessions is a [cohort](../concepts/cohorts.md) plus an [experiment](../concepts/experiments.md): one replay per session, fanned out and evaluated identically. That is the subject of [Build a regression suite from production](regression-suite.md).
