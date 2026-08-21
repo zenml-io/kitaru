@@ -258,16 +258,17 @@ async def _replayed_session(
     baseline = await create_session(repository, ACTOR.account.id, uuid.uuid4())
     job_id = uuid.uuid4()
     task = await create_agent_task(task_repository, job_id)
+    result = await create_session(
+        repository, ACTOR.account.id, uuid.uuid4(), task_id=task.id
+    )
     await replay_repository.create(
         Replay(
             owner_id=ACTOR.account.id,
             job_id=job_id,
             replay_config_id=uuid.uuid4(),
             baseline_session_id=baseline.id,
+            result_session_id=result.id,
         )
-    )
-    result = await create_session(
-        repository, ACTOR.account.id, uuid.uuid4(), task_id=task.id
     )
     return baseline, result
 
@@ -282,6 +283,22 @@ async def test_get_baseline_session(
     baseline, result = await _replayed_session(
         repository, task_repository, replay_repository
     )
+    loaded = await service.get_baseline_session(result.id, actor=ACTOR)
+    assert loaded.id == baseline.id
+
+
+async def test_get_baseline_session_after_the_task_link_is_cleared(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Resolve the baseline through the replay after a requeue unlinked the task."""
+    baseline, result = await _replayed_session(
+        repository, task_repository, replay_repository
+    )
+    result.unlink_task()
+    await repository.update(result)
     loaded = await service.get_baseline_session(result.id, actor=ACTOR)
     assert loaded.id == baseline.id
 

@@ -142,6 +142,19 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         row = (await self._session.scalars(statement)).one_or_none()
         return row.to_domain() if row is not None else None
 
+    async def get_by_result_session_id(self, session_id: uuid.UUID) -> Replay | None:
+        """Load the replay that produced a session, if any.
+
+        Args:
+            session_id: Id of the produced session.
+
+        Returns:
+            Stored replay, or ``None`` when no replay produced the session.
+        """
+        statement = select(ReplayORM).where(ReplayORM.result_session_id == session_id)
+        row = (await self._session.scalars(statement)).one_or_none()
+        return row.to_domain() if row is not None else None
+
     async def get_many_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Replay]:

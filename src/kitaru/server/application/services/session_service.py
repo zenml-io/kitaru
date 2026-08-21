@@ -254,9 +254,8 @@ class SessionService:
     ) -> Session:
         """Get the baseline session a replayed session was produced from.
 
-        The link runs from the session's producing task to the replay owning
-        that task's job. A session with no producing task, or one whose task
-        belongs to a job that is not a replay, has no baseline.
+        The link runs from the replay holding the session as its result. A
+        session no replay holds as its result has no baseline.
 
         Args:
             session_id: Id of the replayed session.
@@ -274,10 +273,7 @@ class SessionService:
         """
         session = await self._repository.get(session_id)
         check_task_session_read(session_id, session.task_id, actor)
-        if session.task_id is None:
-            raise SessionBaselineNotFound(session_id)
-        task = await self._tasks.get(session.task_id)
-        replay = await self._replays.get_by_job_id(task.job_id)
+        replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
         return await self._repository.get(replay.baseline_session_id)
