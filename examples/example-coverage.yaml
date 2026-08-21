@@ -13,6 +13,34 @@ schema:
     - not_applicable
   cost_classes: [none, low, medium, high]
 examples:
+  - id: dabstep-coding-agent
+    path: examples/python/dabstep_coding_agent
+    public_docs:
+      - examples/README.md
+    owner_area: experimental Codex DABstep task wrapper and portable trace conversion
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: tests/examples/test_dabstep_coding_agent.py
+        notes: Exercises portable trace conversion, redaction, and the local DABstep-v1-compatible evaluator without a provider call.
+      local_smoke:
+        status: help_only
+        command: uv run python -m examples.python.dabstep_coding_agent.runner --help
+        requires_server: false
+        timeout_seconds: 30
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [CODEX_HOME]
+        timeout_seconds: 1800
+        cost_class: medium
+        command: See examples/python/dabstep_coding_agent/README.md
+        waiver:
+          reason: The example calls Codex, downloads a public dataset, and retains a local raw trace for human review.
+          reviewer_action: Run the documented scorer preflight and one eligible task manually, then inspect the generated Kitaru JSONL and score receipt.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: mastra-support-triage
     path: examples/typescript/mastra_support_triage
     public_docs:

@@ -17,6 +17,10 @@ Install the workspace before running them:
 uv sync --project plugins --frozen --all-packages
 ```
 
+## Experimental coding-agent example
+
+- [`python/dabstep_coding_agent/`](python/dabstep_coding_agent/) runs one DABstep development task through Codex in a disposable local workdir, retains the native JSONL, and writes a portable Kitaru JSONL session. It is a manual, paid V0 workflow rather than a supported coding-agent adapter.
+
 ## TypeScript examples
 
 The TypeScript examples use the `@zenml-io/kitaru` SDK and its framework adapters:
