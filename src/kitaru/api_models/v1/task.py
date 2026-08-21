@@ -91,9 +91,6 @@ class TaskResponse(TimestampedResponseModel):
     worker_id: uuid.UUID | None = Field(
         default=None, description="Worker that claimed the task."
     )
-    result_session_id: uuid.UUID | None = Field(
-        default=None, description="Session an agent task produced."
-    )
     claimed_at: datetime | None = Field(
         default=None, description="Time the task was claimed."
     )

@@ -267,16 +267,3 @@ class TaskRepository(Protocol):
             session, keyed by session id, sessions without one omitted.
         """
         ...
-
-    async def get_agent_tasks_by_job_ids(
-        self, job_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, Task]:
-        """Bulk-load the agent task of each job, keyed by job id.
-
-        Args:
-            job_ids: Ids of the jobs.
-
-        Returns:
-            Agent tasks keyed by job id, jobs without an agent task omitted.
-        """
-        ...

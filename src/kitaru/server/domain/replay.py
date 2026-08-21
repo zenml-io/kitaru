@@ -113,6 +113,7 @@ class Replay(DomainModel):
     experiment_run_id: uuid.UUID | None = None
     replay_config_id: uuid.UUID
     baseline_session_id: uuid.UUID
+    result_session_id: uuid.UUID | None = None
     evaluate_baselines: bool = False
     status: ReplayStatus = ReplayStatus.PENDING
     error: str | None = None
@@ -179,3 +180,15 @@ class Replay(DomainModel):
                 self.id, self.status, ReplayStatus.CANCELED
             )
         self.status = ReplayStatus.CANCELED
+
+    def link_result_session(self, session_id: uuid.UUID) -> None:
+        """Link the session this replay produced.
+
+        Args:
+            session_id: Id of the produced session.
+        """
+        self.result_session_id = session_id
+
+    def unlink_result_session(self) -> None:
+        """Clear the session this replay produced."""
+        self.result_session_id = None

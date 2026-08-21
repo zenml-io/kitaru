@@ -265,9 +265,9 @@ async def list_experiment_run_evaluation_aggregates(
         dict.fromkeys(details.replay.baseline_session_id for details in replays)
     )
     result_session_ids = [
-        details.result_session_id
+        details.replay.result_session_id
         for details in replays
-        if details.result_session_id is not None
+        if details.replay.result_session_id is not None
     ]
     evaluations = await _load_session_evaluations(
         evaluation_service, baseline_session_ids + result_session_ids, actor
@@ -312,10 +312,10 @@ async def list_experiment_run_evaluation_aggregates(
                             ).get(key)
                         ),
                         result=_evaluation_value(
-                            session_evaluations.get(details.result_session_id, {}).get(
-                                key
-                            )
-                            if details.result_session_id is not None
+                            session_evaluations.get(
+                                details.replay.result_session_id, {}
+                            ).get(key)
+                            if details.replay.result_session_id is not None
                             else None
                         ),
                     )

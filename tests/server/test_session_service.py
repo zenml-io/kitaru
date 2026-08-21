@@ -29,6 +29,7 @@ from conftest import (
     create_agent_task,
     create_agent_version,
     create_import_task,
+    create_replay,
     create_session,
 )
 from kitaru.analytics.events import AnalyticsEvent
@@ -257,16 +258,17 @@ async def _replayed_session(
     baseline = await create_session(repository, ACTOR.account.id, uuid.uuid4())
     job_id = uuid.uuid4()
     task = await create_agent_task(task_repository, job_id)
+    result = await create_session(
+        repository, ACTOR.account.id, uuid.uuid4(), task_id=task.id
+    )
     await replay_repository.create(
         Replay(
             owner_id=ACTOR.account.id,
             job_id=job_id,
             replay_config_id=uuid.uuid4(),
             baseline_session_id=baseline.id,
+            result_session_id=result.id,
         )
-    )
-    result = await create_session(
-        repository, ACTOR.account.id, uuid.uuid4(), task_id=task.id
     )
     return baseline, result
 
@@ -281,6 +283,22 @@ async def test_get_baseline_session(
     baseline, result = await _replayed_session(
         repository, task_repository, replay_repository
     )
+    loaded = await service.get_baseline_session(result.id, actor=ACTOR)
+    assert loaded.id == baseline.id
+
+
+async def test_get_baseline_session_after_the_task_link_is_cleared(
+    service: SessionService,
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Resolve the baseline through the replay after a requeue unlinked the task."""
+    baseline, result = await _replayed_session(
+        repository, task_repository, replay_repository
+    )
+    result.unlink_task()
+    await repository.update(result)
     loaded = await service.get_baseline_session(result.id, actor=ACTOR)
     assert loaded.id == baseline.id
 
@@ -737,6 +755,7 @@ async def test_create_session_requires_the_principals_task_to_be_running(
 
 async def test_create_session_rejects_a_stale_task_attempt(
     service: SessionService,
+    repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
@@ -752,18 +771,17 @@ async def test_create_session_rejects_a_stale_task_attempt(
             SessionCreate(origin=SessionOrigin.RECORDED),
             actor=stale_actor,
         )
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id is None
+    assert await repository.get_by_task_id(task.id) is None
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id, attempt=task.attempt),
     )
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id == session.id
+    assert session.task_id == task.id
 
 
-async def test_create_session_links_an_agent_tasks_result_session(
+async def test_create_session_links_the_session_to_its_agent_task(
     service: SessionService,
+    repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
@@ -775,8 +793,35 @@ async def test_create_session_links_an_agent_tasks_result_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id),
     )
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id == session.id
+    assert session.task_id == task.id
+    linked = await repository.get_by_task_id(task.id)
+    assert linked is not None
+    assert linked.id == session.id
+
+
+async def test_create_session_links_the_replays_result_session(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Creating a session for a replay's agent task links it on the replay row."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    replay = await create_replay(
+        replay_repository,
+        ACTOR.account.id,
+        job_id=task.job_id,
+        replay_config_id=uuid.uuid4(),
+        baseline_session_id=uuid.uuid4(),
+    )
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=_task_principal(task.id),
+    )
+    stored_replay = await replay_repository.get(replay.id)
+    assert stored_replay.result_session_id == session.id
 
 
 async def test_create_session_rejects_a_second_link_to_an_agent_task(
@@ -818,8 +863,6 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     )
     assert first.task_id == task.id
     assert second.task_id == task.id
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id is None
 
 
 async def test_create_session_infers_agent_and_version_from_an_agent_task(

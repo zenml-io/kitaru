@@ -66,11 +66,10 @@ class ToolLookupResult(NamedTuple):
 
 
 class ReplayWithDetails(NamedTuple):
-    """Replay paired with its config and result session id."""
+    """Replay paired with its config."""
 
     replay: Replay
     config: ReplayConfig
-    result_session_id: uuid.UUID | None
 
 
 class ReplayStatusCounts(FrozenModel):

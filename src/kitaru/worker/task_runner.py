@@ -23,7 +23,8 @@ from typing import Any
 
 import httpx
 
-from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.session import SessionListParams, SessionStatus
 from kitaru.api_models.v1.task import (
     TaskKind,
     TaskResponse,
@@ -381,20 +382,21 @@ class TaskRunner:
             Error message naming the missing result session, its status when
             not completed, or a missing result.
         """
-        if task.result_session_id is None:
-            if kind is TaskKind.AGENT:
-                return (
-                    "Agent process exited successfully without recording "
-                    "a result session."
-                )
+        if kind is not TaskKind.AGENT:
             return f"{label} process exited successfully without writing a result."
+        params = SessionListParams(
+            filter=FilterCondition(field="task_id", op=FilterOp.EQ, value=str(task.id))
+        )
         try:
-            session = await client.sessions.get(task.result_session_id)
+            page = await client.sessions.list(params)
         except (APIError, httpx.TransportError) as exc:
-            logger.warning(
-                "Failed to fetch session %s: %s", task.result_session_id, exc
-            )
+            logger.warning("Failed to list sessions for task %s: %s", task.id, exc)
             return f"{label} process exited successfully without writing a result."
+        session = page.items[0] if page.items else None
+        if session is None:
+            return (
+                "Agent process exited successfully without recording a result session."
+            )
         if session.status is not SessionStatus.COMPLETED:
             return f"Result session {session.id} is {session.status}, not completed."
         return f"{label} process exited successfully without writing a result."

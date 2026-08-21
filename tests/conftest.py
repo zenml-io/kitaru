@@ -2326,6 +2326,25 @@ class FakeSessionRepository:
             raise SessionNotFound(session_id)
         return session.model_copy()
 
+    async def get_by_task_id(
+        self, task_id: uuid.UUID, exclusive: bool = False
+    ) -> Session | None:
+        """Load the session a task produced, if any.
+
+        Args:
+            task_id: Id of the producing task.
+            exclusive: Ignored, the fake has no concurrent callers to lock
+                against.
+
+        Returns:
+            Stored session, or ``None`` when no session links the task.
+        """
+        _ = exclusive
+        for session in self._sessions.values():
+            if session.task_id == task_id:
+                return session.model_copy()
+        return None
+
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
         """Resolve the ids of sessions linked to a tag by name.
 
@@ -4151,16 +4170,9 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
-        """Initialize the repository.
-
-        Args:
-            tasks: Fake task repository, needed to resolve the result session
-                filter, which reads through the agent task rather than the
-                replay row.
-        """
+    def __init__(self) -> None:
+        """Initialize the repository."""
         self._replays: dict[uuid.UUID, Replay] = {}
-        self._tasks = tasks
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -4242,6 +4254,20 @@ class FakeReplayRepository:
                 return replay.model_copy()
         return None
 
+    async def get_by_result_session_id(self, session_id: uuid.UUID) -> Replay | None:
+        """Load the replay that produced a session, if any.
+
+        Args:
+            session_id: Id of the produced session.
+
+        Returns:
+            Stored replay, or ``None`` when no replay produced the session.
+        """
+        for replay in self._replays.values():
+            if replay.result_session_id == session_id:
+                return replay.model_copy()
+        return None
+
     async def get_many_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Replay]:
@@ -4273,38 +4299,13 @@ class FakeReplayRepository:
         """
         replays = list(self._replays.values())
         if replay_filter.expression is not None:
-            resolvers = {"result_session_id": self._evaluate_result_session_condition}
             replays = [
                 r
                 for r in replays
-                if _evaluate_filter_expression(r, replay_filter.expression, resolvers)
+                if _evaluate_filter_expression(r, replay_filter.expression)
             ]
         page, next_cursor = _paginate_fake(replays, replay_filter)
         return [r.model_copy() for r in page], next_cursor
-
-    def _evaluate_result_session_condition(
-        self, replay: Replay, condition: FilterCondition
-    ) -> bool:
-        """Evaluate a result session condition against a replay.
-
-        Args:
-            replay: Replay to evaluate.
-            condition: Validated result session condition.
-
-        Returns:
-            Whether the replay's agent task produced a matching session.
-        """
-        assert self._tasks is not None
-        agent_task = next(
-            (
-                task
-                for task in self._tasks._tasks.values()
-                if task.job_id == replay.job_id and isinstance(task, AgentTask)
-            ),
-            None,
-        )
-        result_session_id = agent_task.result_session_id if agent_task else None
-        return _matches_condition(result_session_id, condition)
 
     async def list_by_experiment_run(
         self, experiment_run_id: uuid.UUID
@@ -5549,24 +5550,6 @@ class FakeTaskRepository:
                 )
         return scored
 
-    async def get_agent_tasks_by_job_ids(
-        self, job_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, Task]:
-        """Bulk-load the agent task of each job, keyed by job id.
-
-        Args:
-            job_ids: Ids of the jobs.
-
-        Returns:
-            Agent tasks keyed by job id, jobs without an agent task omitted.
-        """
-        job_id_set = set(job_ids)
-        return {
-            task.job_id: task.model_copy()
-            for task in self._tasks.values()
-            if isinstance(task, AgentTask) and task.job_id in job_id_set
-        }
-
 
 def _is_stale_before(task: Task, bound: datetime) -> bool:
     """Report whether a task last showed a sign of life before a bound.
@@ -5804,12 +5787,13 @@ def build_job_and_task_services(
         dispatcher=EventDispatcher(),
     )
     task_policy = policy if policy is not None else TaskPolicy()
+    replays = FakeReplayRepository()
     spec_builder = TaskSpecBuilder(
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
         secret_repository=substrate.secrets,
-        replay_repository=FakeReplayRepository(),
+        replay_repository=replays,
         policy=task_policy,
     )
     task_service = TaskService(
@@ -5817,6 +5801,7 @@ def build_job_and_task_services(
         worker_repository=substrate.workers,
         session_repository=substrate.sessions,
         job_repository=substrate.jobs,
+        replay_repository=replays,
         spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,
@@ -5902,7 +5887,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
-    replays = FakeReplayRepository(tasks=tasks)
+    replays = FakeReplayRepository()
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
     cohort_versions = FakeCohortVersionRepository(
         cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs, tags=tags
@@ -5944,6 +5929,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         worker_repository=workers,
         session_repository=sessions,
         job_repository=jobs,
+        replay_repository=replays,
         spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,

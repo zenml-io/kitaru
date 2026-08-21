@@ -72,6 +72,20 @@ class SessionRepository(Protocol):
         """
         ...
 
+    async def get_by_task_id(
+        self, task_id: uuid.UUID, exclusive: bool = False
+    ) -> Session | None:
+        """Load the session a task produced, if any.
+
+        Args:
+            task_id: Id of the producing task.
+            exclusive: Lock the row for update.
+
+        Returns:
+            Stored session, or ``None`` when no session links the task.
+        """
+        ...
+
     async def query(
         self, session_filter: SessionFilter
     ) -> tuple[list[Session], str | None]:

@@ -97,7 +97,6 @@ def task_to_response(task: Task) -> TaskResponse:
         ),
         agent_id=task.agent_id if isinstance(task, ImportTask) else None,
         worker_id=task.worker_id,
-        result_session_id=task.result_session_id,
         claimed_at=task.claimed_at,
         heartbeat_at=task.heartbeat_at,
         cancel_requested_at=task.cancel_requested_at,

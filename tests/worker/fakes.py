@@ -18,6 +18,7 @@ from collections import deque
 from datetime import UTC, datetime
 from typing import Any, cast
 
+from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.job import JobKind, JobResponse, JobStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionResponse, SessionStatus
 from kitaru.api_models.v1.task import (
@@ -58,7 +59,6 @@ def make_task(
     status: TaskStatus = TaskStatus.CLAIMED,
     attempt: int = 1,
     job_id: uuid.UUID | None = None,
-    result_session_id: uuid.UUID | None = None,
     **overrides: Any,
 ) -> TaskResponse:
     """Build a task response with sane defaults for the fields tests vary.
@@ -68,7 +68,6 @@ def make_task(
         status: Task status.
         attempt: Current attempt number.
         job_id: Owning job, a fresh id when omitted.
-        result_session_id: Session an agent task produced.
         overrides: Additional fields to override on the response.
 
     Returns:
@@ -82,7 +81,6 @@ def make_task(
         "on_failure": TaskOnFailure.ABORT,
         "attempt": attempt,
         "labels": {},
-        "result_session_id": result_session_id,
         "result": None,
         "created": _now(),
         "updated": _now(),
@@ -418,14 +416,16 @@ class FakeSessionsResource:
     """Scriptable fake of the sessions SDK resource."""
 
     def __init__(self) -> None:
-        """Initialize the resource with an empty response map."""
-        self.get_calls: list[uuid.UUID] = []
-        self.responses: dict[uuid.UUID, Any] = {}
+        """Initialize the resource with empty scripted responses and call logs."""
+        self.list_calls: list[Any] = []
+        self.list_responses: deque[Any] = deque()
 
-    async def get(self, session_id: uuid.UUID) -> SessionResponse:
-        """Record the call and return the mapped session."""
-        self.get_calls.append(session_id)
-        result = self.responses[session_id]
+    async def list(self, params: Any = None) -> Page[SessionResponse]:
+        """Record the call and return the next scripted list result."""
+        self.list_calls.append(params)
+        if not self.list_responses:
+            raise AssertionError("No scripted list response for sessions")
+        result = self.list_responses.popleft()
         if isinstance(result, BaseException):
             raise result
         return result

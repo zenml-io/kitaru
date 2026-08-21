@@ -69,7 +69,7 @@ async def create_replay(
     """
     command = replay_create_to_command(body)
     bundle = await service.create_replay(command, actor=actor)
-    return replay_to_response(bundle.replay, bundle.config, bundle.result_session_id)
+    return replay_to_response(bundle.replay, bundle.config)
 
 
 @router.get("")
@@ -94,10 +94,7 @@ async def list_replays(
     replay_filter = replay_list_params_to_filter(params)
     bundles, next_cursor = await service.list_replays(replay_filter, actor=actor)
     return Page[ReplayResponse](
-        items=[
-            replay_to_response(bundle.replay, bundle.config, bundle.result_session_id)
-            for bundle in bundles
-        ],
+        items=[replay_to_response(bundle.replay, bundle.config) for bundle in bundles],
         next_cursor=next_cursor,
     )
 
@@ -122,7 +119,7 @@ async def get_replay(
         Stored replay.
     """
     bundle = await service.get_replay(replay_id, actor=actor)
-    return replay_to_response(bundle.replay, bundle.config, bundle.result_session_id)
+    return replay_to_response(bundle.replay, bundle.config)
 
 
 @router.post("/{replay_id}/tool-lookup")

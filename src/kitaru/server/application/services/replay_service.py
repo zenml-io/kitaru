@@ -102,33 +102,21 @@ class ReplayService:
         self._analytics = analytics
 
     async def _bundle(self, replays: list[Replay]) -> list[ReplayWithDetails]:
-        """Enrich replays with their config and result session id, in bulk.
+        """Enrich replays with their config, in bulk.
 
         Args:
             replays: Replays to enrich.
 
         Returns:
-            Replays paired with their config and result session id, in the
-            input order.
+            Replays paired with their config, in the input order.
         """
         if not replays:
             return []
         configs = await self._experiments.get_many_replay_configs(
             list({replay.replay_config_id for replay in replays})
         )
-        agent_tasks = await self._tasks.get_agent_tasks_by_job_ids(
-            [replay.job_id for replay in replays]
-        )
         return [
-            ReplayWithDetails(
-                replay=replay,
-                config=configs[replay.replay_config_id],
-                result_session_id=(
-                    agent_tasks[replay.job_id].result_session_id
-                    if replay.job_id in agent_tasks
-                    else None
-                ),
-            )
+            ReplayWithDetails(replay=replay, config=configs[replay.replay_config_id])
             for replay in replays
         ]
 
@@ -155,7 +143,7 @@ class ReplayService:
                 version.
 
         Returns:
-            Created replay, paired with its config and result session id.
+            Created replay, paired with its config.
         """
         baseline = await self._sessions.get(command.baseline_session_id)
         agent_version_id = command.agent_version_id
@@ -212,7 +200,7 @@ class ReplayService:
             ReplayNotFound: No replay has this id.
 
         Returns:
-            Stored replay, paired with its config and result session id.
+            Stored replay, paired with its config.
         """
         replay = await self._repository.get(replay_id)
         await self._check_task_access(replay, actor)
@@ -228,8 +216,8 @@ class ReplayService:
             actor: Caller context.
 
         Returns:
-            Page of matching replays, each paired with its config and result
-            session id, and the next cursor.
+            Page of matching replays, each paired with its config, and the
+            next cursor.
         """
         _ = actor
         replays, next_cursor = await self._repository.query(replay_filter)

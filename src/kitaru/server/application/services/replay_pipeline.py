@@ -152,12 +152,12 @@ async def append_result_evaluations(
     if replay is None:
         return
     config = await experiment_repository.get_replay_config(replay.replay_config_id)
-    assert task.result_session_id is not None
+    assert replay.result_session_id is not None
     evaluator_tasks: list[Task] = [
         EvaluationTask(
             job_id=task.job_id,
             plugin_version_id=evaluator.evaluator_version_id,
-            input_session_id=task.result_session_id,
+            input_session_id=replay.result_session_id,
             params=evaluator.params,
             on_failure=TaskOnFailure.ABORT,
         )

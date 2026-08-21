@@ -13,8 +13,6 @@
 #  permissions and limitations under the License.
 """Replay DTO conversions."""
 
-import uuid
-
 from kitaru.api_models.v1.replay import (
     ReplayCreateRequest,
     ReplayListParams,
@@ -66,19 +64,15 @@ def replay_create_to_command(body: ReplayCreateRequest) -> ReplayCreate:
     )
 
 
-def replay_to_response(
-    replay: Replay, config: ReplayConfig, result_session_id: uuid.UUID | None
-) -> ReplayResponse:
+def replay_to_response(replay: Replay, config: ReplayConfig) -> ReplayResponse:
     """Convert a replay and its config to the response DTO.
 
     Args:
         replay: Stored replay.
         config: The replay's config.
-        result_session_id: Session produced by the replay's agent task, if
-            any.
 
     Returns:
-        Replay response, inlining the config and the result session id.
+        Replay response, inlining the config.
     """
     assert replay.created is not None
     assert replay.updated is not None
@@ -87,7 +81,7 @@ def replay_to_response(
         job_id=replay.job_id,
         experiment_run_id=replay.experiment_run_id,
         baseline_session_id=replay.baseline_session_id,
-        result_session_id=result_session_id,
+        result_session_id=replay.result_session_id,
         override=(
             replay_override_to_wire(config.override)
             if config.override is not None

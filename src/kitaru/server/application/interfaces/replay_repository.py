@@ -76,6 +76,17 @@ class ReplayRepository(Protocol):
         """
         ...
 
+    async def get_by_result_session_id(self, session_id: uuid.UUID) -> Replay | None:
+        """Load the replay that produced a session, if any.
+
+        Args:
+            session_id: Id of the produced session.
+
+        Returns:
+            Stored replay, or ``None`` when no replay produced the session.
+        """
+        ...
+
     async def get_many_by_job_ids(
         self, job_ids: Sequence[uuid.UUID]
     ) -> dict[uuid.UUID, Replay]:

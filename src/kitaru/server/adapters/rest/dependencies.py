@@ -545,6 +545,7 @@ def get_task_service(
         Task service bound to the SQL repositories.
     """
     policy = get_task_policy(settings)
+    replay_repository = SQLReplayRepository(session)
     spec_builder = TaskSpecBuilder(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
@@ -552,7 +553,7 @@ def get_task_service(
         secret_repository=SQLSecretRepository(
             session, AesGcmCipher(settings.SECRET_ENCRYPTION_KEY)
         ),
-        replay_repository=SQLReplayRepository(session),
+        replay_repository=replay_repository,
         policy=policy,
     )
     return TaskService(
@@ -560,6 +561,7 @@ def get_task_service(
         worker_repository=SQLWorkerRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
+        replay_repository=replay_repository,
         spec_builder=spec_builder,
         transitions=_build_task_transitions(session, analytics),
         policy=policy,

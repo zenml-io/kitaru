@@ -47,6 +47,7 @@ REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY = foreign_key_name("replay", ["replay_config
 REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY = foreign_key_name(
     "replay", ["baseline_session_id"]
 )
+REPLAY_RESULT_SESSION_ID_FOREIGN_KEY = foreign_key_name("replay", ["result_session_id"])
 REPLAY_JOB_ID_UNIQUE_CONSTRAINT = unique_constraint_name("replay", ["job_id"])
 REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT = unique_constraint_name(
     "replay", ["experiment_run_id", "baseline_session_id"]
@@ -55,6 +56,7 @@ REPLAY_EXPERIMENT_RUN_ID_STATUS_INDEX = index_name(
     "replay", ["experiment_run_id", "status"]
 )
 REPLAY_BASELINE_SESSION_ID_INDEX = index_name("replay", ["baseline_session_id"])
+REPLAY_RESULT_SESSION_ID_INDEX = index_name("replay", ["result_session_id"])
 
 
 class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -84,6 +86,11 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["session.id"],
             name=REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
         ),
+        ForeignKeyConstraint(
+            ["result_session_id"],
+            ["session.id"],
+            name=REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
+        ),
         UniqueConstraint("job_id", name=REPLAY_JOB_ID_UNIQUE_CONSTRAINT),
         UniqueConstraint(
             "experiment_run_id",
@@ -92,6 +99,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(REPLAY_EXPERIMENT_RUN_ID_STATUS_INDEX, "experiment_run_id", "status"),
         Index(REPLAY_BASELINE_SESSION_ID_INDEX, "baseline_session_id"),
+        Index(REPLAY_RESULT_SESSION_ID_INDEX, "result_session_id"),
     )
 
     owner_id: Mapped[uuid.UUID]
@@ -99,6 +107,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     experiment_run_id: Mapped[uuid.UUID | None]
     replay_config_id: Mapped[uuid.UUID]
     baseline_session_id: Mapped[uuid.UUID]
+    result_session_id: Mapped[uuid.UUID | None]
     evaluate_baselines: Mapped[bool] = mapped_column(Boolean)
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     error: Mapped[str | None] = mapped_column(Text)
@@ -120,6 +129,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             experiment_run_id=replay.experiment_run_id,
             replay_config_id=replay.replay_config_id,
             baseline_session_id=replay.baseline_session_id,
+            result_session_id=replay.result_session_id,
             evaluate_baselines=replay.evaluate_baselines,
             status=replay.status.value,
             error=replay.error,
@@ -131,6 +141,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Args:
             replay: Replay with modified fields.
         """
+        self.result_session_id = replay.result_session_id
         self.status = replay.status.value
         self.error = replay.error
 
@@ -147,6 +158,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             experiment_run_id=self.experiment_run_id,
             replay_config_id=self.replay_config_id,
             baseline_session_id=self.baseline_session_id,
+            result_session_id=self.result_session_id,
             evaluate_baselines=self.evaluate_baselines,
             status=ReplayStatus(self.status),
             error=self.error,

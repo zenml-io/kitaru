@@ -7668,11 +7668,6 @@ export interface components {
              */
             result: unknown;
             /**
-             * Result Session Id
-             * @description Session an agent task produced.
-             */
-            result_session_id?: string | null;
-            /**
              * Started At
              * @description Time execution started.
              */

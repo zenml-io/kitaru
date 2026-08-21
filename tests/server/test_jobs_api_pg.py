@@ -123,8 +123,8 @@ async def test_session_run_lifecycle_completes_the_job(
     assert body["status"] == "completed"
     assert body["ended_at"] is not None
 
-    response = await client.get(f"/api/v1/tasks/{task['id']}")
-    assert response.json()["result_session_id"] == session["id"]
+    response = await client.get(f"/api/v1/sessions/{session['id']}")
+    assert response.json()["task_id"] == task["id"]
 
 
 async def test_cancel_job_persists_across_requests(client: httpx.AsyncClient) -> None:
