@@ -384,9 +384,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
-                    session_id
-                ),
+                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id),
             },
         )
 
