@@ -111,6 +111,18 @@ class SessionInUseByTask(ConflictError):
         super().__init__(f"Session {session_id} is in use by a task")
 
 
+class SessionInUseByReplay(ConflictError):
+    """Raised when a session is referenced by a replay and cannot be deleted."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session that cannot be deleted.
+        """
+        super().__init__(f"Session {session_id} is in use by a replay")
+
+
 class SessionAgentVersionMismatch(ValidationError):
     """Raised when a session names a different agent version than its task runs."""
 

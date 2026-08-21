@@ -29,6 +29,7 @@ from conftest import (
     create_agent_task,
     create_agent_version,
     create_import_task,
+    create_replay,
     create_session,
 )
 from kitaru.analytics.events import AnalyticsEvent
@@ -777,6 +778,31 @@ async def test_create_session_links_an_agent_tasks_result_session(
     )
     stored_task = await task_repository.get(task.id)
     assert stored_task.result_session_id == session.id
+
+
+async def test_create_session_links_the_replays_result_session(
+    service: SessionService,
+    task_repository: FakeTaskRepository,
+    agent_repository: FakeAgentRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    replay_repository: FakeReplayRepository,
+) -> None:
+    """Creating a session for a replay's agent task links it on the replay row."""
+    version = await _stored_agent_version(agent_repository, agent_version_repository)
+    task = await _running_agent_task(task_repository, version.id)
+    replay = await create_replay(
+        replay_repository,
+        ACTOR.account.id,
+        job_id=task.job_id,
+        replay_config_id=uuid.uuid4(),
+        baseline_session_id=uuid.uuid4(),
+    )
+    session = await service.create_session(
+        SessionCreate(origin=SessionOrigin.RECORDED),
+        actor=_task_principal(task.id),
+    )
+    stored_replay = await replay_repository.get(replay.id)
+    assert stored_replay.result_session_id == session.id
 
 
 async def test_create_session_rejects_a_second_link_to_an_agent_task(

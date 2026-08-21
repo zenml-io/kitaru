@@ -28,7 +28,7 @@ from sqlalchemy import (
     update,
 )
 
-from kitaru.api_models.v1.task import TaskKind, TaskStatus
+from kitaru.api_models.v1.task import TaskStatus
 from kitaru.api_models.v1.worker import WorkerScope
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.job import JobORM
@@ -602,22 +602,3 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         for session_id, plugin_version_id in rows:
             scored.setdefault(session_id, set()).add(plugin_version_id)
         return scored
-
-    async def get_agent_tasks_by_job_ids(
-        self, job_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, Task]:
-        """Bulk-load the agent task of each job, keyed by job id.
-
-        Args:
-            job_ids: Ids of the jobs.
-
-        Returns:
-            Agent tasks keyed by job id, jobs without an agent task omitted.
-        """
-        if not job_ids:
-            return {}
-        statement = select(TaskORM).where(
-            TaskORM.job_id.in_(job_ids), TaskORM.kind == TaskKind.AGENT.value
-        )
-        rows = (await self._session.scalars(statement)).all()
-        return {row.job_id: row.to_domain() for row in rows}

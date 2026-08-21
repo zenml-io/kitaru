@@ -71,7 +71,6 @@ from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
-from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
@@ -79,6 +78,7 @@ from kitaru.server.application.interfaces.cohort_version_repository import (
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
+from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
@@ -104,11 +104,11 @@ from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
+    SessionInUseByReplay,
     SessionNotFound,
     SessionRollups,
 )
 from kitaru.server.domain.tag import Tag, TagLink
-from kitaru.server.domain.task import AgentTask
 from kitaru.server.filtering import (
     AndExpression,
     FilterCondition,
@@ -121,6 +121,9 @@ Setup = tuple[
 ]
 CohortSetup = tuple[
     SessionRepository, CohortRepository, CohortVersionRepository, uuid.UUID, uuid.UUID
+]
+ReplaySetup = tuple[
+    SessionRepository, ReplayRepository, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID
 ]
 
 
@@ -690,6 +693,101 @@ async def test_delete_in_use_by_cohort_version(cohort_setup: CohortSetup) -> Non
         await sessions.delete(member.id)
 
 
+@pytest.fixture
+async def replay_setup() -> AsyncGenerator[ReplaySetup, None]:
+    """Provide a Postgres session repository and a replay's collaborators.
+
+    Yields a session repository, a replay repository sharing its backend,
+    an owner id, an agent id, a replay config id, and a job id.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        config = await SQLExperimentRepository(session).create_replay_config(
+            ReplayConfig(
+                owner_id=owner.id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        job = await SQLJobRepository(session).create(
+            Job(owner_id=owner.id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+        )
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLReplayRepository(session),
+            owner.id,
+            agent.id,
+            config.id,
+            job.id,
+        )
+
+
+async def test_delete_in_use_by_replay_as_baseline_session(
+    replay_setup: ReplaySetup,
+) -> None:
+    """Reject deleting a session that is a replay's baseline session."""
+    sessions, replays, owner_id, agent_id, config_id, job_id = replay_setup
+    baseline = await sessions.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
+    )
+    await replays.create(
+        Replay(
+            owner_id=owner_id,
+            job_id=job_id,
+            replay_config_id=config_id,
+            baseline_session_id=baseline.id,
+        )
+    )
+
+    with pytest.raises(SessionInUseByReplay):
+        await sessions.delete(baseline.id)
+
+
+async def test_delete_in_use_by_replay_as_result_session(
+    replay_setup: ReplaySetup,
+) -> None:
+    """Reject deleting a session that is a replay's result session."""
+    sessions, replays, owner_id, agent_id, config_id, job_id = replay_setup
+    baseline = await sessions.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
+    )
+    result = await sessions.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=2,
+            origin=SessionOrigin.RECORDED,
+        )
+    )
+    await replays.create(
+        Replay(
+            owner_id=owner_id,
+            job_id=job_id,
+            replay_config_id=config_id,
+            baseline_session_id=baseline.id,
+            result_session_id=result.id,
+        )
+    )
+
+    with pytest.raises(SessionInUseByReplay):
+        await sessions.delete(result.id)
+
+
 async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
     """Add deltas atomically, coalescing null cost and tokens to zero."""
     repository, owner_id, agent_id, _, _ = setup
@@ -929,10 +1027,10 @@ async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> Non
 async def test_query_filters_by_experiment_run() -> None:
     """Filter sessions produced as the results of a run's replays.
 
-    Postgres-only: the run is three hops from the session, reached through
-    the producing task's job and the replay that owns it.
+    Postgres-only: the run is reached through the replay row that links its
+    result session directly.
 
-    Matching through the task's result session is what keeps a run's
+    Matching through the replay's result session is what keeps a run's
     baseline sessions out of the result set, so that is asserted here.
     """
     if not await postgres_available():
@@ -981,7 +1079,6 @@ async def test_query_filters_by_experiment_run() -> None:
         repository = SQLSessionRepository(session, engine)
         jobs = SQLJobRepository(session)
         replays = SQLReplayRepository(session)
-        tasks = SQLTaskRepository(session)
 
         # Sessions are unique per agent and number, and every session here
         # belongs to the same agent.
@@ -1022,13 +1119,9 @@ async def test_query_filters_by_experiment_run() -> None:
                     experiment_run_id=experiment_run_id,
                     replay_config_id=config.id,
                     baseline_session_id=baseline.id,
+                    result_session_id=result.id,
                 )
             )
-            task = await tasks.create(
-                AgentTask(job_id=job.id, agent_version_id=agent_version.id)
-            )
-            task.link_result_session(result.id)
-            await tasks.update(task)
             return baseline, result
 
         baseline, result = await replay_in_run(run.id)

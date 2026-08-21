@@ -4151,16 +4151,9 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self, tasks: "FakeTaskRepository | None" = None) -> None:
-        """Initialize the repository.
-
-        Args:
-            tasks: Fake task repository, needed to resolve the result session
-                filter, which reads through the agent task rather than the
-                replay row.
-        """
+    def __init__(self) -> None:
+        """Initialize the repository."""
         self._replays: dict[uuid.UUID, Replay] = {}
-        self._tasks = tasks
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -4273,38 +4266,13 @@ class FakeReplayRepository:
         """
         replays = list(self._replays.values())
         if replay_filter.expression is not None:
-            resolvers = {"result_session_id": self._evaluate_result_session_condition}
             replays = [
                 r
                 for r in replays
-                if _evaluate_filter_expression(r, replay_filter.expression, resolvers)
+                if _evaluate_filter_expression(r, replay_filter.expression)
             ]
         page, next_cursor = _paginate_fake(replays, replay_filter)
         return [r.model_copy() for r in page], next_cursor
-
-    def _evaluate_result_session_condition(
-        self, replay: Replay, condition: FilterCondition
-    ) -> bool:
-        """Evaluate a result session condition against a replay.
-
-        Args:
-            replay: Replay to evaluate.
-            condition: Validated result session condition.
-
-        Returns:
-            Whether the replay's agent task produced a matching session.
-        """
-        assert self._tasks is not None
-        agent_task = next(
-            (
-                task
-                for task in self._tasks._tasks.values()
-                if task.job_id == replay.job_id and isinstance(task, AgentTask)
-            ),
-            None,
-        )
-        result_session_id = agent_task.result_session_id if agent_task else None
-        return _matches_condition(result_session_id, condition)
 
     async def list_by_experiment_run(
         self, experiment_run_id: uuid.UUID
@@ -5549,24 +5517,6 @@ class FakeTaskRepository:
                 )
         return scored
 
-    async def get_agent_tasks_by_job_ids(
-        self, job_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, Task]:
-        """Bulk-load the agent task of each job, keyed by job id.
-
-        Args:
-            job_ids: Ids of the jobs.
-
-        Returns:
-            Agent tasks keyed by job id, jobs without an agent task omitted.
-        """
-        job_id_set = set(job_ids)
-        return {
-            task.job_id: task.model_copy()
-            for task in self._tasks.values()
-            if isinstance(task, AgentTask) and task.job_id in job_id_set
-        }
-
 
 def _is_stale_before(task: Task, bound: datetime) -> bool:
     """Report whether a task last showed a sign of life before a bound.
@@ -5902,7 +5852,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
-    replays = FakeReplayRepository(tasks=tasks)
+    replays = FakeReplayRepository()
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
     cohort_versions = FakeCohortVersionRepository(
         cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs, tags=tags

@@ -136,7 +136,7 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         actor=ACTOR,
     )
     assert bundle.replay.status is ReplayStatus.PENDING
-    assert bundle.result_session_id is None
+    assert bundle.replay.result_session_id is None
 
     tasks, _ = await services.task_service.list_tasks(
         TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
@@ -178,6 +178,10 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert isinstance(stored_agent_task, AgentTask)
     stored_agent_task.result_session_id = result_session.id
     await services.tasks.update(stored_agent_task)
+    replay_with_task = await services.replays.get_by_job_id(bundle.replay.job_id)
+    assert replay_with_task is not None
+    replay_with_task.link_result_session(result_session.id)
+    await services.replays.update(replay_with_task)
 
     await services.task_service.update_task(
         agent_task.id,
@@ -238,7 +242,7 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     final_bundle = await services.replay_service.get_replay(
         bundle.replay.id, actor=ACTOR
     )
-    assert final_bundle.result_session_id == result_session.id
+    assert final_bundle.replay.result_session_id == result_session.id
 
 
 async def test_standalone_replay_stamps_the_job_kind_replay(

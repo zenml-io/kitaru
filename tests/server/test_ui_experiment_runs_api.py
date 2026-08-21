@@ -40,7 +40,6 @@ from kitaru.server.application.services.evaluation_service import EvaluationServ
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
-from kitaru.server.domain.task import AgentTask
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -108,13 +107,8 @@ async def _add_replay_with_result_session(
         baseline_session_id=baseline_session_id,
         experiment_run_id=run_id,
     )
-    await services.tasks.create(
-        AgentTask(
-            job_id=replay.job_id,
-            agent_version_id=uuid.uuid4(),
-            result_session_id=result_session_id,
-        )
-    )
+    replay.link_result_session(result_session_id)
+    await services.replays.update(replay)
     return replay.id
 
 

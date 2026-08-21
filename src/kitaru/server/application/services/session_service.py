@@ -90,10 +90,11 @@ class SessionService:
         A task principal's session is linked to the principal's task, which
         must be running. An agent task links exactly one session and gets its
         result session written in the same transaction, an import task links
-        every session it creates. The task is the source of truth for the
-        agent and the agent version. The session takes the next number of
-        its agent, allocated outside the request transaction, so a failed
-        create leaves a gap.
+        every session it creates. A replay owning the agent task's job also
+        stores the session as its result session. The task is the source of
+        truth for the agent and the agent version. The session takes the next
+        number of its agent, allocated outside the request transaction, so a
+        failed create leaves a gap.
 
         Args:
             command: Fields for the new session.
@@ -161,6 +162,10 @@ class SessionService:
         if isinstance(task, AgentTask):
             task.link_result_session(stored.id)
             await self._tasks.update(task)
+            replay = await self._replays.get_by_job_id(task.job_id)
+            if replay is not None:
+                replay.link_result_session(stored.id)
+                await self._replays.update(replay)
         if self._analytics is not None and stored.status != SessionStatus.IN_PROGRESS:
             self._analytics.track(
                 stored.owner_id,

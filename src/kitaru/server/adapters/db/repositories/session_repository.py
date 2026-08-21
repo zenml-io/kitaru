@@ -34,7 +34,11 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
-from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.replay import (
+    REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
+    REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
+    ReplayORM,
+)
 from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
@@ -42,7 +46,6 @@ from kitaru.server.adapters.db.orm.session import (
 from kitaru.server.adapters.db.orm.task import (
     TASK_INPUT_SESSION_ID_FOREIGN_KEY,
     TASK_RESULT_SESSION_ID_FOREIGN_KEY,
-    TaskORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
@@ -53,42 +56,20 @@ from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
+    SessionInUseByReplay,
     SessionInUseByTask,
     SessionNotFound,
     SessionRollups,
 )
 from kitaru.server.filtering import FilterCondition
 
-# A replay's tasks share its job, and the run owns the replay.
+# Matched through the replay's result session, so a run's baseline sessions
+# stay out of the result set.
 _scopes_to_experiment_run = build_scope_condition_binding(
-    local_column=TaskORM.job_id,
-    related_key=ReplayORM.job_id,
+    local_column=SessionORM.id,
+    related_key=ReplayORM.result_session_id,
     scope_column=ReplayORM.experiment_run_id,
 )
-
-
-def _compile_experiment_run_condition(
-    condition: FilterCondition,
-) -> ColumnElement[bool]:
-    """Compile an experiment run scope condition into a task predicate.
-
-    Args:
-        condition: Validated experiment run condition.
-
-    Returns:
-        SQL predicate.
-    """
-    # Matched through the task's result session, so a run's baseline sessions
-    # stay out of the result set.
-    run_tasks = (
-        select(TaskORM.id)
-        .where(
-            TaskORM.result_session_id == SessionORM.id,
-            _scopes_to_experiment_run(condition),
-        )
-        .correlate(SessionORM)
-    )
-    return run_tasks.exists()
 
 
 def _compile_cohort_version_condition(
@@ -147,7 +128,7 @@ SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "name": SessionORM.name,
     "tag": build_tag_condition_binding(TagResourceType.SESSION, SessionORM.id),
     "cohort_version_id": _compile_cohort_version_condition,
-    "experiment_run_id": _compile_experiment_run_condition,
+    "experiment_run_id": _scopes_to_experiment_run,
     "has_evaluation": _compile_has_evaluation_condition,
     "started_at": SessionORM.started_at,
     "ended_at": SessionORM.ended_at,
@@ -368,6 +349,8 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 cannot be deleted.
             SessionInUseByTask: The session is a task's input or result
                 session and cannot be deleted.
+            SessionInUseByReplay: The session is a replay's baseline or
+                result session and cannot be deleted.
         """
         await self._delete_row(
             session_id,
@@ -379,6 +362,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                     session_id
                 ),
                 TASK_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
+                    session_id
+                ),
+                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(
+                    session_id
+                ),
+                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(
                     session_id
                 ),
             },
