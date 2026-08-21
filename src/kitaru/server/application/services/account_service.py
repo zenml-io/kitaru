@@ -195,10 +195,10 @@ class AccountService:
                 account = await self._repository.create(
                     Account(name=name, password_hash=password_hash, is_admin=True)
                 )
+                self._identify(account, AccountOrigin.BOOTSTRAP)
                 self._track_account_created(account, AccountOrigin.BOOTSTRAP)
             except DuplicateAccountName:
                 account = await self._repository.get_by_name(name)
-        self._identify(account, AccountOrigin.BOOTSTRAP)
         return account
 
     async def get_account(self, account_id: uuid.UUID, actor: AuthContext) -> Account:

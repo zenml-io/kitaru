@@ -64,6 +64,8 @@ def build_account_traits(account: Account, origin: AccountOrigin) -> dict[str, A
     }
     if account.email is not None:
         traits["email"] = account.email
+    if account.external_id is not None:
+        traits["control_plane_user_id"] = account.external_id
     return traits
 
 
