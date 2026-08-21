@@ -50,12 +50,15 @@ kitaru session import langfuse-export.jsonl \
 from pydantic_ai import Agent
 from kitaru_pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-5.4", name="support-agent",
-              system_prompt="You resolve support tickets.")
+agent = Agent(
+    "openai:gpt-5.4", name="support-agent", system_prompt="You resolve support tickets."
+)
+
 
 @agent.tool_plain
 def refund_payment(order_id: str) -> str:
     return payments.refund(order_id)  # your real API
+
 
 support = KitaruAgent(agent, agent_id=AGENT_ID)
 support.run_sync("Refund order #4821, the card reader double-charged me.")

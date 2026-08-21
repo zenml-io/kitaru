@@ -61,8 +61,9 @@ import uuid
 from pydantic_ai import Agent
 from kitaru_pydantic_ai import KitaruAgent
 
-agent = Agent("openai:gpt-5.4", name="support-agent",
-              system_prompt="You resolve support tickets.")
+agent = Agent(
+    "openai:gpt-5.4", name="support-agent", system_prompt="You resolve support tickets."
+)
 
 support = KitaruAgent(agent, agent_id=uuid.UUID(os.environ["KITARU_AGENT_ID"]))
 

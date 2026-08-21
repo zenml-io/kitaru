@@ -4388,9 +4388,10 @@ class FakeReplayRepository:
         run_ids = set(experiment_run_ids)
         tallies: dict[uuid.UUID, dict[ReplayStatus, int]] = {}
         for replay in self._replays.values():
-            if replay.experiment_run_id not in run_ids:
+            run_id = replay.experiment_run_id
+            if run_id is None or run_id not in run_ids:
                 continue
-            tally = tallies.setdefault(replay.experiment_run_id, {})
+            tally = tallies.setdefault(run_id, {})
             tally[replay.status] = tally.get(replay.status, 0) + 1
         return {
             run_id: ReplayStatusCounts(

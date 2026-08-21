@@ -221,7 +221,10 @@ That is the whole interface. You receive the uploaded bytes and the `--params` o
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.task.importer import ImportedSession
 
-def parse(content: bytes, params: dict[str, Any]) -> Iterator[ImportedSession | ImportFailure]:
+
+def parse(
+    content: bytes, params: dict[str, Any]
+) -> Iterator[ImportedSession | ImportFailure]:
     for line_number, line in enumerate(content.decode("utf-8").splitlines(), start=1):
         try:
             yield ImportedSession.model_validate(transform(json.loads(line)))

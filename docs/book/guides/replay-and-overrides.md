@@ -57,6 +57,7 @@ from kitaru.api_models.v1.replay_config import (
 
 RECORDED_TOOLS = ToolPolicy(default=HistoryConfig(scope="baseline", on_miss="fail"))
 
+
 async def main() -> None:
     client = KitaruAPIClient()
     replay = await client.replays.create(
@@ -70,6 +71,7 @@ async def main() -> None:
         )
     )
     print(replay.id, replay.job_id)
+
 
 asyncio.run(main())
 ```
@@ -108,13 +110,19 @@ Both sides are sessions with evaluations. Read them together:
 from kitaru.api_models.v1.evaluation import EvaluationListParams
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 
+
 async def evaluations_for(client, session_id):
     return {
         e.name: e
-        async for e in client.evaluations.iter(EvaluationListParams(
-            filter=FilterCondition(field="session_id", op=FilterOp.EQ, value=session_id)
-        ))
+        async for e in client.evaluations.iter(
+            EvaluationListParams(
+                filter=FilterCondition(
+                    field="session_id", op=FilterOp.EQ, value=session_id
+                )
+            )
+        )
     }
+
 
 baseline_evals = await evaluations_for(client, baseline_session_id)
 fork_evals = await evaluations_for(client, result_session_id)
