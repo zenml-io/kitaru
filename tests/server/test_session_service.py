@@ -738,6 +738,7 @@ async def test_create_session_requires_the_principals_task_to_be_running(
 
 async def test_create_session_rejects_a_stale_task_attempt(
     service: SessionService,
+    repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
@@ -753,18 +754,17 @@ async def test_create_session_rejects_a_stale_task_attempt(
             SessionCreate(origin=SessionOrigin.RECORDED),
             actor=stale_actor,
         )
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id is None
+    assert await repository.get_by_task_id(task.id) is None
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id, attempt=task.attempt),
     )
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id == session.id
+    assert session.task_id == task.id
 
 
-async def test_create_session_links_an_agent_tasks_result_session(
+async def test_create_session_links_the_session_to_its_agent_task(
     service: SessionService,
+    repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
     agent_repository: FakeAgentRepository,
     agent_version_repository: FakeAgentVersionRepository,
@@ -776,8 +776,10 @@ async def test_create_session_links_an_agent_tasks_result_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id),
     )
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id == session.id
+    assert session.task_id == task.id
+    linked = await repository.get_by_task_id(task.id)
+    assert linked is not None
+    assert linked.id == session.id
 
 
 async def test_create_session_links_the_replays_result_session(
@@ -844,8 +846,6 @@ async def test_create_session_links_many_sessions_to_an_import_task(
     )
     assert first.task_id == task.id
     assert second.task_id == task.id
-    stored_task = await task_repository.get(task.id)
-    assert stored_task.result_session_id is None
 
 
 async def test_create_session_infers_agent_and_version_from_an_agent_task(

@@ -526,10 +526,6 @@ async def test_ignore_failure_neither_cancels_nor_counts(
     )
     session.status = SessionStatus.COMPLETED
     await services.sessions.update(session)
-    stored_sibling = await services.tasks.get(sibling.id)
-    assert isinstance(stored_sibling, AgentTask)
-    stored_sibling.result_session_id = session.id
-    await services.tasks.update(stored_sibling)
     await services.task_service.update_task(
         sibling.id,
         TaskUpdate(status=TaskStatus.COMPLETED),
@@ -563,10 +559,6 @@ async def test_appended_task_blocks_settlement(services: JobAndTaskServices) -> 
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
     )
     session.status = SessionStatus.COMPLETED
-    stored_task = await services.tasks.get(task.id)
-    assert isinstance(stored_task, AgentTask)
-    stored_task.result_session_id = session.id
-    await services.tasks.update(stored_task)
     await services.task_service.update_task(
         task.id,
         TaskUpdate(status=TaskStatus.RUNNING),

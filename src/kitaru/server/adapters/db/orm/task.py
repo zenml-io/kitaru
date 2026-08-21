@@ -58,14 +58,12 @@ TASK_AGENT_ID_FOREIGN_KEY = foreign_key_name("task", ["agent_id"])
 TASK_PLUGIN_VERSION_ID_FOREIGN_KEY = foreign_key_name("task", ["plugin_version_id"])
 TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY = foreign_key_name("task", ["payload_blob_id"])
 TASK_INPUT_SESSION_ID_FOREIGN_KEY = foreign_key_name("task", ["input_session_id"])
-TASK_RESULT_SESSION_ID_FOREIGN_KEY = foreign_key_name("task", ["result_session_id"])
 TASK_WORKER_ID_FOREIGN_KEY = foreign_key_name("task", ["worker_id"])
 TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
     "task", ["job_id", "input_session_id", "plugin_version_id"]
 )
 TASK_JOB_ID_STATUS_INDEX = index_name("task", ["job_id", "status"])
 TASK_INPUT_SESSION_ID_INDEX = index_name("task", ["input_session_id"])
-TASK_RESULT_SESSION_ID_INDEX = index_name("task", ["result_session_id"])
 # Partial indexes covering the queue scans: a scope claiming everything reads
 # pending rows in id order, a kind claim reads them per kind, and a
 # version-pinned claim reads them per agent version. The staleness sweep
@@ -113,11 +111,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=TASK_INPUT_SESSION_ID_FOREIGN_KEY,
         ),
         ForeignKeyConstraint(
-            ["result_session_id"],
-            ["session.id"],
-            name=TASK_RESULT_SESSION_ID_FOREIGN_KEY,
-        ),
-        ForeignKeyConstraint(
             ["worker_id"],
             ["worker.id"],
             name=TASK_WORKER_ID_FOREIGN_KEY,
@@ -131,7 +124,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ),
         Index(TASK_JOB_ID_STATUS_INDEX, "job_id", "status"),
         Index(TASK_INPUT_SESSION_ID_INDEX, "input_session_id"),
-        Index(TASK_RESULT_SESSION_ID_INDEX, "result_session_id"),
         Index(TASK_PENDING_ID_INDEX, "id", postgresql_where=text(PENDING_PREDICATE)),
         Index(
             TASK_PENDING_KIND_INDEX,
@@ -159,7 +151,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     plugin_version_id: Mapped[uuid.UUID | None]
     payload_blob_id: Mapped[uuid.UUID | None]
     input_session_id: Mapped[uuid.UUID | None]
-    result_session_id: Mapped[uuid.UUID | None]
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     attempt: Mapped[int]
     on_failure: Mapped[str] = mapped_column(String(ON_FAILURE_LENGTH))
@@ -197,7 +188,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             labels=task.labels,
             env=task.env,
             worker_id=task.worker_id,
-            result_session_id=task.result_session_id,
             claimed_at=task.claimed_at,
             heartbeat_at=task.heartbeat_at,
             cancel_requested_at=task.cancel_requested_at,
@@ -230,7 +220,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.status = task.status.value
         self.attempt = task.attempt
         self.worker_id = task.worker_id
-        self.result_session_id = task.result_session_id
         self.claimed_at = task.claimed_at
         self.heartbeat_at = task.heartbeat_at
         self.cancel_requested_at = task.cancel_requested_at
@@ -257,7 +246,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "labels": self.labels,
             "env": self.env,
             "worker_id": self.worker_id,
-            "result_session_id": self.result_session_id,
             "claimed_at": self.claimed_at,
             "heartbeat_at": self.heartbeat_at,
             "cancel_requested_at": self.cancel_requested_at,

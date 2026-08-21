@@ -43,10 +43,7 @@ from kitaru.server.adapters.db.orm.session import (
     SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
-from kitaru.server.adapters.db.orm.task import (
-    TASK_INPUT_SESSION_ID_FOREIGN_KEY,
-    TASK_RESULT_SESSION_ID_FOREIGN_KEY,
-)
+from kitaru.server.adapters.db.orm.task import TASK_INPUT_SESSION_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
@@ -246,6 +243,24 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row = await self._get_row(session_id, exclusive=exclusive)
         return row.to_domain()
 
+    async def get_by_task_id(
+        self, task_id: uuid.UUID, exclusive: bool = False
+    ) -> Session | None:
+        """Load the session a task produced, if any.
+
+        Args:
+            task_id: Id of the producing task.
+            exclusive: Lock the row for update.
+
+        Returns:
+            Stored session, or ``None`` when no session links the task.
+        """
+        statement = select(SessionORM).where(SessionORM.task_id == task_id)
+        if exclusive:
+            statement = statement.with_for_update()
+        row = (await self._session.scalars(statement)).one_or_none()
+        return row.to_domain() if row is not None else None
+
     async def query(
         self, session_filter: SessionFilter
     ) -> tuple[list[Session], str | None]:
@@ -347,8 +362,8 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             SessionNotFound: No session has this id.
             SessionInUse: The session belongs to a cohort version and
                 cannot be deleted.
-            SessionInUseByTask: The session is a task's input or result
-                session and cannot be deleted.
+            SessionInUseByTask: The session is a task's input session and
+                cannot be deleted.
             SessionInUseByReplay: The session is a replay's baseline or
                 result session and cannot be deleted.
         """
@@ -359,9 +374,6 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                     session_id
                 ),
                 TASK_INPUT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
-                    session_id
-                ),
-                TASK_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
                     session_id
                 ),
                 REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(

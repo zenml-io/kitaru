@@ -33,8 +33,6 @@ from kitaru.server.domain.task import (
     Task,
     TaskAttemptMismatch,
     TaskNotRunning,
-    TaskResultSessionAlreadyLinked,
-    TaskResultSessionMissing,
 )
 
 NOW = datetime(2026, 7, 29, 12, 0, tzinfo=UTC)
@@ -161,14 +159,12 @@ def test_requeue_drops_the_attempt_state() -> None:
     task.claimed_at = NOW
     task.heartbeat_at = NOW
     task.started_at = NOW
-    task.result_session_id = uuid.uuid4()
     task.requeue()
     assert task.attempt == 1
     assert task.worker_id is None
     assert task.claimed_at is None
     assert task.heartbeat_at is None
     assert task.started_at is None
-    assert task.result_session_id is None
 
 
 def test_request_cancel_leaves_an_in_flight_status_alone() -> None:
@@ -214,38 +210,6 @@ def test_creator_env_extras_pass() -> None:
     """Env extras outside the contract namespace are kept."""
     task = _task(env={"KITARU_SESSION_NAME": "run-1"})
     assert task.env == {"KITARU_SESSION_NAME": "run-1"}
-
-
-def test_agent_completion_requires_a_result_session() -> None:
-    """An agent task without a linked session cannot complete."""
-    task = AgentTask(
-        job_id=uuid.uuid4(),
-        agent_version_id=uuid.uuid4(),
-        status=TaskStatus.RUNNING,
-    )
-    with pytest.raises(TaskResultSessionMissing):
-        task.complete(None, NOW)
-    assert task.status is TaskStatus.RUNNING
-
-
-def test_agent_completion_needs_no_result_payload() -> None:
-    """A linked result session is the agent task's outcome, not its result."""
-    task = AgentTask(
-        job_id=uuid.uuid4(),
-        agent_version_id=uuid.uuid4(),
-        status=TaskStatus.RUNNING,
-    )
-    task.link_result_session(uuid.uuid4())
-    task.complete(None, NOW)
-    assert task.status is TaskStatus.COMPLETED
-
-
-def test_result_session_links_once() -> None:
-    """A second session cannot link to the same task."""
-    task = AgentTask(job_id=uuid.uuid4(), agent_version_id=uuid.uuid4())
-    task.link_result_session(uuid.uuid4())
-    with pytest.raises(TaskResultSessionAlreadyLinked):
-        task.link_result_session(uuid.uuid4())
 
 
 @pytest.mark.parametrize(

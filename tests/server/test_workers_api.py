@@ -118,6 +118,7 @@ async def client(
         worker_repository=repository,
         session_repository=FakeSessionRepository(),
         job_repository=job_repository,
+        replay_repository=FakeReplayRepository(),
         spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,

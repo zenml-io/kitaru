@@ -2326,6 +2326,25 @@ class FakeSessionRepository:
             raise SessionNotFound(session_id)
         return session.model_copy()
 
+    async def get_by_task_id(
+        self, task_id: uuid.UUID, exclusive: bool = False
+    ) -> Session | None:
+        """Load the session a task produced, if any.
+
+        Args:
+            task_id: Id of the producing task.
+            exclusive: Ignored, the fake has no concurrent callers to lock
+                against.
+
+        Returns:
+            Stored session, or ``None`` when no session links the task.
+        """
+        _ = exclusive
+        for session in self._sessions.values():
+            if session.task_id == task_id:
+                return session.model_copy()
+        return None
+
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
         """Resolve the ids of sessions linked to a tag by name.
 
@@ -5754,12 +5773,13 @@ def build_job_and_task_services(
         dispatcher=EventDispatcher(),
     )
     task_policy = policy if policy is not None else TaskPolicy()
+    replays = FakeReplayRepository()
     spec_builder = TaskSpecBuilder(
         agent_version_repository=substrate.agent_versions,
         plugin_repository=substrate.plugins,
         blob_repository=substrate.blobs,
         secret_repository=substrate.secrets,
-        replay_repository=FakeReplayRepository(),
+        replay_repository=replays,
         policy=task_policy,
     )
     task_service = TaskService(
@@ -5767,6 +5787,7 @@ def build_job_and_task_services(
         worker_repository=substrate.workers,
         session_repository=substrate.sessions,
         job_repository=substrate.jobs,
+        replay_repository=replays,
         spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,
@@ -5894,6 +5915,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         worker_repository=workers,
         session_repository=sessions,
         job_repository=jobs,
+        replay_repository=replays,
         spec_builder=spec_builder,
         transitions=transitions,
         policy=task_policy,

@@ -103,6 +103,7 @@ def _build_task_service(
         worker_repository=SQLWorkerRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         job_repository=SQLJobRepository(session),
+        replay_repository=SQLReplayRepository(session),
         spec_builder=spec_builder,
         transitions=transitions,
         policy=policy,

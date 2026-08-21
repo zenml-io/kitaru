@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Replay result session id Alembic revision.
 
-Revision ID: 003_replay_result_session_id
-Revises: 002_idempotency_key
+Revision ID: 004_replay_result_session_id
+Revises: 003_worker_liveness_index
 Create Date: 2026-08-21
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "003_replay_result_session_id"
-down_revision = "002_idempotency_key"
+revision = "004_replay_result_session_id"
+down_revision = "003_worker_liveness_index"
 branch_labels = None
 depends_on = None
 
@@ -46,10 +46,28 @@ def upgrade() -> None:
         batch_op.create_foreign_key(
             "fk_replay_result_session_id", "session", ["result_session_id"], ["id"]
         )
+    with op.batch_alter_table("task", schema=None) as batch_op:
+        batch_op.drop_constraint("fk_task_result_session_id", type_="foreignkey")
+        batch_op.drop_index("ix_task_result_session_id")
+        batch_op.drop_column("result_session_id")
 
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
+    with op.batch_alter_table("task", schema=None) as batch_op:
+        batch_op.add_column(sa.Column("result_session_id", sa.Uuid(), nullable=True))
+    # Restore the task-side link from the session's task pointer.
+    op.execute(
+        "UPDATE task SET result_session_id = session.id "
+        "FROM session WHERE session.task_id = task.id AND task.kind = 'agent'"
+    )
+    with op.batch_alter_table("task", schema=None) as batch_op:
+        batch_op.create_index(
+            "ix_task_result_session_id", ["result_session_id"], unique=False
+        )
+        batch_op.create_foreign_key(
+            "fk_task_result_session_id", "session", ["result_session_id"], ["id"]
+        )
     with op.batch_alter_table("replay", schema=None) as batch_op:
         batch_op.drop_constraint("fk_replay_result_session_id", type_="foreignkey")
         batch_op.drop_index("ix_replay_result_session_id")

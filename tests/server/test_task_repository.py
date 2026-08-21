@@ -734,7 +734,6 @@ async def test_stamp_cancel_requested_skips_terminal_tasks(setup: Setup) -> None
     completed = _agent_task(setup)
     completed.claim(setup.worker_id, datetime.now(UTC))
     completed.start(datetime.now(UTC))
-    completed.link_result_session(setup.session_id)
     completed.complete(None, datetime.now(UTC))
     stored_completed = await setup.tasks.create(completed)
 
@@ -756,7 +755,6 @@ async def test_stamp_heartbeats_writes_only_the_heartbeat_column(
     held = _agent_task(setup)
     held.claim(setup.worker_id, start)
     held.start(start)
-    held.link_result_session(setup.session_id)
     stored_held = await setup.tasks.create(held)
 
     canceling = _agent_task(setup)
@@ -795,7 +793,6 @@ async def test_stamp_heartbeats_writes_only_the_heartbeat_column(
     assert isinstance(reloaded_held, AgentTask)
     assert reloaded_held.heartbeat_at == now
     assert reloaded_held.status is TaskStatus.RUNNING
-    assert reloaded_held.result_session_id == setup.session_id
 
     reloaded_completed = await setup.tasks.get(stored_completed.id)
     assert reloaded_completed.heartbeat_at != now

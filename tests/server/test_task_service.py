@@ -26,7 +26,9 @@ from conftest import (
     FakePluginRepository,
     FakeTaskRepository,
     JobAndTaskServices,
+    ReplayServices,
     build_job_and_task_services,
+    build_replay_services,
     build_task_actor,
     build_worker_actor,
     create_agent,
@@ -37,12 +39,13 @@ from conftest import (
     create_import_task,
     create_job,
     create_plugin,
+    create_replay,
     create_secret,
     create_session,
     create_worker,
 )
 from kitaru.analytics.events import AnalyticsEvent
-from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import (
     TaskKind,
@@ -84,7 +87,7 @@ def services() -> JobAndTaskServices:
     return build_job_and_task_services()
 
 
-async def _sweep_stale(services: JobAndTaskServices) -> None:
+async def _sweep_stale(services: JobAndTaskServices | ReplayServices) -> None:
     """Run the sweeper's stale rescue over every candidate task."""
     now = datetime.now(UTC)
     for task_id in await services.task_service.list_stale_task_ids(now):
@@ -483,17 +486,56 @@ async def test_sweep_requeue_unlinks_the_result_session(
     )
     stored = await services.tasks.get(task.id)
     assert isinstance(stored, AgentTask)
-    stored.result_session_id = session.id
     stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
     await services.tasks.update(stored)
 
     await _sweep_stale(services)
 
-    reloaded_task = await services.tasks.get(task.id)
-    assert isinstance(reloaded_task, AgentTask)
-    assert reloaded_task.result_session_id is None
     reloaded_session = await services.sessions.get(session.id)
     assert reloaded_session.task_id is None
+
+
+async def test_sweep_requeue_clears_the_replays_result_session() -> None:
+    """Requeuing a stale replay agent task also frees the replay's result session."""
+    services = build_replay_services()
+    job = await create_job(services.jobs, ACTOR.account.id, kind=JobKind.REPLAY)
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    version = await create_agent_version(
+        services.agent_versions,
+        agent_id=agent.id,
+        owner_id=ACTOR.account.id,
+        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+    )
+    task = await create_agent_task(services.tasks, job.id, agent_version_id=version.id)
+    replay = await create_replay(
+        services.replays,
+        ACTOR.account.id,
+        job_id=job.id,
+        replay_config_id=uuid.uuid4(),
+        baseline_session_id=uuid.uuid4(),
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+
+    session = await create_session(
+        services.sessions, ACTOR.account.id, agent_id=agent.id, task_id=task.id
+    )
+    replay.link_result_session(session.id)
+    await services.replays.update(replay)
+
+    stored = await services.tasks.get(task.id)
+    assert isinstance(stored, AgentTask)
+    stored.claimed_at = datetime.now(UTC) - timedelta(hours=1)
+    await services.tasks.update(stored)
+
+    await _sweep_stale(services)
+
+    reloaded_session = await services.sessions.get(session.id)
+    assert reloaded_session.task_id is None
+    reloaded_replay = await services.replays.get(replay.id)
+    assert reloaded_replay.result_session_id is None
 
 
 async def test_sweep_stale_task_abandons_and_settles() -> None:
@@ -588,10 +630,6 @@ async def test_heartbeat_reports_terminal_tasks(services: JobAndTaskServices) ->
     session = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
     )
-    stored = await services.tasks.get(task.id)
-    assert isinstance(stored, AgentTask)
-    stored.result_session_id = session.id
-    await services.tasks.update(stored)
     session.status = SessionStatus.COMPLETED
     await services.sessions.update(session)
     await services.task_service.update_task(
@@ -662,10 +700,6 @@ async def test_agent_completion_requires_a_completed_result_session(
     session = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4(), task_id=task.id
     )
-    stored = await services.tasks.get(task.id)
-    assert isinstance(stored, AgentTask)
-    stored.result_session_id = session.id
-    await services.tasks.update(stored)
 
     with pytest.raises(TaskResultSessionNotCompleted):
         await services.task_service.update_task(
@@ -1014,7 +1048,6 @@ async def test_apply_status_agent_terminal_tracks_nothing() -> None:
         task, partial(Task.claim, worker_id=uuid.uuid4(), now=now)
     )
     started = await transitions.apply_status(claimed, partial(Task.start, now=now))
-    started.link_result_session(uuid.uuid4())
 
     completed = await transitions.apply_status(
         started, partial(Task.complete, result=None, now=now)

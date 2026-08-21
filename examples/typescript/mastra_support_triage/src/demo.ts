@@ -209,11 +209,14 @@ async function getResultSessionId(
   if (tasks.next_cursor !== null) {
     throw new Error(`Job ${job.id} has too many tasks to inspect safely`);
   }
-  const ids = tasks.items.flatMap((task) =>
-    task.kind === "agent" && task.result_session_id !== null
-      ? [task.result_session_id]
-      : [],
-  );
+  const sessions = await client.sessions.list({
+    filter: {
+      field: "task_id",
+      op: "in",
+      value: tasks.items.map((task) => task.id),
+    },
+  });
+  const ids = sessions.items.map((session) => session.id);
   if (ids.length !== 1 || ids[0] === undefined) {
     throw new Error(
       `Kitaru job ${job.id} produced ${ids.length} result sessions`,

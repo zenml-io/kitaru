@@ -40,7 +40,11 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicy,
     ToolPolicyOnMiss,
 )
-from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
+from kitaru.api_models.v1.session import (
+    SessionListParams,
+    SessionOrigin,
+    SessionStatus,
+)
 from kitaru.api_models.v1.session_node import (
     NodeType,
     SessionNodeListParams,
@@ -178,9 +182,16 @@ async def _run_job(
 
 async def _result_session_id(client: KitaruAPIClient, job: JobResponse) -> str:
     tasks = await client.jobs.list_tasks(job.id)
-    result_ids = [
-        str(task.result_session_id) for task in tasks.items if task.result_session_id
-    ]
+    sessions = await client.sessions.list(
+        SessionListParams(
+            filter=FilterCondition(
+                field="task_id",
+                op=FilterOp.IN,
+                value=[str(task.id) for task in tasks.items],
+            )
+        )
+    )
+    result_ids = [str(session.id) for session in sessions.items]
     if len(result_ids) != 1:
         raise RuntimeError(
             f"Kitaru job {job.id} produced {len(result_ids)} result sessions"

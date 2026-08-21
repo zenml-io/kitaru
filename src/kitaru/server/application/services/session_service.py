@@ -88,11 +88,11 @@ class SessionService:
         """Create a session owned by the caller.
 
         A task principal's session is linked to the principal's task, which
-        must be running. An agent task links exactly one session and gets its
-        result session written in the same transaction, an import task links
-        every session it creates. A replay owning the agent task's job also
-        stores the session as its result session. The task is the source of
-        truth for the agent and the agent version. The session takes the next
+        must be running. An agent task links exactly one session, and its
+        result session is found through that link. An import task links
+        every session it creates. A replay owning the agent task's job stores
+        the session as its result session. The task is the source of truth
+        for the agent and the agent version. The session takes the next
         number of its agent, allocated outside the request transaction, so a
         failed create leaves a gap.
 
@@ -132,7 +132,10 @@ class SessionService:
             # Check the attempt on the locked task so a requeue cannot race
             # the result link.
             task.check_attempt(actor.principal.attempt)
-            if isinstance(task, AgentTask) and task.result_session_id is not None:
+            if (
+                isinstance(task, AgentTask)
+                and await self._repository.get_by_task_id(task.id) is not None
+            ):
                 raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
         number = await self._repository.allocate_session_number(agent_id)
@@ -160,8 +163,6 @@ class SessionService:
         )
         stored = await self._repository.create(session)
         if isinstance(task, AgentTask):
-            task.link_result_session(stored.id)
-            await self._tasks.update(task)
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
                 replay.link_result_session(stored.id)

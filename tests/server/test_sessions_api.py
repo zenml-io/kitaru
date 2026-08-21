@@ -727,8 +727,7 @@ async def test_create_session_links_the_agent_task_result_session(
     assert response.status_code == 201
     body = response.json()
 
-    stored_task = await task_repository.get(task.id)
-    assert str(stored_task.result_session_id) == body["id"]
+    assert body["task_id"] == str(task.id)
     assert body["agent_id"] == str(agent.id)
     assert body["agent_version_id"] == str(version.id)
 

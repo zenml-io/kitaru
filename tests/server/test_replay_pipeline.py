@@ -174,10 +174,6 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     )
     result_session.status = SessionStatus.COMPLETED
     await services.sessions.update(result_session)
-    stored_agent_task = await services.tasks.get(agent_task.id)
-    assert isinstance(stored_agent_task, AgentTask)
-    stored_agent_task.result_session_id = result_session.id
-    await services.tasks.update(stored_agent_task)
     replay_with_task = await services.replays.get_by_job_id(bundle.replay.job_id)
     assert replay_with_task is not None
     replay_with_task.link_result_session(result_session.id)

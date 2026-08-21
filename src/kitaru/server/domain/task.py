@@ -264,7 +264,6 @@ class Task(DomainModel):
     labels: dict[str, str] = Field(default_factory=dict)
     env: dict[str, str] = Field(default_factory=dict)
     worker_id: uuid.UUID | None = None
-    result_session_id: uuid.UUID | None = None
     claimed_at: datetime | None = None
     heartbeat_at: datetime | None = None
     cancel_requested_at: datetime | None = None
@@ -394,7 +393,6 @@ class Task(DomainModel):
         self.claimed_at = None
         self.heartbeat_at = None
         self.started_at = None
-        self.result_session_id = None
 
     def check_result(self, result: Any) -> None:
         """Validate a completion result against the task kind's contract.
@@ -507,19 +505,6 @@ class Task(DomainModel):
         self.error = error
         self.ended_at = now
 
-    def link_result_session(self, session_id: uuid.UUID) -> None:
-        """Link the session this task produced.
-
-        Args:
-            session_id: Id of the produced session.
-
-        Raises:
-            TaskResultSessionAlreadyLinked: A session is already linked.
-        """
-        if self.result_session_id is not None:
-            raise TaskResultSessionAlreadyLinked(self.id)
-        self.result_session_id = session_id
-
     def check_running(self) -> None:
         """Require the task to be running.
 
@@ -589,18 +574,6 @@ class AgentTask(Task):
             Agent kind.
         """
         return TaskKind.AGENT
-
-    def check_result(self, result: Any) -> None:
-        """Require a linked result session, the agent task's actual outcome.
-
-        Args:
-            result: Result the completion carries, diagnostic only.
-
-        Raises:
-            TaskResultSessionMissing: No session is linked.
-        """
-        if self.result_session_id is None:
-            raise TaskResultSessionMissing(self.id)
 
 
 class EvaluationTask(Task):

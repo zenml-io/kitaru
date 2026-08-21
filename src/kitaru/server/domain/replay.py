@@ -188,3 +188,7 @@ class Replay(DomainModel):
             session_id: Id of the produced session.
         """
         self.result_session_id = session_id
+
+    def unlink_result_session(self) -> None:
+        """Clear the session this replay produced."""
+        self.result_session_id = None

@@ -23,6 +23,7 @@ from typing import Any
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import TaskStatus
 from kitaru.server.application.interfaces.job_repository import JobRepository
+from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.interfaces.worker_repository import WorkerRepository
@@ -65,6 +66,7 @@ class TaskService:
         worker_repository: WorkerRepository,
         session_repository: SessionRepository,
         job_repository: JobRepository,
+        replay_repository: ReplayRepository,
         spec_builder: TaskSpecBuilder,
         transitions: TaskTransitions,
         policy: TaskPolicy,
@@ -76,6 +78,7 @@ class TaskService:
             worker_repository: Worker repository.
             session_repository: Session repository.
             job_repository: Job repository.
+            replay_repository: Replay repository.
             spec_builder: Task execution spec builder.
             transitions: Task transition dispatch.
             policy: Task execution policy.
@@ -84,6 +87,7 @@ class TaskService:
         self._workers = worker_repository
         self._sessions = session_repository
         self._jobs = job_repository
+        self._replays = replay_repository
         self._spec_builder = spec_builder
         self._transitions = transitions
         self._policy = policy
@@ -425,20 +429,31 @@ class TaskService:
         """
         if not isinstance(task, AgentTask):
             return
-        if task.result_session_id is None:
+        session = await self._sessions.get_by_task_id(task.id)
+        if session is None:
             raise TaskResultSessionMissing(task.id)
-        session = await self._sessions.get(task.result_session_id)
         if session.status is not SessionStatus.COMPLETED:
             raise TaskResultSessionNotCompleted(task.id, session.id)
 
     async def _unlink_result_session(self, task: Task) -> None:
         """Free the result session slot a requeued attempt left behind.
 
+        Clears the replay's result session link too, when the task's job
+        holds a replay.
+
         Args:
             task: Task about to be requeued.
         """
-        if task.result_session_id is None:
+        if not isinstance(task, AgentTask):
             return
-        session = await self._sessions.get(task.result_session_id, exclusive=True)
+        # The replay's link is written together with the session, so no
+        # session means nothing to clear on the replay either.
+        session = await self._sessions.get_by_task_id(task.id, exclusive=True)
+        if session is None:
+            return
         session.unlink_task()
         await self._sessions.update(session)
+        replay = await self._replays.get_by_job_id(task.job_id)
+        if replay is not None:
+            replay.unlink_result_session()
+            await self._replays.update(replay)

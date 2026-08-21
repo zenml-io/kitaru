@@ -7478,19 +7478,6 @@
             "description": "Task result, diagnostic output on a non-completed task.",
             "title": "Result"
           },
-          "result_session_id": {
-            "anyOf": [
-              {
-                "format": "uuid",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Session an agent task produced.",
-            "title": "Result Session Id"
-          },
           "started_at": {
             "anyOf": [
               {

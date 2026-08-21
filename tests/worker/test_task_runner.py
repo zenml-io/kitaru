@@ -15,7 +15,6 @@
 
 import asyncio
 import json
-import uuid
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from fakes import (
     make_task,
 )
 
+from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import PackagePluginSpec, TaskKind, TaskStatus
 from kitaru.client.exceptions import (
@@ -490,12 +490,13 @@ async def test_completion_conflict_agent_without_result_session(
     """An agent completion conflict with no linked session names that fact."""
     _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
     client = FakeKitaruAPIClient()
-    task = make_task(kind=TaskKind.AGENT, attempt=1, result_session_id=None)
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
     spec = make_agent_spec(task.id)
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(APIError(409, "conflict"))
     client.tasks.get_responses.append(running_task)
+    client.sessions.list_responses.append(Page(items=[], next_cursor=None))
     client.tasks.update_responses.append(
         running_task.model_copy(update={"status": TaskStatus.FAILED})
     )
@@ -517,16 +518,14 @@ async def test_completion_conflict_agent_with_incomplete_session(
     """An agent completion conflict with a non-completed session names its status."""
     _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
     client = FakeKitaruAPIClient()
-    session_id = uuid.uuid4()
-    task = make_task(kind=TaskKind.AGENT, attempt=1, result_session_id=session_id)
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
     spec = make_agent_spec(task.id)
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     client.tasks.update_responses.append(running_task)
     client.tasks.update_responses.append(APIError(409, "conflict"))
     client.tasks.get_responses.append(running_task)
-    client.sessions.responses[session_id] = make_session_response(
-        id=session_id, status=SessionStatus.FAILED
-    )
+    session = make_session_response(status=SessionStatus.FAILED)
+    client.sessions.list_responses.append(Page(items=[session], next_cursor=None))
     client.tasks.update_responses.append(
         running_task.model_copy(update={"status": TaskStatus.FAILED})
     )
@@ -536,7 +535,7 @@ async def test_completion_conflict_agent_with_incomplete_session(
     )
 
     _, request = client.tasks.update_calls[-1]
-    assert request.error == f"Result session {session_id} is failed, not completed."
+    assert request.error == f"Result session {session.id} is failed, not completed."
 
 
 async def test_completion_conflict_non_agent_missing_result(
