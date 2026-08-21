@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Use aggregate session or root-span cost when call-level costs are unavailable.
+
 ## 0.1.0
 
 - First stable release of the built-in evaluator package.

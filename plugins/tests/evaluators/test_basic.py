@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the starting-point evaluator plugins."""
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -49,6 +50,109 @@ def test_cost_reports_session_rollup() -> None:
     assert result.score == 0.0125
 
 
+def test_cost_uses_root_span_when_llm_cost_is_missing() -> None:
+    """Use an explicit aggregate root cost when call costs are unavailable."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.02"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="agent run",
+            cost=Decimal("0.0125"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.0125
+
+
+def test_cost_prefers_call_costs_over_aggregate_root() -> None:
+    """Do not count a root aggregate in addition to complete call costs."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.065"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="agent run",
+            cost=Decimal("0.04"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="first model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="second model request",
+            cost=Decimal("0.015"),
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.025
+
+
+def test_cost_uses_root_span_when_call_rollup_is_partial() -> None:
+    """Prefer a complete root aggregate to a partial call rollup."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.04"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="agent run",
+            cost=Decimal("0.03"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="recorded model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="missing model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.03
+
+
+def test_cost_uses_session_aggregate_when_all_llm_costs_are_missing() -> None:
+    """Use a positive session aggregate when no call-level cost was recorded."""
+    view = _view(cost=Decimal("0.0125"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model request",
+            cost=None,
+        )
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.0125
+
+
 def test_cost_reports_unavailable_when_llm_cost_is_missing() -> None:
     """Do not present an unrecorded replay cost as a real zero."""
     view = _view(cost=Decimal("0"))
@@ -58,6 +162,127 @@ def test_cost_reports_unavailable_when_llm_cost_is_missing() -> None:
             name="model_request",
             cost=None,
         )
+    ]
+
+    result = cost(view)
+
+    assert result.score is None
+    assert result.value == "unavailable"
+
+
+def test_cost_reports_unavailable_for_partial_call_rollup() -> None:
+    """Do not present a partial session rollup as an aggregate cost."""
+    view = _view(cost=Decimal("0.01"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="recorded model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="missing model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score is None
+    assert result.value == "unavailable"
+
+
+def test_cost_reports_unavailable_for_zero_root_rollup() -> None:
+    """Do not present an ambiguous zero root rollup as a real total."""
+    view = _view(cost=Decimal("0"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="agent run",
+            cost=Decimal("0"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score is None
+    assert result.value == "unavailable"
+
+
+def test_cost_reports_unavailable_for_partial_root_rollup() -> None:
+    """Do not present a subset of root costs as the session total."""
+    view = _view(cost=Decimal("0.01"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="recorded agent run",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="missing agent run",
+            cost=None,
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score is None
+    assert result.value == "unavailable"
+
+
+def test_cost_reports_unavailable_for_nested_span_rollup() -> None:
+    """Do not present a nested span's partial rollup as a session total."""
+    view = _view(cost=Decimal("0.01"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.SPAN,
+            parent_id=uuid.uuid4(),
+            name="nested operation",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            name="model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score is None
+    assert result.value == "unavailable"
+
+
+def test_cost_reports_unavailable_for_unpriced_sibling_root() -> None:
+    """Do not let a priced root span hide an unpriced sibling tree."""
+    view = _view(cost=Decimal("0.01"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="recorded agent run",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=None,
+            name="unpriced root call",
+            cost=None,
+        ),
     ]
 
     result = cost(view)

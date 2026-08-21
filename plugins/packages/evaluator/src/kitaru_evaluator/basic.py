@@ -1,6 +1,7 @@
 """Basic deterministic evaluators."""
 
 from collections import Counter
+from decimal import Decimal
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session_node import NodeType
@@ -9,11 +10,41 @@ from kitaru.task.evaluator import SessionView
 
 def cost(session: SessionView) -> EvaluationResult:
     """Report the total recorded cost of a session."""
-    recorded_cost = session.session.cost
-    if recorded_cost is None or any(
-        node.node_type is NodeType.LLM_CALL and node.cost is None
-        for node in session.nodes
+    llm_nodes = [node for node in session.nodes if node.node_type is NodeType.LLM_CALL]
+    if llm_nodes and all(
+        node.cost is not None and node.cost.is_finite() and node.cost >= 0
+        for node in llm_nodes
     ):
+        recorded_cost = sum(
+            (node.cost for node in llm_nodes if node.cost is not None), Decimal(0)
+        )
+    else:
+        root_nodes = [node for node in session.nodes if node.parent_id is None]
+        root_span = (
+            root_nodes[0]
+            if len(root_nodes) == 1 and root_nodes[0].node_type is NodeType.SPAN
+            else None
+        )
+        session_cost = session.session.cost
+        if (
+            root_span is not None
+            and root_span.cost is not None
+            and root_span.cost.is_finite()
+            and root_span.cost > 0
+        ):
+            recorded_cost = root_span.cost
+        elif (
+            root_span is None
+            and not any(node.cost is not None for node in session.nodes)
+            and session_cost is not None
+            and session_cost.is_finite()
+            and session_cost >= 0
+            and (not llm_nodes or session_cost > 0)
+        ):
+            recorded_cost = session_cost
+        else:
+            recorded_cost = None
+    if recorded_cost is None:
         return EvaluationResult(
             name="cost",
             value="unavailable",
