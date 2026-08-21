@@ -130,6 +130,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 
 ## Commits and PRs
 
+- **Never merge a PR that has not been human-reviewed.** Every PR — including dependabot bumps and small hygiene changes — needs an approving review from a human before it merges. Do not bypass the review requirement with `gh pr merge --admin` or any other mechanism, even when all checks are green and the change looks trivial. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2), so an unreviewed merge is a process violation, not just a style issue. Prepare the PR, request review, and wait.
 - **Run CI checks locally before committing/pushing.** Always run `just check` and `just test` before pushing to `develop`. All checks must pass locally — do not rely on CI to catch failures. This includes format, lint, typecheck, typos, yaml, actions lint, links, and tests.
 - **Keep pre-existing failures separate.** If `just check` or `just test` surfaces a failure unrelated to the requested change, diagnose and report it. Fix it only when it blocks the scoped change or the user explicitly approves expanding the task; do not absorb another contributor's work into the current commit by default.
 - **Commits:** Imperative mood, concise summary (50 chars or less): "Add feature" not "Added feature". Explain *why* in the body (blank line after summary), reference issues when applicable (`Fixes #1234`).
