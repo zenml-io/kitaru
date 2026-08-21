@@ -113,6 +113,7 @@ The canonical returns implementation lives in the public [`zenml-io/kitaru-templ
 - Link related issues when applicable.
 - Every PR description should include a `Reviewer Notes` H2 or H3 section with
   a concrete reproduction path for reviewers.
+- Never merge a PR that has not received an approving human review — this includes dependabot bumps and trivial changes, and it must not be bypassed with `gh pr merge --admin` or similar. Documented review of every change is part of our change-management controls (relevant to compliance frameworks such as SOC 2). Prepare the PR, request review, and wait.
 
 ## CI/CD
 
