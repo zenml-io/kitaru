@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Distinguish repeated tool-call cycles by canonical call identity.
+
 ## 0.1.0
 
 - First stable release of the built-in evaluator package.
