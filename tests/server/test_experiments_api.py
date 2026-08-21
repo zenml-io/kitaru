@@ -176,6 +176,38 @@ async def test_create_experiment_requires_at_least_one_evaluator(
     assert response.status_code == 422
 
 
+async def test_create_experiment_rejects_output_contract_without_rules(
+    client: httpx.AsyncClient,
+    agent_id: str,
+    plugin_repository: FakePluginRepository,
+) -> None:
+    """Reject an unconfigured output contract before creating an experiment."""
+    plugin = await create_plugin(
+        plugin_repository,
+        ACCOUNT.id,
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/output-contract",
+    )
+    await plugin_repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    response = await client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "exp1",
+            "agent_id": agent_id,
+            "evaluators": [{"evaluator": "kitaru/output-contract"}],
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": (
+            "Evaluator 'kitaru/output-contract' requires at least one rule: "
+            "expected, required_paths, or type_requirements"
+        )
+    }
+
+
 async def test_get_experiment(client: httpx.AsyncClient, agent_id: str) -> None:
     """Get an experiment by id."""
     created = (

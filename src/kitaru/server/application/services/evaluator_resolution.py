@@ -23,8 +23,27 @@ from kitaru.server.application.services.plugin_resolution import (
     resolve_plugin_version,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.names import RESERVED_NAMESPACE
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.replay_config import EvaluatorConfig
+
+OUTPUT_CONTRACT_EVALUATOR = f"{RESERVED_NAMESPACE}/output-contract"
+
+
+def _validate_builtin_evaluator_params(config: EvaluatorConfigInput) -> None:
+    """Validate parameters required by built-in evaluators."""
+    if config.evaluator != OUTPUT_CONTRACT_EVALUATOR:
+        return
+    params = config.params
+    if (
+        "expected" not in params
+        and params.get("required_paths") is None
+        and params.get("type_requirements") is None
+    ):
+        raise ValidationError(
+            f"Evaluator '{OUTPUT_CONTRACT_EVALUATOR}' requires at least one rule: "
+            "expected, required_paths, or type_requirements"
+        )
 
 
 async def resolve_evaluator_config(
@@ -56,6 +75,7 @@ async def resolve_evaluator_config(
     plugin_version = await resolve_plugin_version(
         plugin, config.version, plugin_repository
     )
+    _validate_builtin_evaluator_params(config)
     return EvaluatorConfig(
         evaluator=config.evaluator,
         version=plugin_version.version,

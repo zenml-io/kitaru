@@ -136,3 +136,22 @@ async def test_validate_evaluators_rejects_duplicate_version(
             ],
             repository,
         )
+
+
+async def test_validate_evaluators_rejects_output_contract_without_rules(
+    repository: FakePluginRepository,
+) -> None:
+    """Reject the built-in output contract before scheduling evaluator work."""
+    plugin = await create_plugin(
+        repository,
+        OWNER_ID,
+        kind=PluginKind.EVALUATOR,
+        name="kitaru/output-contract",
+    )
+    await repository.create_version(plugin.id, SOURCE, display_version="v1")
+
+    with pytest.raises(ValidationError, match="requires at least one rule"):
+        await validate_evaluators(
+            [EvaluatorConfigInput(evaluator="kitaru/output-contract")],
+            repository,
+        )
