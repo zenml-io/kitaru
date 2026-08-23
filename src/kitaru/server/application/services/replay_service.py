@@ -49,7 +49,7 @@ from kitaru.server.application.services.evaluator_resolution import validate_eva
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.replay import Replay, ReplayAccessDenied
+from kitaru.server.domain.replay import Replay, ReplayAccessDenied, ReplayInUse
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     ReplayConfig,
@@ -225,6 +225,23 @@ class ReplayService:
         _ = actor
         replays, next_cursor = await self._repository.query(replay_filter)
         return await self._bundle(replays), next_cursor
+
+    async def delete_replay(self, replay_id: uuid.UUID, actor: AuthContext) -> None:
+        """Delete a replay.
+
+        Args:
+            replay_id: Id of the replay.
+            actor: Caller context.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            ReplayInUse: The replay belongs to an experiment run.
+        """
+        _ = actor
+        replay = await self._repository.get(replay_id)
+        if replay.experiment_run_id is not None:
+            raise ReplayInUse(replay_id)
+        await self._repository.delete(replay_id)
 
     async def tool_lookup(
         self,

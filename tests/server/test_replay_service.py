@@ -31,6 +31,7 @@ from conftest import (
     create_replay,
     create_session,
     create_worker,
+    get_replay_job_id,
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
@@ -59,7 +60,11 @@ from kitaru.server.domain.agent_version import (
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.replay import ReplayAccessDenied
+from kitaru.server.domain.replay import (
+    ReplayAccessDenied,
+    ReplayInUse,
+    ReplayNotFound,
+)
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     PassthroughConfig,
@@ -771,7 +776,7 @@ async def test_get_replay_result_session_id_appears_once_linked_on_the_replay(
     )
     assert bundle.replay.result_session_id is None
 
-    replay = await services.replays.get_by_job_id(bundle.replay.job_id)
+    replay = await services.replays.get_by_job_id(get_replay_job_id(bundle.replay))
     assert replay is not None
     result_session_id = uuid.uuid4()
     replay.link_result_session(result_session_id)
@@ -1004,7 +1009,7 @@ async def test_list_replays_filters_by_result_session(
             ),
             actor=ACTOR,
         )
-        replay = await services.replays.get_by_job_id(bundle.replay.job_id)
+        replay = await services.replays.get_by_job_id(get_replay_job_id(bundle.replay))
         assert replay is not None
         result_session_id = uuid.uuid4()
         replay.link_result_session(result_session_id)
@@ -1051,7 +1056,7 @@ async def test_list_replays_filters_on_a_missing_result_session(
         ),
         actor=ACTOR,
     )
-    replay = await services.replays.get_by_job_id(linked.replay.job_id)
+    replay = await services.replays.get_by_job_id(get_replay_job_id(linked.replay))
     assert replay is not None
     replay.link_result_session(uuid.uuid4())
     await services.replays.update(replay)
@@ -1072,3 +1077,45 @@ async def test_list_replays_filters_on_a_missing_result_session(
         actor=ACTOR,
     )
     assert [bundle.replay.id for bundle in pending] == [unlinked.replay.id]
+
+
+async def test_delete_replay_removes_a_standalone_replay(
+    services: ReplayServices,
+) -> None:
+    """Deleting a standalone replay removes it."""
+    bundle = await _replay_bundle(services)
+    await services.replay_service.delete_replay(bundle.replay.id, actor=ACTOR)
+    with pytest.raises(ReplayNotFound):
+        await services.replays.get(bundle.replay.id)
+
+
+async def test_delete_replay_rejects_a_replay_of_an_experiment_run(
+    services: ReplayServices,
+) -> None:
+    """Deleting a replay that belongs to an experiment run conflicts."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    config = await services.experiments.create_replay_config(
+        ReplayConfig(
+            owner_id=ACTOR.account.id,
+            tool_policy=ToolPolicy(default=PassthroughConfig()),
+            evaluators=[],
+        )
+    )
+    replay = await create_replay(
+        services.replays,
+        ACTOR.account.id,
+        job_id=uuid.uuid4(),
+        replay_config_id=config.id,
+        baseline_session_id=baseline.id,
+        experiment_run_id=uuid.uuid4(),
+    )
+    with pytest.raises(ReplayInUse):
+        await services.replay_service.delete_replay(replay.id, actor=ACTOR)
+    assert await services.replays.get(replay.id) == replay
+
+
+async def test_delete_replay_not_found(services: ReplayServices) -> None:
+    """Deleting a replay that does not exist raises."""
+    with pytest.raises(ReplayNotFound):
+        await services.replay_service.delete_replay(uuid.uuid4(), actor=ACTOR)

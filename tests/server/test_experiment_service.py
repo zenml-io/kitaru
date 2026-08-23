@@ -51,7 +51,7 @@ from kitaru.server.domain.experiment import (
     ExperimentNotFound,
 )
 from kitaru.server.domain.experiment_run import ExperimentRunNotFound
-from kitaru.server.domain.job import Job, JobNotFound
+from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import PackagePluginSource, PluginKind, PluginNotFound
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
@@ -748,13 +748,13 @@ async def test_delete_experiment_cascades_runs(
         await services.experiment_runs.get(run.id)
 
 
-async def test_delete_experiment_deletes_replay_jobs(
+async def test_delete_experiment_cancels_replay_jobs(
     service: ExperimentService,
     plugin_repository: FakePluginRepository,
     services: ReplayServices,
     agent_id: uuid.UUID,
 ) -> None:
-    """Deleting an experiment deletes its runs' replay jobs."""
+    """Deleting an experiment cancels its runs' replay jobs and leaves them stored."""
     await _register_evaluator(plugin_repository)
     command = ExperimentCreate(
         name="exp1",
@@ -783,8 +783,8 @@ async def test_delete_experiment_deletes_replay_jobs(
 
     await service.delete_experiment(created.id, actor=ACTOR)
 
-    with pytest.raises(JobNotFound):
-        await services.jobs.get(job.id)
+    kept = await services.jobs.get(job.id)
+    assert kept.cancel_requested_at is not None
 
 
 async def test_create_experiment_tracks_experiment_created(
@@ -806,6 +806,7 @@ async def test_create_experiment_tracks_experiment_created(
         replay_repository=services.replays,
         job_repository=services.jobs,
         task_repository=services.tasks,
+        transitions=services.transitions,
         analytics=analytics,
     )
     command = ExperimentCreate(

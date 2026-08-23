@@ -19,6 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SDK methods that call an endpoint supporting idempotency now take an `idempotency_key` argument, so callers can supply their own key instead of the per-request key the transport generates. Those endpoints declare an `Idempotency-Key` header parameter in the OpenAPI schema.
 - MCP tools that create a resource take an optional `idempotency_key` field, so a retried tool call whose response was lost returns the original result instead of acting twice.
 - CLI commands that create a single resource take `--idempotency-key`, so a retried invocation with the same key returns the original result instead of acting twice.
+- Added `DELETE /api/v1/replays/{replay_id}` to delete a standalone replay. A replay that belongs to an experiment run returns HTTP 409, since deleting the run removes its replays.
 
 ### Changed
 
@@ -31,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - `POST /api/v1/replays/{replay_id}/tool-lookup` now returns a `match` object carrying the matched tool call's `status` and `error` instead of a flat `found`/`result` pair. `match` is `null` on a miss. A baseline lookup with an occurrence now matches completed and failed tool calls, skipping in-progress ones. Every other lookup matches only completed tool calls.
 - History replay in the LangGraph, Pydantic AI, Mastra, and Vercel AI SDK adapters now distinguishes completed matches, failed matches, and genuine misses. Completed matches replay through each framework's native result contract, matched failures raise their stored errors without executing the live tool, and only genuine misses apply `on_miss`.
 - Deleting an agent now hides the agent and retains its subtree instead of rejecting the delete with HTTP 409. The subtree stays readable through its own resources, creating a session, agent version, cohort, experiment, or investigation for a deleted agent returns HTTP 404, deleting individual child resources is unchanged, and a concurrent second delete of the same agent returns HTTP 404. Deleting a plugin or experiment cascades its versions, runs, and replays. Deleting an agent version, cohort, or secret can now return HTTP 409 when an experiment run or agent version still references it. Deleting a session can now return HTTP 409 when an investigation or replay references it, in addition to a cohort version, and is no longer blocked by a task. Tasks are deleted with the agent version, plugin version, session, or blob they take as input. Tag links are removed with the resource they point at. Creating a session, session node, experiment, experiment run, cohort, cohort version, investigation, replay, or annotation whose parent was deleted concurrently now returns HTTP 404 instead of HTTP 500.
+- Deleting a job no longer deletes its replay, and is rejected with HTTP 409 until the job has settled. Cancel the job and let it settle first. Deleting an experiment or an experiment run cancels its replay jobs instead of deleting them, so those jobs outlive the experiment or run they came from.
 
 ### Removed
 

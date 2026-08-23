@@ -91,13 +91,14 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT: lambda: DuplicateReplayForBaseline(
                 replay.experiment_run_id, replay.baseline_session_id
             ),
-            REPLAY_JOB_ID_UNIQUE_CONSTRAINT: lambda: ReplayAlreadyExistsForJob(
-                replay.job_id
-            ),
             REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
                 replay.baseline_session_id
             ),
         }
+        if (job_id := replay.job_id) is not None:
+            constraints[REPLAY_JOB_ID_UNIQUE_CONSTRAINT] = lambda: (
+                ReplayAlreadyExistsForJob(job_id)
+            )
         if (experiment_run_id := replay.experiment_run_id) is not None:
             constraints[REPLAY_EXPERIMENT_RUN_ID_FOREIGN_KEY] = lambda: (
                 ExperimentRunNotFound(experiment_run_id)
@@ -190,7 +191,7 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             return {}
         statement = select(ReplayORM).where(ReplayORM.job_id.in_(list(job_ids)))
         rows = (await self._session.scalars(statement)).all()
-        return {row.job_id: row.to_domain() for row in rows}
+        return {row.job_id: row.to_domain() for row in rows if row.job_id is not None}
 
     async def query(
         self, replay_filter: ReplayFilter
@@ -276,6 +277,17 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             rows.append(row)
         await self._flush()
         return [row.to_domain() for row in rows]
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+        """
+        await self._delete_row(replay_id)
 
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.

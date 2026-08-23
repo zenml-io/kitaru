@@ -55,6 +55,7 @@ from kitaru.server.application.services.evaluator_resolution import (
 )
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -86,6 +87,7 @@ class ExperimentService:
         replay_repository: ReplayRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        transitions: TaskTransitions,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -102,10 +104,10 @@ class ExperimentService:
             session_repository: Session repository, for run fan-out.
             agent_version_repository: Agent version repository.
             replay_repository: Replay repository, for run fan-out, progress,
-                and delete cascade.
-            job_repository: Job repository, for run fan-out and delete
-                cascade.
+                and job lookup on delete.
+            job_repository: Job repository, for run fan-out.
             task_repository: Task repository, for run fan-out.
+            transitions: Task transition dispatch, for job cancellation.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
@@ -118,6 +120,7 @@ class ExperimentService:
         self._replays = replay_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._transitions = transitions
         self._analytics = analytics
 
     async def _create_replay_config(
@@ -335,10 +338,10 @@ class ExperimentService:
     async def delete_experiment(
         self, experiment_id: uuid.UUID, actor: AuthContext
     ) -> None:
-        """Delete an experiment, its runs, their replay jobs, and its replay config.
+        """Delete an experiment, its runs, their replays, and its replay config.
 
-        The job deletes cascade their replay rows, so the experiment row's
-        own delete cascades only the runs.
+        The experiment row's own delete cascades the runs and their replays,
+        and the jobs that ran them stay in place.
 
         Args:
             experiment_id: Id of the experiment.
@@ -353,8 +356,10 @@ class ExperimentService:
         job_ids: list[uuid.UUID] = []
         for run in runs:
             replays = await self._replays.list_by_experiment_run(run.id)
-            job_ids.extend(replay.job_id for replay in replays)
-        await self._jobs.delete_many(job_ids)
+            job_ids.extend(
+                replay.job_id for replay in replays if replay.job_id is not None
+            )
+        await self._transitions.request_jobs_cancel(job_ids)
         await self._repository.delete(experiment_id)
         await self._repository.delete_replay_config(experiment.replay_config_id)
 

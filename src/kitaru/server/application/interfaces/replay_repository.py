@@ -160,6 +160,17 @@ class ReplayRepository(Protocol):
         """
         ...
 
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+        """
+        ...
+
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.
 

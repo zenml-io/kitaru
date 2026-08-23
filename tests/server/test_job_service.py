@@ -55,7 +55,7 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.job import JobAlreadySettled, JobNotFound
+from kitaru.server.domain.job import JobAlreadySettled, JobNotFound, JobNotSettled
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -481,13 +481,23 @@ async def test_cancel_job_rejects_an_already_settled_job(
 
 
 async def test_delete_job_cascades_its_tasks(services: JobAndTaskServices) -> None:
-    """Deleting a job removes its tasks in the fake, mirroring the cascade."""
-    job = await create_job(services.jobs, ACTOR.account.id)
+    """Deleting a settled job removes its tasks in the fake, mirroring the cascade."""
+    job = await create_job(services.jobs, ACTOR.account.id, status=JobStatus.COMPLETED)
     task = await create_agent_task(services.tasks, job.id)
     await services.job_service.delete_job(job.id, actor=ACTOR)
     with pytest.raises(JobNotFound):
         await services.jobs.get(job.id)
     assert await services.tasks.get_many([task.id]) == {}
+
+
+async def test_delete_job_rejects_an_unsettled_job(
+    services: JobAndTaskServices,
+) -> None:
+    """Deleting a job that has not settled conflicts and leaves it stored."""
+    job = await create_job(services.jobs, ACTOR.account.id)
+    with pytest.raises(JobNotSettled):
+        await services.job_service.delete_job(job.id, actor=ACTOR)
+    assert (await services.jobs.get(job.id)).id == job.id
 
 
 async def test_settlement_precedence_failed_over_canceled_over_completed(

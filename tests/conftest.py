@@ -4436,9 +4436,12 @@ class FakeReplayRepository:
                 )
 
     def _check_unique_job(self, replay: Replay) -> None:
+        job_id = replay.job_id
+        if job_id is None:
+            return
         for other in self._replays.values():
-            if other.id != replay.id and other.job_id == replay.job_id:
-                raise ReplayAlreadyExistsForJob(replay.job_id)
+            if other.id != replay.id and other.job_id == job_id:
+                raise ReplayAlreadyExistsForJob(job_id)
 
     async def create(self, replay: Replay) -> Replay:
         """Persist a new replay.
@@ -4532,7 +4535,7 @@ class FakeReplayRepository:
         return {
             replay.job_id: replay.model_copy()
             for replay in self._replays.values()
-            if replay.job_id in job_id_set
+            if replay.job_id is not None and replay.job_id in job_id_set
         }
 
     async def query(
@@ -4610,6 +4613,19 @@ class FakeReplayRepository:
             await self.update(replay)
             for replay in sorted(replays, key=lambda replay: replay.id)
         ]
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+        """
+        if replay_id not in self._replays:
+            raise ReplayNotFound(replay_id)
+        del self._replays[replay_id]
 
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.
@@ -4706,6 +4722,19 @@ async def create_replay(
             status=status,
         )
     )
+
+
+def get_replay_job_id(replay: Replay) -> uuid.UUID:
+    """Read the job id of a replay that still points at its job.
+
+    Args:
+        replay: Replay to read.
+
+    Returns:
+        Id of the job that ran the replay.
+    """
+    assert replay.job_id is not None
+    return replay.job_id
 
 
 class FakeExperimentRunRepository:
@@ -6142,6 +6171,7 @@ class ReplayServices(NamedTuple):
     workers: FakeWorkerRepository
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
+    transitions: TaskTransitions
 
 
 def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
@@ -6241,6 +6271,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         replay_repository=replays,
         job_repository=jobs,
         task_repository=tasks,
+        transitions=transitions,
     )
     replay_service = ReplayService(
         repository=replays,
@@ -6282,6 +6313,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         workers=workers,
         evaluations=evaluations,
         tags=tags,
+        transitions=transitions,
     )
 
 

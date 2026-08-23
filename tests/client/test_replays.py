@@ -185,6 +185,23 @@ async def test_list_and_iter(
     assert len(collected) == 1
 
 
+async def test_delete(
+    api_client: KitaruAPIClient,
+    baseline_session_id: uuid.UUID,
+    evaluator_config: EvaluatorConfig,
+) -> None:
+    """Delete a replay through the SDK."""
+    created = await api_client.replays.create(
+        ReplayCreateRequest(
+            baseline_session_id=baseline_session_id,
+            evaluators=[evaluator_config],
+        )
+    )
+    await api_client.replays.delete(created.id)
+    with pytest.raises(NotFoundError):
+        await api_client.replays.get(created.id)
+
+
 async def test_tool_lookup_not_configured_for_history(
     api_client: KitaruAPIClient,
     baseline_session_id: uuid.UUID,

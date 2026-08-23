@@ -63,7 +63,7 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("cohort_version_session", "session_id"): None,
     ("replay", "baseline_session_id"): None,
     ("replay", "experiment_run_id"): "CASCADE",
-    ("replay", "job_id"): "CASCADE",
+    ("replay", "job_id"): "SET NULL",
     ("replay", "owner_id"): None,
     ("replay", "replay_config_id"): None,
     ("replay", "result_session_id"): None,

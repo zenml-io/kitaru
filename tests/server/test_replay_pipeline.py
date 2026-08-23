@@ -34,6 +34,7 @@ from conftest import (
     create_replay,
     create_session,
     create_worker,
+    get_replay_job_id,
 )
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
@@ -174,7 +175,9 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     )
     result_session.status = SessionStatus.COMPLETED
     await services.sessions.update(result_session)
-    replay_with_task = await services.replays.get_by_job_id(bundle.replay.job_id)
+    replay_with_task = await services.replays.get_by_job_id(
+        get_replay_job_id(bundle.replay)
+    )
     assert replay_with_task is not None
     replay_with_task.link_result_session(result_session.id)
     await services.replays.update(replay_with_task)
@@ -229,7 +232,7 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert evaluations[0].evaluation.task_id == eval_task.id
     assert evaluations[0].evaluation.evaluator_version_id == evaluator.id
 
-    job_after = await services.jobs.get(bundle.replay.job_id)
+    job_after = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job_after.status is JobStatus.COMPLETED
 
     replay_final = await services.replays.get(bundle.replay.id)
@@ -256,7 +259,7 @@ async def test_standalone_replay_stamps_the_job_kind_replay(
         ),
         actor=ACTOR,
     )
-    job = await services.jobs.get(bundle.replay.job_id)
+    job = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job.kind is JobKind.REPLAY
 
 
@@ -358,9 +361,9 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
         actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
-    job_after = await services.jobs.get(bundle.replay.job_id)
+    job_after = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job_after.cancel_requested_at is not None
-    await services.task_service.propagate_job_cancel(bundle.replay.job_id)
+    await services.task_service.propagate_job_cancel(get_replay_job_id(bundle.replay))
 
     baseline_after = await services.tasks.get(baseline_task.id)
     assert baseline_after.status is TaskStatus.CLAIMED
@@ -372,7 +375,7 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
         actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
 
-    job_after = await services.jobs.get(bundle.replay.job_id)
+    job_after = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job_after.status is JobStatus.FAILED
     assert job_after.error == "boom"
 
@@ -419,7 +422,7 @@ async def test_baseline_evaluator_failure_fails_the_replay(
         actor=build_task_actor(ACTOR.account, baseline_task.id, 1, worker.id),
     )
 
-    await services.task_service.propagate_job_cancel(bundle.replay.job_id)
+    await services.task_service.propagate_job_cancel(get_replay_job_id(bundle.replay))
 
     agent_after = await services.tasks.get(agent_task.id)
     assert agent_after.cancel_requested_at is not None
@@ -429,7 +432,7 @@ async def test_baseline_evaluator_failure_fails_the_replay(
         actor=build_task_actor(ACTOR.account, agent_task.id, 1, worker.id),
     )
 
-    job_after = await services.jobs.get(bundle.replay.job_id)
+    job_after = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job_after.status is JobStatus.FAILED
 
     replay_after = await services.replays.get(bundle.replay.id)
@@ -570,7 +573,7 @@ async def test_start_run_stamps_the_job_kind_replay(
         actor=ACTOR,
     )
     for bundle in bundles:
-        job = await services.jobs.get(bundle.replay.job_id)
+        job = await services.jobs.get(get_replay_job_id(bundle.replay))
         assert job.kind is JobKind.REPLAY
 
 

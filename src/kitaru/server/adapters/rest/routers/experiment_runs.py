@@ -100,7 +100,7 @@ async def delete_experiment_run(
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> None:
-    """Delete an experiment run and its jobs.
+    """Delete an experiment run and its replays.
 
     Clients observe HTTP 204 on success and 404 when no run has this id.
 

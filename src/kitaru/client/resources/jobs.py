@@ -149,12 +149,13 @@ class JobsResource:
         return JobResponse.model_validate(response.json())
 
     async def delete(self, job_id: uuid.UUID) -> None:
-        """Delete a job, cascading its tasks.
+        """Delete a settled job, cascading its tasks.
 
         Args:
             job_id: Id of the job.
 
         Raises:
-            APIError: The request failed, including 404 for a missing job.
+            APIError: The request failed, including 404 for a missing job
+                and 409 for a job that has not settled.
         """
         await self._client.request("DELETE", f"/api/v1/jobs/{job_id}")

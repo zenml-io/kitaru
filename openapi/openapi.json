@@ -5291,10 +5291,17 @@
             "type": "string"
           },
           "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Job running the replay.",
-            "format": "uuid",
-            "title": "Job Id",
-            "type": "string"
+            "title": "Job Id"
           },
           "override": {
             "anyOf": [
@@ -5338,7 +5345,6 @@
           "created",
           "updated",
           "id",
-          "job_id",
           "baseline_session_id",
           "override",
           "tool_policy",
@@ -12152,7 +12158,7 @@
     },
     "/api/v1/experiment-runs/{experiment_run_id}": {
       "delete": {
-        "description": "Delete an experiment run and its jobs.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
+        "description": "Delete an experiment run and its replays.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
         "operationId": "delete_experiment_run_api_v1_experiment_runs__experiment_run_id__delete",
         "parameters": [
           {
@@ -13929,7 +13935,7 @@
     },
     "/api/v1/jobs/{job_id}": {
       "delete": {
-        "description": "Delete a job, cascading its tasks.\n\nClients observe HTTP 204 on success and 404 when no job has this id.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
+        "description": "Delete a settled job, cascading its tasks.\n\nClients observe HTTP 204 on success, 404 when no job has this id, and\n409 when the job has not settled.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
         "operationId": "delete_job_api_v1_jobs__job_id__delete",
         "parameters": [
           {
@@ -14397,6 +14403,41 @@
       }
     },
     "/api/v1/replays/{replay_id}": {
+      "delete": {
+        "description": "Delete a replay.\n\nClients observe HTTP 204 on success, 404 when no replay has this id, and\n409 when the replay belongs to an experiment run.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.",
+        "operationId": "delete_replay_api_v1_replays__replay_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Replay",
+        "tags": [
+          "replays"
+        ]
+      },
       "get": {
         "description": "Get a replay by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, and 404 when no replay has this id.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
         "operationId": "get_replay_api_v1_replays__replay_id__get",

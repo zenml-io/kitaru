@@ -45,7 +45,7 @@ from kitaru.server.application.services.plugin_resolution import (
 )
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.job import Job, JobAlreadySettled
+from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
 
@@ -219,7 +219,7 @@ class JobService:
         return await self._transitions.cancel_job(job_id)
 
     async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
-        """Delete a job, cascading its tasks.
+        """Delete a settled job, cascading its tasks.
 
         Args:
             job_id: Id of the job.
@@ -227,8 +227,12 @@ class JobService:
 
         Raises:
             JobNotFound: No job has this id.
+            JobNotSettled: The job has not reached a terminal status.
         """
         _ = actor
+        job = await self._repository.get(job_id)
+        if not job.settled:
+            raise JobNotSettled(job_id)
         await self._repository.delete(job_id)
 
     async def create_job(self, kind: JobKind, actor: AuthContext) -> Job:

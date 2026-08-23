@@ -27,6 +27,7 @@ from conftest import (
     create_agent_version,
     create_blob,
     create_plugin,
+    create_replay,
     create_session,
     override_idempotency,
 )
@@ -43,6 +44,11 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.replay_config import (
+    PassthroughConfig,
+    ReplayConfig,
+    ToolPolicy,
+)
 from kitaru.server.domain.session_node import SessionNode
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -194,6 +200,57 @@ async def test_list_replays_filters_by_baseline_session(
         "/api/v1/replays", params={"filter": json.dumps(other_filter)}
     )
     assert response.json()["items"] == []
+
+
+async def test_delete_replay(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """Delete a replay and observe HTTP 204."""
+    created = (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": str(baseline_session_id),
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    response = await client.delete(f"/api/v1/replays/{created['id']}")
+    assert response.status_code == 204
+    response = await client.get(f"/api/v1/replays/{created['id']}")
+    assert response.status_code == 404
+
+
+async def test_delete_replay_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when deleting a missing replay."""
+    response = await client.delete(f"/api/v1/replays/{uuid.uuid4()}")
+    assert response.status_code == 404
+
+
+async def test_delete_replay_conflicts_for_an_experiment_run_replay(
+    client: httpx.AsyncClient,
+    services: ReplayServices,
+    baseline_session_id: uuid.UUID,
+) -> None:
+    """Observe HTTP 409 when deleting a replay that belongs to an experiment run."""
+    config = await services.experiments.create_replay_config(
+        ReplayConfig(
+            owner_id=ACCOUNT.id,
+            tool_policy=ToolPolicy(default=PassthroughConfig()),
+            evaluators=[],
+        )
+    )
+    replay = await create_replay(
+        services.replays,
+        ACCOUNT.id,
+        job_id=uuid.uuid4(),
+        replay_config_id=config.id,
+        baseline_session_id=baseline_session_id,
+        experiment_run_id=uuid.uuid4(),
+    )
+    response = await client.delete(f"/api/v1/replays/{replay.id}")
+    assert response.status_code == 409
+    assert (await client.get(f"/api/v1/replays/{replay.id}")).status_code == 200
 
 
 async def test_tool_lookup_not_configured_for_history(

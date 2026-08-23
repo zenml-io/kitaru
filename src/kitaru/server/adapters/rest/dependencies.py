@@ -650,6 +650,7 @@ def get_experiment_service(
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
+        transitions=_build_task_transitions(session, analytics),
         analytics=analytics,
     )
 
