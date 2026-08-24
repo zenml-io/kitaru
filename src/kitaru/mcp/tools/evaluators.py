@@ -30,7 +30,8 @@ async def handle_evaluators_manage(
                 name=request.name,
                 description=request.description,
                 metadata=request.metadata,
-            )
+            ),
+            idempotency_key=request.idempotency_key,
         )
     if isinstance(request, EvaluatorUpdate):
         values = request.model_dump(

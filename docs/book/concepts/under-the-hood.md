@@ -19,6 +19,14 @@ Between them sits the **job/task** layer. Commands like "replay this session," "
 
 Writes are safe to retry: the client stamps every POST request with an `Idempotency-Key` header, held stable across the transport's own retries, and the server stores the first committed response for that key, scoped to your account. A replay or evaluation request that times out on the wire and gets retried never becomes two replays: the retry gets the original response back, marked with an `Idempotent-Replayed: true` header instead of running again. Reusing a key with a different request body is rejected with 422. A failed request stores nothing, so a retry after an error re-executes normally. Stored keys expire after `KITARU_SERVER_IDEMPOTENCY_KEY_RETENTION_SECONDS` (15 minutes by default) and are cleared by the same sweep loop that requeues tasks.
 
+You can also supply the key yourself. Every SDK method that calls an endpoint supporting idempotency takes an `idempotency_key` argument, which replaces the generated one:
+
+```python
+await client.api.replays.create(request, idempotency_key=f"nightly-{date}")
+```
+
+The endpoints that honor a key are the ones whose OpenAPI operation declares an `Idempotency-Key` header parameter, and the SDK exposes the argument on exactly those methods. A key is at most 255 printable characters and is scoped to your account rather than to a user, so two members of one account choosing the same key collide. Calling again with the same key while the first call is still running returns 409. Retention applies to your own keys too, so they protect against retries and double submits inside the retention window rather than acting as a permanent uniqueness constraint.
+
 ## How replay works
 
 1. `POST /api/v1/replays` stores the replay (baseline session, agent version, override, tool policy, evaluators) and creates its job with one agent task.

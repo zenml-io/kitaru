@@ -109,7 +109,9 @@ async def handle_review_manage(
             description=request.description,
             sessions=request.sessions,
         )
-        investigation = await state.client.investigations.create(dto)
+        investigation = await state.client.investigations.create(
+            dto, idempotency_key=request.idempotency_key
+        )
         review_url: str | None = None
         if info is not None:
             review_url = get_investigation_review_url(
@@ -145,7 +147,8 @@ async def handle_review_manage(
                 session_id=request.session_id,
                 selector=request.selector,
                 value=request.value,
-            )
+            ),
+            idempotency_key=request.idempotency_key,
         )
     if isinstance(request, InvestigationAnswerCreate):
         return await state.client.annotations.create(
@@ -154,14 +157,18 @@ async def handle_review_manage(
                 question_key=request.question_key,
                 selector=request.selector,
                 value=request.value,
-            )
+            ),
+            idempotency_key=request.idempotency_key,
         )
     if isinstance(request, AnnotationUpdate):
         return await state.client.annotations.update(
             request.annotation_id, AnnotationUpdateRequest(value=request.value)
         )
     if isinstance(request, TagCreate):
-        return await state.client.tags.create(TagCreateRequest(name=request.name))
+        return await state.client.tags.create(
+            TagCreateRequest(name=request.name),
+            idempotency_key=request.idempotency_key,
+        )
     if isinstance(request, TagUpdate):
         return await state.client.tags.update(
             request.tag_id, TagUpdateRequest(name=request.name)

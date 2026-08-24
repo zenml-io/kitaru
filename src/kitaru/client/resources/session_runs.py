@@ -33,11 +33,15 @@ class SessionRunsResource:
         """
         self._client = client
 
-    async def create(self, request: SessionRunCreateRequest) -> JobResponse:
+    async def create(
+        self, request: SessionRunCreateRequest, idempotency_key: str | None = None
+    ) -> JobResponse:
         """Run an agent version once.
 
         Args:
             request: Session run create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 422 when the agent
@@ -50,5 +54,6 @@ class SessionRunsResource:
             "POST",
             "/api/v1/session-runs",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return JobResponse.model_validate(response.json())

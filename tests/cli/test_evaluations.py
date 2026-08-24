@@ -241,6 +241,7 @@ class StubEvaluationClient:
         )
         self.job = _job()
         self.requests: list[EvaluationBatchCreateRequest] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.create_error = create_error
         self.evaluators = self._Evaluators(self)
         self.evaluations = self._Evaluations(self)
@@ -295,8 +296,13 @@ class StubEvaluationClient:
         def __init__(self, owner: "StubEvaluationClient") -> None:
             self.owner = owner
 
-        async def create(self, request: EvaluationBatchCreateRequest) -> JobResponse:
+        async def create(
+            self,
+            request: EvaluationBatchCreateRequest,
+            idempotency_key: str | None = None,
+        ) -> JobResponse:
             self.owner.requests.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             if self.owner.create_error is not None:
                 raise self.owner.create_error
             return self.owner.job

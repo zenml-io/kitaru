@@ -36,6 +36,7 @@ from unittest.mock import AsyncMock
 import httpx
 import pytest
 from fastapi import FastAPI
+from fastapi.routing import iter_route_contexts
 from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -69,6 +70,7 @@ from kitaru.server.adapters.rest.dependencies import (
     _resolve_auth_context,
     get_idempotency_key_repository,
 )
+from kitaru.server.adapters.rest.route import is_idempotent
 from kitaru.server.api.app import create_app
 from kitaru.server.api.composition import register_subscribers
 from kitaru.server.api.config import APISettings
@@ -1532,6 +1534,25 @@ def override_idempotency(
     )
     app.dependency_overrides[get_idempotency_key_repository] = lambda: repository
     return repository
+
+
+def marked_idempotent_routes(app: FastAPI) -> set[tuple[str, str]]:
+    """Return the method and path pairs an app marks idempotent.
+
+    Args:
+        app: App whose routes are walked.
+
+    Returns:
+        Marked routes.
+    """
+    return {
+        (method, context.path)
+        for context in iter_route_contexts(app.routes)
+        if context.path is not None
+        and context.endpoint is not None
+        and is_idempotent(context.endpoint)
+        for method in context.methods or ()
+    }
 
 
 class FakeSecretRepository:

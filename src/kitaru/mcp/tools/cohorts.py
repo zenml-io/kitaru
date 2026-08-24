@@ -28,7 +28,9 @@ async def handle_cohorts_manage(
             agent_id=request.agent_id,
             metadata=request.metadata,
         )
-        return await state.client.cohorts.create(dto)
+        return await state.client.cohorts.create(
+            dto, idempotency_key=request.idempotency_key
+        )
     if isinstance(request, CohortUpdate):
         values = request.model_dump(
             include={"name", "description", "metadata"}, exclude_unset=True
@@ -45,7 +47,9 @@ async def handle_cohorts_manage(
             remove_session_ids=request.remove_session_ids,
             display_version=request.display_version,
         )
-        return await state.client.cohorts.create_version(request.cohort_id, dto)
+        return await state.client.cohorts.create_version(
+            request.cohort_id, dto, idempotency_key=request.idempotency_key
+        )
     values = {
         "display_version": None
         if request.clear_display_version

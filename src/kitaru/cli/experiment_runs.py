@@ -173,6 +173,7 @@ async def start_run(
     timeout: float | None,
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Start one run and optionally wait locally for terminal settlement."""
     wait_settings = get_wait_settings(wait=wait, interval=interval, timeout=timeout)
@@ -188,6 +189,7 @@ async def start_run(
             agent_version_id=agent_version.id,
             evaluate_baselines=evaluate_baselines,
         ),
+        idempotency_key=idempotency_key,
     )
     experiment_identity = _experiment_identity(experiment)
     cohort_version_identity = _cohort_version_identity(cohort_version)

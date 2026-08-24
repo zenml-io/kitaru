@@ -62,6 +62,7 @@ class StubAnnotationClient:
         self.create_calls: list[
             ManualAnnotationCreateRequest | InvestigationAnswerCreateRequest
         ] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[AnnotationListParams] = []
         self.get_calls: list[uuid.UUID] = []
         self.update_calls: list[tuple[uuid.UUID, AnnotationUpdateRequest]] = []
@@ -75,8 +76,10 @@ class StubAnnotationClient:
         async def create(
             self,
             request: ManualAnnotationCreateRequest | InvestigationAnswerCreateRequest,
+            idempotency_key: str | None = None,
         ) -> StubModel:
             self.owner.create_calls.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             return self.owner.annotation
 
         async def list(self, params: AnnotationListParams) -> Any:

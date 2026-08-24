@@ -44,11 +44,15 @@ class ImportersResource:
         """
         self._client = client
 
-    async def create(self, request: ImporterCreateRequest) -> ImporterResponse:
+    async def create(
+        self, request: ImporterCreateRequest, idempotency_key: str | None = None
+    ) -> ImporterResponse:
         """Create an importer.
 
         Args:
             request: Importer create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -60,6 +64,7 @@ class ImportersResource:
             "POST",
             "/api/v1/importers",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return ImporterResponse.model_validate(response.json())
 
