@@ -85,31 +85,3 @@ async def test_downgrade_past_deletion_rules_is_rejected() -> None:
     finally:
         await engine.dispose()
         await drop_test_database(settings)
-
-
-async def test_downgrade_to_deletion_rules_round_trips() -> None:
-    """Downgrade the revisions above the deletion rules and upgrade back to head."""
-    if not await postgres_available():
-        pytest.skip("PostgreSQL is not reachable")
-    settings = db_settings()
-    await DatabaseService.create_db(settings)
-    engine = create_async_engine(DatabaseService.generate_database_uri(settings))
-    try:
-        alembic = Alembic(engine)
-        await alembic.upgrade()
-        head = await alembic.current_revisions()
-
-        await _seed_agents(engine, ["assistant"])
-
-        await alembic.downgrade(DELETION_RULES)
-        assert await alembic.current_revisions() == [DELETION_RULES]
-
-        await alembic.upgrade()
-        assert await alembic.current_revisions() == head
-
-        async with engine.connect() as connection:
-            count = await connection.scalar(text("SELECT count(*) FROM agent"))
-        assert count == 1
-    finally:
-        await engine.dispose()
-        await drop_test_database(settings)

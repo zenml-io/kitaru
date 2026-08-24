@@ -11,11 +11,11 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Foreign key deletion rules, typed tag_link columns, and agent soft delete.
+"""Deletion rules across the schema, from foreign keys to agent soft delete.
 
 Revision ID: 005_deletion_rules
 Revises: 004_replay_result_session_id
-Create Date: 2026-08-18
+Create Date: 2026-08-24
 
 """
 
@@ -52,6 +52,7 @@ from kitaru.server.adapters.db.orm.investigation_session import (
     INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.orm_utils import index_name, unique_constraint_name
+from kitaru.server.adapters.db.orm.replay import REPLAY_JOB_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.orm.session import (
     SESSION_AGENT_ID_FOREIGN_KEY,
     SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
@@ -250,46 +251,24 @@ def upgrade() -> None:
             ondelete="SET NULL",
         )
 
+    # A task names its inputs by id without constraining them, so deleting an
+    # input neither deletes the task nor is blocked by it.
     with op.batch_alter_table("task", schema=None) as batch_op:
         batch_op.drop_constraint(TASK_AGENT_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.create_foreign_key(
-            TASK_AGENT_ID_FOREIGN_KEY,
-            "agent",
-            ["agent_id"],
-            ["id"],
-            ondelete="CASCADE",
-        )
         batch_op.drop_constraint(TASK_AGENT_VERSION_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.create_foreign_key(
-            TASK_AGENT_VERSION_ID_FOREIGN_KEY,
-            "agent_version",
-            ["agent_version_id"],
-            ["id"],
-            ondelete="CASCADE",
-        )
         batch_op.drop_constraint(TASK_PLUGIN_VERSION_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.create_foreign_key(
-            TASK_PLUGIN_VERSION_ID_FOREIGN_KEY,
-            "plugin_version",
-            ["plugin_version_id"],
-            ["id"],
-            ondelete="CASCADE",
-        )
         batch_op.drop_constraint(TASK_INPUT_SESSION_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.create_foreign_key(
-            TASK_INPUT_SESSION_ID_FOREIGN_KEY,
-            "session",
-            ["input_session_id"],
-            ["id"],
-            ondelete="CASCADE",
-        )
         batch_op.drop_constraint(TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY, type_="foreignkey")
+
+    with op.batch_alter_table("replay", schema=None) as batch_op:
+        batch_op.alter_column("job_id", existing_type=sa.Uuid(), nullable=True)
+        batch_op.drop_constraint(REPLAY_JOB_ID_FOREIGN_KEY, type_="foreignkey")
         batch_op.create_foreign_key(
-            TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY,
-            "blob",
-            ["payload_blob_id"],
+            REPLAY_JOB_ID_FOREIGN_KEY,
+            "job",
+            ["job_id"],
             ["id"],
-            ondelete="CASCADE",
+            ondelete="SET NULL",
         )
 
     # tag_link moves from a polymorphic resource_type/resource_id pair to one
