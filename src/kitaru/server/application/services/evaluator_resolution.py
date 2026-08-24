@@ -37,8 +37,8 @@ def _validate_builtin_evaluator_params(config: EvaluatorConfigInput) -> None:
     params = config.params
     if (
         "expected" not in params
-        and params.get("required_paths") is None
-        and params.get("type_requirements") is None
+        and not params.get("required_paths")
+        and not params.get("type_requirements")
     ):
         raise ValidationError(
             f"Evaluator '{OUTPUT_CONTRACT_EVALUATOR}' requires at least one rule: "

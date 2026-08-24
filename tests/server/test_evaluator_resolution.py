@@ -138,10 +138,15 @@ async def test_validate_evaluators_rejects_duplicate_version(
         )
 
 
+@pytest.mark.parametrize(
+    "params",
+    [{}, {"required_paths": []}, {"type_requirements": {}}],
+)
 async def test_validate_evaluators_rejects_output_contract_without_rules(
     repository: FakePluginRepository,
+    params: dict[str, object],
 ) -> None:
-    """Reject the built-in output contract before scheduling evaluator work."""
+    """Reject the built-in output contract without a non-empty rule."""
     plugin = await create_plugin(
         repository,
         OWNER_ID,
@@ -152,6 +157,6 @@ async def test_validate_evaluators_rejects_output_contract_without_rules(
 
     with pytest.raises(ValidationError, match="requires at least one rule"):
         await validate_evaluators(
-            [EvaluatorConfigInput(evaluator="kitaru/output-contract")],
+            [EvaluatorConfigInput(evaluator="kitaru/output-contract", params=params)],
             repository,
         )
