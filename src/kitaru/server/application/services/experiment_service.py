@@ -351,7 +351,11 @@ class ExperimentService:
             ExperimentNotFound: No experiment has this id.
         """
         _ = actor
-        experiment = await self._repository.get(experiment_id)
+        # Lock the experiment so a concurrent start_run, which locks it too,
+        # either commits its run before this snapshot and has that run's jobs
+        # cancelled, or finds the experiment gone. Without the lock it could
+        # slip a run in after the snapshot whose jobs then outlive the cascade.
+        experiment = await self._repository.get(experiment_id, exclusive=True)
         runs = await self._experiment_runs.list_by_experiment(experiment_id)
         job_ids: list[uuid.UUID] = []
         for run in runs:
