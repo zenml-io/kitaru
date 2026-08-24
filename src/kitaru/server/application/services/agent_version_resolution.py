@@ -30,7 +30,7 @@ async def resolve_runnable_agent_version(
     repository: AgentVersionRepository,
     agent_id: uuid.UUID | None = None,
 ) -> AgentVersion:
-    """Load an agent version and require it to carry a run spec.
+    """Load a runnable agent version and require it to carry a run spec.
 
     Args:
         agent_version_id: Id of the agent version.
@@ -46,7 +46,7 @@ async def resolve_runnable_agent_version(
     Returns:
         Agent version carrying a run spec.
     """
-    agent_version = await repository.get(agent_version_id)
+    agent_version = await repository.get_runnable(agent_version_id)
     if agent_id is not None and agent_version.agent_id != agent_id:
         raise AgentVersionAgentMismatch(agent_version_id, agent_id)
     if agent_version.run_spec is None:

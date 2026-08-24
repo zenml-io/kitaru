@@ -1993,6 +1993,25 @@ class FakeAgentVersionRepository:
             raise AgentVersionNotFound(agent_version_id)
         return agent_version.model_copy()
 
+    async def get_runnable(self, agent_version_id: uuid.UUID) -> AgentVersion:
+        """Load an agent version whose agent is not deleted.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+            AgentNotFound: The version's agent is deleted.
+
+        Returns:
+            Stored agent version.
+        """
+        agent_version = await self.get(agent_version_id)
+        agent = self._agents._agents.get(agent_version.agent_id)
+        if agent is None or agent.deleted_at is not None:
+            raise AgentNotFound(agent_version.agent_id)
+        return agent_version
+
     async def get_agent_id(self, agent_version_id: uuid.UUID) -> uuid.UUID:
         """Load the id of the agent a version belongs to.
 
