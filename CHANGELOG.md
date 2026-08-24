@@ -37,6 +37,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Cancelling a job's pending tasks now settles the job when that leaves it with nothing running, so a replay job whose experiment or experiment run was deleted reaches `canceled` on its own instead of staying pending until someone cancels it by hand.
 - Deleting a job no longer deletes its replay, and is rejected with HTTP 409 until the job has settled. Cancel the job and let it settle first. Deleting an experiment or an experiment run cancels its replay jobs instead of deleting them, so those jobs outlive the experiment or run they came from.
 - Concurrent deletes of the same resource now give exactly one caller HTTP 204, every other caller gets HTTP 404. Previously several racing deletes could all report success.
+- Downgrading the database below migration `005_deletion_rules` is refused with an explicit error, since the earlier schema cannot hold an agent name reused after a delete. The refusal rolls back the whole downgrade, so the database stays at its current revision.
 
 ### Removed
 
