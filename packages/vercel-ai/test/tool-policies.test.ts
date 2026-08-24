@@ -514,12 +514,15 @@ describe("replay tool policies", () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
-  it("warns once when a replay repeats a tool call with identical arguments", async () => {
+  it.each([
+    ["baseline", 0],
+    ["agent", 1],
+  ] as const)("handles repeated %s history calls", async (scope, expectedWarnings) => {
     const client = new FakeClient({
       lookup: () => ({
         match: { error: null, result: "recorded", status: "completed" },
       }),
-      replay: replaySpec({ on_miss: "fail", type: "history" }),
+      replay: replaySpec({ on_miss: "fail", scope, type: "history" }),
     });
     const model = new MockLanguageModelV4({
       doGenerate: toolResponse([
@@ -546,10 +549,10 @@ describe("replay tool policies", () => {
         },
       });
 
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn.mock.calls[0]?.[0]).toContain(
-        "called again with identical arguments",
-      );
+      expect(warn).toHaveBeenCalledTimes(expectedWarnings);
+      if (expectedWarnings > 0) {
+        expect(warn.mock.calls[0]?.[0]).toContain("newest completed result");
+      }
     } finally {
       warn.mockRestore();
     }

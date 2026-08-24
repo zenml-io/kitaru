@@ -80,11 +80,14 @@ async def test_callback_failures_preserve_error_text(fake_client: Any) -> None:
         parent_run_id=root_id,
     )
     await callback.on_tool_error(RuntimeError("service down"), run_id=tool_id)
-    await recorder.finalize(result={"done": False})
+    await recorder.finalize(error=RuntimeError("graph failed"))
 
     client = fake_client.instances[0]
     nodes = [node for _, batch in client.sessions.node_batches for node in batch.nodes]
     nested = next(node for node in reversed(nodes) if node.name == "nested")
     tool = next(node for node in reversed(nodes) if node.name == "weather")
+    root = next(node for node in reversed(nodes) if node.index == 0)
     assert nested.error == "chain failed"
     assert tool.error == "service down"
+    assert root.error == "graph failed"
+    assert client.sessions.updated[-1][1].error == "graph failed"
