@@ -42,11 +42,15 @@ class SecretsResource:
         """
         self._client = client
 
-    async def create(self, request: SecretCreateRequest) -> SecretResponse:
+    async def create(
+        self, request: SecretCreateRequest, idempotency_key: str | None = None
+    ) -> SecretResponse:
         """Create a secret.
 
         Args:
             request: Secret create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -58,6 +62,7 @@ class SecretsResource:
             "POST",
             "/api/v1/secrets",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return SecretResponse.model_validate(response.json())
 

@@ -557,11 +557,16 @@ async def register_agent(
 
 
 async def register_agent_version(
-    client: Any, reference: str, request: AgentVersionCreateRequest
+    client: Any,
+    reference: str,
+    request: AgentVersionCreateRequest,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Resolve an agent and create its next server-assigned version."""
     parent = await resolve_asset(client.agents, reference, "Agent")
-    version = await client.agents.create_version(parent.id, request)
+    version = await client.agents.create_version(
+        parent.id, request, idempotency_key=idempotency_key
+    )
     return _registration_result("agent", parent, version)
 
 
@@ -609,6 +614,7 @@ async def register_plugin_version(
     reference: str,
     source: PluginSourceInput,
     display_version: str | None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Resolve a plugin parent, upload if needed, and create a version."""
     resource = _plugin_resource(client, kind)
@@ -623,6 +629,7 @@ async def register_plugin_version(
         version = await resource.create_version(
             parent.id,
             request_type(source=plugin_source, display_version=display_version),
+            idempotency_key=idempotency_key,
         )
     except Exception as error:
         if blob is None:

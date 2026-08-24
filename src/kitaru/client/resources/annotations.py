@@ -41,11 +41,15 @@ class AnnotationsResource:
         """
         self._client = client
 
-    async def create(self, request: AnnotationCreateRequest) -> AnnotationResponse:
+    async def create(
+        self, request: AnnotationCreateRequest, idempotency_key: str | None = None
+    ) -> AnnotationResponse:
         """Create an annotation, either manual or answering an investigation question.
 
         Args:
             request: Annotation create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 when the session or
@@ -58,6 +62,7 @@ class AnnotationsResource:
             "POST",
             "/api/v1/annotations",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return AnnotationResponse.model_validate(response.json())
 

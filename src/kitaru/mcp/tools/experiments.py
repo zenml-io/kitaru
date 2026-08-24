@@ -34,7 +34,9 @@ async def handle_experiments_manage(
             tool_policy=request.tool_policy,
             evaluators=evaluators or [],
         )
-        return await state.client.experiments.create(dto)
+        return await state.client.experiments.create(
+            dto, idempotency_key=request.idempotency_key
+        )
     values = request.model_dump(
         include={"name", "description", "override", "tool_policy"},
         exclude_unset=True,

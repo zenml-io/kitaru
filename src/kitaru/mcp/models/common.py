@@ -38,6 +38,13 @@ class MCPModel(BaseModel):
     model_config = ConfigDict(extra="forbid", protected_namespaces=())
 
 
+IDEMPOTENCY_KEY_DESCRIPTION = (
+    "Pass a fresh unique string per logical request. Reuse it only when "
+    "retrying this exact call after a lost or failed response, so the retry "
+    "returns the original result instead of acting twice."
+)
+
+
 class PageOptions(MCPModel):
     """Bounded one-page request options."""
 

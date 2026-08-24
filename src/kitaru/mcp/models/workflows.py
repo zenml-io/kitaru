@@ -10,7 +10,7 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.mcp.models.common import DeleteKind, MCPModel
+from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, DeleteKind, MCPModel
 from kitaru.mcp.models.management import EvaluatorSelection
 
 
@@ -22,6 +22,10 @@ class SessionImportRequest(MCPModel):
     importer_version: int = Field(ge=1)
     agent_version_id: uuid.UUID
     params: dict[str, JsonValue] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class EvaluationStart(MCPModel):
@@ -30,6 +34,10 @@ class EvaluationStart(MCPModel):
     operation: Literal["evaluation"]
     session_ids: list[uuid.UUID] = Field(min_length=1, max_length=100)
     evaluators: list[EvaluatorSelection] = Field(min_length=1, max_length=100)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def _validate_batch(self) -> "EvaluationStart":
@@ -50,6 +58,10 @@ class ExperimentRunStart(MCPModel):
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
     evaluate_baselines: bool = False
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 WorkflowStartRequest = Annotated[

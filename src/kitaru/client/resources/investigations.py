@@ -45,12 +45,16 @@ class InvestigationsResource:
         self._client = client
 
     async def create(
-        self, request: InvestigationCreateRequest
+        self,
+        request: InvestigationCreateRequest,
+        idempotency_key: str | None = None,
     ) -> InvestigationResponse:
         """Create an investigation with its sessions in one shot.
 
         Args:
             request: Investigation create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 when the agent or a
@@ -63,6 +67,7 @@ class InvestigationsResource:
             "POST",
             "/api/v1/investigations",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return InvestigationResponse.model_validate(response.json())
 

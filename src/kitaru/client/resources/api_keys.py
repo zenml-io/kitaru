@@ -43,13 +43,17 @@ class ApiKeysResource:
         """
         self._client = client
 
-    async def create(self, request: ApiKeyCreateRequest) -> ApiKeyIssuedResponse:
+    async def create(
+        self, request: ApiKeyCreateRequest, idempotency_key: str | None = None
+    ) -> ApiKeyIssuedResponse:
         """Create an API key.
 
         The response carries the plaintext key exactly once.
 
         Args:
             request: API key create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -61,6 +65,7 @@ class ApiKeysResource:
             "POST",
             "/api/v1/api-keys",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return ApiKeyIssuedResponse.model_validate(response.json())
 
@@ -143,7 +148,10 @@ class ApiKeysResource:
         return ApiKeyResponse.model_validate(response.json())
 
     async def rotate(
-        self, api_key_id: uuid.UUID, request: ApiKeyRotateRequest | None = None
+        self,
+        api_key_id: uuid.UUID,
+        request: ApiKeyRotateRequest | None = None,
+        idempotency_key: str | None = None,
     ) -> ApiKeyIssuedResponse:
         """Rotate an API key.
 
@@ -152,6 +160,8 @@ class ApiKeysResource:
         Args:
             api_key_id: Id of the API key.
             request: API key rotate request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 for a missing API key.
@@ -164,6 +174,7 @@ class ApiKeysResource:
             "POST",
             f"/api/v1/api-keys/{api_key_id}/rotate",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return ApiKeyIssuedResponse.model_validate(response.json())
 

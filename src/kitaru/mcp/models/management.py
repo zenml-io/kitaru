@@ -10,7 +10,7 @@ from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
 from kitaru.api_models.v1.replay_config import ReplayOverride, ToolPolicy
-from kitaru.mcp.models.common import MCPModel
+from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, MCPModel
 
 
 class EvaluatorSelection(MCPModel):
@@ -29,6 +29,10 @@ class CohortCreate(MCPModel):
     name: str = Field(min_length=1)
     description: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class CohortUpdate(MCPModel):
@@ -71,6 +75,10 @@ class CohortVersionCreate(MCPModel):
     add_session_ids: list[uuid.UUID] = Field(default_factory=list)
     remove_session_ids: list[uuid.UUID] = Field(default_factory=list)
     display_version: str | None = None
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def _validate_membership(self) -> "CohortVersionCreate":
@@ -116,6 +124,10 @@ class ExperimentCreate(MCPModel):
     override: ReplayOverride | None = None
     tool_policy: ToolPolicy | None = None
     evaluators: list[EvaluatorSelection] = Field(min_length=1, max_length=10)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class ExperimentUpdate(MCPModel):

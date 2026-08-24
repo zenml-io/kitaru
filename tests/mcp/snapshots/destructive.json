@@ -5743,6 +5743,19 @@
               "default": null,
               "title": "Description"
             },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "metadata": {
               "additionalProperties": true,
               "title": "Metadata",
@@ -5872,6 +5885,19 @@
               ],
               "default": null,
               "title": "Display Version"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
             },
             "operation": {
               "const": "create_version",
@@ -6287,6 +6313,19 @@
               "minItems": 1,
               "title": "Evaluators",
               "type": "array"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
             },
             "name": {
               "minLength": 1,
@@ -7304,6 +7343,19 @@
               "title": "Agent Version Id",
               "type": "string"
             },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "importer_id": {
               "format": "uuid",
               "title": "Importer Id",
@@ -7741,6 +7793,19 @@
           "additionalProperties": false,
           "description": "Answer one investigation question for one linked session.",
           "properties": {
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "investigation_session_id": {
               "format": "uuid",
               "title": "Investigation Session Id",
@@ -7799,6 +7864,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
             },
             "name": {
               "minLength": 1,
@@ -7992,6 +8070,19 @@
           "additionalProperties": false,
           "description": "Create a manual annotation for one session.",
           "properties": {
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "operation": {
               "const": "create_annotation",
               "title": "Operation",
@@ -8068,6 +8159,19 @@
           "additionalProperties": false,
           "description": "Create a tag.",
           "properties": {
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "name": {
               "minLength": 1,
               "title": "Name",
@@ -8884,6 +8988,19 @@
               "title": "Evaluators",
               "type": "array"
             },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "operation": {
               "const": "evaluation",
               "title": "Operation",
@@ -8958,6 +9075,19 @@
               "format": "uuid",
               "title": "Experiment Id",
               "type": "string"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
             },
             "operation": {
               "const": "experiment_run",
@@ -9543,6 +9673,19 @@
               ],
               "default": null,
               "title": "Description"
+            },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
             },
             "metadata": {
               "additionalProperties": true,

@@ -110,6 +110,7 @@ class StubRunsClient:
         )
         self.get_responses = [self.created_run]
         self.start_calls: list[tuple[uuid.UUID, ExperimentRunCreateRequest]] = []
+        self.start_idempotency_keys: list[str | None] = []
         self.list_calls: list[ExperimentRunListParams] = []
         self.jobs_calls: list[tuple[uuid.UUID, ExperimentRunJobsListParams]] = []
         self.get_calls = 0
@@ -141,9 +142,13 @@ class StubRunsClient:
             return self.owner.experiment
 
         async def start_run(
-            self, experiment_id: uuid.UUID, request: ExperimentRunCreateRequest
+            self,
+            experiment_id: uuid.UUID,
+            request: ExperimentRunCreateRequest,
+            idempotency_key: str | None = None,
         ) -> ExperimentRunResponse:
             self.owner.start_calls.append((experiment_id, request))
+            self.owner.start_idempotency_keys.append(idempotency_key)
             return self.owner.created_run
 
     class _Runs:

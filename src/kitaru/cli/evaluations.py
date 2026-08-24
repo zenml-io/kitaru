@@ -226,6 +226,7 @@ async def evaluate_sessions(
     wait: bool,
     interval: float | None,
     timeout: float | None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one evaluation job over selected session/version pairs."""
     wait_settings = receipts.get_wait_settings(
@@ -262,7 +263,7 @@ async def evaluate_sessions(
         input_session_ids=session_ids,
         evaluators=configs,
     )
-    job = await client.evaluations.create(request)
+    job = await client.evaluations.create(request, idempotency_key=idempotency_key)
     created = receipts.created_job_result(
         "session_evaluation",
         job,

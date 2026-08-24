@@ -40,12 +40,14 @@ class UsersResource:
         self._client = client
 
     async def create(
-        self, request: UserCreateRequest
+        self, request: UserCreateRequest, idempotency_key: str | None = None
     ) -> AccountResponse | UserActivationTokenResponse:
         """Create a user.
 
         Args:
             request: User create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -58,6 +60,7 @@ class UsersResource:
             "POST",
             "/api/v1/users",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         payload = response.json()
         if "activation_token" in payload:

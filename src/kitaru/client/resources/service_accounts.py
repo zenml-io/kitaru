@@ -37,11 +37,15 @@ class ServiceAccountsResource:
         """
         self._client = client
 
-    async def create(self, request: ServiceAccountCreateRequest) -> AccountResponse:
+    async def create(
+        self, request: ServiceAccountCreateRequest, idempotency_key: str | None = None
+    ) -> AccountResponse:
         """Create a service account.
 
         Args:
             request: Service account create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -53,6 +57,7 @@ class ServiceAccountsResource:
             "POST",
             "/api/v1/service-accounts",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return AccountResponse.model_validate(response.json())
 

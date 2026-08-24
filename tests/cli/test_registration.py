@@ -67,6 +67,8 @@ class StubResource:
         self.versions: list[StubModel] = []
         self.created_requests: list[Any] = []
         self.version_requests: list[tuple[uuid.UUID, Any]] = []
+        self.create_idempotency_keys: list[str | None] = []
+        self.version_idempotency_keys: list[str | None] = []
         self.create_error: Exception | None = None
         self.version_error: Exception | None = None
         self.parent = StubModel("created")
@@ -104,16 +106,25 @@ class StubResource:
                 return item
         raise AssertionError("unexpected version")
 
-    async def create(self, request: Any) -> StubModel:
+    async def create(
+        self, request: Any, idempotency_key: str | None = None
+    ) -> StubModel:
         """Record parent creation."""
         self.created_requests.append(request)
+        self.create_idempotency_keys.append(idempotency_key)
         if self.create_error:
             raise self.create_error
         return self.parent
 
-    async def create_version(self, parent_id: uuid.UUID, request: Any) -> StubModel:
+    async def create_version(
+        self,
+        parent_id: uuid.UUID,
+        request: Any,
+        idempotency_key: str | None = None,
+    ) -> StubModel:
         """Record version creation."""
         self.version_requests.append((parent_id, request))
+        self.version_idempotency_keys.append(idempotency_key)
         if self.version_error:
             raise self.version_error
         return self.version
