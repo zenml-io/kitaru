@@ -15,7 +15,7 @@
 
 import uuid
 from datetime import UTC, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, localcontext
 from typing import Any
 
 from kitaru.api_models.v1.session import SessionResponse
@@ -128,6 +128,37 @@ def test_cost_includes_priced_tool_calls_with_complete_llm_costs() -> None:
             node_type=NodeType.TOOL_CALL,
             parent_id=root_id,
             name="paid search",
+            cost=Decimal("0.02"),
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.03
+
+
+def test_cost_includes_priced_child_spans_with_complete_llm_costs() -> None:
+    """Include child spans without double-counting the root aggregate."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.08"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="agent run",
+            cost=Decimal("0.05"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.SPAN,
+            parent_id=root_id,
+            name="paid child operation",
             cost=Decimal("0.02"),
         ),
     ]
@@ -255,6 +286,71 @@ def test_cost_uses_multiple_root_span_aggregates_when_llm_costs_are_missing() ->
     result = cost(view)
 
     assert result.score == 0.03
+
+
+def test_cost_sums_direct_costs_without_ambient_decimal_rounding() -> None:
+    """Keep direct cost totals exact when an evaluator runs at low precision."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("1.234"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            name="agent run",
+            cost=Decimal("2"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="first model request",
+            cost=Decimal("1.23"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            parent_id=root_id,
+            name="paid search",
+            cost=Decimal("0.004"),
+        ),
+    ]
+
+    with localcontext() as context:
+        context.prec = 2
+        result = cost(view)
+
+    assert result.score == 1.234
+
+
+def test_cost_sums_root_aggregates_without_ambient_decimal_rounding() -> None:
+    """Keep aggregate fallback totals exact when an evaluator runs at low precision."""
+    first_root_id = uuid.uuid4()
+    second_root_id = uuid.uuid4()
+    view = _view(cost=Decimal("1.234"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=first_root_id,
+            node_type=NodeType.SPAN,
+            name="first trace",
+            cost=Decimal("1.23"),
+        ),
+        SessionNodeResponse.model_construct(
+            id=second_root_id,
+            node_type=NodeType.SPAN,
+            name="second trace",
+            cost=Decimal("0.004"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=first_root_id,
+            name="missing model request",
+            cost=None,
+        ),
+    ]
+
+    with localcontext() as context:
+        context.prec = 2
+        result = cost(view)
+
+    assert result.score == 1.234
 
 
 def test_cost_uses_root_span_when_call_rollup_is_partial() -> None:
