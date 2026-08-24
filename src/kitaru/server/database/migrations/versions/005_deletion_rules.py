@@ -74,13 +74,6 @@ from kitaru.server.adapters.db.orm.tag import (
     TAG_LINK_SESSION_ID_TAG_ID_UNIQUE_CONSTRAINT,
     TAG_LINK_TAG_ID_INDEX,
 )
-from kitaru.server.adapters.db.orm.task import (
-    TASK_AGENT_ID_FOREIGN_KEY,
-    TASK_AGENT_VERSION_ID_FOREIGN_KEY,
-    TASK_INPUT_SESSION_ID_FOREIGN_KEY,
-    TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY,
-    TASK_PLUGIN_VERSION_ID_FOREIGN_KEY,
-)
 
 # revision identifiers, used by Alembic.
 revision = "005_deletion_rules"
@@ -254,11 +247,11 @@ def upgrade() -> None:
     # A task names its inputs by id without constraining them, so deleting an
     # input neither deletes the task nor is blocked by it.
     with op.batch_alter_table("task", schema=None) as batch_op:
-        batch_op.drop_constraint(TASK_AGENT_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.drop_constraint(TASK_AGENT_VERSION_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.drop_constraint(TASK_PLUGIN_VERSION_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.drop_constraint(TASK_INPUT_SESSION_ID_FOREIGN_KEY, type_="foreignkey")
-        batch_op.drop_constraint(TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY, type_="foreignkey")
+        batch_op.drop_constraint("fk_task_agent_id", type_="foreignkey")
+        batch_op.drop_constraint("fk_task_agent_version_id", type_="foreignkey")
+        batch_op.drop_constraint("fk_task_plugin_version_id", type_="foreignkey")
+        batch_op.drop_constraint("fk_task_input_session_id", type_="foreignkey")
+        batch_op.drop_constraint("fk_task_payload_blob_id", type_="foreignkey")
 
     with op.batch_alter_table("replay", schema=None) as batch_op:
         batch_op.alter_column("job_id", existing_type=sa.Uuid(), nullable=True)
