@@ -153,6 +153,36 @@ def test_cost_reports_tool_only_session_cost() -> None:
     assert result.score == 0.02
 
 
+def test_cost_uses_root_aggregate_when_tool_cost_is_missing() -> None:
+    """Prefer the complete root aggregate to an incomplete direct total."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.04"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            name="agent run",
+            cost=Decimal("0.03"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            parent_id=root_id,
+            name="paid search",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.03
+
+
 def test_cost_excludes_multiple_root_span_aggregates() -> None:
     """Sum direct calls instead of duplicate aggregate costs from each trace."""
     first_root_id = uuid.uuid4()

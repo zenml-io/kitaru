@@ -23,7 +23,7 @@ def cost(session: SessionView) -> EvaluationResult:
         direct_nodes
         and llm_costs_are_complete
         and all(
-            node.cost is None or (node.cost.is_finite() and node.cost >= 0)
+            node.cost is not None and node.cost.is_finite() and node.cost >= 0
             for node in direct_nodes
         )
     ):
