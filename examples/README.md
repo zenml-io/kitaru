@@ -2,7 +2,7 @@
 
 ## Complete returns workflow
 
-Use the public [`zenml-io/kitaru-template`](https://github.com/zenml-io/kitaru-template) for the maintained product walkthrough. It provides a ready PydanticAI returns agent and checked-in Langfuse traces. Its root README owns setup and import; the [complete tutorial](../docs/book/tutorials/returns-agent/README.md) continues through deterministic diagnostics, evidence-linked human review, an immutable cohort version, and bounded replay.
+Use [`python/pydantic_ai_ticket_resolver/`](python/pydantic_ai_ticket_resolver/) for the maintained product walkthrough. It provides a ready PydanticAI returns agent and checked-in Langfuse traces. Its README owns setup and import; the [complete tutorial](../docs/book/tutorials/returns-agent/README.md) continues through deterministic diagnostics, evidence-linked human review, an immutable cohort version, and bounded replay.
 
 ## Python adapter examples
 

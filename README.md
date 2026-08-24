@@ -68,19 +68,19 @@ npx skills add zenml-io/kitaru-skills
 }
 ```
 
-**3. Get an agent with traces.** The fastest way to feel the loop is the template: a ready PydanticAI agent with checked-in Langfuse traces.
+**3. Get an agent with traces.** The fastest way to feel the loop is the canonical example: a ready PydanticAI agent with checked-in Langfuse traces.
 
 ```bash
-git clone https://github.com/zenml-io/kitaru-template
-cd kitaru-template    # its README has the setup and import commands
+git clone https://github.com/zenml-io/kitaru.git
+cd kitaru/examples/python/pydantic_ai_ticket_resolver
 ```
 
 Already have an agent in production? [Import its traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) from Langfuse, LangSmith, Braintrust, Logfire, or Arize Phoenix, or [record with an adapter](https://docs.zenml.io/kitaru/adapters/record-in-production): one wrapper, no rewrite.
 
-**4. Let your assistant drive the loop.** Open the repo in Claude Code, Codex, or Cursor. On the template, take the guided tour:
+**4. Let your assistant drive the loop.** Open the example directory in Claude Code, Codex, or Cursor, then take the guided tour:
 
 ```
-Use kitaru-guided-tour to walk me through Kitaru on the returns-agent template. I am new; explain each step as we go, and ask before anything paid or live.
+Use kitaru-guided-tour to walk me through Kitaru on the canonical returns-agent example. I am new; explain each step as we go, and ask before anything paid or live.
 ```
 
 On your own agent, run the investigation:
@@ -89,7 +89,7 @@ On your own agent, run the investigation:
 Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Show me the recorded evidence before asking for a judgment, and ask before creating resources or starting paid replay.
 ```
 
-The assistant sweeps the sessions with built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it handles the investigation work. The [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) walks the same loop on the template, step by step.
+The assistant sweeps the sessions with built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it handles the investigation work. The [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) walks the same loop on the canonical example, step by step.
 
 ## 🔌 Languages and frameworks
 
@@ -116,7 +116,7 @@ One server runs on your infrastructure, with Docker image and Helm chart include
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
 | [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | From an agent in production to your first replay-backed decision |
 | [Set up your coding agent](https://docs.zenml.io/kitaru/getting-started/setup) | Install the MCP server and the agent skills |
-| [Kitaru template](https://github.com/zenml-io/kitaru-template) | A ready agent and checked-in traces to try the method on |
+| [Canonical example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) | A ready agent and checked-in traces to try the method on |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, or any format |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Replay production traffic against a change and gate it in CI |
 | [Deploy Kitaru](https://docs.zenml.io/kitaru/getting-started/deploy) | Self-host for your team |

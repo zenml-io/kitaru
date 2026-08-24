@@ -69,7 +69,7 @@ The Kitaru marketing site and its asset pipeline now live in `zenml-io-v2`. Do n
 
 Detailed authoring conventions, link rules, and accuracy requirements for all
 three docs surfaces live in **`docs/CLAUDE.md`** (loaded when you work under
-`docs/`). Keep the public `zenml-io/kitaru-template` setup and import path runnable without provider credentials.
+`docs/`). Keep the canonical returns example setup and import path runnable without provider credentials.
 
 Do not commit temporary agent planning/review files such as `docs/plans/*`,
 `docs/reviews/*`, or prompt exports unless the user explicitly asks for a
@@ -140,7 +140,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 - **PR reproduction:** Include a concrete "Reproduction" subsection inside Reviewer Notes or immediately after it. Prefer a runnable example, API flow, or UI path that proves the behavior end to end. Tell the reviewer exactly what to run and what to look for afterward.
 - **PR local checks:** Do not create a standalone "Verification" section that only lists `just check`, `just test`, or `/simplify`. Those are still required local hygiene, but they are not useful reviewer guidance by themselves. If useful, include them as a short "Local checks run" note after the reproduction instructions.
 - **Before opening a PR or making a large commit**, always run `/simplify` to review changed code for reuse opportunities, quality issues, and efficiency improvements. Fix any issues it finds before committing.
-- **Preserve template compatibility** when changing Kitaru behavior used by the public `zenml-io/kitaru-template` repository. Inspect its current contract and validate the affected template checks before opening a PR.
+- **Preserve canonical example compatibility** when changing Kitaru behavior used by `examples/python/pydantic_ai_ticket_resolver`. Inspect its current contract and validate the affected example checks before opening a PR.
 - Never include a "[Codex] " or "feat: " prefix to PR titles.
 
 ## Conventions

@@ -75,4 +75,4 @@ from kitaru_pydantic_ai import ToolPolicyError, ToolPolicyMissError
 - **The `llm` tool policy** is not yet supported by this adapter; a replay that reaches one fails with `ToolPolicyError`. See [Tool policies](../guides/tool-policies.md).
 - **Recording overhead** is one async client and batched node uploads per run, off the hot path of model calls. If the Kitaru server is unreachable your run fails fast at session creation rather than running unrecorded; treat server availability accordingly in production.
 - **Alongside other tracing:** the adapter composes with PydanticAI's OpenTelemetry instrumentation, so recording to Kitaru and tracing to Langfuse from the same run works.
-- **Import-first alternative:** the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) imports a checked-in Langfuse export of PydanticAI runs into Kitaru as replayable sessions.
+- **Import-first alternative:** the [canonical returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) imports a checked-in Langfuse export of PydanticAI runs into Kitaru as replayable sessions.

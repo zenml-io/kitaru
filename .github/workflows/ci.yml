@@ -17,7 +17,6 @@ permissions:
   contents: read
 env:
   KITARU_ANALYTICS_OPT_IN: false
-  KITARU_TEMPLATE_REF: 2eb723766d1e31448e569c0f241c255752c3d721
   ZENML_ANALYTICS_OPT_IN: false
   ZENML_LOGGING_VERBOSITY: INFO
   AUTO_OPEN_DASHBOARD: false
@@ -175,8 +174,8 @@ jobs:
           readarray -t ignore_flags < <(awk '/^(CVE|GHSA|PYSEC)-/ {print "--ignore-vuln"; print $1}' \
             .github/pip-audit-ignored.txt)
           uv run pip-audit "${ignore_flags[@]}"
-  public-template-contract:
-    name: Public template against current Kitaru
+  canonical-example:
+    name: Canonical example end to end
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -195,13 +194,6 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           persist-credentials: false
-      - name: Check out pinned public template
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          repository: zenml-io/kitaru-template
-          ref: ${{ env.KITARU_TEMPLATE_REF }}
-          path: kitaru-template
-          persist-credentials: false
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9  # v9.0.0
       - name: Install current Kitaru build environment
         run: uv sync --frozen --extra server --extra cli --extra worker
@@ -209,27 +201,28 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --candidate-dir plugins/candidate-wheels
-      - name: Sync pinned public template
-        working-directory: kitaru-template
+      - name: Sync canonical example
+        working-directory: examples/python/pydantic_ai_ticket_resolver
         run: uv sync --frozen
-      - name: Install current Kitaru artifacts into template
+      - name: Install current Kitaru artifacts into canonical example
         run: |
           uv pip install \
-            --python kitaru-template/.venv/bin/python \
+            --python examples/python/pydantic_ai_ticket_resolver/.venv/bin/python \
             --reinstall \
             --no-deps \
             plugins/candidate-wheels/kitaru-*.whl \
             plugins/candidate-wheels/kitaru_pydantic_ai-*.whl \
             plugins/candidate-wheels/kitaru_langfuse_importer-*.whl
-          uv pip check --python kitaru-template/.venv/bin/python
-      - name: Test public template contracts
-        working-directory: kitaru-template
+          uv pip check \
+            --python examples/python/pydantic_ai_ticket_resolver/.venv/bin/python
+      - name: Test canonical example contracts
+        working-directory: examples/python/pydantic_ai_ticket_resolver
         run: >-
           uv run --no-sync python -m pytest -q
           tests/test_contract.py
           tests/test_repository_contract.py
-      - name: Run public template end to end
-        working-directory: kitaru-template
+      - name: Run canonical example end to end
+        working-directory: examples/python/pydantic_ai_ticket_resolver
         run: uv run --no-sync python scripts/run_ci_e2e.py
         env:
           UV_FIND_LINKS: ${{ github.workspace }}/plugins/candidate-wheels
