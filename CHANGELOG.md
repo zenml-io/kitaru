@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Registering a worker from the Kitaru 0.22.2 Python SDK or older is rejected with HTTP 426. Those versions renew a worker token by registering again, which a server that gives every registration its own id cannot serve: the worker goes on heartbeating an id its token no longer names, and the tasks it is running get swept away from it. Upgrade workers along with the server. Every other caller is unaffected.
 - Replays store their result session id directly instead of deriving it from their task, and a session referenced by a replay's result can no longer be deleted.
 - `POST /api/v1/replays/{replay_id}/tool-lookup` now returns a `match` object carrying the matched tool call's `status` and `error` instead of a flat `found`/`result` pair. `match` is `null` on a miss. A baseline lookup with an occurrence now matches completed and failed tool calls, skipping in-progress ones. Every other lookup matches only completed tool calls.
+- History replay in the LangGraph, Pydantic AI, Mastra, and Vercel AI SDK adapters now distinguishes completed matches, failed matches, and genuine misses. Completed matches replay through each framework's native result contract, matched failures raise their stored errors without executing the live tool, and only genuine misses apply `on_miss`.
 
 ### Removed
 

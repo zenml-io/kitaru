@@ -111,7 +111,7 @@ The Mastra adapter supports these [tool policies](../guides/tool-policies.md) fo
 
 History matching is guaranteed only when both the recording and replay use this Mastra adapter. Another framework may apply schema defaults, coercion, or serialization differently, which changes the history key even when the logical tool call looks equivalent.
 
-A found history value of `null` fails closed. The current lookup response cannot distinguish a successful `null` result from a failed recorded call, so the adapter neither treats it as a mocked success nor executes the real tool.
+A completed history match replays its result, including `null`, without executing the live tool. A failed match raises its stored error and does not execute the live tool. Only a genuine miss follows the policy's `on_miss` behavior.
 
 Before a replay starts, the adapter inventories configured tools, function-valued tools resolved from the run's `requestContext`, and per-run `clientTools` and `toolsets`. It rejects tools without a local `execute` function, approval-gated runs, sandboxed tools, and tool keys that Mastra would rename before exposing them to the model. Tools added only during execution and tools executed by a provider remain outside this preflight check and are not supported replay targets.
 
