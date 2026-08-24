@@ -106,6 +106,37 @@ def test_cost_prefers_call_costs_over_aggregate_root() -> None:
     assert result.score == 0.025
 
 
+def test_cost_includes_priced_tool_calls_with_complete_llm_costs() -> None:
+    """Include direct tool costs without double-counting the root aggregate."""
+    root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.08"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=root_id,
+            node_type=NodeType.SPAN,
+            parent_id=None,
+            name="agent run",
+            cost=Decimal("0.05"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=root_id,
+            name="model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            parent_id=root_id,
+            name="paid search",
+            cost=Decimal("0.02"),
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.03
+
+
 def test_cost_uses_root_span_when_call_rollup_is_partial() -> None:
     """Prefer a complete root aggregate to a partial call rollup."""
     root_id = uuid.uuid4()

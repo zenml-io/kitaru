@@ -10,21 +10,29 @@ from kitaru.task.evaluator import SessionView
 
 def cost(session: SessionView) -> EvaluationResult:
     """Report the total recorded cost of a session."""
+    root_nodes = [node for node in session.nodes if node.parent_id is None]
+    root_span = (
+        root_nodes[0]
+        if len(root_nodes) == 1 and root_nodes[0].node_type is NodeType.SPAN
+        else None
+    )
     llm_nodes = [node for node in session.nodes if node.node_type is NodeType.LLM_CALL]
     if llm_nodes and all(
         node.cost is not None and node.cost.is_finite() and node.cost >= 0
         for node in llm_nodes
     ):
-        recorded_cost = sum(
-            (node.cost for node in llm_nodes if node.cost is not None), Decimal(0)
-        )
+        direct_nodes = [node for node in session.nodes if node is not root_span]
+        if all(
+            node.cost is None or (node.cost.is_finite() and node.cost >= 0)
+            for node in direct_nodes
+        ):
+            recorded_cost = sum(
+                (node.cost for node in direct_nodes if node.cost is not None),
+                Decimal(0),
+            )
+        else:
+            recorded_cost = None
     else:
-        root_nodes = [node for node in session.nodes if node.parent_id is None]
-        root_span = (
-            root_nodes[0]
-            if len(root_nodes) == 1 and root_nodes[0].node_type is NodeType.SPAN
-            else None
-        )
         session_cost = session.session.cost
         if (
             root_span is not None
