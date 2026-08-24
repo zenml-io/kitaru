@@ -311,7 +311,7 @@ def _is_nonnegative_integer(value: Any) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0
 
 
-def _sum_decimals(values: list[Decimal]) -> Decimal:
+def sum_decimals(values: list[Decimal]) -> Decimal:
     """Sum finite decimals exactly without using the ambient decimal context."""
     if not values:
         return Decimal(0)
@@ -1046,9 +1046,7 @@ def _sum_cost(nodes: list[SessionNodeResponse]) -> tuple[Decimal | None, bool]:
     )
     if not complete:
         return None, False
-    return _sum_decimals(
-        [node.cost for node in relevant if node.cost is not None]
-    ), True
+    return sum_decimals([node.cost for node in relevant if node.cost is not None]), True
 
 
 def _sum_tokens(nodes: list[SessionNodeResponse]) -> tuple[int | None, bool]:

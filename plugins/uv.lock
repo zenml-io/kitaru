@@ -1006,7 +1006,7 @@ requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-evaluator"
-version = "0.1.1"
+version = "0.1.2"
 source = { editable = "packages/evaluator" }
 dependencies = [
     { name = "kitaru" },

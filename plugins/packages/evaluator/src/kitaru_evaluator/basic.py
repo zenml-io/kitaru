@@ -5,15 +5,57 @@ from collections import Counter
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.task.evaluator import SessionView
+from kitaru_evaluator.deterministic import sum_decimals
 
 
 def cost(session: SessionView) -> EvaluationResult:
     """Report the total recorded cost of a session."""
-    recorded_cost = session.session.cost
-    if recorded_cost is None or any(
-        node.node_type is NodeType.LLM_CALL and node.cost is None
+    root_nodes = [node for node in session.nodes if node.parent_id is None]
+    direct_nodes = [
+        node
         for node in session.nodes
+        if node.node_type is not NodeType.SPAN or node.parent_id is not None
+    ]
+    llm_costs_are_complete = all(
+        node.cost is not None and node.cost.is_finite() and node.cost >= 0
+        for node in session.nodes
+        if node.node_type is NodeType.LLM_CALL
+    )
+    if (
+        direct_nodes
+        and llm_costs_are_complete
+        and all(
+            node.cost is not None and node.cost.is_finite() and node.cost >= 0
+            for node in direct_nodes
+        )
     ):
+        recorded_cost = sum_decimals(
+            [node.cost for node in direct_nodes if node.cost is not None]
+        )
+    else:
+        session_cost = session.session.cost
+        if (
+            root_nodes
+            and all(node.node_type is NodeType.SPAN for node in root_nodes)
+            and all(
+                node.cost is not None and node.cost.is_finite() and node.cost > 0
+                for node in root_nodes
+            )
+        ):
+            recorded_cost = sum_decimals(
+                [node.cost for node in root_nodes if node.cost is not None]
+            )
+        elif (
+            not any(node.cost is not None for node in session.nodes)
+            and session_cost is not None
+            and session_cost.is_finite()
+            and session_cost >= 0
+            and (not direct_nodes or session_cost > 0)
+        ):
+            recorded_cost = session_cost
+        else:
+            recorded_cost = None
+    if recorded_cost is None:
         return EvaluationResult(
             name="cost",
             value="unavailable",

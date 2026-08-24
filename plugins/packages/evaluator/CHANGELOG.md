@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Include directly priced non-root spans and fall back to aggregate costs when direct coverage is incomplete.
+
 ## 0.1.1
 
 - Distinguish repeated tool-call cycles by canonical call identity.
