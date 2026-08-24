@@ -207,6 +207,7 @@ class KitaruRunner(Generic[TContext]):
                     resolved.openai,
                     options.get("run_config"),
                     resolved.replay,
+                    client=recorder.client,
                 )
                 run_agent = prepared.starting_agent
                 run_input = prepared.input

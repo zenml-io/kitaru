@@ -13,11 +13,11 @@
 #  limitations under the License.
 """Pure OpenAI Agents replay preflight and per-run transformation."""
 
+import asyncio
 import copy
 import inspect
-import json
 from collections.abc import Awaitable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from typing import Any, Generic, TypeVar, cast
 
 from agents import (
@@ -31,16 +31,24 @@ from agents import (
 from agents.run_config import CallModelData, ModelInputData
 from agents.tool import Tool, get_function_tool_origin
 
-from kitaru.api_models.v1.replay import ReplayResponse
+from kitaru.api_models.v1.replay import ReplayResponse, ToolLookupRequest
 from kitaru.api_models.v1.replay_config import (
+    HistoryConfig,
+    HistoryScope,
     PassthroughConfig,
     StaticCase,
     StaticConfig,
     StaticMatchMode,
     ToolPolicyOnMiss,
 )
+from kitaru.cache_keys import compute_tool_cache_key
+from kitaru.client import KitaruAPIClient
 
-from .inputs import normalize_openai_input
+from .inputs import (
+    contains_capture_marker,
+    normalize_openai_input,
+    parse_tool_arguments,
+)
 
 TContext = TypeVar("TContext")
 
@@ -60,6 +68,14 @@ class PreparedReplay(Generic[TContext]):
     starting_agent: Agent[TContext]
     input: str | list[TResponseInputItem]
     run_config: RunConfig
+
+
+@dataclass
+class _HistoryState:
+    """Track baseline occurrences for one prepared replay run."""
+
+    occurrences: dict[str, int] = field(default_factory=dict)
+    locks: dict[str, asyncio.Lock] = field(default_factory=dict)
 
 
 def _copy_run_config(value: RunConfig | dict[str, Any] | None) -> RunConfig:
@@ -110,15 +126,15 @@ def _validate_function_tool(tool: FunctionTool, target: str) -> None:
 
 def _preflight_tools(
     starting_agent: Agent[Any], replay: ReplayResponse
-) -> list[tuple[int, FunctionTool, StaticConfig]]:
-    """Resolve every named static override before creating any copied tool."""
+) -> list[tuple[int, FunctionTool, StaticConfig | HistoryConfig]]:
+    """Resolve every named supported override before copying any tool."""
     policy = replay.tool_policy
     if not isinstance(policy.default, PassthroughConfig):
         raise ToolPolicyError("Replay tool policy default must be passthrough")
 
-    static_targets: list[tuple[int, FunctionTool, StaticConfig]] = []
+    targets: list[tuple[int, FunctionTool, StaticConfig | HistoryConfig]] = []
     for target, override in policy.tools.items():
-        if not isinstance(override, PassthroughConfig | StaticConfig):
+        if not isinstance(override, PassthroughConfig | StaticConfig | HistoryConfig):
             raise ToolPolicyError(
                 f"Tool policy '{override.type}' is not supported for '{target}'"
             )
@@ -142,9 +158,13 @@ def _preflight_tools(
                 f"Tool override '{target}' must target a direct FunctionTool"
             )
         _validate_function_tool(tool, target)
-        if isinstance(override, StaticConfig):
-            static_targets.append((index, tool, override))
-    return static_targets
+        if isinstance(override, HistoryConfig) and tool.timeout_seconds is not None:
+            raise ToolPolicyError(
+                f"History override '{target}' cannot target a tool with a timeout"
+            )
+        if isinstance(override, StaticConfig | HistoryConfig):
+            targets.append((index, tool, override))
+    return targets
 
 
 def _case_matches(case: StaticCase, arguments: Any) -> bool:
@@ -168,8 +188,8 @@ def _copy_static_tool(tool: FunctionTool, policy: StaticConfig) -> FunctionTool:
 
     async def invoke(context: Any, arguments_json: str) -> Any:
         try:
-            arguments = json.loads(arguments_json)
-        except json.JSONDecodeError as error:
+            arguments = parse_tool_arguments(arguments_json)
+        except (ValueError, TypeError) as error:
             raise ToolPolicyError(
                 f"Invalid JSON arguments for tool '{tool.name}'"
             ) from error
@@ -184,6 +204,76 @@ def _copy_static_tool(tool: FunctionTool, policy: StaticConfig) -> FunctionTool:
             return await original_invoke(context, arguments_json)
 
         message = f"No static result for tool '{tool.name}'"
+        if policy.on_miss is ToolPolicyOnMiss.ERROR_RESULT:
+            return {"error": message}
+        raise ToolPolicyMissError(message)
+
+    copied_tool.on_invoke_tool = invoke
+    return copied_tool
+
+
+def _copy_history_tool(
+    tool: FunctionTool,
+    policy: HistoryConfig,
+    replay: ReplayResponse,
+    client: KitaruAPIClient,
+    state: _HistoryState,
+) -> FunctionTool:
+    """Copy one function tool and resolve calls from Kitaru history."""
+    copied_tool = copy.copy(tool)
+    original_invoke = copied_tool.on_invoke_tool
+
+    async def lookup(arguments: Any) -> tuple[bool, Any]:
+        cache_key = compute_tool_cache_key(tool.name, arguments)
+        if cache_key is None:
+            raise ToolPolicyError(
+                f"Arguments for tool '{tool.name}' cannot be replayed safely"
+            )
+        occurrence = None
+        if policy.scope is HistoryScope.BASELINE:
+            lock = state.locks.setdefault(cache_key, asyncio.Lock())
+            async with lock:
+                occurrence = state.occurrences.get(cache_key, 0)
+                response = await client.replays.tool_lookup(
+                    replay.id,
+                    ToolLookupRequest(
+                        tool_name=tool.name,
+                        cache_key=cache_key,
+                        occurrence=occurrence,
+                    ),
+                )
+                if response.found:
+                    state.occurrences[cache_key] = occurrence + 1
+                return response.found, response.result
+        response = await client.replays.tool_lookup(
+            replay.id,
+            ToolLookupRequest(
+                tool_name=tool.name,
+                cache_key=cache_key,
+                occurrence=None,
+            ),
+        )
+        return response.found, response.result
+
+    async def invoke(context: Any, arguments_json: str) -> Any:
+        try:
+            arguments = parse_tool_arguments(arguments_json)
+        except (ValueError, TypeError) as error:
+            raise ToolPolicyError(
+                f"Invalid JSON arguments for tool '{tool.name}'"
+            ) from error
+
+        found, result = await lookup(arguments)
+        if found:
+            if result is None or contains_capture_marker(result):
+                raise ToolPolicyError(
+                    f"History result for tool '{tool.name}' cannot be replayed safely"
+                )
+            return result
+        if policy.on_miss is ToolPolicyOnMiss.PASSTHROUGH:
+            return await original_invoke(context, arguments_json)
+
+        message = f"No history result for tool '{tool.name}'"
         if policy.on_miss is ToolPolicyOnMiss.ERROR_RESULT:
             return {"error": message}
         raise ToolPolicyMissError(message)
@@ -236,6 +326,8 @@ def prepare_replay(
     input: Any,
     run_config: RunConfig | dict[str, Any] | None,
     replay: ReplayResponse,
+    *,
+    client: KitaruAPIClient | None = None,
 ) -> PreparedReplay[TContext]:
     """Preflight and apply supported replay changes without mutating caller values.
 
@@ -252,7 +344,12 @@ def prepare_replay(
     Returns:
         Prepared per-run agent, input, and configuration.
     """
-    static_targets = _preflight_tools(starting_agent, replay)
+    tool_targets = _preflight_tools(starting_agent, replay)
+    if (
+        any(isinstance(policy, HistoryConfig) for _, _, policy in tool_targets)
+        and client is None
+    ):
+        raise ToolPolicyError("History replay requires a Kitaru client")
     override = replay.override
     effective_input = normalize_openai_input(
         override.prompt
@@ -262,10 +359,17 @@ def prepare_replay(
     prepared_config = _copy_run_config(run_config)
 
     agent_changes: dict[str, Any] = {}
-    if static_targets:
+    if tool_targets:
+        history_state = _HistoryState()
         tools = list(starting_agent.tools)
-        for index, tool, policy in static_targets:
-            tools[index] = _copy_static_tool(tool, policy)
+        for index, tool, policy in tool_targets:
+            if isinstance(policy, StaticConfig):
+                tools[index] = _copy_static_tool(tool, policy)
+            else:
+                assert client is not None
+                tools[index] = _copy_history_tool(
+                    tool, policy, replay, client, history_state
+                )
         agent_changes["tools"] = tools
     if override is not None and override.system_prompt is not None:
         agent_changes["instructions"] = override.system_prompt

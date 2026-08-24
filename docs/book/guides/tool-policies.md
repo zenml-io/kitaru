@@ -73,13 +73,15 @@ Each `StaticCase` matches arguments with `match_mode="exact"` or `"subset"` and 
 
 {% hint style="warning" %} The API accepts and stores the `llm` policy, but the PydanticAI, Mastra, and Vercel AI SDK adapters do not support it. Those adapters reject the policy before executing the configured tool. Use `static` when you need to provide a simulated result. Check the relevant adapter page before relying on `llm` elsewhere. {% endhint %}
 
-History matching is guaranteed only within the same TypeScript adapter. Different frameworks can apply schema defaults, coercion, or serialization differently, which changes the cache key even when a tool call looks equivalent. The TypeScript adapters also fail closed on a found `null` history result because the current API cannot distinguish a successful `null` from a recorded failure.
+History matching is guaranteed only within the same adapter implementation. Different frameworks can apply schema defaults, coercion, or serialization differently, which changes the cache key even when a tool call looks equivalent. The TypeScript and OpenAI Agents adapters also fail closed on a found `null` history result because the current API cannot distinguish a successful `null` from a recorded failure.
+
+{% hint style="info" %} The OpenAI Agents adapter supports history only for named direct function tools and requires the default policy to remain `passthrough`. It also fails closed on found `null` or truncated results. See the [OpenAI Agents adapter page](../adapters/openai-agents.md) for its target and concurrency limits. {% endhint %}
 
 ## How matching works
 
 A recorded `tool_call` node has a cache key derived from the tool name and its canonical JSON arguments. During replay, the adapter computes the same key for the attempted call and asks the server for a match within the policy's scope. Calls with different arguments have different keys and do not match.
 
-A baseline can call the same tool with identical arguments more than once and receive different results. With `baseline` scope, the PydanticAI, LangGraph, and TypeScript (Mastra and Vercel AI SDK) adapters consume those recorded results in their original order: the first replayed call gets the first recorded result, the second gets the second, and so on. A replayed call past the last recorded occurrence is a miss and follows the configured `on_miss` behavior. With `cohort_version` and `agent` scope, the newest matching recording answers every call.
+A baseline can call the same tool with identical arguments more than once and receive different results. With `baseline` scope, the PydanticAI, LangGraph, OpenAI Agents, and TypeScript (Mastra and Vercel AI SDK) adapters consume those recorded results in invocation order: the first replayed call gets the first recorded result, the second gets the second, and so on. A replayed call past the last recorded occurrence is a miss and follows the configured `on_miss` behavior. With `cohort_version` and `agent` scope, the newest matching recording answers every call.
 
 If a tool call's arguments cannot be serialized to canonical JSON, the call has no cache key. A history lookup cannot match it, so replay follows the configured `on_miss` behavior. Keep tool arguments JSON-serializable if you plan to replay them from history.
 

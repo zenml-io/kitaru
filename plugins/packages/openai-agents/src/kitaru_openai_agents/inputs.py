@@ -22,6 +22,26 @@ from pydantic import TypeAdapter, ValidationError
 _INPUT_ITEMS_ADAPTER = TypeAdapter(list[TResponseInputItem])
 
 
+def parse_tool_arguments(value: str) -> Any:
+    """Parse function tool arguments as strict JSON."""
+
+    def reject_constant(constant: str) -> Any:
+        raise ValueError(f"Invalid JSON constant: {constant}")
+
+    return json.loads(value, parse_constant=reject_constant)
+
+
+def contains_capture_marker(value: Any) -> bool:
+    """Check whether captured data contains a lossy serialization marker."""
+    if isinstance(value, dict):
+        if "_kitaru_truncated" in value or "_kitaru_unsupported_type" in value:
+            return True
+        return any(contains_capture_marker(item) for item in value.values())
+    if isinstance(value, list):
+        return any(contains_capture_marker(item) for item in value)
+    return False
+
+
 def normalize_openai_input(value: Any) -> str | list[TResponseInputItem]:
     """Keep valid OpenAI input lists and serialize other JSON deterministically."""
     if isinstance(value, str):

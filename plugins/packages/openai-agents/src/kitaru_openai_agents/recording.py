@@ -41,6 +41,7 @@ from agents import (
     TResponseInputItem,
 )
 from openai.types.responses import (
+    ResponseFunctionToolCall,
     ResponseOutputMessage,
     ResponseOutputRefusal,
     ResponseOutputText,
@@ -64,7 +65,11 @@ from kitaru.api_models.v1.session_node import (
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru.client import KitaruAPIClient
 
-from .inputs import normalize_openai_input
+from .inputs import (
+    contains_capture_marker,
+    normalize_openai_input,
+    parse_tool_arguments,
+)
 
 TContext = TypeVar("TContext")
 SessionObserver = Callable[[SessionResponse], Awaitable[None] | None]
@@ -286,6 +291,7 @@ class RunRecorder:
                 continue
             self._seen.add(("tool", call_id))
             output = outputs.get(call.call_id)
+            tool_inputs, tool_attributes = _capture_tool_input(call)
             await self._append_node(
                 node_type=NodeType.TOOL_CALL,
                 name=call.tool_name or _raw_type(call.raw_item) or "hosted_tool",
@@ -293,9 +299,10 @@ class RunRecorder:
                 external_id=call.call_id or _raw_id(call.raw_item),
                 started_at=None,
                 ended_at=None,
-                inputs=_capture_tool_input(call),
+                inputs=tool_inputs,
                 outputs=_capture(output.output) if output is not None else None,
                 tool_name=call.tool_name,
+                attributes=tool_attributes,
             )
 
         for position, item in enumerate(new_items):
@@ -760,16 +767,31 @@ def _capture_usage(response: ModelResponse) -> TokenUsage:
     )
 
 
-def _capture_tool_input(item: ToolCallItem) -> Any:
+def _capture_tool_input(item: ToolCallItem) -> tuple[Any, dict[str, str]]:
     raw = item.raw_item
+    if isinstance(raw, ResponseFunctionToolCall):
+        try:
+            arguments = parse_tool_arguments(raw.arguments)
+        except (ValueError, TypeError):
+            return None, {"kitaru.tool_arguments": "invalid_json"}
+        captured = _capture(arguments)
+        if contains_capture_marker(captured):
+            return None, {"kitaru.tool_arguments": "capture_loss"}
+        return captured, {}
     if isinstance(raw, dict):
-        return {
-            key: _capture(raw[key])
-            for key in ("arguments", "action", "query")
-            if key in raw
-        }
+        return (
+            {
+                key: _capture(raw[key])
+                for key in ("arguments", "action", "query")
+                if key in raw
+            },
+            {},
+        )
     arguments = getattr(raw, "arguments", None)
-    return {"arguments": _capture(arguments)} if arguments is not None else None
+    return (
+        ({"arguments": _capture(arguments)} if arguments is not None else None),
+        {},
+    )
 
 
 def _raw_id(value: Any) -> str | None:

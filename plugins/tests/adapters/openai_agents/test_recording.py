@@ -679,6 +679,7 @@ async def test_reconciles_tools_hosted_calls_and_handoffs_by_public_ids() -> Non
     ]
     tool = nodes[2]
     assert tool.external_id == "call-1"
+    assert tool.inputs == {"city": "Paris"}
     assert tool.outputs == {"forecast": "sunny"}
     assert nodes[3].external_id == "hosted-1"
     assert nodes[4].subagent_id == "target"
