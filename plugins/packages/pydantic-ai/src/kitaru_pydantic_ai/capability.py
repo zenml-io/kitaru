@@ -792,11 +792,23 @@ class _KitaruCapability(AbstractCapability[Any]):
                             occurrence=occurrence,
                         ),
                     )
-                    if response.found:
+                    match = response.match
+                    if match is not None:
                         if occurrence is not None:
                             state.history_occurrences[cache_key] = occurrence + 1
-                        result = response.result
-                        mocked_policy = policy.type
+                        if match.status is NodeStatus.COMPLETED:
+                            result = match.result
+                            mocked_policy = policy.type
+                        elif match.status is NodeStatus.FAILED:
+                            raise ToolPolicyError(
+                                match.error
+                                or f"Recorded tool call '{call.tool_name}' failed"
+                            )
+                        else:
+                            raise ToolPolicyError(
+                                f"History lookup for tool '{call.tool_name}' returned "
+                                f"unexpected status '{match.status.value}'"
+                            )
                     else:
                         result, mocked_policy, failed_result = await self._handle_miss(
                             policy.type, policy.on_miss, call.tool_name, args, handler
