@@ -340,7 +340,7 @@ describe("KitaruClient", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("validates replay IDs and lookup discriminators", async () => {
+  it("validates replay IDs and requires a lookup match", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(
@@ -352,7 +352,7 @@ describe("KitaruClient", () => {
           tool_policy: { default: { type: "passthrough" } },
         }),
       )
-      .mockResolvedValueOnce(jsonResponse({ result: null }));
+      .mockResolvedValueOnce(jsonResponse({}));
     const client = new KitaruClient({
       apiUrl: "https://api.example",
       fetch,
@@ -364,7 +364,31 @@ describe("KitaruClient", () => {
         cache_key: "a".repeat(64),
         tool_name: "normalize",
       } satisfies ToolLookupRequest),
-    ).rejects.toThrow("missing found discriminator");
+    ).rejects.toThrow("missing match");
+  });
+
+  it.each([
+    ["a non-object match", { match: "completed" }],
+    ["a missing result", { match: { status: "completed" } }],
+    ["an unknown status", { match: { result: null, status: "unknown" } }],
+    [
+      "a malformed error",
+      {
+        match: { error: { message: "failed" }, result: null, status: "failed" },
+      },
+    ],
+  ])("rejects a tool lookup with %s", async (_name, response) => {
+    const fetch = vi.fn<typeof globalThis.fetch>(async () =>
+      jsonResponse(response),
+    );
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await expect(
+      client.lookupToolResult(REPLAY_ID, {
+        cache_key: "a".repeat(64),
+        tool_name: "normalize",
+      }),
+    ).rejects.toThrow("Invalid response");
   });
 
   it.each([
@@ -436,7 +460,11 @@ describe("KitaruClient", () => {
       .mockResolvedValueOnce(jsonResponse([nodeResponse]))
       .mockResolvedValueOnce(jsonResponse(replayResponse))
       .mockResolvedValueOnce(jsonResponse(taskSpec))
-      .mockResolvedValueOnce(jsonResponse({ found: true, result: null }));
+      .mockResolvedValueOnce(
+        jsonResponse({
+          match: { error: null, result: null, status: "completed" },
+        }),
+      );
     const client = new KitaruClient({
       apiKey: "secret",
       apiUrl: "https://api.example",

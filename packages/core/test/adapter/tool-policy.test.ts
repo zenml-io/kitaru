@@ -45,17 +45,15 @@ describe("normalized replay policy decisions", () => {
     });
   });
 
-  it.each([
-    "fail",
-    "error_result",
-    "passthrough",
-  ] as const)("fails closed for an ambiguous null history result with %s on_miss", async (onMiss) => {
+  it("replays a completed null result without treating it as a miss", async () => {
     const run = state(
       {
-        default: { on_miss: onMiss, scope: "baseline", type: "history" },
+        default: { on_miss: "passthrough", scope: "baseline", type: "history" },
         tools: {},
       },
-      () => ({ found: true, result: null }),
+      () => ({
+        match: { error: null, result: null, status: "completed" },
+      }),
     );
 
     await expect(
@@ -64,14 +62,62 @@ describe("normalized replay policy decisions", () => {
         inputs: { value: 1 },
         toolName: "lookup",
       }),
-    ).rejects.toThrow(
-      /cannot distinguish a failed recording from a null result/,
+    ).resolves.toEqual({ output: null, type: "mocked_result" });
+    expect(run.getToolCall("call-1")).toMatchObject({
+      mocked: true,
+      outcome: "completed",
+      output: null,
+    });
+  });
+
+  it.each([
+    ["recorded text", "tool raised an exception", "tool raised an exception"],
+    ["no text", null, "Recorded tool call 'lookup' failed"],
+  ] as const)("throws a recorded failure with %s", async (_name, error, message) => {
+    const { client, run } = runState(
+      {
+        default: { on_miss: "passthrough", scope: "baseline", type: "history" },
+        tools: {},
+      },
+      () => ({ match: { error, result: null, status: "failed" } }),
     );
-    expect(run.failure).toBeInstanceOf(ToolPolicyError);
+
+    await expect(
+      decideToolCall(run, {
+        callId: "call-1",
+        inputs: { value: 1 },
+        toolName: "lookup",
+      }),
+    ).rejects.toEqual(
+      expect.objectContaining({ message, name: "ToolPolicyError" }),
+    );
     expect(run.getToolCall("call-1")).toMatchObject({
       mocked: false,
       outcome: "failed",
     });
+    expect(client.lookups[0]?.occurrence).toBe(0);
+    expect(
+      run.getHistoryOccurrence(client.lookups[0]?.cache_key ?? "missing"),
+    ).toBe(1);
+  });
+
+  it("fails closed for an unexpected recorded status", async () => {
+    const run = state(
+      {
+        default: { on_miss: "passthrough", scope: "baseline", type: "history" },
+        tools: {},
+      },
+      () => ({ match: { error: null, result: null, status: "in_progress" } }),
+    );
+
+    await expect(
+      decideToolCall(run, {
+        callId: "call-1",
+        inputs: { value: 1 },
+        toolName: "lookup",
+      }),
+    ).rejects.toThrow("unexpected status 'in_progress'");
+    expect(run.failure).toBeInstanceOf(ToolPolicyError);
   });
 
   it.each([
@@ -213,8 +259,11 @@ describe("normalized replay policy decisions", () => {
   it("replays repeated identical baseline calls in recorded order", async () => {
     const recorded = ["first", "second", "third"];
     const { client, run } = runState(baselineHistory("fail"), (request) => ({
-      found: true,
-      result: { value: recorded[request.occurrence ?? 0] },
+      match: {
+        error: null,
+        result: { value: recorded[request.occurrence ?? 0] },
+        status: "completed",
+      },
     }));
 
     for (const [index, value] of recorded.entries()) {
@@ -229,8 +278,11 @@ describe("normalized replay policy decisions", () => {
 
   it("counts baseline occurrences per cache key, not per run", async () => {
     const { client, run } = runState(baselineHistory("fail"), (request) => ({
-      found: true,
-      result: { value: request.occurrence ?? 0 },
+      match: {
+        error: null,
+        result: { value: request.occurrence ?? 0 },
+        status: "completed",
+      },
     }));
 
     await decideToolCall(run, { callId: "call-1", ...weatherDelft });
@@ -251,9 +303,15 @@ describe("normalized replay policy decisions", () => {
     const { client, run } = runState(baselineHistory("passthrough"), () => {
       if (firstCall) {
         firstCall = false;
-        return { found: false, result: null };
+        return { match: null };
       }
-      return { found: true, result: { value: "recorded" } };
+      return {
+        match: {
+          error: null,
+          result: { value: "recorded" },
+          status: "completed",
+        },
+      };
     });
 
     await expect(
@@ -277,7 +335,13 @@ describe("normalized replay policy decisions", () => {
         default: { on_miss: "fail", scope, type: "history" },
         tools: {},
       },
-      () => ({ found: true, result: { value: "recorded" } }),
+      () => ({
+        match: {
+          error: null,
+          result: { value: "recorded" },
+          status: "completed",
+        },
+      }),
     );
     await decideToolCall(run, { callId: "call-1", ...weatherDelft });
     await decideToolCall(run, { callId: "call-2", ...weatherDelft });
@@ -290,8 +354,14 @@ describe("normalized replay policy decisions", () => {
   it("follows on_miss for a call past the last recorded occurrence", async () => {
     const { client, run } = runState(baselineHistory("fail"), (request) =>
       (request.occurrence ?? 0) < 1
-        ? { found: true, result: { value: "only" } }
-        : { found: false, result: null },
+        ? {
+            match: {
+              error: null,
+              result: { value: "only" },
+              status: "completed",
+            },
+          }
+        : { match: null },
     );
 
     await expect(

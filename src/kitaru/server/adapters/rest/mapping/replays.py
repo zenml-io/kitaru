@@ -131,7 +131,7 @@ def tool_lookup_result_to_response(
         Tool lookup response.
     """
     if result is None:
-        return ToolLookupResponse()
+        return ToolLookupResponse(match=None)
     return ToolLookupResponse(
         match=ToolLookupMatch(
             result=result.result, status=result.status, error=result.error
