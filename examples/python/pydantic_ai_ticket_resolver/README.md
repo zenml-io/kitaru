@@ -37,7 +37,7 @@ Check the currently selected Kitaru server:
 uv run kitaru status
 ```
 
-If the selected server is healthy, keep using it. It can be local or cloud. Check whether this template is already set up there:
+If the selected server is healthy, keep using it. It can be local or cloud. Check whether this example is already set up there:
 
 ```bash
 uv run kitaru agent get returns-resolver
