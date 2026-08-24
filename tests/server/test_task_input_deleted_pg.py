@@ -20,6 +20,7 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import httpx
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from conftest import db_settings, lifespan_client
@@ -467,6 +468,62 @@ async def test_worker_calls_after_input_deleted_mid_flight_never_5xx() -> None:
         ].text
         assert calls["get_task"].status_code == 200
         assert calls["get_spec"].status_code == 404
+
+
+async def test_completing_evaluator_task_after_input_deleted_never_5xx() -> None:
+    """A completed evaluator task whose session vanished records nothing."""
+    settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
+    async with lifespan_client(settings) as client:
+        owner_id = await _account_id(client)
+        agent = await _agent(client, "assistant")
+        session = await _session(client, agent["id"])
+        plugin = await _evaluator_plugin(client, "accuracy")
+
+        _job_id, task_id = await _raw_evaluator_job(
+            settings,
+            owner_id,
+            uuid.UUID(plugin["version"]["id"]),
+            uuid.UUID(session["id"]),
+        )
+
+        _worker_id, worker_token = await _register_worker(
+            client, {"claims": [{"kind": "evaluator"}]}
+        )
+        entries = await _claim_all(client, worker_token)
+        assert [entry["task"]["id"] for entry in entries] == [task_id], entries
+        task_token = entries[0]["token"]
+
+        running = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "running"},
+            headers=_bearer(task_token),
+        )
+        assert running.status_code == 200, running.text
+
+        # Delete the scored session while its evaluator task is mid-flight.
+        deleted = await client.delete(f"/api/v1/sessions/{session['id']}")
+        assert deleted.status_code == 204, deleted.text
+
+        completed = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={
+                "status": "completed",
+                "result": [{"name": "accuracy", "score": 0.9}],
+            },
+            headers=_bearer(task_token),
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["status"] == "completed"
+
+        # The deleted session cascade-removes its evaluation rows, so the
+        # completion writes none rather than colliding with the vanished
+        # session's foreign key.
+        async with _raw_session(settings) as raw:
+            count = await raw.scalar(
+                text("SELECT count(*) FROM evaluation WHERE session_id = :sid"),
+                {"sid": session["id"]},
+            )
+        assert count == 0
 
 
 # ---------------------------------------------------------------------------
