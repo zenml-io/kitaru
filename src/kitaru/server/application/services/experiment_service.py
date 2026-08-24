@@ -359,7 +359,9 @@ class ExperimentService:
             job_ids.extend(
                 replay.job_id for replay in replays if replay.job_id is not None
             )
-        await self._transitions.request_jobs_cancel(job_ids)
+        # Settle without publishing JobsSettled. Its subscribers lock the
+        # replay and run rows in the opposite order of the delete cascade.
+        await self._transitions.request_jobs_cancel(job_ids, dispatch_settled=False)
         await self._repository.delete(experiment_id)
         await self._repository.delete_replay_config(experiment.replay_config_id)
 

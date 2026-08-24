@@ -4431,16 +4431,24 @@ async def create_experiment(
 class FakeReplayRepository:
     """In-memory replay repository."""
 
-    def __init__(self, sessions: "FakeSessionRepository | None" = None) -> None:
+    def __init__(
+        self,
+        sessions: "FakeSessionRepository | None" = None,
+        experiment_runs: "FakeExperimentRunRepository | None" = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
             sessions: Fake session repository, wired back onto the session
                 repository so its delete can check for a replay reference.
+            experiment_runs: Fake experiment run repository, wired back onto
+                the run repository so its delete cascades these replays.
         """
         self._replays: dict[uuid.UUID, Replay] = {}
         if sessions is not None:
             sessions._replays = self
+        if experiment_runs is not None:
+            experiment_runs._replays = self
 
     def _check_duplicate_baseline(self, replay: Replay) -> None:
         for other in self._replays.values():
@@ -4771,6 +4779,9 @@ class FakeExperimentRunRepository:
         # Wired back by FakeCohortVersionRepository, to resolve the cohort
         # filter the way the SQL repository resolves it through a subquery.
         self._cohort_versions: FakeCohortVersionRepository | None = None
+        # Wired back by FakeReplayRepository, so delete cascades a run's
+        # replays the way the SQL foreign key cascades them.
+        self._replays: FakeReplayRepository | None = None
 
     async def create(self, run: ExperimentRun) -> ExperimentRun:
         """Persist a new experiment run.
@@ -4911,6 +4922,13 @@ class FakeExperimentRunRepository:
         if experiment_run_id not in self._runs:
             raise ExperimentRunNotFound(experiment_run_id)
         del self._runs[experiment_run_id]
+        if self._replays is not None:
+            for replay_id in [
+                replay.id
+                for replay in self._replays._replays.values()
+                if replay.experiment_run_id == experiment_run_id
+            ]:
+                del self._replays._replays[replay_id]
 
     async def get_max_number(self, experiment_id: uuid.UUID) -> int:
         """Read the highest run number an experiment has assigned.
@@ -6221,8 +6239,8 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
     jobs = substrate.jobs
     tags = FakeTagRepository()
     cohorts = FakeCohortRepository(tags=tags)
-    replays = FakeReplayRepository()
     experiment_runs = FakeExperimentRunRepository(tag_repository=tags)
+    replays = FakeReplayRepository(experiment_runs=experiment_runs)
     cohort_versions = FakeCohortVersionRepository(
         cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs, tags=tags
     )

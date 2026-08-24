@@ -42,7 +42,7 @@ from kitaru.server.domain.plugin import (
     PluginKind,
     ScriptPluginSource,
 )
-from kitaru.server.domain.task import ImportTask, TaskNotFound
+from kitaru.server.domain.task import ImportTask
 
 Setup = tuple[BlobRepository, uuid.UUID]
 
@@ -158,8 +158,8 @@ async def test_delete_in_use(setup: Setup) -> None:
         await repository.delete(blob.id)
 
 
-async def test_delete_cascades_task_with_payload() -> None:
-    """Deleting a blob deletes the import task carrying it as payload."""
+async def test_delete_leaves_task_with_payload() -> None:
+    """Deleting a blob leaves the import task that names it as payload."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session() as session:
@@ -196,5 +196,6 @@ async def test_delete_cascades_task_with_payload() -> None:
 
         await blob_repository.delete(payload_blob.id)
 
-        with pytest.raises(TaskNotFound):
-            await task_repository.get(task.id)
+        stored = await task_repository.get(task.id)
+        assert isinstance(stored, ImportTask)
+        assert stored.payload_blob_id == payload_blob.id

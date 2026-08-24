@@ -235,18 +235,24 @@ class TaskTransitions:
             )
 
     async def request_jobs_cancel(
-        self, job_ids: Sequence[uuid.UUID], nowait: bool = False
+        self,
+        job_ids: Sequence[uuid.UUID],
+        nowait: bool = False,
+        dispatch_settled: bool = True,
     ) -> None:
-        """Stamp the cancel request on each job and cancel their pending tasks.
+        """Stamp the cancel request on each job, cancel pending tasks, and settle.
 
         Locks the jobs' live task rows in one id-ordered acquisition, then
         their job rows. A job id matching no job, or a settled job, is
-        skipped.
+        skipped. Cancelling the pending tasks can leave a job with nothing
+        live left, so the drained jobs settle here rather than in each caller.
 
         Args:
             job_ids: Ids of the jobs.
             nowait: Whether to fail instead of waiting when another
                 transaction holds one of the task rows.
+            dispatch_settled: Whether the settlement of the drained jobs
+                publishes ``JobsSettled``.
 
         Raises:
             DBAPIError: ``nowait`` is set and a task row is held elsewhere.
@@ -265,34 +271,21 @@ class TaskTransitions:
             canceling.append(job)
         if canceling:
             await self._jobs.update_many(canceling)
+        await self.settle_jobs_if_drained(job_ids, dispatch=dispatch_settled)
 
-    async def settle_job_if_drained(self, job_id: uuid.UUID) -> Job:
-        """Settle a job once every one of its tasks is terminal.
-
-        Locks the job row and no task row.
-
-        Args:
-            job_id: Id of the job.
-
-        Raises:
-            JobNotFound: No job has this id.
-
-        Returns:
-            Loaded job, settled if its tasks have drained.
-        """
-        job = await self._jobs.get(job_id, exclusive=True)
-        tasks = await self._tasks.list_by_job(job_id)
-        return await self._settle_drained_job(job, tasks)
-
-    async def settle_jobs_if_drained(self, job_ids: Sequence[uuid.UUID]) -> None:
+    async def settle_jobs_if_drained(
+        self, job_ids: Sequence[uuid.UUID], dispatch: bool = True
+    ) -> None:
         """Settle every drained job among many in one bulk read and one bulk write.
 
         Locks the job rows in one id-ordered acquisition and no task row. A
         job that already settled, or still has a non-terminal task, is left
-        untouched. The newly settled jobs publish a single ``JobsSettled``.
+        untouched.
 
         Args:
             job_ids: Ids of the jobs.
+            dispatch: Whether the newly settled jobs publish a single
+                ``JobsSettled``.
         """
         if not job_ids:
             return
@@ -318,7 +311,8 @@ class TaskTransitions:
         if not settled:
             return
         stored = await self._jobs.update_many(settled)
-        await self._dispatcher.dispatch(JobsSettled(jobs=stored))
+        if dispatch:
+            await self._dispatcher.dispatch(JobsSettled(jobs=stored))
 
     async def cancel_job(self, job_id: uuid.UUID) -> Job:
         """Stamp the cancel request on a job and settle it if that drained it.
@@ -333,7 +327,9 @@ class TaskTransitions:
             Stored job carrying the cancel request.
         """
         await self.request_jobs_cancel([job_id])
-        return await self.settle_job_if_drained(job_id)
+        # The cancel already settled the job if it drained it, so this reads
+        # the stored row back rather than deciding anything.
+        return await self._jobs.get(job_id)
 
     async def _track_task_terminal(self, task: Task, job: Job) -> None:
         """Track a task's transition to a terminal status by kind.

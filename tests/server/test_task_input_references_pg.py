@@ -97,6 +97,7 @@ async def test_task_names_a_missing_agent_version(setup: Setup) -> None:
     stored = await SQLTaskRepository(setup.session).create(
         AgentTask(job_id=setup.job_id, agent_version_id=uuid.uuid4(), inputs={})
     )
+    assert isinstance(stored, AgentTask)
     assert stored.agent_version_id is not None
 
 
@@ -109,6 +110,7 @@ async def test_task_names_a_missing_input_session(setup: Setup) -> None:
             input_session_id=uuid.uuid4(),
         )
     )
+    assert isinstance(stored, EvaluationTask)
     assert stored.input_session_id is not None
 
 
@@ -122,6 +124,7 @@ async def test_task_names_a_missing_payload_blob(setup: Setup) -> None:
             agent_id=setup.agent_id,
         )
     )
+    assert isinstance(stored, ImportTask)
     assert stored.payload_blob_id is not None
 
 

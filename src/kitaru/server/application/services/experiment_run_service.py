@@ -183,7 +183,6 @@ class ExperimentRunService:
             if replay.job_id is not None and not replay.settled
         ]
         await self._transitions.request_jobs_cancel(job_ids)
-        await self._transitions.settle_jobs_if_drained(job_ids)
         run = await self._repository.get(experiment_run_id)
         counts = await self._replays.count_by_status(experiment_run_id)
         return run, counts
@@ -206,7 +205,10 @@ class ExperimentRunService:
         _ = actor
         await self._repository.get(experiment_run_id)
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
+        # Settle without publishing JobsSettled. Its subscribers lock the
+        # replay and run rows in the opposite order of the delete cascade.
         await self._transitions.request_jobs_cancel(
-            [replay.job_id for replay in replays if replay.job_id is not None]
+            [replay.job_id for replay in replays if replay.job_id is not None],
+            dispatch_settled=False,
         )
         await self._repository.delete(experiment_run_id)
