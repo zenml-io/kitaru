@@ -258,8 +258,8 @@ export async function decideToolCall(
     if (occurrence !== undefined) {
       state.advanceHistoryOccurrence(cacheKey, occurrence);
     }
+    entry.mocked = true;
     if (lookup.match.status === "completed") {
-      entry.mocked = true;
       entry.outcome = "completed";
       entry.output = toRecorderJson(lookup.match.result);
       return { output: lookup.match.result, type: "mocked_result" };

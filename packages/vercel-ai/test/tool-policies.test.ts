@@ -361,6 +361,7 @@ describe("replay tool policies", () => {
       .flatMap((batch) => batch.nodes)
       .find((node) => node.node_type === "tool_call");
     expect(toolNode).toMatchObject({
+      attributes: { mocked: true, policy: "history" },
       error: "recorded tool failure",
       outputs: null,
       status: "failed",

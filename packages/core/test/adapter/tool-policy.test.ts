@@ -92,8 +92,9 @@ describe("normalized replay policy decisions", () => {
       expect.objectContaining({ message, name: "ToolPolicyError" }),
     );
     expect(run.getToolCall("call-1")).toMatchObject({
-      mocked: false,
+      mocked: true,
       outcome: "failed",
+      policy: "history",
     });
     expect(client.lookups[0]?.occurrence).toBe(0);
     expect(
@@ -118,6 +119,11 @@ describe("normalized replay policy decisions", () => {
       }),
     ).rejects.toThrow("unexpected status 'in_progress'");
     expect(run.failure).toBeInstanceOf(ToolPolicyError);
+    expect(run.getToolCall("call-1")).toMatchObject({
+      mocked: true,
+      outcome: "failed",
+      policy: "history",
+    });
   });
 
   it.each([

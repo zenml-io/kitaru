@@ -796,9 +796,9 @@ class _KitaruCapability(AbstractCapability[Any]):
                     if match is not None:
                         if occurrence is not None:
                             state.history_occurrences[cache_key] = occurrence + 1
+                        mocked_policy = policy.type
                         if match.status is NodeStatus.COMPLETED:
                             result = match.result
-                            mocked_policy = policy.type
                         elif match.status is NodeStatus.FAILED:
                             raise ToolPolicyError(
                                 match.error
@@ -830,7 +830,11 @@ class _KitaruCapability(AbstractCapability[Any]):
                     started_at=started_at,
                     status=NodeStatus.FAILED,
                     error=_error_text(error),
-                    attributes={},
+                    attributes=(
+                        {"mocked": True, "policy": mocked_policy}
+                        if mocked_policy
+                        else {}
+                    ),
                     external_id=call.tool_call_id,
                 )
             except BaseException as recording_error:

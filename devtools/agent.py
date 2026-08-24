@@ -122,11 +122,13 @@ class PolicyToolResolver:
                     )
                 if match.status is NodeStatus.FAILED:
                     raise ToolResolutionError(
-                        match.error or f"Recorded tool call {tool_name!r} failed"
+                        match.error or f"Recorded tool call {tool_name!r} failed",
+                        attributes={"mocked": True, "policy": policy.type},
                     )
                 raise ToolResolutionError(
                     f"History lookup for tool {tool_name!r} returned unexpected "
-                    f"status {match.status.value!r}"
+                    f"status {match.status.value!r}",
+                    attributes={"mocked": True, "policy": policy.type},
                 )
             return self._handle_miss(policy.type, policy.on_miss, tool_name, inputs)
         raise ToolResolutionError(

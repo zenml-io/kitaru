@@ -1340,6 +1340,7 @@ async def test_history_policy_raises_and_records_failed_match(
     assert tool.status is NodeStatus.FAILED
     assert tool.outputs is None
     assert tool.error == expected_error
+    assert tool.attributes == {"mocked": True, "policy": "history"}
     assert client.replays.lookups[0][1].occurrence == 0
     cache_key = client.replays.lookups[0][1].cache_key
     assert run_states[0].history_occurrences[cache_key] == 1
@@ -1379,6 +1380,7 @@ async def test_history_policy_fails_closed_for_unexpected_match_status(
     client = _FakeClient.instances[0]
     tool = next(node for node in _nodes(client) if node.node_type is NodeType.TOOL_CALL)
     assert tool.status is NodeStatus.FAILED
+    assert tool.attributes == {"mocked": True, "policy": "history"}
     assert client.replays.lookups[0][1].occurrence == 0
 
 

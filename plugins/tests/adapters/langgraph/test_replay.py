@@ -28,7 +28,7 @@ from kitaru_langgraph import ToolPolicyError, ToolPolicyMissError
 from kitaru_langgraph.capture import CapturePolicy
 from kitaru_langgraph.codec import encode_tool_outcome
 from kitaru_langgraph.langchain import KitaruLangGraphMiddleware
-from kitaru_langgraph.recording import _ACTIVE_INVOCATION
+from kitaru_langgraph.recording import _ACTIVE_INVOCATION, InvocationRecorder
 
 
 class _SyncBridge:
@@ -390,6 +390,35 @@ async def test_history_failed_match_raises_and_records_substitution(
     assert recorder.recorded[0]["result"] is None
     assert recorder.recorded[0]["policy_name"] == "history"
     assert str(recorder.recorded[0]["error"]) == expected_error
+
+
+async def test_history_failed_match_persists_error_message(fake_client: Any) -> None:
+    recorded_error = "recorded tool failure"
+    recorder = await InvocationRecorder.setup(
+        {"input": True},
+        None,
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        batch_size=1,
+        policy=CapturePolicy(),
+    )
+    await recorder.record_tool_substitution(
+        tool_call_id="call-1",
+        tool_name="weather",
+        arguments={"city": "Paris"},
+        result=None,
+        policy_name="history",
+        error=ToolPolicyError(recorded_error),
+    )
+
+    nodes = [
+        node
+        for _, batch in fake_client.instances[0].sessions.node_batches
+        for node in batch.nodes
+    ]
+    emitted = next(node for node in nodes if node.name == "weather")
+    assert emitted.error == recorded_error
 
 
 @pytest.mark.parametrize("sync", [False, True], ids=["async", "sync"])

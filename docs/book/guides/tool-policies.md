@@ -73,7 +73,7 @@ Each `StaticCase` matches arguments with `match_mode="exact"` or `"subset"` and 
 
 {% hint style="warning" %} The API accepts and stores the `llm` policy, but the PydanticAI, Mastra, and Vercel AI SDK adapters do not support it. Those adapters reject the policy before executing the configured tool. Use `static` when you need to provide a simulated result. Check the relevant adapter page before relying on `llm` elsewhere. {% endhint %}
 
-History matching is guaranteed only within the same TypeScript adapter. Different frameworks can apply schema defaults, coercion, or serialization differently, which changes the cache key even when a tool call looks equivalent. A completed history match replays its result, including `null`. A failed match raises its stored error without executing the live tool. Only a genuine miss follows `on_miss`.
+History matching is guaranteed only within the same TypeScript adapter. Different frameworks can apply schema defaults, coercion, or serialization differently, which changes the cache key even when a tool call looks equivalent. A completed history match replays its result, including `null`, except in LangGraph: it requires a recorded `ToolMessage` or `Command` envelope and fails closed for `null` or malformed completed results. A failed match raises its stored error without executing the live tool. Only a genuine miss follows `on_miss`.
 
 ## How matching works
 

@@ -431,7 +431,9 @@ class InvocationRecorder:
                 node_type=NodeType.TOOL_CALL,
                 name=tool_name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=type(error).__name__ if error is not None else None,
+                error=(str(error) or type(error).__name__)
+                if error is not None
+                else None,
                 started_at=datetime.now(UTC),
                 ended_at=datetime.now(UTC),
                 inputs=input_capture.value,
