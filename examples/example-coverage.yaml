@@ -19,7 +19,7 @@ examples:
       - docs/book/getting-started/quickstart.md
       - docs/book/tutorials/returns-agent/README.md
       - docs/book/adapters/pydantic-ai.md
-    owner_area: canonical Python returns-agent walkthrough from imported evidence
+    owner_area: quickstart Python returns-agent walkthrough from imported evidence
       through replayed experiment
     coverage:
       deterministic_pytest:
@@ -33,7 +33,7 @@ examples:
           examples/python/pydantic_ai_ticket_resolver/scripts/run_ci_e2e.py
         requires_server: true
         timeout_seconds: 600
-        notes: The canonical-example CI job builds current Kitaru and plugin wheels
+        notes: The quickstart-example CI job builds current Kitaru and plugin wheels
           before running this complete standalone validation.
       live_provider:
         status: manual_only

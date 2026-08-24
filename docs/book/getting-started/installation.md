@@ -160,4 +160,4 @@ kitaru doctor
 
 ## Next steps
 
-Read the [Quickstart](quickstart.md) to understand Kitaru's five-step method. For a controlled hands-on path, prepare the [canonical returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) and continue with the [complete returns-agent tutorial](../tutorials/returns-agent/README.md). If you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).
+Read the [Quickstart](quickstart.md) to understand Kitaru's five-step method. For a controlled hands-on path, prepare the [PydanticAI returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) and continue with the [complete returns-agent tutorial](../tutorials/returns-agent/README.md). If you already collect traces elsewhere, start with [Import your traces](import-your-traces.md).

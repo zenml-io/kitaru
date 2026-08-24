@@ -1,4 +1,4 @@
-"""Contract tests for the canonical returns-resolution example."""
+"""Contract tests for the quickstart returns-resolution example."""
 
 import json
 import re
@@ -104,7 +104,7 @@ def test_checked_in_langfuse_export_contains_replayable_tool_traces() -> None:
         item
         for item in parse(
             TRACE_PATH.read_bytes(),
-            {"source_instance": "canonical-returns-example"},
+            {"source_instance": "quickstart-returns-example"},
         )
         if isinstance(item, ImportedSession)
     ]

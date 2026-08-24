@@ -2,7 +2,7 @@
 # requires-python = ">=3.11"
 # dependencies = []
 # ///
-"""Test-only evaluator for the canonical returns end-to-end contract."""
+"""Test-only evaluator for the quickstart returns end-to-end contract."""
 
 import json
 from decimal import Decimal, InvalidOperation

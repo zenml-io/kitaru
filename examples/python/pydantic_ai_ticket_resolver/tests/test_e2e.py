@@ -1,4 +1,4 @@
-"""Run the canonical CLI walkthrough against a real local Kitaru server."""
+"""Run the quickstart CLI walkthrough against a real local Kitaru server."""
 
 import json
 import os
@@ -19,16 +19,16 @@ EVALUATOR_FIXTURE_PATH = TEST_ASSETS_DIR / "canonical_returns_evaluator.py"
 CLI = Path(sys.executable).with_name("kitaru")
 
 pytestmark = pytest.mark.skipif(
-    os.environ.get("KITARU_CANONICAL_E2E") != "1",
-    reason="Set KITARU_CANONICAL_E2E=1 against an isolated local server.",
+    os.environ.get("KITARU_QUICKSTART_E2E") != "1",
+    reason="Set KITARU_QUICKSTART_E2E=1 against an isolated local server.",
 )
 
 
 def _subprocess_environment() -> dict[str, str]:
     """Build the environment used by the CLI and worker."""
     environment = os.environ.copy()
-    environment["KITARU_API_URL"] = os.environ["KITARU_CANONICAL_SERVER_URL"]
-    environment["KITARU_API_KEY"] = os.environ["KITARU_CANONICAL_API_KEY"]
+    environment["KITARU_API_URL"] = os.environ["KITARU_QUICKSTART_SERVER_URL"]
+    environment["KITARU_API_KEY"] = os.environ["KITARU_QUICKSTART_API_KEY"]
     return environment
 
 
@@ -117,7 +117,7 @@ def _wait_for_worker(name: str, process: subprocess.Popen[str]) -> None:
     raise RuntimeError("Worker did not become live within 30 seconds.")
 
 
-def test_canonical_example_completes_import_to_cohorts(tmp_path: Path) -> None:
+def test_quickstart_example_completes_import_to_cohorts(tmp_path: Path) -> None:
     """Exercise the provider-free import, evaluation, and cohort workflow."""
     assert CLI.exists()
     _cli("status")
@@ -126,7 +126,7 @@ def test_canonical_example_completes_import_to_cohorts(tmp_path: Path) -> None:
     worker_arguments = _get_readme_command("worker")
     worker_name = worker_arguments[worker_arguments.index("--name") + 1]
     worker_log_path = Path(
-        os.environ.get("KITARU_CANONICAL_WORKER_LOG", tmp_path / "worker.log")
+        os.environ.get("KITARU_QUICKSTART_WORKER_LOG", tmp_path / "worker.log")
     )
     with worker_log_path.open("w+", encoding="utf-8") as worker_log:
         worker = subprocess.Popen(

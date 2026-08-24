@@ -11,7 +11,7 @@ The first task is factual: confirm what the example preserved and inspect the po
 
 ## Confirm the prepared evidence
 
-The [canonical example setup](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) registered the logical agent `returns-resolver` and assigned its first immutable run specification the reference `returns-resolver@1`. That version stores the command, working directory, timeout, and declared tools Kitaru can use for later replay. Registration did not run the agent.
+The [PydanticAI returns-agent setup](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) registered the logical agent `returns-resolver` and assigned its first immutable run specification the reference `returns-resolver@1`. That version stores the command, working directory, timeout, and declared tools Kitaru can use for later replay. Registration did not run the agent.
 
 The setup also imported `traces/langfuse-traces.jsonl` under that exact version. One complete recorded run became a [session](../../concepts/agents-and-sessions.md); model calls, tool calls, tool results, and other events inside it became session nodes. Importing preserved the evidence and its source identity without calling the historical agent.
 

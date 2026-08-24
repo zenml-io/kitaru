@@ -118,7 +118,7 @@ Before creating remote state or using worker or model compute, the skill explain
 
 | Skill | Use it when |
 |---|---|
-| `kitaru-guided-tour` | First contact with no agent of your own: a value-first tour on the canonical example, from a prepared three-session review to an evaluator and one approved replay experiment |
+| `kitaru-guided-tour` | First contact with no agent of your own: a value-first tour on the PydanticAI returns-agent example, from a prepared three-session review to an evaluator and one approved replay experiment |
 | `kitaru-investigation` | Reviewing sessions, recording evidence, and creating a cohort from confirmed cases |
 | [`kitaru-replay-experiment`](../guides/replay-and-overrides.md) | Testing one candidate change against an accepted cohort with pinned evaluators, and reading whether the evidence improved, regressed, traded off, or stayed inconclusive |
 | [`kitaru-adapter-builder`](../adapters/README.md) | Building a Python or TypeScript [adapter](../adapters/README.md) for a framework that Kitaru does not support yet, with explicit recording and replay capabilities |

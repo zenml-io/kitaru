@@ -1,4 +1,4 @@
-"""Run the canonical example against an isolated Kitaru server."""
+"""Run the quickstart example against an isolated Kitaru server."""
 
 import asyncio
 import os
@@ -119,7 +119,7 @@ def _run_e2e_test(environment: dict[str, str]) -> int:
     try:
         return process.wait(timeout=600)
     except subprocess.TimeoutExpired:
-        print("Canonical example timed out after 600 seconds.", file=sys.stderr)
+        print("Quickstart example timed out after 600 seconds.", file=sys.stderr)
         _stop_process(process)
         return 1
 
@@ -131,15 +131,15 @@ def main() -> int:
     server_environment = _get_server_environment()
 
     test_environment = os.environ.copy()
-    test_environment["KITARU_CANONICAL_E2E"] = "1"
-    test_environment["KITARU_CANONICAL_SERVER_URL"] = server_url
-    test_environment["KITARU_CANONICAL_API_KEY"] = "canonical-ci-worker"
+    test_environment["KITARU_QUICKSTART_E2E"] = "1"
+    test_environment["KITARU_QUICKSTART_SERVER_URL"] = server_url
+    test_environment["KITARU_QUICKSTART_API_KEY"] = "quickstart-ci-worker"
 
     return_code = 1
     with tempfile.TemporaryDirectory(prefix="kitaru-example-e2e-") as temporary:
         log_path = Path(temporary) / "kitaru-server.log"
         worker_log_path = Path(temporary) / "kitaru-worker.log"
-        test_environment["KITARU_CANONICAL_WORKER_LOG"] = str(worker_log_path)
+        test_environment["KITARU_QUICKSTART_WORKER_LOG"] = str(worker_log_path)
         with log_path.open("w", encoding="utf-8") as server_log:
             server = subprocess.Popen(
                 [
@@ -167,7 +167,7 @@ def main() -> int:
                     print(_read_log(log_path), file=sys.stderr)
                     print(_read_log(worker_log_path), file=sys.stderr)
                 else:
-                    print("Canonical example end-to-end contract passed.")
+                    print("Quickstart example end-to-end contract passed.")
             except RuntimeError as error:
                 print(error, file=sys.stderr)
                 print(_read_log(log_path), file=sys.stderr)

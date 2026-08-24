@@ -174,8 +174,8 @@ jobs:
           readarray -t ignore_flags < <(awk '/^(CVE|GHSA|PYSEC)-/ {print "--ignore-vuln"; print $1}' \
             .github/pip-audit-ignored.txt)
           uv run pip-audit "${ignore_flags[@]}"
-  canonical-example:
-    name: Canonical example end to end
+  quickstart-example:
+    name: Quickstart example end to end
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -201,10 +201,10 @@ jobs:
         run: >-
           uv run --no-sync python scripts/smoke_plugin_artifacts.py
           --candidate-dir plugins/candidate-wheels
-      - name: Sync canonical example
+      - name: Sync quickstart example
         working-directory: examples/python/pydantic_ai_ticket_resolver
         run: uv sync --frozen
-      - name: Install current Kitaru artifacts into canonical example
+      - name: Install current Kitaru artifacts into quickstart example
         run: |
           uv pip install \
             --python examples/python/pydantic_ai_ticket_resolver/.venv/bin/python \
@@ -215,13 +215,13 @@ jobs:
             plugins/candidate-wheels/kitaru_langfuse_importer-*.whl
           uv pip check \
             --python examples/python/pydantic_ai_ticket_resolver/.venv/bin/python
-      - name: Test canonical example contracts
+      - name: Test quickstart example contracts
         working-directory: examples/python/pydantic_ai_ticket_resolver
         run: >-
           uv run --no-sync python -m pytest -q
           tests/test_contract.py
           tests/test_repository_contract.py
-      - name: Run canonical example end to end
+      - name: Run quickstart example end to end
         working-directory: examples/python/pydantic_ai_ticket_resolver
         run: uv run --no-sync python scripts/run_ci_e2e.py
         env:

@@ -23,9 +23,9 @@ The tutorial is intentionally more detailed than the [Quickstart](../../getting-
 
 Each page begins with the same five-step map. The first four phase pages end with a **Checkpoint**, and the final page summarizes the complete evidence chain. Because this is evidence-led, placeholders such as `YOUR_SESSION_UUID` are deliberate: substitute IDs produced by your own review rather than copying a predetermined ticket list.
 
-## Prepare the canonical example
+## Prepare the PydanticAI returns agent
 
-Install `jq`, then open the [canonical example README](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) and complete its setup through the ten-session confirmation. That README is the source of truth for cloning, entering the example directory, the frozen environment, workspace selection, agent registration, worker startup, and the checked-in Langfuse import. Keep running the commands below from the example directory.
+Install `jq`, then open the [PydanticAI returns-agent README](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) and complete its setup through the ten-session confirmation. That README is the source of truth for cloning, entering the example directory, the frozen environment, workspace selection, agent registration, worker startup, and the checked-in Langfuse import. Keep running the commands below from the example directory.
 
 The example uses synthetic customers, orders, shipments, and actions. Refund and replacement tools modify only an isolated in-memory store. No model-provider or Langfuse credentials are needed for setup, import, or the deterministic parts of this tutorial.
 
@@ -42,7 +42,7 @@ Some tutorial commands create jobs. The [worker](../../concepts/workers.md) clai
 
 ## Prefer a coding agent?
 
-The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/setup.md) and use the guided-tour prompt in the [canonical example README](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver).
+The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/setup.md) and use the guided-tour prompt in the [PydanticAI returns-agent README](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver).
 
 ## Start the investigation
 

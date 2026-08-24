@@ -1,6 +1,6 @@
 # Investigate a PydanticAI agent with Kitaru
 
-This directory is Kitaru's canonical investigation example. It contains a PydanticAI returns agent, ten checked-in Langfuse traces with model-generated reasoning summaries, and deterministic tests. All customers, orders, shipments, and actions are synthetic. Refund and replacement tools modify only an in-memory store.
+This directory contains Kitaru's PydanticAI returns-agent example: a ready agent, ten checked-in Langfuse traces with model-generated reasoning summaries, and deterministic tests. Internally, Kitaru uses it as the quickstart example. All customers, orders, shipments, and actions are synthetic. Refund and replacement tools modify only an in-memory store.
 
 Use this README to prepare the example and import its starting evidence. Continue with the [complete returns-agent tutorial](../../../docs/book/tutorials/returns-agent/README.md) for the investigation, evaluator, replay, and comparison method.
 
@@ -82,7 +82,7 @@ Open a second terminal in this directory and start a worker. No model-provider c
 <!-- e2e:worker -->
 
 ```bash
-uv run kitaru worker start --name canonical-example-worker --concurrency 10
+uv run kitaru worker start --name returns-agent-worker --concurrency 10
 ```
 
 Leave the worker running while you import and investigate. Return to the first terminal for the remaining commands.
@@ -97,7 +97,7 @@ uv run kitaru session import \
   --importer kitaru/langfuse@latest \
   --agent returns-resolver@1 \
   --tag returns-baseline \
-  --params '{"source_instance":"kitaru-canonical-example"}' \
+  --params '{"source_instance":"kitaru-quickstart-example"}' \
   --media-type application/x-ndjson \
   --wait
 ```

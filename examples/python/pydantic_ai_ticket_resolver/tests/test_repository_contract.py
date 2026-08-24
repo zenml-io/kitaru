@@ -1,4 +1,4 @@
-"""Repository-level contracts for Kitaru's canonical example."""
+"""Repository-level contracts for Kitaru's quickstart example."""
 
 import tomllib
 from pathlib import Path
@@ -6,7 +6,7 @@ from pathlib import Path
 ROOT = Path(__file__).parents[1]
 
 
-def test_canonical_example_contract_is_directory_local() -> None:
+def test_quickstart_example_contract_is_directory_local() -> None:
     """Keep the example runtime rooted in its own directory."""
     assert (ROOT / "returns_agent").is_dir()
     assert (ROOT / "traces" / "langfuse-traces.jsonl").is_file()
@@ -34,7 +34,7 @@ def test_readme_owns_setup_without_copying_the_tutorial() -> None:
     assert readme.index("kitaru status") < readme.index("kitaru login --local")
     assert "paid model calls" not in readme
     worker_command = (
-        "uv run kitaru worker start --name canonical-example-worker --concurrency 10"
+        "uv run kitaru worker start --name returns-agent-worker --concurrency 10"
     )
     assert worker_command in readme
     assert readme.index(worker_command) < readme.index("kitaru session import")
@@ -42,7 +42,7 @@ def test_readme_owns_setup_without_copying_the_tutorial() -> None:
     assert len(readme.splitlines()) < 180
 
 
-def test_development_checks_are_locked_with_the_template() -> None:
+def test_development_checks_are_locked_with_the_example() -> None:
     """Keep standalone validation available from the frozen environment."""
     project = tomllib.loads((ROOT / "pyproject.toml").read_text())
     development = project["dependency-groups"]["dev"]
@@ -51,7 +51,7 @@ def test_development_checks_are_locked_with_the_template() -> None:
 
 
 def test_local_kitaru_state_is_ignored() -> None:
-    """Keep generated investigation state out of the public template."""
+    """Keep generated investigation state out of the public example."""
     ignores = (ROOT.parents[2] / ".gitignore").read_text().splitlines()
     assert ".kitaru/" in ignores
     assert ".zen/" in ignores
