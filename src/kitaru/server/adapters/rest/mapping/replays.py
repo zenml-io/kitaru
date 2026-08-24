@@ -17,6 +17,7 @@ from kitaru.api_models.v1.replay import (
     ReplayCreateRequest,
     ReplayListParams,
     ReplayResponse,
+    ToolLookupMatch,
     ToolLookupResponse,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
@@ -118,13 +119,21 @@ def replay_list_params_to_filter(params: ReplayListParams) -> ReplayFilter:
     )
 
 
-def tool_lookup_result_to_response(result: ToolLookupResult) -> ToolLookupResponse:
+def tool_lookup_result_to_response(
+    result: ToolLookupResult | None,
+) -> ToolLookupResponse:
     """Convert a tool lookup result to the response DTO.
 
     Args:
-        result: Tool lookup result.
+        result: Tool lookup result, ``None`` on a miss.
 
     Returns:
         Tool lookup response.
     """
-    return ToolLookupResponse(found=result.found, result=result.result)
+    if result is None:
+        return ToolLookupResponse()
+    return ToolLookupResponse(
+        match=ToolLookupMatch(
+            result=result.result, status=result.status, error=result.error
+        )
+    )

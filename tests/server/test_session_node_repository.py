@@ -559,6 +559,83 @@ async def test_find_nth_by_cache_key_in_session_walks_index_order(
     )
 
 
+async def test_find_nth_by_cache_key_in_session_matches_a_failed_node(
+    setup: Setup,
+) -> None:
+    """Count a failed tool call as a finished candidate."""
+    repository, session_id, _ = setup
+    cache_key = "e" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.FAILED,
+                error="boom",
+            )
+        ],
+    )
+    found = await repository.find_nth_by_cache_key_in_session(session_id, cache_key, 0)
+    assert found is not None
+    assert found.status == NodeStatus.FAILED
+    assert found.error == "boom"
+
+
+async def test_find_nth_by_cache_key_in_session_skips_an_in_progress_node(
+    setup: Setup,
+) -> None:
+    """Exclude an in-progress tool call from the occurrence count."""
+    repository, session_id, _ = setup
+    cache_key = "f" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.IN_PROGRESS,
+            ),
+            _node(
+                1,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                outputs={"ticket": "b"},
+            ),
+        ],
+    )
+    found = await repository.find_nth_by_cache_key_in_session(session_id, cache_key, 0)
+    assert found is not None
+    assert found.outputs == {"ticket": "b"}
+
+
+async def test_find_latest_by_cache_key_in_session_skips_a_failed_node(
+    setup: Setup,
+) -> None:
+    """Only completed tool calls are candidates for the newest match."""
+    repository, session_id, _ = setup
+    cache_key = "g" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.FAILED,
+            )
+        ],
+    )
+    found = await repository.find_latest_by_cache_key_in_session(session_id, cache_key)
+    assert found is None
+
+
 async def test_find_latest_by_cache_key_in_agent_scopes_to_agent(
     scoped_setup: ScopedSetup,
 ) -> None:
@@ -600,6 +677,32 @@ async def test_find_latest_by_cache_key_in_agent_scopes_to_agent(
 
     assert found is not None
     assert found.outputs == {"temperature": 18}
+
+
+async def test_find_latest_by_cache_key_in_agent_skips_a_failed_node(
+    scoped_setup: ScopedSetup,
+) -> None:
+    """Only completed tool calls are candidates for the newest match."""
+    repository, _, _, _, make_agent_id, make_session_id = scoped_setup
+    agent_id = await make_agent_id()
+    session_id = await make_session_id(agent_id)
+    cache_key = "q" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.FAILED,
+            )
+        ],
+    )
+
+    found = await repository.find_latest_by_cache_key_in_agent(agent_id, cache_key)
+
+    assert found is None
 
 
 async def test_find_latest_by_cache_key_in_cohort_version_scopes_to_cohort_version(
@@ -651,3 +754,40 @@ async def test_find_latest_by_cache_key_in_cohort_version_scopes_to_cohort_versi
 
     assert found is not None
     assert found.outputs == {"temperature": 18}
+
+
+async def test_find_latest_by_cache_key_in_cohort_version_skips_a_failed_node(
+    scoped_setup: ScopedSetup,
+) -> None:
+    """Only completed tool calls are candidates for the newest match."""
+    repository, cohorts, cohort_versions, owner_id, make_agent_id, make_session_id = (
+        scoped_setup
+    )
+    agent_id = await make_agent_id()
+    session_id = await make_session_id(agent_id)
+    cache_key = "r" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.FAILED,
+            )
+        ],
+    )
+    cohort = await cohorts.create(
+        Cohort(owner_id=owner_id, name="failed-cohort", agent_id=agent_id)
+    )
+    cohort_version = await cohort_versions.create(
+        CohortVersion(owner_id=owner_id, cohort_id=cohort.id, session_count=1),
+        [session_id],
+    )
+
+    found = await repository.find_latest_by_cache_key_in_cohort_version(
+        cohort_version.id, cache_key
+    )
+
+    assert found is None

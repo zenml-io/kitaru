@@ -7857,6 +7857,37 @@
         "title": "TokenUsage",
         "type": "object"
       },
+      "ToolLookupMatch": {
+        "description": "Tool lookup match.",
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error from a failed tool call.",
+            "title": "Error"
+          },
+          "result": {
+            "description": "Cached tool result.",
+            "title": "Result"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NodeStatus",
+            "description": "Tool call status."
+          }
+        },
+        "required": [
+          "result",
+          "status"
+        ],
+        "title": "ToolLookupMatch",
+        "type": "object"
+      },
       "ToolLookupRequest": {
         "additionalProperties": false,
         "description": "Tool lookup request.",
@@ -7897,20 +7928,18 @@
       "ToolLookupResponse": {
         "description": "Tool lookup response.",
         "properties": {
-          "found": {
-            "description": "Whether a cached result was found.",
-            "title": "Found",
-            "type": "boolean"
-          },
-          "result": {
-            "description": "Cached tool result.",
-            "title": "Result"
+          "match": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolLookupMatch"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Matching recorded tool call."
           }
         },
-        "required": [
-          "found",
-          "result"
-        ],
         "title": "ToolLookupResponse",
         "type": "object"
       },
@@ -14350,7 +14379,7 @@
     },
     "/api/v1/replays/{replay_id}/tool-lookup": {
       "post": {
-        "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, 404 when no replay has this id, and 422 when\nthe tool is not configured for history or an occurrence was given for a\nnon-baseline history scope.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Whether a cached result was found, and the result if so.",
+        "description": "Search recorded tool-call history for a cached result.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, 404 when no replay has this id, and 422 when\nthe tool is not configured for history or an occurrence was given for a\nnon-baseline history scope.\n\nArgs:\n    replay_id: Id of the replay.\n    body: Tool lookup request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Matching recorded tool call, unset on a miss.",
         "operationId": "tool_lookup_api_v1_replays__replay_id__tool_lookup_post",
         "parameters": [
           {

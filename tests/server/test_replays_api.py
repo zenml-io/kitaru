@@ -31,6 +31,7 @@ from conftest import (
     override_idempotency,
 )
 from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -42,6 +43,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.session_node import SessionNode
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -261,3 +263,77 @@ async def test_tool_lookup_negative_occurrence(
         json={"tool_name": "search", "cache_key": "a" * 64, "occurrence": -1},
     )
     assert response.status_code == 422
+
+
+async def _replay_with_history_tool(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> dict[str, object]:
+    return (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": str(baseline_session_id),
+                "evaluators": [{"evaluator": "accuracy"}],
+                "tool_policy": {
+                    "default": {"type": "passthrough"},
+                    "tools": {
+                        "search": {
+                            "type": "history",
+                            "scope": "baseline",
+                            "on_miss": "fail",
+                        }
+                    },
+                },
+            },
+        )
+    ).json()
+
+
+async def test_tool_lookup_match_carries_status_and_error(
+    client: httpx.AsyncClient,
+    services: ReplayServices,
+    baseline_session_id: uuid.UUID,
+) -> None:
+    """A hit for a failed node nests its status and error under match."""
+    created = await _replay_with_history_tool(client, baseline_session_id)
+    cache_key = "a" * 64
+    await services.session_nodes.upsert_batch(
+        baseline_session_id,
+        [
+            SessionNode(
+                session_id=baseline_session_id,
+                index=0,
+                node_type=NodeType.TOOL_CALL,
+                name="search",
+                status=NodeStatus.FAILED,
+                error="tool raised an exception",
+                tool_name="search",
+                cache_key=cache_key,
+            )
+        ],
+    )
+
+    response = await client.post(
+        f"/api/v1/replays/{created['id']}/tool-lookup",
+        json={"tool_name": "search", "cache_key": cache_key, "occurrence": 0},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["match"]["status"] == "failed"
+    assert body["match"]["error"] == "tool raised an exception"
+
+
+async def test_tool_lookup_miss_returns_a_null_match(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """A miss returns a null match."""
+    created = await _replay_with_history_tool(client, baseline_session_id)
+
+    response = await client.post(
+        f"/api/v1/replays/{created['id']}/tool-lookup",
+        json={"tool_name": "search", "cache_key": "a" * 64},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"match": None}
