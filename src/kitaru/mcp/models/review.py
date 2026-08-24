@@ -17,7 +17,11 @@ from kitaru.api_models.v1.investigation import (
     InvestigationStatus,
 )
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.mcp.models.common import MCPModel, PageOptions
+from kitaru.mcp.models.common import (
+    IDEMPOTENCY_KEY_DESCRIPTION,
+    MCPModel,
+    PageOptions,
+)
 
 ReviewKind = Literal["investigation", "annotation"]
 
@@ -61,6 +65,10 @@ class InvestigationCreate(MCPModel):
     name: str = Field(min_length=1)
     description: str | None = None
     sessions: list[InvestigationSessionInput] = Field(max_length=100)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
     @model_validator(mode="after")
     def _validate_contents(self) -> "InvestigationCreate":
@@ -117,6 +125,10 @@ class ManualAnnotationCreate(MCPModel):
     session_id: uuid.UUID
     selector: AnnotationSelector | None = None
     value: JsonValue = Field()
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class InvestigationAnswerCreate(MCPModel):
@@ -127,6 +139,10 @@ class InvestigationAnswerCreate(MCPModel):
     question_key: str
     selector: AnnotationSelector | None = None
     value: JsonValue = Field()
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class AnnotationUpdate(MCPModel):
@@ -142,6 +158,10 @@ class TagCreate(MCPModel):
 
     operation: Literal["create_tag"]
     name: str = Field(min_length=1)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class TagUpdate(MCPModel):

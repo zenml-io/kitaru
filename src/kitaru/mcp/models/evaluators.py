@@ -14,7 +14,7 @@ from kitaru.api_models.v1.plugin import (
     PluginSource,
     ScriptPluginSource,
 )
-from kitaru.mcp.models.common import MCPModel
+from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, MCPModel
 
 
 class EvaluatorCreate(MCPModel):
@@ -24,6 +24,10 @@ class EvaluatorCreate(MCPModel):
     name: str = Field(min_length=1)
     description: str | None = None
     metadata: dict[str, JsonValue] = Field(default_factory=dict)
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
 
 class EvaluatorUpdate(MCPModel):

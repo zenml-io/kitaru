@@ -6,7 +6,7 @@
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 151586,
+      "discovery_response_bytes": 155018,
       "tool_count": 11,
       "tools": {
         "kitaru_activity_read": {
@@ -18,8 +18,8 @@
         },
         "kitaru_cohorts_manage": {
           "$defs_count": 7,
-          "combined_bytes": 6446,
-          "input_bytes": 3083,
+          "combined_bytes": 7070,
+          "input_bytes": 3707,
           "maximum_nesting_depth": 7,
           "output_bytes": 3363
         },
@@ -32,15 +32,15 @@
         },
         "kitaru_evaluators_manage": {
           "$defs_count": 11,
-          "combined_bytes": 8431,
-          "input_bytes": 3958,
+          "combined_bytes": 8743,
+          "input_bytes": 4270,
           "maximum_nesting_depth": 7,
           "output_bytes": 4473
         },
         "kitaru_experiments_manage": {
           "$defs_count": 26,
-          "combined_bytes": 14374,
-          "input_bytes": 7057,
+          "combined_bytes": 14686,
+          "input_bytes": 7369,
           "maximum_nesting_depth": 8,
           "output_bytes": 7317
         },
@@ -53,8 +53,8 @@
         },
         "kitaru_review_manage": {
           "$defs_count": 30,
-          "combined_bytes": 17906,
-          "input_bytes": 8491,
+          "combined_bytes": 19154,
+          "input_bytes": 9739,
           "maximum_nesting_depth": 7,
           "output_bytes": 9415
         },
@@ -67,8 +67,8 @@
         },
         "kitaru_session_import": {
           "$defs_count": 6,
-          "combined_bytes": 4336,
-          "input_bytes": 793,
+          "combined_bytes": 4648,
+          "input_bytes": 1105,
           "maximum_nesting_depth": 7,
           "output_bytes": 3543
         },
@@ -81,8 +81,8 @@
         },
         "kitaru_workflow_start": {
           "$defs_count": 13,
-          "combined_bytes": 9236,
-          "input_bytes": 1950,
+          "combined_bytes": 9860,
+          "input_bytes": 2574,
           "maximum_nesting_depth": 7,
           "output_bytes": 7286
         }
@@ -116,7 +116,7 @@
       }
     },
     "standard": {
-      "discovery_response_bytes": 140194,
+      "discovery_response_bytes": 143626,
       "tool_count": 9,
       "tools": {
         "kitaru_activity_read": {
@@ -128,22 +128,22 @@
         },
         "kitaru_cohorts_manage": {
           "$defs_count": 7,
-          "combined_bytes": 6446,
-          "input_bytes": 3083,
+          "combined_bytes": 7070,
+          "input_bytes": 3707,
           "maximum_nesting_depth": 7,
           "output_bytes": 3363
         },
         "kitaru_evaluators_manage": {
           "$defs_count": 11,
-          "combined_bytes": 8431,
-          "input_bytes": 3958,
+          "combined_bytes": 8743,
+          "input_bytes": 4270,
           "maximum_nesting_depth": 7,
           "output_bytes": 4473
         },
         "kitaru_experiments_manage": {
           "$defs_count": 26,
-          "combined_bytes": 14374,
-          "input_bytes": 7057,
+          "combined_bytes": 14686,
+          "input_bytes": 7369,
           "maximum_nesting_depth": 8,
           "output_bytes": 7317
         },
@@ -156,8 +156,8 @@
         },
         "kitaru_review_manage": {
           "$defs_count": 30,
-          "combined_bytes": 17906,
-          "input_bytes": 8491,
+          "combined_bytes": 19154,
+          "input_bytes": 9739,
           "maximum_nesting_depth": 7,
           "output_bytes": 9415
         },
@@ -170,15 +170,15 @@
         },
         "kitaru_session_import": {
           "$defs_count": 6,
-          "combined_bytes": 4336,
-          "input_bytes": 793,
+          "combined_bytes": 4648,
+          "input_bytes": 1105,
           "maximum_nesting_depth": 7,
           "output_bytes": 3543
         },
         "kitaru_workflow_start": {
           "$defs_count": 13,
-          "combined_bytes": 9236,
-          "input_bytes": 1950,
+          "combined_bytes": 9860,
+          "input_bytes": 2574,
           "maximum_nesting_depth": 7,
           "output_bytes": 7286
         }

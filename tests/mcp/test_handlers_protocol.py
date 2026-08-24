@@ -30,8 +30,11 @@ from kitaru.mcp.lifecycle import MCPServerState
 from kitaru.mcp.models.activity import ActivityListRequest
 from kitaru.mcp.models.common import PageData
 from kitaru.mcp.models.management import (
+    CohortCreate,
     CohortUpdate,
     CohortVersionCreate,
+    EvaluatorSelection,
+    ExperimentCreate,
     ExperimentUpdate,
 )
 from kitaru.mcp.models.registry import (
@@ -54,6 +57,7 @@ class UpdateClient:
         self.cohort_updates: list[object] = []
         self.experiment_updates: list[object] = []
         self.cohort_version_creates: list[object] = []
+        self.cohort_version_idempotency_keys: list[str | None] = []
         self.cohorts = SimpleNamespace(
             update=self._update_cohort, create_version=self._create_cohort_version
         )
@@ -68,9 +72,10 @@ class UpdateClient:
         return SimpleNamespace()
 
     async def _create_cohort_version(
-        self, _item_id: uuid.UUID, request: object
+        self, _item_id: uuid.UUID, request: object, idempotency_key: str | None = None
     ) -> object:
         self.cohort_version_creates.append(request)
+        self.cohort_version_idempotency_keys.append(idempotency_key)
         return SimpleNamespace()
 
 
@@ -636,3 +641,76 @@ async def test_cohort_version_create_forwards_optional_baseline() -> None:
 
     assert cast(Any, client.cohort_version_creates[0]).baseline_id == baseline_id
     assert cast(Any, client.cohort_version_creates[1]).baseline_id is None
+
+
+async def test_cohort_version_create_forwards_idempotency_key() -> None:
+    client = UpdateClient()
+    state = MCPServerState(MCPSettings(), cast(Any, client))
+
+    await handle_cohorts_manage(
+        state,
+        CohortVersionCreate(
+            operation="create_version",
+            cohort_id=uuid.uuid4(),
+            idempotency_key="retry-cohort-version-1",
+        ),
+    )
+
+    assert client.cohort_version_idempotency_keys == ["retry-cohort-version-1"]
+
+
+async def test_cohort_create_forwards_idempotency_key() -> None:
+    idempotency_keys: list[str | None] = []
+
+    async def create(_request: object, idempotency_key: str | None = None) -> object:
+        idempotency_keys.append(idempotency_key)
+        return SimpleNamespace()
+
+    client = SimpleNamespace(cohorts=SimpleNamespace(create=create))
+    state = MCPServerState(MCPSettings(), cast(Any, client))
+
+    await handle_cohorts_manage(
+        state,
+        CohortCreate(
+            operation="create",
+            agent_id=uuid.uuid4(),
+            name="regression-cases",
+            idempotency_key="retry-cohort-1",
+        ),
+    )
+
+    assert idempotency_keys == ["retry-cohort-1"]
+
+
+async def test_experiment_create_forwards_idempotency_key() -> None:
+    evaluator_id = uuid.uuid4()
+    idempotency_keys: list[str | None] = []
+
+    async def get_evaluator(item_id: uuid.UUID) -> object:
+        return SimpleNamespace(id=item_id, name="accuracy")
+
+    async def get_version(item_id: uuid.UUID, version: int) -> object:
+        return SimpleNamespace(id=uuid.uuid4(), evaluator_id=item_id, version=version)
+
+    async def create(_request: object, idempotency_key: str | None = None) -> object:
+        idempotency_keys.append(idempotency_key)
+        return SimpleNamespace()
+
+    client = SimpleNamespace(
+        evaluators=SimpleNamespace(get=get_evaluator, get_version=get_version),
+        experiments=SimpleNamespace(create=create),
+    )
+    state = MCPServerState(MCPSettings(), cast(Any, client))
+
+    await handle_experiments_manage(
+        state,
+        ExperimentCreate(
+            operation="create",
+            agent_id=uuid.uuid4(),
+            name="baseline-comparison",
+            evaluators=[EvaluatorSelection(evaluator_id=evaluator_id, version=1)],
+            idempotency_key="retry-experiment-1",
+        ),
+    )
+
+    assert idempotency_keys == ["retry-experiment-1"]
