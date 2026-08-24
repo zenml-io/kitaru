@@ -138,6 +138,7 @@ async def create_investigation(
     session_ids: list[uuid.UUID],
     session_questions: list[str],
     session_highlights: list[str],
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an investigation with linked sessions."""
     if len(set(session_ids)) != len(session_ids):
@@ -172,7 +173,8 @@ async def create_investigation(
             name=name,
             description=description,
             sessions=sessions,
-        )
+        ),
+        idempotency_key=idempotency_key,
     )
     review_url: str | None = None
     warnings: list[str] = []

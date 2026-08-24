@@ -80,6 +80,7 @@ class StubExperimentClient:
         self.evaluator_lookups = 0
         self.experiment_lookups = 0
         self.create_calls: list[ExperimentCreateRequest] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[ExperimentListParams] = []
         self.update_calls: list[tuple[uuid.UUID, ExperimentUpdateRequest]] = []
         self.deleted: list[uuid.UUID] = []
@@ -137,8 +138,11 @@ class StubExperimentClient:
         def __init__(self, owner: "StubExperimentClient") -> None:
             self.owner = owner
 
-        async def create(self, request: ExperimentCreateRequest) -> StubModel:
+        async def create(
+            self, request: ExperimentCreateRequest, idempotency_key: str | None = None
+        ) -> StubModel:
             self.owner.create_calls.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             return self.owner.experiment
 
         async def get(self, experiment_id: uuid.UUID) -> StubModel:

@@ -45,6 +45,7 @@ async def create_annotation(
     investigation_session_id: uuid.UUID | None,
     question_key: str | None,
     selector: str | None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create either a manual annotation or an investigation answer."""
     if (session_id is None) == (investigation_session_id is None):
@@ -90,7 +91,9 @@ async def create_annotation(
         if parsed_selector is not None:
             answer_fields["selector"] = parsed_selector
         request = InvestigationAnswerCreateRequest(**answer_fields)
-    annotation = await client.annotations.create(request)
+    annotation = await client.annotations.create(
+        request, idempotency_key=idempotency_key
+    )
     return CommandResult(item=annotation.model_dump(mode="json"))
 
 

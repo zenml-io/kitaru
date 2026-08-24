@@ -118,6 +118,7 @@ class StubImportClient:
         self.job = _job()
         self.uploads: list[tuple[bytes, str, str | None]] = []
         self.requests: list[Any] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.lookup_calls: list[str] = []
         self.create_error = create_error
         self.importers = self._Importers(self)
@@ -174,8 +175,11 @@ class StubImportClient:
         def __init__(self, owner: "StubImportClient") -> None:
             self.owner = owner
 
-        async def create(self, request: Any) -> JobResponse:
+        async def create(
+            self, request: Any, idempotency_key: str | None = None
+        ) -> JobResponse:
             self.owner.requests.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             if self.owner.create_error is not None:
                 raise self.owner.create_error
             return self.owner.job

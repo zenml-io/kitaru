@@ -92,6 +92,7 @@ class StubInvestigationClient:
         )
         self.agent_lookups = 0
         self.create_calls: list[InvestigationCreateRequest] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[InvestigationListParams] = []
         self.get_calls: list[uuid.UUID] = []
         self.update_calls: list[tuple[uuid.UUID, InvestigationUpdateRequest]] = []
@@ -144,8 +145,13 @@ class StubInvestigationClient:
         def __init__(self, owner: "StubInvestigationClient") -> None:
             self.owner = owner
 
-        async def create(self, request: InvestigationCreateRequest) -> StubModel:
+        async def create(
+            self,
+            request: InvestigationCreateRequest,
+            idempotency_key: str | None = None,
+        ) -> StubModel:
             self.owner.create_calls.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             return self.owner.investigation
 
         async def list(self, params: InvestigationListParams) -> Any:
@@ -243,6 +249,24 @@ async def test_create_maps_sessions_questions_and_highlights_to_sdk() -> None:
         ],
     }
     assert result.item["id"] == str(client.investigation.id)
+
+
+async def test_create_forwards_idempotency_key_to_the_sdk_call() -> None:
+    """A retried invocation reaches the SDK create call with the same key."""
+    client = StubInvestigationClient()
+
+    await investigations.create_investigation(
+        client,
+        "triage",
+        agent="assistant",
+        description=None,
+        session_ids=[],
+        session_questions=[],
+        session_highlights=[],
+        idempotency_key="retry-triage",
+    )
+
+    assert client.create_idempotency_keys == ["retry-triage"]
 
 
 async def _create_minimal(client: StubInvestigationClient) -> Any:
