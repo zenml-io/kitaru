@@ -137,6 +137,96 @@ def test_cost_includes_priced_tool_calls_with_complete_llm_costs() -> None:
     assert result.score == 0.03
 
 
+def test_cost_reports_tool_only_session_cost() -> None:
+    """Report direct costs when a session has no LLM calls."""
+    view = _view(cost=Decimal("0.02"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.TOOL_CALL,
+            name="paid search",
+            cost=Decimal("0.02"),
+        )
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.02
+
+
+def test_cost_excludes_multiple_root_span_aggregates() -> None:
+    """Sum direct calls instead of duplicate aggregate costs from each trace."""
+    first_root_id = uuid.uuid4()
+    second_root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.06"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=first_root_id,
+            node_type=NodeType.SPAN,
+            name="first trace",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            id=second_root_id,
+            node_type=NodeType.SPAN,
+            name="second trace",
+            cost=Decimal("0.02"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=first_root_id,
+            name="first model request",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=second_root_id,
+            name="second model request",
+            cost=Decimal("0.02"),
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.03
+
+
+def test_cost_uses_multiple_root_span_aggregates_when_llm_costs_are_missing() -> None:
+    """Use each trace aggregate when no direct LLM cost was recorded."""
+    first_root_id = uuid.uuid4()
+    second_root_id = uuid.uuid4()
+    view = _view(cost=Decimal("0.03"))
+    view.nodes = [
+        SessionNodeResponse.model_construct(
+            id=first_root_id,
+            node_type=NodeType.SPAN,
+            name="first trace",
+            cost=Decimal("0.01"),
+        ),
+        SessionNodeResponse.model_construct(
+            id=second_root_id,
+            node_type=NodeType.SPAN,
+            name="second trace",
+            cost=Decimal("0.02"),
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=first_root_id,
+            name="first model request",
+            cost=None,
+        ),
+        SessionNodeResponse.model_construct(
+            node_type=NodeType.LLM_CALL,
+            parent_id=second_root_id,
+            name="second model request",
+            cost=None,
+        ),
+    ]
+
+    result = cost(view)
+
+    assert result.score == 0.03
+
+
 def test_cost_uses_root_span_when_call_rollup_is_partial() -> None:
     """Prefer a complete root aggregate to a partial call rollup."""
     root_id = uuid.uuid4()

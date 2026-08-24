@@ -11,43 +11,45 @@ from kitaru.task.evaluator import SessionView
 def cost(session: SessionView) -> EvaluationResult:
     """Report the total recorded cost of a session."""
     root_nodes = [node for node in session.nodes if node.parent_id is None]
-    root_span = (
-        root_nodes[0]
-        if len(root_nodes) == 1 and root_nodes[0].node_type is NodeType.SPAN
-        else None
-    )
-    llm_nodes = [node for node in session.nodes if node.node_type is NodeType.LLM_CALL]
-    if llm_nodes and all(
+    direct_nodes = [
+        node for node in session.nodes if node.node_type is not NodeType.SPAN
+    ]
+    llm_costs_are_complete = all(
         node.cost is not None and node.cost.is_finite() and node.cost >= 0
-        for node in llm_nodes
-    ):
-        direct_nodes = [node for node in session.nodes if node is not root_span]
-        if all(
+        for node in session.nodes
+        if node.node_type is NodeType.LLM_CALL
+    )
+    if (
+        direct_nodes
+        and llm_costs_are_complete
+        and all(
             node.cost is None or (node.cost.is_finite() and node.cost >= 0)
             for node in direct_nodes
-        ):
-            recorded_cost = sum(
-                (node.cost for node in direct_nodes if node.cost is not None),
-                Decimal(0),
-            )
-        else:
-            recorded_cost = None
+        )
+    ):
+        recorded_cost = sum(
+            (node.cost for node in direct_nodes if node.cost is not None),
+            Decimal(0),
+        )
     else:
         session_cost = session.session.cost
         if (
-            root_span is not None
-            and root_span.cost is not None
-            and root_span.cost.is_finite()
-            and root_span.cost > 0
+            root_nodes
+            and all(node.node_type is NodeType.SPAN for node in root_nodes)
+            and all(
+                node.cost is not None and node.cost.is_finite() and node.cost > 0
+                for node in root_nodes
+            )
         ):
-            recorded_cost = root_span.cost
+            recorded_cost = sum(
+                (node.cost for node in root_nodes if node.cost is not None), Decimal(0)
+            )
         elif (
-            root_span is None
-            and not any(node.cost is not None for node in session.nodes)
+            not any(node.cost is not None for node in session.nodes)
             and session_cost is not None
             and session_cost.is_finite()
             and session_cost >= 0
-            and (not llm_nodes or session_cost > 0)
+            and (not direct_nodes or session_cost > 0)
         ):
             recorded_cost = session_cost
         else:
