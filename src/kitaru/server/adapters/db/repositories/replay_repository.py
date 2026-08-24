@@ -17,10 +17,8 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.replay import ReplayStatus
-from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     compile_filter_expression,
@@ -124,14 +122,12 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             return []
         rows = [ReplayORM.from_domain(replay) for replay in replays]
         self._session.add_all(rows)
-        try:
-            await self._flush()
-        except IntegrityError as exc:
-            # The service resolves the baseline session before this insert, so
-            # a violation here means it was deleted concurrently.
-            if violated_constraint(exc) == REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY:
-                raise SessionNotFound() from exc
-            raise
+        # The service resolves the baseline session before this insert, so a
+        # baseline session foreign key violation means it was deleted
+        # concurrently.
+        await self._flush(
+            {REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
+        )
         return [row.to_domain() for row in rows]
 
     async def get(self, replay_id: uuid.UUID) -> Replay:

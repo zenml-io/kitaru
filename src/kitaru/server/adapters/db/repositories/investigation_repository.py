@@ -17,9 +17,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 
-from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.investigation import (
     INVESTIGATION_AGENT_ID_FOREIGN_KEY,
@@ -160,20 +158,16 @@ class SQLInvestigationRepository(BaseSQLRepository[InvestigationORM]):
         self._session.add_all(
             [InvestigationSessionORM.from_domain(session) for session in sessions]
         )
-        try:
-            await self._flush(
-                {
-                    INVESTIGATION_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
-                        investigation.agent_id
-                    )
-                }
-            )
-        except IntegrityError as exc:
-            # The service validates the sessions before this insert, so a
-            # violation here means one was deleted concurrently.
-            if violated_constraint(exc) == INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY:
-                raise SessionNotFound() from exc
-            raise
+        # The service validates the sessions before this insert, so a session
+        # foreign key violation means one was deleted concurrently.
+        await self._flush(
+            {
+                INVESTIGATION_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
+                    investigation.agent_id
+                ),
+                INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(),
+            }
+        )
         completed = sum(1 for session in sessions if session.verdict is not None)
         return row.to_domain(len(sessions), completed)
 

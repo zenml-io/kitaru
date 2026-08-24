@@ -17,10 +17,8 @@ import uuid
 from collections.abc import Mapping, Sequence
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     build_tag_condition_binding,
@@ -107,17 +105,11 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
                     cohort_version_id=row.id, session_id=session_id, index=index
                 )
             )
-        try:
-            await self._flush()
-        except IntegrityError as exc:
-            # The service validates the sessions before this insert, so a
-            # violation here means one was deleted concurrently.
-            if (
-                violated_constraint(exc)
-                == COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY
-            ):
-                raise SessionNotFound() from exc
-            raise
+        # The service validates the sessions before this insert, so a session
+        # foreign key violation means one was deleted concurrently.
+        await self._flush(
+            {COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
+        )
         return row.to_domain()
 
     async def get(
