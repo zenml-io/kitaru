@@ -20,7 +20,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.replay import ReplayStatus
-from kitaru.server.adapters.db.errors import violated_constraint, violated_key_value
+from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     compile_filter_expression,
@@ -127,11 +127,10 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
         try:
             await self._flush()
         except IntegrityError as exc:
-            # The rows flush as one statement, so the driver's detail is the
-            # only pointer to the missing session.
-            constraint = violated_constraint(exc)
-            if constraint == REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY:
-                raise SessionNotFound(uuid.UUID(violated_key_value(exc))) from exc
+            # The service resolves the baseline session before this insert, so
+            # a violation here means it was deleted concurrently.
+            if violated_constraint(exc) == REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY:
+                raise SessionNotFound() from exc
             raise
         return [row.to_domain() for row in rows]
 

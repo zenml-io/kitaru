@@ -225,14 +225,13 @@ async def test_cohort_version_missing_session(setup: Setup) -> None:
         Cohort(owner_id=setup.owner_id, name="other", agent_id=setup.agent_id)
     )
     missing = uuid.uuid4()
-    with pytest.raises(SessionNotFound) as excinfo:
+    with pytest.raises(SessionNotFound, match="A referenced session was not found"):
         await SQLCohortVersionRepository(setup.session).create(
             CohortVersion(
                 owner_id=setup.owner_id, cohort_id=cohort.id, session_count=2
             ),
             [setup.session_id, missing],
         )
-    assert str(missing) in str(excinfo.value)
 
 
 def _investigation(owner_id: uuid.UUID, agent_id: uuid.UUID) -> Investigation:
@@ -267,11 +266,10 @@ async def test_investigation_missing_session(setup: Setup) -> None:
     """Translate the session foreign key on investigation create."""
     investigation = _investigation(setup.owner_id, setup.agent_id)
     missing = uuid.uuid4()
-    with pytest.raises(SessionNotFound) as excinfo:
+    with pytest.raises(SessionNotFound, match="A referenced session was not found"):
         await SQLInvestigationRepository(setup.session).create(
             investigation, [_link(investigation.id, missing)]
         )
-    assert str(missing) in str(excinfo.value)
 
 
 def _run(

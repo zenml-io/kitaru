@@ -36,13 +36,16 @@ from kitaru.server.domain.ids import uuid7
 class SessionNotFound(NotFoundError):
     """Raised when a session lookup does not resolve."""
 
-    def __init__(self, session_id: uuid.UUID) -> None:
+    def __init__(self, session_id: uuid.UUID | None = None) -> None:
         """Initialize the error.
 
         Args:
-            session_id: Id of the missing session.
+            session_id: Id of the missing session, None when unidentified.
         """
-        super().__init__(f"Session {session_id} was not found")
+        if session_id is None:
+            super().__init__("A referenced session was not found")
+        else:
+            super().__init__(f"Session {session_id} was not found")
 
 
 class SessionAccessDenied(ForbiddenError):

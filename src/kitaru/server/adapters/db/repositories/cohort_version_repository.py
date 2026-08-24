@@ -20,7 +20,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.tag import TagResourceType
-from kitaru.server.adapters.db.errors import violated_constraint, violated_key_value
+from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     build_tag_condition_binding,
@@ -110,11 +110,13 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
         try:
             await self._flush()
         except IntegrityError as exc:
-            # The link rows flush as one statement, so the driver's detail is
-            # the only pointer to the missing session.
-            constraint = violated_constraint(exc)
-            if constraint == COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY:
-                raise SessionNotFound(uuid.UUID(violated_key_value(exc))) from exc
+            # The service validates the sessions before this insert, so a
+            # violation here means one was deleted concurrently.
+            if (
+                violated_constraint(exc)
+                == COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY
+            ):
+                raise SessionNotFound() from exc
             raise
         return row.to_domain()
 

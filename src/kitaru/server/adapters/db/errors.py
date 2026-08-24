@@ -13,13 +13,8 @@
 #  permissions and limitations under the License.
 """Database error introspection."""
 
-import re
-
 import asyncpg
 from sqlalchemy.exc import DBAPIError, IntegrityError
-
-# Postgres reports the offending row as ``Key (column)=(value) ...``.
-_KEY_VALUE_PATTERN = re.compile(r"\)=\((.*?)\)")
 
 
 def _has_driver_cause(
@@ -102,24 +97,3 @@ def violated_constraint(exc: IntegrityError) -> str | None:
         # The driver generates this attribute dynamically, invisible to ty.
         return cause.constraint_name  # ty: ignore[unresolved-attribute]
     return None
-
-
-def violated_key_value(exc: IntegrityError) -> str | None:
-    """Return the key value the driver reports for a violated constraint.
-
-    Args:
-        exc: Integrity error raised by a flush.
-
-    Returns:
-        Key value from the error detail when the driver reports one,
-        otherwise ``None``.
-    """
-    cause = exc.orig.__cause__ if exc.orig is not None else None
-    if not isinstance(cause, asyncpg.exceptions.IntegrityConstraintViolationError):
-        return None
-    # The driver generates this attribute dynamically, invisible to ty.
-    detail: str | None = cause.detail  # ty: ignore[unresolved-attribute]
-    if detail is None:
-        return None
-    match = _KEY_VALUE_PATTERN.search(detail)
-    return match.group(1) if match else None
