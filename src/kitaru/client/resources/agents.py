@@ -46,11 +46,15 @@ class AgentsResource:
         """
         self._client = client
 
-    async def create(self, request: AgentCreateRequest) -> AgentResponse:
+    async def create(
+        self, request: AgentCreateRequest, idempotency_key: str | None = None
+    ) -> AgentResponse:
         """Create an agent.
 
         Args:
             request: Agent create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -62,6 +66,7 @@ class AgentsResource:
             "POST",
             "/api/v1/agents",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return AgentResponse.model_validate(response.json())
 
@@ -156,13 +161,18 @@ class AgentsResource:
         await self._client.request("DELETE", f"/api/v1/agents/{agent_id}")
 
     async def create_version(
-        self, agent_id: uuid.UUID, request: AgentVersionCreateRequest
+        self,
+        agent_id: uuid.UUID,
+        request: AgentVersionCreateRequest,
+        idempotency_key: str | None = None,
     ) -> AgentVersionResponse:
         """Create a new version of an agent.
 
         Args:
             agent_id: Id of the agent.
             request: Agent version create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 for a missing agent.
@@ -174,6 +184,7 @@ class AgentsResource:
             "POST",
             f"/api/v1/agents/{agent_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return AgentVersionResponse.model_validate(response.json())
 

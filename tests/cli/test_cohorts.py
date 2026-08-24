@@ -93,10 +93,12 @@ class StubCohortClient:
         self.agent_lookups = 0
         self.cohort_lookups = 0
         self.created_cohorts: list[CohortCreateRequest] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[CohortListParams] = []
         self.update_calls: list[tuple[uuid.UUID, CohortUpdateRequest]] = []
         self.deleted_cohorts: list[uuid.UUID] = []
         self.created_versions: list[tuple[uuid.UUID, CohortVersionCreateRequest]] = []
+        self.version_idempotency_keys: list[str | None] = []
         self.version_error: Exception | None = None
         self.version_list_calls: list[tuple[uuid.UUID, ListParams]] = []
         self.version_get_calls: list[uuid.UUID] = []
@@ -142,8 +144,11 @@ class StubCohortClient:
         def __init__(self, owner: "StubCohortClient") -> None:
             self.owner = owner
 
-        async def create(self, request: CohortCreateRequest) -> StubModel:
+        async def create(
+            self, request: CohortCreateRequest, idempotency_key: str | None = None
+        ) -> StubModel:
             self.owner.created_cohorts.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             return self.owner.cohort
 
         async def get(self, cohort_id: uuid.UUID) -> StubModel:
@@ -169,9 +174,13 @@ class StubCohortClient:
             self.owner.deleted_cohorts.append(cohort_id)
 
         async def create_version(
-            self, cohort_id: uuid.UUID, request: CohortVersionCreateRequest
+            self,
+            cohort_id: uuid.UUID,
+            request: CohortVersionCreateRequest,
+            idempotency_key: str | None = None,
         ) -> StubModel:
             self.owner.created_versions.append((cohort_id, request))
+            self.owner.version_idempotency_keys.append(idempotency_key)
             if self.owner.version_error is not None:
                 raise self.owner.version_error
             return self.owner.version_two
@@ -299,6 +308,25 @@ async def test_cohort_create_snapshots_a_tag_selection() -> None:
     assert request.display_version == "discovery-v1"
     assert result.item["reference"] == "regression@2"
     assert result.item["session_count"] == 2
+
+
+async def test_cohort_create_forwards_idempotency_key_to_parent_create_only() -> None:
+    """A retried invocation dedupes the cohort but not its first version."""
+    client = StubCohortClient()
+
+    await cohorts.create_cohort(
+        client,
+        "nightly",
+        agent="assistant",
+        description="Nightly cases",
+        metadata=None,
+        tag="baseline",
+        display_version="discovery-v1",
+        idempotency_key="retry-nightly",
+    )
+
+    assert client.create_idempotency_keys == ["retry-nightly"]
+    assert client.version_idempotency_keys == [None]
 
 
 async def test_cohort_create_reports_surviving_parent_on_version_failure() -> None:

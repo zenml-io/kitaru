@@ -56,6 +56,7 @@ async def create_cohort(
     filter: str | None = None,
     all_sessions: bool = False,
     display_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create a cohort and optionally its first selected membership version."""
     parsed_metadata = parse_json_object(metadata, option="--metadata")
@@ -92,7 +93,8 @@ async def create_cohort(
             description=description,
             agent_id=resolved_agent.id,
             metadata=parsed_metadata,
-        )
+        ),
+        idempotency_key=idempotency_key,
     )
     if selected_session_ids is None:
         return CommandResult(item=created_cohort.model_dump(mode="json"))
@@ -217,6 +219,7 @@ async def create_cohort_version(
     remove_session_ids: list[uuid.UUID] | None,
     display_version: str | None,
     baseline_id: uuid.UUID | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
     additions = list(add_session_ids or [])
@@ -242,6 +245,7 @@ async def create_cohort_version(
             remove_session_ids=removals,
             display_version=display_version,
         ),
+        idempotency_key=idempotency_key,
     )
     warnings = []
     if not additions and not removals:

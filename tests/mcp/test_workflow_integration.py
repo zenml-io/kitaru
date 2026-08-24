@@ -19,6 +19,7 @@ from kitaru.mcp.tools.workflows import handle_session_import
 class _ImportClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
+        self.idempotency_key: str | None = None
         self.blobs = SimpleNamespace(get=self._get_blob)
         self.importers = SimpleNamespace(
             get_version=self._get_importer_version, get=self._get_importer
@@ -42,8 +43,11 @@ class _ImportClient:
         self.calls.append("agent_version")
         return SimpleNamespace(id=item_id, agent_id=uuid.uuid4())
 
-    async def _create_import(self, _request: object) -> object:
+    async def _create_import(
+        self, _request: object, idempotency_key: str | None = None
+    ) -> object:
         self.calls.append("create")
+        self.idempotency_key = idempotency_key
         return SimpleNamespace(model_dump=lambda **_kwargs: {"id": str(uuid.uuid4())})
 
 
@@ -100,6 +104,23 @@ async def test_existing_blob_import_uses_four_bounded_preflight_reads() -> None:
     ]
     assert result["operation"] == "session_import"
     assert result["idempotency"] == "domain-deduplicated-only"
+
+
+async def test_session_import_forwards_idempotency_key() -> None:
+    client = _ImportClient()
+
+    await handle_session_import(
+        _get_state(client),
+        SessionImportRequest(
+            payload_blob_id=uuid.uuid4(),
+            importer_id=uuid.uuid4(),
+            importer_version=2,
+            agent_version_id=uuid.uuid4(),
+            idempotency_key="retry-import-1",
+        ),
+    )
+
+    assert client.idempotency_key == "retry-import-1"
 
 
 async def test_evaluator_selections_use_name_version_dto_and_cache_parent() -> None:

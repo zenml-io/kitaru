@@ -437,3 +437,38 @@ def test_help_exposes_only_the_schema_command_surface(capsys) -> None:
 
     [job_get] = describe_schema(("job", "get"))
     assert job_get["side_effects"]["reads_local_file"] is True
+
+
+def test_idempotency_key_option_covers_only_single_create_commands() -> None:
+    """--idempotency-key is offered on every command backed by one create call."""
+    covered_paths = (
+        ("cohort", "create"),
+        ("cohort", "version", "create"),
+        ("investigation", "create"),
+        ("annotation", "create"),
+        ("experiment", "create"),
+        ("replay", "create"),
+        ("experiment", "run", "start"),
+        ("session", "import"),
+        ("session", "evaluate"),
+        ("agent", "version", "register"),
+        ("importer", "version", "register"),
+        ("evaluator", "version", "register"),
+    )
+    for path in covered_paths:
+        [command] = describe_schema(path)
+        names = {parameter["name"] for parameter in command["parameters"]}
+        assert "--idempotency-key" in names, path
+
+    # These register both a parent and its initial version in one invocation, so
+    # a single user-supplied key cannot be forwarded to both without one of the
+    # two creates failing with a fingerprint conflict on retry.
+    uncovered_paths = (
+        ("agent", "register"),
+        ("importer", "register"),
+        ("evaluator", "register"),
+    )
+    for path in uncovered_paths:
+        [command] = describe_schema(path)
+        names = {parameter["name"] for parameter in command["parameters"]}
+        assert "--idempotency-key" not in names, path

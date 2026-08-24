@@ -18,7 +18,6 @@ from collections.abc import AsyncGenerator
 
 import httpx
 import pytest
-from fastapi.routing import iter_route_contexts
 
 from conftest import (
     FakeAgentRepository,
@@ -26,6 +25,7 @@ from conftest import (
     FakeApiKeyRepository,
     FakeIdempotencyKeyRepository,
     FakeTagRepository,
+    marked_idempotent_routes,
 )
 from kitaru.server.adapters.rest.dependencies import (
     _resolve_auth_context,
@@ -34,7 +34,6 @@ from kitaru.server.adapters.rest.dependencies import (
     get_idempotency_key_repository,
     get_tag_service,
 )
-from kitaru.server.adapters.rest.route import is_idempotent
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import (
@@ -267,14 +266,24 @@ async def test_unmarked_route_ignores_the_header(
 async def test_idempotent_routes_match_the_expected_set() -> None:
     """Assert exactly the specified routes carry the idempotent marker."""
     app = create_app(_settings())
-    marked = {
-        (method, context.path)
-        for context in iter_route_contexts(app.routes)
-        if context.endpoint is not None and is_idempotent(context.endpoint)
-        for method in context.methods or ()
-    }
+    marked = marked_idempotent_routes(app)
     assert marked == EXPECTED_IDEMPOTENT_ROUTES
     assert ("POST", "/api/v1/tasks/claim") not in marked
+
+
+async def test_openapi_schema_documents_the_header_on_the_expected_routes() -> None:
+    """Assert the OpenAPI schema declares the header on exactly the expected routes."""
+    app = create_app(_settings())
+    schema = app.openapi()
+    documented = {
+        (method.upper(), path)
+        for path, operations in schema["paths"].items()
+        for method, operation in operations.items()
+        for parameter in operation.get("parameters", [])
+        if parameter.get("name") == "Idempotency-Key"
+        and parameter.get("in") == "header"
+    }
+    assert documented == EXPECTED_IDEMPOTENT_ROUTES
 
 
 async def test_non_printable_header_returns_400(client: httpx.AsyncClient) -> None:

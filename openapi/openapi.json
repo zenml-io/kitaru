@@ -9034,6 +9034,24 @@
       "post": {
         "description": "Create an agent.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Agent create request.\n    service: Agent service.\n    actor: Caller context.\n\nReturns:\n    Created agent.",
         "operationId": "create_agent_api_v1_agents_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9331,6 +9349,22 @@
               "title": "Agent Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -9479,6 +9513,24 @@
       "post": {
         "description": "Create a manual annotation, or answer an investigation session.\n\nA body carrying session_id creates a manual annotation. A body carrying\ninvestigation_session_id answers an investigation session, moving a\npending investigation to in_progress on its first answer.\n\nClients observe HTTP 201 on success, 404 when the session or the\ninvestigation session does not exist, and 422 when the selector names a\nnode outside the session.\n\nArgs:\n    body: Manual annotation or investigation answer create request.\n    service: Annotation service.\n    actor: Caller context.\n\nReturns:\n    Created annotation.",
         "operationId": "create_annotation_api_v1_annotations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9764,6 +9816,24 @@
       "post": {
         "description": "Create an API key.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input. The response carries the plaintext\nkey exactly once.\n\nArgs:\n    body: API key create request.\n    service: API key service.\n    actor: Caller context.\n\nReturns:\n    Created API key including the plaintext key.",
         "operationId": "create_api_key_api_v1_api_keys_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -9946,6 +10016,22 @@
               "format": "uuid",
               "title": "Api Key Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           }
         ],
@@ -10389,6 +10475,24 @@
       "post": {
         "description": "Create a cohort namespace.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\n409 when the cohort name is already registered, and 422 on invalid\ninput.\n\nArgs:\n    body: Cohort create request.\n    service: Cohort service.\n    actor: Caller context.\n\nReturns:\n    Created cohort.",
         "operationId": "create_cohort_api_v1_cohorts_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -10685,6 +10789,22 @@
               "format": "uuid",
               "title": "Cohort Id",
               "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           }
         ],
@@ -11182,6 +11302,24 @@
       "post": {
         "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, and 422 when the pair count exceeds the cap or an input\nsession does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_evaluations_api_v1_evaluations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -11372,6 +11510,24 @@
       "post": {
         "description": "Create an evaluator.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Evaluator create request.\n    service: Evaluator service.\n    actor: Caller context.\n\nReturns:\n    Created evaluator.",
         "operationId": "create_evaluator_api_v1_evaluators_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -12249,6 +12405,24 @@
       "post": {
         "description": "Create an experiment.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist\nor an evaluator config names an unknown evaluator or version, 409 when\nthe name is already registered, and 422 on invalid input, including a\nduplicate resolved evaluator version.\n\nArgs:\n    body: Experiment create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created experiment.",
         "operationId": "create_experiment_api_v1_experiments_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -12432,6 +12606,22 @@
               "title": "Experiment Id",
               "type": "string"
             }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -12580,6 +12770,24 @@
       "post": {
         "description": "Create an importer.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Importer create request.\n    service: Importer service.\n    actor: Caller context.\n\nReturns:\n    Created importer.",
         "operationId": "create_importer_api_v1_importers_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -13008,6 +13216,24 @@
       "post": {
         "description": "Import sessions from a payload blob, as a job holding one importer task.\n\nClients observe HTTP 201 on success and 404 when the importer, the\nversion, the payload blob, or the agent does not exist.\n\nArgs:\n    body: Import create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_import_api_v1_imports_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -13176,6 +13402,24 @@
       "post": {
         "description": "Create an investigation with its linked sessions in one shot.\n\nClients observe HTTP 201 on success, 404 when the agent does not exist,\nand 422 when a linked session id repeats, is missing, or belongs to a\ndifferent agent.\n\nArgs:\n    body: Investigation create request.\n    service: Investigation service.\n    actor: Caller context.\n\nReturns:\n    Created investigation.",
         "operationId": "create_investigation_api_v1_investigations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14004,6 +14248,24 @@
       "post": {
         "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, and\n422 when the baseline session carries no agent version and none was\ngiven, the resolved agent version has no run spec, the tool policy uses\ncohort-version-scoped history, or an evaluator version repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
         "operationId": "create_replay_api_v1_replays_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14248,6 +14510,24 @@
       "post": {
         "description": "Create a secret.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input. The response omits the secret\nvalues.\n\nArgs:\n    body: Secret create request.\n    service: Secret service.\n    actor: Caller context.\n\nReturns:\n    Created secret without values.",
         "operationId": "create_secret_api_v1_secrets_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14439,6 +14719,24 @@
       "post": {
         "description": "Create a service account, active without credentials.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme and when the caller may not create accounts, 409 when the name is\nalready registered, and 422 on invalid input.\n\nArgs:\n    body: Service account create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
         "operationId": "create_service_account_api_v1_service_accounts_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14535,6 +14833,24 @@
       "post": {
         "description": "Run an agent version once, as a job holding one agent task.\n\nClients observe HTTP 201 on success, 404 when no agent version has this\nid, and 422 when the agent version carries no run spec.\n\nArgs:\n    body: Session run create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_session_run_api_v1_session_runs_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -14681,6 +14997,24 @@
       "post": {
         "description": "Create a session.\n\nA task principal's session is always linked to its own task, regardless\nof the request's task_id. Clients observe HTTP 201 on success, 409 when\nthe imported_from and external id pair is already registered, and 422 on\ninvalid input.\n\nArgs:\n    body: Session create request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Created session.",
         "operationId": "create_session_api_v1_sessions_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -15204,6 +15538,24 @@
       "post": {
         "description": "Create a tag.\n\nClients observe HTTP 201 on success, 409 when the name is already\nregistered, and 422 on invalid input.\n\nArgs:\n    body: Tag create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag.",
         "operationId": "create_tag_api_v1_tags_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {
@@ -15930,6 +16282,24 @@
       "post": {
         "description": "Create a user.\n\nA user created without a password starts inactive and its response\ncarries the activation token once.\n\nClients observe HTTP 201 on success, 403 outside the ``local`` auth\nscheme, 409 when the name is already registered, and 422 on invalid input.\n\nArgs:\n    body: User create request.\n    service: Account service.\n    actor: Caller context.\n\nReturns:\n    Created account.",
         "operationId": "create_user_api_v1_users_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
         "requestBody": {
           "content": {
             "application/json": {

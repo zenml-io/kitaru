@@ -44,11 +44,15 @@ class EvaluatorsResource:
         """
         self._client = client
 
-    async def create(self, request: EvaluatorCreateRequest) -> EvaluatorResponse:
+    async def create(
+        self, request: EvaluatorCreateRequest, idempotency_key: str | None = None
+    ) -> EvaluatorResponse:
         """Create an evaluator.
 
         Args:
             request: Evaluator create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -60,6 +64,7 @@ class EvaluatorsResource:
             "POST",
             "/api/v1/evaluators",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return EvaluatorResponse.model_validate(response.json())
 

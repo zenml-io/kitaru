@@ -44,11 +44,15 @@ class TagsResource:
         """
         self._client = client
 
-    async def create(self, request: TagCreateRequest) -> TagResponse:
+    async def create(
+        self, request: TagCreateRequest, idempotency_key: str | None = None
+    ) -> TagResponse:
         """Create a tag.
 
         Args:
             request: Tag create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate name.
@@ -60,6 +64,7 @@ class TagsResource:
             "POST",
             "/api/v1/tags",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return TagResponse.model_validate(response.json())
 

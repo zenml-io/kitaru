@@ -18,7 +18,7 @@ import inspect
 from collections.abc import Callable, Coroutine
 from typing import Annotated, Any, get_args, get_origin
 
-from fastapi import Depends, HTTPException, Request, params, status
+from fastapi import Depends, Header, HTTPException, Request, params, status
 
 from kitaru.server.adapters.rest.dependencies import get_idempotency_key_repository
 from kitaru.server.adapters.rest.request_state import (
@@ -121,8 +121,13 @@ def build_idempotency_enforcer(
         repository: Annotated[
             IdempotencyKeyRepository, Depends(get_idempotency_key_repository)
         ],
+        idempotency_key: Annotated[
+            str | None, Header(alias=_IDEMPOTENCY_KEY_HEADER)
+        ] = None,
     ) -> None:
-        await _enforce_idempotency(request, context, repository, encrypt_response)
+        await _enforce_idempotency(
+            request, context, repository, encrypt_response, idempotency_key
+        )
 
     return enforce_idempotency
 
@@ -132,6 +137,7 @@ async def _enforce_idempotency(
     context: AuthContext,
     repository: IdempotencyKeyRepository,
     encrypt_response: bool,
+    idempotency_key: str | None,
 ) -> None:
     """Replay or register a request's idempotency key before it runs.
 
@@ -146,6 +152,7 @@ async def _enforce_idempotency(
         context: Resolved auth context.
         repository: Idempotency key repository for the current request.
         encrypt_response: Whether the route's stored responses are encrypted.
+        idempotency_key: Raw header value, when present.
 
     Raises:
         HTTPException: The header is present but empty, too long, or not
@@ -156,10 +163,9 @@ async def _enforce_idempotency(
         IdempotencyKeyReused: A reused key already has a stored response, to
             replay in place of running the route.
     """
-    header = request.headers.get(_IDEMPOTENCY_KEY_HEADER)
-    if header is None:
+    if idempotency_key is None:
         return
-    key = header.strip()
+    key = idempotency_key.strip()
     if not key or len(key) > MAX_IDEMPOTENCY_KEY_LENGTH or not key.isprintable():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

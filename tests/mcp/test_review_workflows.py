@@ -350,20 +350,28 @@ async def test_investigation_pending_preserves_downstream_transition_error() -> 
 async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
     calls: list[str] = []
     investigation_requests: list[object] = []
+    investigation_idempotency_keys: list[str | None] = []
     annotation_creates: list[object] = []
+    annotation_idempotency_keys: list[str | None] = []
     annotation_updates: list[object] = []
 
-    async def create_investigation(request: object) -> object:
+    async def create_investigation(
+        request: object, idempotency_key: str | None = None
+    ) -> object:
         calls.append("create")
         investigation_requests.append(request)
+        investigation_idempotency_keys.append(idempotency_key)
         return _investigation()
 
     async def get_info() -> ServerInfoResponse:
         calls.append("info")
         return ServerInfoResponse(version="0.0.0", auth_scheme=AuthScheme.LOCAL)
 
-    async def create_annotation(request: object) -> object:
+    async def create_annotation(
+        request: object, idempotency_key: str | None = None
+    ) -> object:
         annotation_creates.append(request)
+        annotation_idempotency_keys.append(idempotency_key)
         return SimpleNamespace()
 
     async def update_annotation(_id: uuid.UUID, request: object) -> object:
@@ -391,6 +399,7 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
                     "questions": [{"key": "root-cause", "question": "Was it correct?"}],
                 }
             ],
+            idempotency_key="retry-investigation-1",
         ),
     )
     await handle_review_manage(
@@ -399,6 +408,7 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
             operation="create_annotation",
             session_id=uuid.uuid4(),
             value={"label": "bad"},
+            idempotency_key="retry-annotation-1",
         ),
     )
     await handle_review_manage(
@@ -408,6 +418,7 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
             investigation_session_id=investigation_session_id,
             question_key="root-cause",
             value=False,
+            idempotency_key="retry-answer-1",
         ),
     )
     await handle_review_manage(
@@ -436,6 +447,8 @@ async def test_review_creates_and_updates_forward_typed_sdk_dtos() -> None:
     )
     assert cast(Any, annotation_updates[0]).model_dump(mode="json") == {"value": True}
     assert calls == ["info", "create"]
+    assert investigation_idempotency_keys == ["retry-investigation-1"]
+    assert annotation_idempotency_keys == ["retry-annotation-1", "retry-answer-1"]
 
 
 def _investigation() -> InvestigationResponse:
@@ -461,7 +474,10 @@ async def _create_investigation(
     *,
     handler_timeout: float = 120.0,
 ) -> CallToolResult:
-    async def create(_request: object) -> InvestigationResponse:
+    async def create(
+        _request: object, idempotency_key: str | None = None
+    ) -> InvestigationResponse:
+        del idempotency_key
         return investigation
 
     client = SimpleNamespace(
@@ -624,8 +640,10 @@ async def test_review_tag_mutations_forward_typed_sdk_dtos() -> None:
         updated=now,
     )
 
-    async def create(request: TagCreateRequest) -> TagResponse:
-        calls.append(("create", request, None))
+    async def create(
+        request: TagCreateRequest, idempotency_key: str | None = None
+    ) -> TagResponse:
+        calls.append(("create", request, idempotency_key))
         return tag
 
     async def update(
@@ -647,7 +665,12 @@ async def test_review_tag_mutations_forward_typed_sdk_dtos() -> None:
     )
     assert (
         await handle_review_manage(
-            state, TagCreate(operation="create_tag", name="regression")
+            state,
+            TagCreate(
+                operation="create_tag",
+                name="regression",
+                idempotency_key="retry-tag-1",
+            ),
         )
         is tag
     )
@@ -673,6 +696,7 @@ async def test_review_tag_mutations_forward_typed_sdk_dtos() -> None:
 
     assert isinstance(calls[0][1], TagCreateRequest)
     assert calls[0][1].model_dump() == {"name": "regression"}
+    assert calls[0][2] == "retry-tag-1"
     assert calls[1][1] == tag_id
     assert isinstance(calls[1][2], TagUpdateRequest)
     assert calls[1][2].model_dump() == {"name": "known-failure"}
@@ -694,7 +718,10 @@ async def test_review_tag_create_has_typed_protocol_result() -> None:
         updated=now,
     )
 
-    async def create(request: TagCreateRequest) -> TagResponse:
+    async def create(
+        request: TagCreateRequest, idempotency_key: str | None = None
+    ) -> TagResponse:
+        del idempotency_key
         assert isinstance(request, TagCreateRequest)
         return tag
 
@@ -726,7 +753,10 @@ async def test_review_tag_create_has_typed_protocol_result() -> None:
 async def test_review_tag_api_errors_use_redacted_protocol_envelope(
     status_code: int, code: str, message: str
 ) -> None:
-    async def create(_request: TagCreateRequest) -> TagResponse:
+    async def create(
+        _request: TagCreateRequest, idempotency_key: str | None = None
+    ) -> TagResponse:
+        del idempotency_key
         raise APIError(status_code, "Bearer sensitive-token")
 
     server, context = _get_context(
@@ -795,6 +825,8 @@ def test_evaluation_start_caps_pairs_and_rejects_duplicates() -> None:
 
 async def test_workflow_starts_return_without_polling() -> None:
     calls: list[str] = []
+    evaluation_idempotency_keys: list[str | None] = []
+    experiment_start_idempotency_keys: list[str | None] = []
     evaluator_id = uuid.uuid4()
 
     async def get_evaluator(item_id: uuid.UUID) -> object:
@@ -805,12 +837,19 @@ async def test_workflow_starts_return_without_polling() -> None:
         calls.append("evaluator_version")
         return SimpleNamespace(id=uuid.uuid4(), evaluator_id=item_id, version=version)
 
-    async def create_evaluation(request: object) -> object:
+    async def create_evaluation(
+        request: object, idempotency_key: str | None = None
+    ) -> object:
+        del request
         calls.append("evaluation_create")
+        evaluation_idempotency_keys.append(idempotency_key)
         return SimpleNamespace(model_dump=lambda **_kwargs: {"id": str(uuid.uuid4())})
 
-    async def start_run(experiment_id: uuid.UUID, request: object) -> object:
+    async def start_run(
+        experiment_id: uuid.UUID, request: object, idempotency_key: str | None = None
+    ) -> object:
         calls.append("experiment_start")
+        experiment_start_idempotency_keys.append(idempotency_key)
         run_id = uuid.uuid4()
         return SimpleNamespace(
             id=run_id,
@@ -836,11 +875,13 @@ async def test_workflow_starts_return_without_polling() -> None:
                 operation="evaluation",
                 session_ids=[uuid.uuid4()],
                 evaluators=[{"evaluator_id": evaluator_id, "version": 2}],
+                idempotency_key="retry-evaluation-1",
             ),
         ),
     )
     assert calls == ["evaluator", "evaluator_version", "evaluation_create"]
     assert evaluation["operation"] == "evaluation"
+    assert evaluation_idempotency_keys == ["retry-evaluation-1"]
 
     experiment = cast(
         dict[str, Any],
@@ -851,11 +892,13 @@ async def test_workflow_starts_return_without_polling() -> None:
                 experiment_id=uuid.uuid4(),
                 cohort_version_id=uuid.uuid4(),
                 agent_version_id=uuid.uuid4(),
+                idempotency_key="retry-experiment-run-1",
             ),
         ),
     )
     assert calls[-1] == "experiment_start"
     assert experiment["operation"] == "experiment_run"
+    assert experiment_start_idempotency_keys == ["retry-experiment-run-1"]
 
 
 async def test_experiment_run_start_rejects_mismatched_receipt() -> None:
@@ -866,7 +909,10 @@ async def test_experiment_run_start_rejects_mismatched_receipt() -> None:
         agent_version_id=uuid.uuid4(),
     )
 
-    async def start_run(_experiment_id: uuid.UUID, _request: object) -> object:
+    async def start_run(
+        _experiment_id: uuid.UUID, _request: object, idempotency_key: str | None = None
+    ) -> object:
+        del idempotency_key
         return SimpleNamespace(
             experiment_id=uuid.uuid4(),
             cohort_version_id=request.cohort_version_id,
@@ -898,7 +944,10 @@ async def test_evaluator_resolution_uses_bounded_concurrency() -> None:
         await wait_for_read()
         return SimpleNamespace(id=uuid.uuid4(), evaluator_id=item_id, version=version)
 
-    async def create_evaluation(_request: object) -> object:
+    async def create_evaluation(
+        _request: object, idempotency_key: str | None = None
+    ) -> object:
+        del idempotency_key
         return SimpleNamespace(model_dump=lambda **_kwargs: {"id": str(uuid.uuid4())})
 
     client = SimpleNamespace(
@@ -996,7 +1045,10 @@ async def test_evaluation_start_protocol_returns_typed_receipt() -> None:
             updated=now,
         )
 
-    async def create_evaluation(_request: object) -> JobResponse:
+    async def create_evaluation(
+        _request: object, idempotency_key: str | None = None
+    ) -> JobResponse:
+        del idempotency_key
         return JobResponse(
             id=job_id,
             owner_id=uuid.uuid4(),
@@ -1088,9 +1140,11 @@ def test_evaluator_updates_require_explicit_non_conflicting_changes() -> None:
 
 async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     calls: list[tuple[str, object]] = []
+    create_idempotency_keys: list[str | None] = []
 
-    async def create(request: object) -> object:
+    async def create(request: object, idempotency_key: str | None = None) -> object:
         calls.append(("create", request))
+        create_idempotency_keys.append(idempotency_key)
         return SimpleNamespace()
 
     async def update(_id: uuid.UUID, request: object) -> object:
@@ -1115,7 +1169,10 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     )
     state = _get_state(client)
     await handle_evaluators_manage(
-        state, EvaluatorCreate(operation="create", name="accuracy")
+        state,
+        EvaluatorCreate(
+            operation="create", name="accuracy", idempotency_key="retry-evaluator-1"
+        ),
     )
     await handle_evaluators_manage(
         state,
@@ -1167,6 +1224,7 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     assert cast(Any, calls[3][1]).model_dump(exclude_unset=True) == {
         "display_version": None
     }
+    assert create_idempotency_keys == ["retry-evaluator-1"]
 
 
 async def test_script_evaluator_version_requires_existing_exact_blob() -> None:

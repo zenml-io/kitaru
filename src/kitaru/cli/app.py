@@ -1098,6 +1098,14 @@ _WAIT_PARAMETERS = (
         "Local wait timeout; requires --wait.",
     ),
 )
+_IDEMPOTENCY_KEY_PARAMETER = ParameterSpec(
+    "--idempotency-key",
+    "string",
+    "option",
+    False,
+    "Retrying this exact invocation with the same key returns the original "
+    "result instead of acting twice.",
+)
 _AGENT_SOURCE_PARAMETERS = (
     ParameterSpec("--spec", "path", "option", False, "YAML or JSON spec document."),
     ParameterSpec(
@@ -1303,6 +1311,7 @@ async def agent_get(agent: str, /) -> CommandResult:
                 "--description", "string", "option", False, "Version description."
             ),
             *_AGENT_SOURCE_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("reads_local_file", "creates_remote_state"),
@@ -1325,6 +1334,7 @@ async def agent_version_register(
     tool: list[str] | None = None,
     mcp_server: list[str] | None = None,
     skill: list[str] | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create the next server-assigned version of an exact agent."""
     if spec is not None:
@@ -1359,7 +1369,9 @@ async def agent_version_register(
             skills=skill,
         )
     async with _open_asset_client() as client:
-        return await registration.register_agent_version(client, agent, request)
+        return await registration.register_agent_version(
+            client, agent, request, idempotency_key=idempotency_key
+        )
 
 
 @_register(
@@ -1465,6 +1477,7 @@ async def agent_version_get(agent_version: str, /) -> CommandResult:
                 False,
                 "Display version for the membership snapshot.",
             ),
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -1488,6 +1501,7 @@ async def cohort_create(
         bool, Parameter(name="--all", help="Select all sessions.")
     ] = False,
     display_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create a cohort and optionally snapshot selected sessions."""
     async with _open_asset_client() as client:
@@ -1504,6 +1518,7 @@ async def cohort_create(
             filter=filter,
             all_sessions=all_sessions,
             display_version=display_version,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -1670,6 +1685,7 @@ async def cohort_delete(cohort: str, /, *, force: bool = False) -> CommandResult
                 False,
                 "Human-readable version.",
             ),
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -1685,6 +1701,7 @@ async def cohort_version_create(
     remove_session: list[uuid.UUID] | None = None,
     baseline: uuid.UUID | None = None,
     display_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an immutable version from an ordered membership delta."""
     async with _open_asset_client() as client:
@@ -1695,6 +1712,7 @@ async def cohort_version_create(
             remove_session_ids=remove_session,
             baseline_id=baseline,
             display_version=display_version,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -1872,6 +1890,7 @@ async def cohort_version_delete(
                 False,
                 "Curated highlights for a question added with --session-question.",
             ),
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -1888,6 +1907,7 @@ async def investigation_create(
     session: list[uuid.UUID] | None = None,
     session_question: list[str] | None = None,
     session_highlights: list[str] | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an investigation with its linked sessions."""
     async with _open_asset_client() as client:
@@ -1899,6 +1919,7 @@ async def investigation_create(
             session_ids=session or [],
             session_questions=session_question or [],
             session_highlights=session_highlights or [],
+            idempotency_key=idempotency_key,
         )
 
 
@@ -2123,6 +2144,7 @@ async def investigation_session_verdict(
                 "Optional node, JSON Pointer, or span selector.",
             ),
             ParameterSpec("--value", "JSON value", "option", True, "Annotation value."),
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -2137,6 +2159,7 @@ async def annotation_create(
     investigation_session: uuid.UUID | None = None,
     question_key: str | None = None,
     selector: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one manual annotation or investigation answer."""
     async with _open_asset_client() as client:
@@ -2147,6 +2170,7 @@ async def annotation_create(
             investigation_session_id=investigation_session,
             question_key=question_key,
             selector=selector,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -2283,6 +2307,7 @@ async def annotation_delete(
                 False,
                 "Parameters for a selected evaluator token.",
             ),
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -2300,6 +2325,7 @@ async def experiment_create(
     override: str | None = None,
     tool_policy: str | None = None,
     evaluator_params: list[str] | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an experiment with exact evaluator versions."""
     async with _open_asset_client() as client:
@@ -2312,6 +2338,7 @@ async def experiment_create(
             tool_policy=tool_policy,
             evaluators=evaluator,
             evaluator_params=evaluator_params,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -2537,6 +2564,7 @@ async def experiment_delete(
                 False,
                 "Also score the baseline session.",
             ),
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -2554,6 +2582,7 @@ async def replay_create(
     override: str | None = None,
     tool_policy: str | None = None,
     evaluate_baselines: bool = False,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one standalone replay without waiting for its job."""
     async with _open_asset_client() as client:
@@ -2566,6 +2595,7 @@ async def replay_create(
             override=override,
             tool_policy=tool_policy,
             evaluate_baselines=evaluate_baselines,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -2642,6 +2672,7 @@ async def replay_get(replay: uuid.UUID, /) -> CommandResult:
                 "Also score each baseline session.",
             ),
             *_WAIT_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("creates_remote_state",),
@@ -2660,6 +2691,7 @@ async def experiment_run_start(
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Start one exact experiment run and optionally wait for it."""
     async with _open_asset_client() as client:
@@ -2672,6 +2704,7 @@ async def experiment_run_start(
             wait=wait,
             interval=interval,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -2882,6 +2915,7 @@ async def _register_plugin_version_command(
     package: str | None,
     entrypoint: str | None,
     display_version: str | None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Run one kind-specific version registration."""
     source = registration.prepare_plugin_source(
@@ -2894,6 +2928,7 @@ async def _register_plugin_version_command(
             reference=reference,
             source=source,
             display_version=display_version,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -3106,6 +3141,7 @@ async def importer_get(importer: str, /) -> CommandResult:
                 "IMPORTER", "reference", "argument", True, "Importer UUID or name."
             ),
             *_PLUGIN_SOURCE_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
@@ -3121,6 +3157,7 @@ async def importer_version_register(
     package: str | None = None,
     entrypoint: str | None = None,
     display_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create the next importer version."""
     return await _register_plugin_version_command(
@@ -3130,6 +3167,7 @@ async def importer_version_register(
         package=package,
         entrypoint=entrypoint,
         display_version=display_version,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -3322,6 +3360,7 @@ async def evaluator_get(evaluator: str, /) -> CommandResult:
                 "EVALUATOR", "reference", "argument", True, "Evaluator UUID or name."
             ),
             *_PLUGIN_SOURCE_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("reads_local_file", "uploads_data", "creates_remote_state"),
@@ -3337,6 +3376,7 @@ async def evaluator_version_register(
     package: str | None = None,
     entrypoint: str | None = None,
     display_version: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create the next evaluator version."""
     return await _register_plugin_version_command(
@@ -3346,6 +3386,7 @@ async def evaluator_version_register(
         package=package,
         entrypoint=entrypoint,
         display_version=display_version,
+        idempotency_key=idempotency_key,
     )
 
 
@@ -3445,6 +3486,7 @@ async def evaluator_version_get(evaluator_version: str, /) -> CommandResult:
                 "Payload media type.",
             ),
             *_WAIT_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("uploads_data", "creates_remote_state"),
@@ -3469,6 +3511,7 @@ async def session_import(
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
     async with _open_asset_client() as client:
@@ -3484,6 +3527,7 @@ async def session_import(
             wait=wait,
             interval=interval,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 
@@ -3695,6 +3739,7 @@ async def session_nodes(
                 "Parameters for a selected evaluator token.",
             ),
             *_WAIT_PARAMETERS,
+            _IDEMPOTENCY_KEY_PARAMETER,
         ),
         read_only=False,
         side_effects=("reads_local_file", "creates_remote_state"),
@@ -3723,6 +3768,7 @@ async def session_evaluate(
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Evaluate sessions selected by ID, tag, or all sessions."""
     async with _open_asset_client() as client:
@@ -3740,6 +3786,7 @@ async def session_evaluate(
             wait=wait,
             interval=interval,
             timeout=timeout,
+            idempotency_key=idempotency_key,
         )
 
 

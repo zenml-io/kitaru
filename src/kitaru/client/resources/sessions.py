@@ -49,11 +49,15 @@ class SessionsResource:
         """
         self._client = client
 
-    async def create(self, request: SessionCreateRequest) -> SessionResponse:
+    async def create(
+        self, request: SessionCreateRequest, idempotency_key: str | None = None
+    ) -> SessionResponse:
         """Create a session.
 
         Args:
             request: Session create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 409 for a duplicate
@@ -66,6 +70,7 @@ class SessionsResource:
             "POST",
             "/api/v1/sessions",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return SessionResponse.model_validate(response.json())
 
