@@ -68,12 +68,11 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("replay", "replay_config_id"): None,
     ("replay", "result_session_id"): None,
     ("session_node", "session_id"): "CASCADE",
-    ("task", "agent_id"): "CASCADE",
-    ("task", "agent_version_id"): "CASCADE",
-    ("task", "input_session_id"): "CASCADE",
+    # A task names its inputs by id and carries no constraint to them, so
+    # agent_id, agent_version_id, input_session_id, payload_blob_id, and
+    # plugin_version_id are absent here. Only the job a task belongs to and the
+    # worker holding it stay constrained.
     ("task", "job_id"): "CASCADE",
-    ("task", "payload_blob_id"): "CASCADE",
-    ("task", "plugin_version_id"): "CASCADE",
     ("task", "worker_id"): "SET NULL",
     ("evaluation", "evaluator_version_id"): "SET NULL",
     ("evaluation", "owner_id"): None,

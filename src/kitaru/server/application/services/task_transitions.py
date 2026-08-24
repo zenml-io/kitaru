@@ -30,6 +30,7 @@ from kitaru.server.application.interfaces.plugin_repository import PluginReposit
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin
 from kitaru.server.domain.task import EvaluationTask, ImportTask, Task
@@ -367,9 +368,13 @@ class TaskTransitions:
             plugin_version_id: Id of the plugin version the task ran.
 
         Returns:
-            Stored plugin, or None without a plugin repository.
+            Stored plugin, or None without a plugin repository and None when
+            the version has been deleted since the task named it.
         """
         if self._plugins is None:
             return None
-        version = await self._plugins.get_version_by_id(plugin_version_id)
-        return await self._plugins.get(version.plugin_id)
+        try:
+            version = await self._plugins.get_version_by_id(plugin_version_id)
+            return await self._plugins.get(version.plugin_id)
+        except NotFoundError:
+            return None

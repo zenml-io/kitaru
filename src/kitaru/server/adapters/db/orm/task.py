@@ -53,12 +53,17 @@ STATUS_LENGTH = 16
 ON_FAILURE_LENGTH = 16
 
 TASK_JOB_ID_FOREIGN_KEY = foreign_key_name("task", ["job_id"])
+TASK_WORKER_ID_FOREIGN_KEY = foreign_key_name("task", ["worker_id"])
+# A task names the rows it takes as input by id alone. The queue holds work
+# that outlives the rows it points at, so deleting one of them neither cascades
+# into the queue nor is blocked by it, and a claim that cannot resolve an input
+# cancels the task instead. The names stay here for the migration that drops
+# the constraints.
 TASK_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("task", ["agent_version_id"])
 TASK_AGENT_ID_FOREIGN_KEY = foreign_key_name("task", ["agent_id"])
 TASK_PLUGIN_VERSION_ID_FOREIGN_KEY = foreign_key_name("task", ["plugin_version_id"])
 TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY = foreign_key_name("task", ["payload_blob_id"])
 TASK_INPUT_SESSION_ID_FOREIGN_KEY = foreign_key_name("task", ["input_session_id"])
-TASK_WORKER_ID_FOREIGN_KEY = foreign_key_name("task", ["worker_id"])
 TASK_EVALUATOR_PAIR_UNIQUE_CONSTRAINT = unique_constraint_name(
     "task", ["job_id", "input_session_id", "plugin_version_id"]
 )
@@ -88,36 +93,6 @@ class TaskORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __table_args__ = (
         ForeignKeyConstraint(
             ["job_id"], ["job.id"], name=TASK_JOB_ID_FOREIGN_KEY, ondelete="CASCADE"
-        ),
-        ForeignKeyConstraint(
-            ["agent_version_id"],
-            ["agent_version.id"],
-            name=TASK_AGENT_VERSION_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["agent_id"],
-            ["agent.id"],
-            name=TASK_AGENT_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["plugin_version_id"],
-            ["plugin_version.id"],
-            name=TASK_PLUGIN_VERSION_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["payload_blob_id"],
-            ["blob.id"],
-            name=TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
-        ),
-        ForeignKeyConstraint(
-            ["input_session_id"],
-            ["session.id"],
-            name=TASK_INPUT_SESSION_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["worker_id"],
