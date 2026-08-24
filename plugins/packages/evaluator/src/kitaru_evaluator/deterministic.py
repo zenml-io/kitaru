@@ -764,17 +764,20 @@ def _tool_identity(node: SessionNodeResponse) -> tuple[str, str] | None:
     return node.tool_name, _canonical_json(normalized)
 
 
-def _cycle_findings(calls: list[SessionNodeResponse]) -> list[dict[str, Any]]:
-    """Detect left-maximal name cycles of period 2-5 repeated at least 3 times."""
+def _cycle_findings(
+    calls: list[SessionNodeResponse],
+    identities: list[tuple[str, str] | None],
+) -> list[dict[str, Any]]:
+    """Detect left-maximal call cycles of period 2-5 repeated at least 3 times."""
     candidates: list[dict[str, Any]] = []
     names = [call.tool_name for call in calls]
     for period in range(2, 6):
         match_start: int | None = None
-        for position in range(len(names) - period + 1):
+        for position in range(len(identities) - period + 1):
             matches = (
-                position < len(names) - period
-                and names[position] is not None
-                and names[position] == names[position + period]
+                position < len(identities) - period
+                and identities[position] is not None
+                and identities[position] == identities[position + period]
             )
             if matches and match_start is None:
                 match_start = position
@@ -857,8 +860,8 @@ def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
             ),
             _finding_result(
                 "short_cycles",
-                _cycle_findings(calls),
-                "Repeated exact tool-name cycles.",
+                _cycle_findings(calls, identities),
+                "Repeated exact tool-call cycles.",
             ),
             _json_result(
                 "cycle_detector_bounds",

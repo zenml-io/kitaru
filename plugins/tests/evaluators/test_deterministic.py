@@ -544,12 +544,18 @@ def test_config_validation_rejects_ambiguous_policies(call: Any, match: str) -> 
 def test_trajectory_signals_separate_repeats_retries_and_cycles() -> None:
     """Detect exact adjacent calls, failed retries, and bounded short cycles."""
     nodes = [
-        _node(0, tool_name="a", inputs={"x": 1}, outputs={}, status=NodeStatus.FAILED),
-        _node(1, tool_name="a", inputs={"x": 1}, outputs={}),
+        _node(
+            0,
+            tool_name="a",
+            inputs={"x": 1, "y": 2},
+            outputs={},
+            status=NodeStatus.FAILED,
+        ),
+        _node(1, tool_name="a", inputs={"y": 2, "x": 1}, outputs={}),
         _node(2, tool_name="b", inputs={}, outputs={}),
-        _node(3, tool_name="a", inputs={"different": True}, outputs={}),
+        _node(3, tool_name="a", inputs={"x": 1, "y": 2}, outputs={}),
         _node(4, tool_name="b", inputs={}, outputs={}),
-        _node(5, tool_name="a", inputs={}, outputs={}),
+        _node(5, tool_name="a", inputs={"y": 2, "x": 1}, outputs={}),
         _node(6, tool_name="b", inputs={}, outputs={}),
     ]
     results = _by_name(evaluators.trajectory_signals(_view(nodes)))
@@ -563,6 +569,27 @@ def test_trajectory_signals_separate_repeats_retries_and_cycles() -> None:
         "min_period": 2,
         "min_repetitions": 3,
     }
+
+
+def test_trajectory_signals_do_not_cycle_distinct_calls_to_the_same_tool() -> None:
+    """Do not classify different commands as a repeated tool-call cycle."""
+    nodes = [
+        _node(
+            index,
+            tool_name="command_execution",
+            inputs={"command": command},
+            outputs={},
+        )
+        for index, command in enumerate(
+            ["pwd", "ls", "git status", "pytest", "ruff check", "git diff"]
+        )
+    ]
+
+    cycles = _payload(
+        _by_name(evaluators.trajectory_signals(_view(nodes)))["short_cycles"]
+    )
+
+    assert cycles["total"] == 0
 
 
 def test_trajectory_signals_emit_one_maximal_odd_cycle() -> None:
