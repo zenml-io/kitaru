@@ -111,11 +111,11 @@ The Mastra adapter supports these [tool policies](../guides/tool-policies.md) fo
 
 History matching is guaranteed only when both the recording and replay use this Mastra adapter. Another framework may apply schema defaults, coercion, or serialization differently, which changes the history key even when the logical tool call looks equivalent.
 
-A completed history match replays its result, including `null`, without executing the live tool. A failed match raises its stored error and does not execute the live tool. Only a genuine miss follows the policy's `on_miss` behavior.
+A completed history match replays its result, including `null`, without executing the live tool. A failed match throws `ToolPolicyError` with its stored error text and does not execute the live tool. Only a genuine miss follows the policy's `on_miss` behavior.
 
 Before a replay starts, the adapter inventories configured tools, function-valued tools resolved from the run's `requestContext`, and per-run `clientTools` and `toolsets`. It rejects tools without a local `execute` function, approval-gated runs, sandboxed tools, and tool keys that Mastra would rename before exposing them to the model. Tools added only during execution and tools executed by a provider remain outside this preflight check and are not supported replay targets.
 
-A tool-policy failure aborts the replay and records the session as failed. Replay forces `toolCallConcurrency: 1` and aborts Mastra's generation loop as soon as a tool hook fails, so a later model step or sibling tool cannot continue after the policy failure.
+A tool-policy failure aborts the replay and records the session as failed. Replay forces `toolCallConcurrency: 1` and aborts Mastra's generation loop as soon as a tool hook fails, so a later model step or sibling tool cannot continue after the policy failure. Kitaru does not recreate the original exception class or convert a matched failure into a native tool-error result.
 
 {% hint style="danger" %}
 Replay is execution, not a transaction. A passthrough tool can complete an external side effect before a later model or recording failure, and Kitaru cannot roll it back. Use application-level idempotency keys for side-effecting tools, or choose static or history policies when replay must suppress execution.

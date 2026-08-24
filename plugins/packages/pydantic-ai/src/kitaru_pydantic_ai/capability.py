@@ -792,6 +792,11 @@ class _KitaruCapability(AbstractCapability[Any]):
                             occurrence=occurrence,
                         ),
                     )
+                    if "match" not in response.model_fields_set:
+                        raise ToolPolicyError(
+                            "Kitaru server tool lookup response does not include "
+                            "'match'; upgrade the server before using history replay"
+                        )
                     match = response.match
                     if match is not None:
                         if occurrence is not None:

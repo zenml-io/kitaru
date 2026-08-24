@@ -1346,6 +1346,34 @@ async def test_history_policy_raises_and_records_failed_match(
     assert run_states[0].history_occurrences[cache_key] == 1
 
 
+async def test_history_policy_legacy_lookup_response_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An old server response cannot be mistaken for a genuine history miss."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+            )
+        ),
+    )
+    _FakeClient.next_lookup_response = ToolLookupResponse()
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(ToolPolicyError, match="does not include 'match'"):
+        await agent.run("weather")
+
+    assert real_calls == []
+    assert returned_results == []
+
+
 async def test_history_policy_fails_closed_for_unexpected_match_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -50,3 +50,41 @@ async def test_nested_ancestor_is_persisted_before_child(fake_client: Any) -> No
     assert all(
         node.parent_index is None or node.parent_index < node.index for node in nodes
     )
+
+
+async def test_callback_failures_preserve_error_text(fake_client: Any) -> None:
+    """Persist useful messages for failed chains and tool calls."""
+    recorder = await InvocationRecorder.setup(
+        {"input": True},
+        None,
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        batch_size=1,
+        policy=CapturePolicy(),
+    )
+    callback = AsyncKitaruCallback(recorder)
+    root_id = uuid.uuid4()
+    nested_id = uuid.uuid4()
+    tool_id = uuid.uuid4()
+
+    await callback.on_chain_start({}, {}, run_id=root_id)
+    await callback.on_chain_start(
+        {"name": "nested"}, {}, run_id=nested_id, parent_run_id=root_id
+    )
+    await callback.on_chain_error(RuntimeError("chain failed"), run_id=nested_id)
+    await callback.on_tool_start(
+        {"name": "weather"},
+        "{}",
+        run_id=tool_id,
+        parent_run_id=root_id,
+    )
+    await callback.on_tool_error(RuntimeError("service down"), run_id=tool_id)
+    await recorder.finalize(result={"done": False})
+
+    client = fake_client.instances[0]
+    nodes = [node for _, batch in client.sessions.node_batches for node in batch.nodes]
+    nested = next(node for node in reversed(nodes) if node.name == "nested")
+    tool = next(node for node in reversed(nodes) if node.name == "weather")
+    assert nested.error == "chain failed"
+    assert tool.error == "service down"

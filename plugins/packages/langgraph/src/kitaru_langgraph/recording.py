@@ -44,6 +44,11 @@ FRAMEWORK = "langgraph"
 _LOGGER = logging.getLogger(__name__)
 
 
+def _error_text(error: BaseException) -> str:
+    """Return a useful stored error message with a class-name fallback."""
+    return str(error) or type(error).__name__
+
+
 @dataclass(frozen=True)
 class RecordingFailure:
     """Safe diagnostic for the first contained adapter failure."""
@@ -310,7 +315,7 @@ class InvocationRecorder:
                 node_type=NodeType.SPAN,
                 name=pending.name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=type(error).__name__ if error is not None else None,
+                error=_error_text(error) if error is not None else None,
                 started_at=pending.started_at,
                 ended_at=datetime.now(UTC),
                 inputs=pending.inputs,
@@ -383,7 +388,7 @@ class InvocationRecorder:
                 node_type=pending.node_type,
                 name=pending.name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=type(error).__name__ if error is not None else None,
+                error=_error_text(error) if error is not None else None,
                 started_at=pending.started_at,
                 ended_at=datetime.now(UTC),
                 inputs=pending.inputs,
@@ -431,9 +436,7 @@ class InvocationRecorder:
                 node_type=NodeType.TOOL_CALL,
                 name=tool_name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=(str(error) or type(error).__name__)
-                if error is not None
-                else None,
+                error=_error_text(error) if error is not None else None,
                 started_at=datetime.now(UTC),
                 ended_at=datetime.now(UTC),
                 inputs=input_capture.value,

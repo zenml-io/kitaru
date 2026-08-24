@@ -217,6 +217,27 @@ describe("replay tool policies", () => {
     });
   });
 
+  it("passes through on a genuine history miss", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    installTestApi({
+      lookup: () => ({ match: null }),
+      replaySpec: replaySpec({
+        default: {
+          on_miss: "passthrough",
+          scope: "baseline",
+          type: "history",
+        },
+        tools: {},
+      }),
+    });
+    const execute = vi.fn(() => ({ source: "real" }));
+
+    const result = await wrapper(replayAgent(execute)).generate("run");
+
+    expect(result).toEqual({ source: "real" });
+    expect(execute).toHaveBeenCalledOnce();
+  });
+
   it("does not look up history with redacted credentials", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi({

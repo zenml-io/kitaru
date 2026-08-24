@@ -614,6 +614,68 @@ async def test_find_nth_by_cache_key_in_session_skips_an_in_progress_node(
     assert found.outputs == {"ticket": "b"}
 
 
+async def test_find_nth_by_cache_key_in_session_counts_only_finished_nodes(
+    setup: Setup,
+) -> None:
+    """Count failed and completed calls while excluding in-progress calls."""
+    repository, session_id, _ = setup
+    cache_key = "h" * 64
+    await repository.upsert_batch(
+        session_id,
+        [
+            _node(
+                0,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.FAILED,
+                error="boom",
+            ),
+            _node(
+                1,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                status=NodeStatus.IN_PROGRESS,
+            ),
+            _node(
+                2,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                outputs={"ticket": "a"},
+            ),
+            _node(
+                3,
+                session_id=session_id,
+                node_type=NodeType.TOOL_CALL,
+                cache_key=cache_key,
+                outputs={"ticket": "b"},
+            ),
+        ],
+    )
+
+    found = [
+        await repository.find_nth_by_cache_key_in_session(
+            session_id, cache_key, occurrence
+        )
+        for occurrence in range(4)
+    ]
+
+    assert [node.status if node is not None else None for node in found] == [
+        NodeStatus.FAILED,
+        NodeStatus.COMPLETED,
+        NodeStatus.COMPLETED,
+        None,
+    ]
+    assert [node.outputs if node is not None else None for node in found] == [
+        None,
+        {"ticket": "a"},
+        {"ticket": "b"},
+        None,
+    ]
+
+
 async def test_find_latest_by_cache_key_in_session_skips_a_failed_node(
     setup: Setup,
 ) -> None:

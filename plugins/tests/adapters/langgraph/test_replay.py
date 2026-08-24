@@ -392,6 +392,30 @@ async def test_history_failed_match_raises_and_records_substitution(
     assert str(recorder.recorded[0]["error"]) == expected_error
 
 
+@pytest.mark.parametrize("sync", [False, True], ids=["async", "sync"])
+async def test_history_legacy_lookup_response_fails_closed(sync: bool) -> None:
+    """An old server response cannot be mistaken for a genuine history miss."""
+    policy = ToolPolicy(
+        default=HistoryConfig(
+            scope=HistoryScope.BASELINE,
+            on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+        )
+    )
+    recorder = _Recorder(override=None, policy=policy)
+
+    async def lookup(*_: Any) -> Any:
+        return ToolLookupResponse()
+
+    recorder.client.replays.tool_lookup = lookup
+    live_calls: list[str] = []
+
+    with pytest.raises(ToolPolicyError, match="does not include 'match'"):
+        await _invoke_history_tool(recorder, live_calls, sync=sync)
+
+    assert live_calls == []
+    assert recorder.history_occurrences == {}
+
+
 async def test_history_failed_match_persists_error_message(fake_client: Any) -> None:
     recorded_error = "recorded tool failure"
     recorder = await InvocationRecorder.setup(

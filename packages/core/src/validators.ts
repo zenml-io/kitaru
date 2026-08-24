@@ -234,10 +234,10 @@ export function validateToolLookup(
   path: string,
   status: number,
 ): asserts value is ToolLookupResponse {
-  if (!isRecord(value)) {
-    invalidResponse(method, path, status, "invalid response");
+  if (!isRecord(value) || !Object.hasOwn(value, "match")) {
+    invalidResponse(method, path, status, "missing match");
   }
-  if (!Object.hasOwn(value, "match") || value.match === null) {
+  if (value.match === null) {
     return;
   }
   if (!isRecord(value.match)) {

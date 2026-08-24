@@ -352,6 +352,11 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
                 tool_name=name, cache_key=cache_key, occurrence=occurrence
             ),
         )
+        if "match" not in lookup.model_fields_set:
+            raise ToolPolicyError(
+                "Kitaru server tool lookup response does not include 'match'; "
+                "upgrade the server before using history replay"
+            )
         match = lookup.match
         if match is None:
             return None
