@@ -1722,8 +1722,6 @@ class FakeAgentRepository:
     def __init__(self) -> None:
         """Initialize the repository."""
         self._agents: dict[uuid.UUID, Agent] = {}
-        # Wired back by FakeAgentVersionRepository, cascaded on delete.
-        self._agent_versions: FakeAgentVersionRepository | None = None
 
     def _check_duplicate_name(self, agent: Agent) -> None:
         for other in self._agents.values():
@@ -1855,38 +1853,6 @@ class FakeAgentRepository:
             raise AgentNotFound(agent_id)
         agent.deleted_at = datetime.now(UTC)
 
-    async def list_marked_deleted(self, cutoff: datetime, limit: int) -> list[Agent]:
-        """List agents marked deleted before a cutoff, up to a limit.
-
-        Args:
-            cutoff: Rows marked deleted before this time are returned.
-            limit: Maximum number of rows to return.
-
-        Returns:
-            Agents marked deleted before the cutoff.
-        """
-        marked = [
-            agent
-            for agent in self._agents.values()
-            if agent.deleted_at is not None and agent.deleted_at < cutoff
-        ]
-        return [agent.model_copy() for agent in marked[:limit]]
-
-    async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id, marked deleted or not, cascading its versions.
-
-        Args:
-            agent_id: Id of the agent.
-
-        Raises:
-            AgentNotFound: No agent has this id.
-        """
-        if agent_id not in self._agents:
-            raise AgentNotFound(agent_id)
-        del self._agents[agent_id]
-        if self._agent_versions is not None:
-            self._agent_versions.cascade_agent_delete(agent_id)
-
 
 async def create_agent(
     repository: FakeAgentRepository,
@@ -1923,9 +1889,7 @@ class FakeAgentVersionRepository:
         """Initialize the repository.
 
         Args:
-            agents: Fake agent repository sharing the version counter. Also
-                wired back onto the agent repository so its delete can
-                cascade this repository's versions.
+            agents: Fake agent repository sharing the version counter.
             tags: Fake tag repository, consulted by the ``tag`` filter.
             experiment_runs: Fake experiment run repository, consulted by
                 delete to check for an in-use version.
@@ -1933,27 +1897,10 @@ class FakeAgentVersionRepository:
                 are cleared on delete.
         """
         self._agents = agents
-        self._agents._agent_versions = self
         self._versions: dict[uuid.UUID, AgentVersion] = {}
         self._tags = tags
         self._experiment_runs = experiment_runs
         self._sessions = sessions
-
-    def cascade_agent_delete(self, agent_id: uuid.UUID) -> None:
-        """Drop the versions of a deleted agent, mirroring the cascading key.
-
-        Args:
-            agent_id: Id of the deleted agent.
-        """
-        stale_ids = [
-            version_id
-            for version_id, version in self._versions.items()
-            if version.agent_id == agent_id
-        ]
-        for version_id in stale_ids:
-            del self._versions[version_id]
-            if self._sessions is not None:
-                self._sessions._null_agent_version(version_id)
 
     async def create(self, agent_version: AgentVersion) -> AgentVersion:
         """Persist a new agent version.
@@ -5423,18 +5370,6 @@ class FakeJobRepository:
         del self._jobs[job_id]
         if self._tasks is not None:
             self._tasks.cascade_job_delete(job_id)
-
-    async def delete_many(self, job_ids: Sequence[uuid.UUID]) -> None:
-        """Delete many jobs by id, cascading their tasks.
-
-        Args:
-            job_ids: Ids of the jobs.
-
-        Raises:
-            JobNotFound: A job id matches no job.
-        """
-        for job_id in sorted(job_ids):
-            await self.delete(job_id)
 
 
 class FakeTaskRepository:

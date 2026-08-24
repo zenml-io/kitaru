@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from datetime import UTC, datetime
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
@@ -163,36 +163,14 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         Raises:
             AgentNotFound: No agent has this id.
         """
-        row = await self._get_row(agent_id)
-        row.deleted_at = datetime.now(UTC)
-        await self._flush()
-
-    async def list_marked_deleted(self, cutoff: datetime, limit: int) -> list[Agent]:
-        """List agents marked deleted before a cutoff, up to a limit.
-
-        Args:
-            cutoff: Rows marked deleted before this time are returned.
-            limit: Maximum number of rows to return.
-
-        Returns:
-            Agents marked deleted before the cutoff.
-        """
+        now = datetime.now(UTC)
         statement = (
-            select(AgentORM)
-            .where(AgentORM.deleted_at < cutoff)
-            .order_by(AgentORM.id)
-            .limit(limit)
+            update(AgentORM)
+            .where(AgentORM.id == agent_id, AgentORM.deleted_at.is_(None))
+            .values(deleted_at=now, updated=now)
+            .execution_options(synchronize_session="fetch")
         )
-        rows = (await self._session.scalars(statement)).all()
-        return [row.to_domain() for row in rows]
-
-    async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id.
-
-        Args:
-            agent_id: Id of the agent.
-
-        Raises:
-            AgentNotFound: No agent has this id.
-        """
-        await self._delete_row(agent_id)
+        result = await self._session.execute(statement)
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise self._not_found(agent_id)

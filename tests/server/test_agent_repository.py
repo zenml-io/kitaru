@@ -43,7 +43,6 @@ from kitaru.server.domain.agent import (
     AgentNotFound,
     DuplicateAgentName,
 )
-from kitaru.server.domain.agent_version import AgentVersion, AgentVersionNotFound
 from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[AgentRepository, uuid.UUID, Callable[[], AgentVersionRepository]]
@@ -260,37 +259,3 @@ async def test_mark_deleted_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(AgentNotFound, match=f"Agent {missing_id} was not found"):
         await repository.mark_deleted(missing_id)
-
-
-async def test_delete(setup: Setup) -> None:
-    """Delete a stored agent."""
-    repository, owner_id, _ = setup
-    created = await repository.create(Agent(owner_id=owner_id, name="assistant"))
-    await repository.delete(created.id)
-    with pytest.raises(AgentNotFound):
-        await repository.get(created.id)
-
-
-async def test_delete_not_found(setup: Setup) -> None:
-    """Raise for an unknown agent id."""
-    repository, _, _ = setup
-    missing_id = uuid.uuid4()
-    with pytest.raises(AgentNotFound, match=f"Agent {missing_id} was not found"):
-        await repository.delete(missing_id)
-
-
-async def test_delete_cascades_versions(setup: Setup) -> None:
-    """Deleting an agent cascades its versions."""
-    repository, owner_id, make_version_repository = setup
-    agent = await repository.create(Agent(owner_id=owner_id, name="assistant"))
-    version_repository = make_version_repository()
-    version = await version_repository.create(
-        AgentVersion(owner_id=owner_id, agent_id=agent.id)
-    )
-
-    await repository.delete(agent.id)
-
-    with pytest.raises(AgentNotFound):
-        await repository.get(agent.id)
-    with pytest.raises(AgentVersionNotFound):
-        await version_repository.get(version.id)

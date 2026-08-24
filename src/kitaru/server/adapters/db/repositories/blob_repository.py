@@ -159,8 +159,6 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
             BlobNotFound: No blob has this id.
             BlobInUse: The blob is referenced by a plugin version.
         """
-        row = await self._get_row(blob_id)
-        await self._session.delete(row)
-        await self._flush(
-            {PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id)}
+        await self._delete_row(
+            blob_id, {PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id)}
         )

@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A task names the rows it takes as input by id and no longer holds a foreign key to them, so deleting an agent version, plugin version, blob, or session neither deletes the tasks that name it nor is blocked by them. A worker claim that cannot resolve a task's inputs cancels that task, which settles its job the same way any other terminal task does.
 - Cancelling a job's pending tasks now settles the job when that leaves it with nothing running, so a replay job whose experiment or experiment run was deleted reaches `canceled` on its own instead of staying pending until someone cancels it by hand.
 - Deleting a job no longer deletes its replay, and is rejected with HTTP 409 until the job has settled. Cancel the job and let it settle first. Deleting an experiment or an experiment run cancels its replay jobs instead of deleting them, so those jobs outlive the experiment or run they came from.
+- Concurrent deletes of the same resource now give exactly one caller HTTP 204, every other caller gets HTTP 404. Previously several racing deletes could all report success.
 
 ### Removed
 

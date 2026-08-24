@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Mapping
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
@@ -239,12 +239,15 @@ class SQLTagRepository(BaseSQLRepository[TagORM]):
             TagLinkNotFound: No link matches the tag and resource.
         """
         resource_column = TagLinkORM.get_resource_column(resource_type)
-        statement = select(TagLinkORM).where(
-            TagLinkORM.tag_id == tag_id,
-            resource_column == resource_id,
+        statement = (
+            delete(TagLinkORM)
+            .where(
+                TagLinkORM.tag_id == tag_id,
+                resource_column == resource_id,
+            )
+            .execution_options(synchronize_session="fetch")
         )
-        row = (await self._session.scalars(statement)).one_or_none()
-        if row is None:
+        result = await self._session.execute(statement)
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
             raise TagLinkNotFound(tag_id, resource_type, resource_id)
-        await self._session.delete(row)
-        await self._session.flush()

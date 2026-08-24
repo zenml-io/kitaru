@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Generic, NoReturn, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, defer
@@ -161,13 +161,19 @@ class BaseSQLRepository(Generic[RowT]):
             NotFoundError: No row has this id.
             DomainError: A mapped constraint was violated.
         """
-        row = await self._get_row(entity_id)
+        statement = (
+            delete(self.orm_class)
+            .where(self.orm_class.id == entity_id)
+            .execution_options(synchronize_session="fetch")
+        )
         try:
             async with self._session.begin_nested():
-                await self._session.delete(row)
-                await self._session.flush()
+                result = await self._session.execute(statement)
         except IntegrityError as exc:
             self._raise_translated(exc, constraints)
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise self._not_found(entity_id)
 
     def _raise_translated(
         self, exc: IntegrityError, constraints: ConstraintErrors | None

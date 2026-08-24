@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.tag import TagResourceType
@@ -254,11 +254,14 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
             ReplayConfigNotFound: No replay config has this id.
             ReplayConfigInUse: A replay references the replay config.
         """
-        row = await self._get_replay_config_row(config_id)
+        statement = (
+            delete(ReplayConfigORM)
+            .where(ReplayConfigORM.id == config_id)
+            .execution_options(synchronize_session="fetch")
+        )
         try:
             async with self._session.begin_nested():
-                await self._session.delete(row)
-                await self._session.flush()
+                result = await self._session.execute(statement)
         except IntegrityError as exc:
             self._raise_translated(
                 exc,
@@ -268,3 +271,6 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
                     )
                 },
             )
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise ReplayConfigNotFound(config_id)
