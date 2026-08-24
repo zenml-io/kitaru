@@ -26,7 +26,9 @@ async def handle_session_import(
         payload_blob_id=blob.id,
         params=request.params,
     )
-    job = await state.client.imports.create(dto)
+    job = await state.client.imports.create(
+        dto, idempotency_key=request.idempotency_key
+    )
     return {
         "operation": "session_import",
         "idempotency": "domain-deduplicated-only",

@@ -249,6 +249,7 @@ async def import_sessions(
     interval: float | None,
     timeout: float | None,
     join_on: str | None = None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Upload a local payload and create one import job."""
     tags = _normalize_import_tags(tags, wait=wait)
@@ -314,7 +315,7 @@ async def import_sessions(
         params=parsed_params,
     )
     try:
-        job = await client.imports.create(request)
+        job = await client.imports.create(request, idempotency_key=idempotency_key)
     except APIError as error:
         raise CLIError(
             "partial_failure",

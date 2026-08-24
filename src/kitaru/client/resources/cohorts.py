@@ -46,11 +46,15 @@ class CohortsResource:
         """
         self._client = client
 
-    async def create(self, request: CohortCreateRequest) -> CohortResponse:
+    async def create(
+        self, request: CohortCreateRequest, idempotency_key: str | None = None
+    ) -> CohortResponse:
         """Create a cohort.
 
         Args:
             request: Cohort create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 when the agent does
@@ -64,6 +68,7 @@ class CohortsResource:
             "POST",
             "/api/v1/cohorts",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return CohortResponse.model_validate(response.json())
 
@@ -160,13 +165,18 @@ class CohortsResource:
         await self._client.request("DELETE", f"/api/v1/cohorts/{cohort_id}")
 
     async def create_version(
-        self, cohort_id: uuid.UUID, request: CohortVersionCreateRequest
+        self,
+        cohort_id: uuid.UUID,
+        request: CohortVersionCreateRequest,
+        idempotency_key: str | None = None,
     ) -> CohortVersionResponse:
         """Create a new version of a cohort.
 
         Args:
             cohort_id: Id of the cohort.
             request: Cohort version create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -180,6 +190,7 @@ class CohortsResource:
             "POST",
             f"/api/v1/cohorts/{cohort_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return CohortVersionResponse.model_validate(response.json())
 

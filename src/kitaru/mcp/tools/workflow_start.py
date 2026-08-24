@@ -24,7 +24,8 @@ async def handle_workflow_start(
             EvaluationBatchCreateRequest(
                 input_session_ids=request.session_ids,
                 evaluators=resolved.configs,
-            )
+            ),
+            idempotency_key=request.idempotency_key,
         )
         return {
             "operation": "evaluation",
@@ -46,7 +47,9 @@ async def handle_workflow_start(
         agent_version_id=request.agent_version_id,
         evaluate_baselines=request.evaluate_baselines,
     )
-    run = await state.client.experiments.start_run(request.experiment_id, dto)
+    run = await state.client.experiments.start_run(
+        request.experiment_id, dto, idempotency_key=request.idempotency_key
+    )
     if (
         run.experiment_id != request.experiment_id
         or run.cohort_version_id != request.cohort_version_id

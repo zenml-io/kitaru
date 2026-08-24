@@ -41,6 +41,7 @@ async def create_experiment(
     tool_policy: str | None,
     evaluators: Sequence[str],
     evaluator_params: Sequence[str] | None,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create an experiment with exact evaluator versions."""
     resolved_agent = await resolve_asset(client.agents, agent, "Agent")
@@ -56,7 +57,9 @@ async def create_experiment(
     )
     fields["evaluators"] = configs
 
-    experiment = await client.experiments.create(ExperimentCreateRequest(**fields))
+    experiment = await client.experiments.create(
+        ExperimentCreateRequest(**fields), idempotency_key=idempotency_key
+    )
     return CommandResult(item=experiment.model_dump(mode="json"))
 
 

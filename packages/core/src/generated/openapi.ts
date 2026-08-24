@@ -8518,7 +8518,9 @@ export interface operations {
     create_agent_api_v1_agents_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8686,7 +8688,9 @@ export interface operations {
     create_agent_version_api_v1_agents__agent_id__versions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 agent_id: string;
             };
@@ -8759,7 +8763,9 @@ export interface operations {
     create_annotation_api_v1_annotations_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -8925,7 +8931,9 @@ export interface operations {
     create_api_key_api_v1_api_keys_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -9053,7 +9061,9 @@ export interface operations {
     rotate_api_key_api_v1_api_keys__api_key_id__rotate_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 api_key_id: string;
             };
@@ -9345,7 +9355,9 @@ export interface operations {
     create_cohort_api_v1_cohorts_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -9513,7 +9525,9 @@ export interface operations {
     create_cohort_version_api_v1_cohorts__cohort_id__versions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 cohort_id: string;
             };
@@ -9789,7 +9803,9 @@ export interface operations {
     create_evaluations_api_v1_evaluations_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -9891,7 +9907,9 @@ export interface operations {
     create_evaluator_api_v1_evaluators_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -10367,7 +10385,9 @@ export interface operations {
     create_experiment_api_v1_experiments_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -10495,7 +10515,9 @@ export interface operations {
     start_run_api_v1_experiments__experiment_id__runs_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 experiment_id: string;
             };
@@ -10568,7 +10590,9 @@ export interface operations {
     create_importer_api_v1_importers_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -10837,7 +10861,9 @@ export interface operations {
     create_import_api_v1_imports_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -10928,7 +10954,9 @@ export interface operations {
     create_investigation_api_v1_investigations_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11395,7 +11423,9 @@ export interface operations {
     create_replay_api_v1_replays_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11532,7 +11562,9 @@ export interface operations {
     create_secret_api_v1_secrets_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11662,7 +11694,9 @@ export interface operations {
     create_service_account_api_v1_service_accounts_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11730,7 +11764,9 @@ export interface operations {
     create_session_run_api_v1_session_runs_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -11801,7 +11837,9 @@ export interface operations {
     create_session_api_v1_sessions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12106,7 +12144,9 @@ export interface operations {
     create_tag_api_v1_tags_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -12537,7 +12577,9 @@ export interface operations {
     create_user_api_v1_users_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

@@ -31,6 +31,7 @@ async def create_replay(
     override: str | None,
     tool_policy: str | None,
     evaluate_baselines: bool,
+    idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one standalone replay with exact evaluator versions."""
     fields: dict[str, Any] = {"baseline_session_id": baseline_session_id}
@@ -47,7 +48,9 @@ async def create_replay(
     fields["evaluators"] = configs
     fields["evaluate_baselines"] = evaluate_baselines
 
-    replay = await client.replays.create(ReplayCreateRequest(**fields))
+    replay = await client.replays.create(
+        ReplayCreateRequest(**fields), idempotency_key=idempotency_key
+    )
     return CommandResult(
         item=replay.model_dump(mode="json"),
         event="created",

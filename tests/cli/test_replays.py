@@ -61,6 +61,7 @@ class StubReplayClient:
             updated=now,
         )
         self.create_calls: list[ReplayCreateRequest] = []
+        self.create_idempotency_keys: list[str | None] = []
         self.list_calls: list[ReplayListParams] = []
         self.get_calls: list[uuid.UUID] = []
         self.agents = self._Agents(self)
@@ -102,8 +103,11 @@ class StubReplayClient:
         def __init__(self, owner: "StubReplayClient") -> None:
             self.owner = owner
 
-        async def create(self, request: ReplayCreateRequest) -> ReplayResponse:
+        async def create(
+            self, request: ReplayCreateRequest, idempotency_key: str | None = None
+        ) -> ReplayResponse:
             self.owner.create_calls.append(request)
+            self.owner.create_idempotency_keys.append(idempotency_key)
             return self.owner.replay
 
         async def list(self, params: ReplayListParams) -> Any:
