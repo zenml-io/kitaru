@@ -41,11 +41,15 @@ class EvaluationsResource:
         """
         self._client = client
 
-    async def create(self, request: EvaluationBatchCreateRequest) -> JobResponse:
+    async def create(
+        self, request: EvaluationBatchCreateRequest, idempotency_key: str | None = None
+    ) -> JobResponse:
         """Score every input session with every evaluator.
 
         Args:
             request: Evaluation batch create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 422 when the pair count
@@ -58,6 +62,7 @@ class EvaluationsResource:
             "POST",
             "/api/v1/evaluations",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return JobResponse.model_validate(response.json())
 

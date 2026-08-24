@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
+- SDK methods that call an endpoint supporting idempotency now take an `idempotency_key` argument, so callers can supply their own key instead of the per-request key the transport generates. Those endpoints declare an `Idempotency-Key` header parameter in the OpenAPI schema.
 
 ### Changed
 

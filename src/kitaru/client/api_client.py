@@ -64,7 +64,7 @@ from kitaru.client.resources.tasks import TasksResource
 from kitaru.client.resources.users import UsersResource
 from kitaru.client.resources.workers import WorkersResource
 from kitaru.headers import CLIENT_HEADER, SKILL_HEADER, format_client_header
-from kitaru.transport import build_async_client
+from kitaru.transport import IDEMPOTENCY_KEY_HEADER, build_async_client
 
 
 class KitaruAPIClient:
@@ -255,6 +255,7 @@ class KitaruAPIClient:
         files: dict[str, tuple[str | None, bytes, str]] | None = None,
         content: bytes | AsyncIterable[bytes] | None = None,
         headers: dict[str, str] | None = None,
+        idempotency_key: str | None = None,
         authenticate: bool = True,
     ) -> httpx.Response:
         """Send a request and raise a typed error on failure.
@@ -269,6 +270,8 @@ class KitaruAPIClient:
                 field.
             content: Raw or streaming request body.
             headers: Additional request headers.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
             authenticate: Whether to send the request through this client's
                 auth flow. The login endpoints send their own credential.
 
@@ -283,6 +286,8 @@ class KitaruAPIClient:
             # httpx renders None query values as empty strings, which the
             # server rejects for typed filters.
             params = {key: value for key, value in params.items() if value is not None}
+        if idempotency_key is not None:
+            headers = {**(headers or {}), IDEMPOTENCY_KEY_HEADER: idempotency_key}
         if self._request_headers:
             headers = {**self._request_headers, **(headers or {})}
         response = await self._http.request(
