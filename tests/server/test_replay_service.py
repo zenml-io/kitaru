@@ -1089,6 +1089,26 @@ async def test_delete_replay_removes_a_standalone_replay(
         await services.replays.get(bundle.replay.id)
 
 
+async def test_get_replay_reads_not_found_when_its_config_is_gone(
+    services: ReplayServices,
+) -> None:
+    """A replay whose config a concurrent delete removed reads as not found."""
+    bundle = await _replay_bundle(services)
+    del services.experiments._configs[bundle.replay.replay_config_id]
+    with pytest.raises(ReplayNotFound):
+        await services.replay_service.get_replay(bundle.replay.id, actor=ACTOR)
+
+
+async def test_list_replays_skips_a_replay_whose_config_is_gone(
+    services: ReplayServices,
+) -> None:
+    """List omits a replay whose config a concurrent delete removed."""
+    bundle = await _replay_bundle(services)
+    del services.experiments._configs[bundle.replay.replay_config_id]
+    listed, _ = await services.replay_service.list_replays(ReplayFilter(), actor=ACTOR)
+    assert bundle.replay.id not in [item.replay.id for item in listed]
+
+
 async def test_delete_replay_rejects_a_replay_of_an_experiment_run(
     services: ReplayServices,
 ) -> None:

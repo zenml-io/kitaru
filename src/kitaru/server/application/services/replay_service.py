@@ -49,7 +49,12 @@ from kitaru.server.application.services.evaluator_resolution import validate_eva
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.replay import Replay, ReplayAccessDenied, ReplayInUse
+from kitaru.server.domain.replay import (
+    Replay,
+    ReplayAccessDenied,
+    ReplayInUse,
+    ReplayNotFound,
+)
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     ReplayConfig,
@@ -115,9 +120,12 @@ class ReplayService:
         configs = await self._experiments.get_many_replay_configs(
             list({replay.replay_config_id for replay in replays})
         )
+        # Skip replays whose replay config a concurrent delete removed between
+        # the two reads.
         return [
             ReplayWithDetails(replay=replay, config=configs[replay.replay_config_id])
             for replay in replays
+            if replay.replay_config_id in configs
         ]
 
     async def create_replay(
@@ -207,7 +215,10 @@ class ReplayService:
         """
         replay = await self._repository.get(replay_id)
         await self._check_task_access(replay, actor)
-        return (await self._bundle([replay]))[0]
+        bundled = await self._bundle([replay])
+        if not bundled:
+            raise ReplayNotFound(replay_id)
+        return bundled[0]
 
     async def list_replays(
         self, replay_filter: ReplayFilter, actor: AuthContext
