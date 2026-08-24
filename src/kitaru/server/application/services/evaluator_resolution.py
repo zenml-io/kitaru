@@ -35,10 +35,19 @@ def _validate_builtin_evaluator_params(config: EvaluatorConfigInput) -> None:
     if config.evaluator != OUTPUT_CONTRACT_EVALUATOR:
         return
     params = config.params
+    required_paths = params.get("required_paths")
+    type_requirements = params.get("type_requirements")
+    if (required_paths is not None and not required_paths) or (
+        type_requirements is not None and not type_requirements
+    ):
+        raise ValidationError(
+            f"Evaluator '{OUTPUT_CONTRACT_EVALUATOR}' requires non-empty rule "
+            "collections"
+        )
     if (
         "expected" not in params
-        and not params.get("required_paths")
-        and not params.get("type_requirements")
+        and required_paths is None
+        and type_requirements is None
     ):
         raise ValidationError(
             f"Evaluator '{OUTPUT_CONTRACT_EVALUATOR}' requires at least one rule: "

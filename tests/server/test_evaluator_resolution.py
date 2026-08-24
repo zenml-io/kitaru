@@ -140,7 +140,13 @@ async def test_validate_evaluators_rejects_duplicate_version(
 
 @pytest.mark.parametrize(
     "params",
-    [{}, {"required_paths": []}, {"type_requirements": {}}],
+    [
+        {},
+        {"required_paths": []},
+        {"type_requirements": {}},
+        {"expected": {}, "required_paths": []},
+        {"expected": {}, "type_requirements": {}},
+    ],
 )
 async def test_validate_evaluators_rejects_output_contract_without_rules(
     repository: FakePluginRepository,
@@ -155,7 +161,7 @@ async def test_validate_evaluators_rejects_output_contract_without_rules(
     )
     await repository.create_version(plugin.id, SOURCE, display_version="v1")
 
-    with pytest.raises(ValidationError, match="requires at least one rule"):
+    with pytest.raises(ValidationError, match="requires"):
         await validate_evaluators(
             [EvaluatorConfigInput(evaluator="kitaru/output-contract", params=params)],
             repository,
