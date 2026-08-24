@@ -133,10 +133,12 @@ describe("replay tool policies", () => {
     expect(execute).not.toHaveBeenCalled();
   });
 
-  it("fails closed for an ambiguous found null history result", async () => {
+  it("returns and records a completed null history result", async () => {
     vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
     const api = installTestApi({
-      lookup: () => ({ found: true, result: null }),
+      lookup: () => ({
+        match: { error: null, result: null, status: "completed" },
+      }),
       replaySpec: replaySpec({
         default: {
           on_miss: "fail",
@@ -152,16 +154,66 @@ describe("replay tool policies", () => {
       unknown
     >;
 
-    await expect(
-      wrapper(replayAgent(execute, rawInput)).generate("run"),
-    ).rejects.toBeInstanceOf(ToolPolicyError);
+    const result = await wrapper(replayAgent(execute, rawInput)).generate(
+      "run",
+    );
 
+    expect(result).toBeNull();
     expect(execute).not.toHaveBeenCalled();
     const lookup = api.calls.find((call) => call.path.endsWith("/tool-lookup"));
     expect(lookup?.body).toEqual({
       cache_key: computeToolCacheKey("normalize", rawInput as never),
       occurrence: 0,
       tool_name: "normalize",
+    });
+    const tool = api
+      .nodeBatches()
+      .flat()
+      .find((node) => node.node_type === "tool_call");
+    expect(tool).toMatchObject({
+      attributes: { mocked: true, policy: "history" },
+      outputs: null,
+      status: "completed",
+    });
+  });
+
+  it("throws and records a failed history result", async () => {
+    vi.stubEnv("KITARU_REPLAY_ID", REPLAY_ID);
+    const api = installTestApi({
+      lookup: () => ({
+        match: {
+          error: "recorded tool failure",
+          result: null,
+          status: "failed",
+        },
+      }),
+      replaySpec: replaySpec({
+        default: {
+          on_miss: "passthrough",
+          scope: "baseline",
+          type: "history",
+        },
+        tools: {},
+      }),
+    });
+    const execute = vi.fn(() => "real");
+
+    await expect(wrapper(replayAgent(execute)).generate("run")).rejects.toEqual(
+      expect.objectContaining({
+        message: "recorded tool failure",
+        name: "ToolPolicyError",
+      }),
+    );
+
+    expect(execute).not.toHaveBeenCalled();
+    const tool = api
+      .nodeBatches()
+      .flat()
+      .find((node) => node.node_type === "tool_call");
+    expect(tool).toMatchObject({
+      error: "recorded tool failure",
+      outputs: null,
+      status: "failed",
     });
   });
 

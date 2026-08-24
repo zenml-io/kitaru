@@ -1,3 +1,4 @@
+import { ToolPolicyError } from "@zenml-io/kitaru";
 import { jsonSchema, tool } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import { describe, expect, it, vi } from "vitest";
@@ -218,7 +219,13 @@ describe("replay tool policies", () => {
       name: "history",
       client: () =>
         new FakeClient({
-          lookup: () => ({ found: true, result: { source: "history" } }),
+          lookup: () => ({
+            match: {
+              error: null,
+              result: { source: "history" },
+              status: "completed",
+            },
+          }),
           replay: replaySpec({ on_miss: "fail", type: "history" }),
         }),
       expected: { source: "history" },
@@ -289,12 +296,51 @@ describe("replay tool policies", () => {
     expect(client.updated.at(-1)?.status).toBe("failed");
   });
 
-  it("fails closed when history returns an ambiguous null result", async () => {
+  it("returns and records a completed null history result", async () => {
     const client = new FakeClient({
-      lookup: () => ({ found: true, result: null }),
-      replay: replaySpec({ on_miss: "passthrough", type: "history" }),
+      lookup: () => ({
+        match: { error: null, result: null, status: "completed" },
+      }),
+      replay: replaySpec({ on_miss: "fail", type: "history" }),
     });
     const execute = vi.fn(async () => ({ saved: true }));
+    const generate = createKitaruGenerateText({
+      agentId: AGENT_ID,
+      client,
+      environment: replayEnvironment(),
+    });
+
+    const result = await generate({
+      model: modelForValue(),
+      prompt: "go",
+      tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
+    });
+
+    expect(result.toolResults[0]?.output).toBeNull();
+    expect(execute).not.toHaveBeenCalled();
+    expect(client.updated.at(-1)?.status).toBe("completed");
+    const toolNode = client.nodeBatches
+      .flatMap((batch) => batch.nodes)
+      .find((node) => node.node_type === "tool_call");
+    expect(toolNode).toMatchObject({
+      attributes: { mocked: true, policy: "history" },
+      outputs: null,
+      status: "completed",
+    });
+  });
+
+  it("throws and records a failed history result", async () => {
+    const client = new FakeClient({
+      lookup: () => ({
+        match: {
+          error: "recorded tool failure",
+          result: null,
+          status: "failed",
+        },
+      }),
+      replay: replaySpec({ on_miss: "passthrough", type: "history" }),
+    });
+    const execute = vi.fn(async () => "live");
     const generate = createKitaruGenerateText({
       agentId: AGENT_ID,
       client,
@@ -305,17 +351,9 @@ describe("replay tool policies", () => {
       generate({
         model: modelForValue(),
         prompt: "go",
-        tools: {
-          write: tool({
-            execute,
-            inputSchema: VALUE_INPUT,
-            outputSchema: SUCCESS_OUTPUT,
-          }),
-        },
+        tools: { write: tool({ execute, inputSchema: VALUE_INPUT }) },
       }),
-    ).rejects.toThrow(
-      /cannot distinguish a failed recording from a null result/,
-    );
+    ).rejects.toBeInstanceOf(ToolPolicyError);
 
     expect(execute).not.toHaveBeenCalled();
     expect(client.updated.at(-1)?.status).toBe("failed");
@@ -323,9 +361,7 @@ describe("replay tool policies", () => {
       .flatMap((batch) => batch.nodes)
       .find((node) => node.node_type === "tool_call");
     expect(toolNode).toMatchObject({
-      error: expect.stringContaining(
-        "cannot distinguish a failed recording from a null result",
-      ),
+      error: "recorded tool failure",
       outputs: null,
       status: "failed",
     });
@@ -479,7 +515,9 @@ describe("replay tool policies", () => {
 
   it("warns once when a replay repeats a tool call with identical arguments", async () => {
     const client = new FakeClient({
-      lookup: () => ({ found: true, result: "recorded" }),
+      lookup: () => ({
+        match: { error: null, result: "recorded", status: "completed" },
+      }),
       replay: replaySpec({ on_miss: "fail", type: "history" }),
     });
     const model = new MockLanguageModelV4({
