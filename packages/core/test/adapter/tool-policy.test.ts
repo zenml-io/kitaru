@@ -309,7 +309,7 @@ describe("normalized replay policy decisions", () => {
     const { client, run } = runState(baselineHistory("passthrough"), () => {
       if (firstCall) {
         firstCall = false;
-        return { match: null };
+        return {};
       }
       return {
         match: {

@@ -7940,9 +7940,6 @@
             "description": "Matching recorded tool call."
           }
         },
-        "required": [
-          "match"
-        ],
         "title": "ToolLookupResponse",
         "type": "object"
       },
@@ -8651,7 +8648,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.22.3+dev"
+    "version": "0.22.2+dev"
   },
   "openapi": "3.1.0",
   "paths": {

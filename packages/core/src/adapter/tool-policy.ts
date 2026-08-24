@@ -249,7 +249,7 @@ export async function decideToolCall(
       request.occurrence = occurrence;
     }
     const lookup = await state.client.lookupToolResult(state.replayId, request);
-    if (lookup.match === null) {
+    if (lookup.match == null) {
       return policyMiss(entry, "history", policy.on_miss);
     }
     // Any recorded match consumes its occurrence before its outcome is

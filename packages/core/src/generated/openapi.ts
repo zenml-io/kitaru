@@ -7904,7 +7904,7 @@ export interface components {
          */
         ToolLookupResponse: {
             /** @description Matching recorded tool call. */
-            match: components["schemas"]["ToolLookupMatch"] | null;
+            match?: components["schemas"]["ToolLookupMatch"] | null;
         };
         /**
          * ToolPolicy

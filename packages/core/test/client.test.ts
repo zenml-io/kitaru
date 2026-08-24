@@ -340,7 +340,7 @@ describe("KitaruClient", () => {
     expect(fetch).toHaveBeenCalledTimes(2);
   });
 
-  it("validates replay IDs and requires a lookup match", async () => {
+  it("validates replay IDs and accepts an omitted lookup match", async () => {
     const fetch = vi
       .fn<typeof globalThis.fetch>()
       .mockResolvedValueOnce(
@@ -364,7 +364,7 @@ describe("KitaruClient", () => {
         cache_key: "a".repeat(64),
         tool_name: "normalize",
       } satisfies ToolLookupRequest),
-    ).rejects.toThrow("missing match");
+    ).resolves.toEqual({});
   });
 
   it.each([

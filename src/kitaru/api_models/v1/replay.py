@@ -120,4 +120,6 @@ class ToolLookupMatch(ResponseModel):
 class ToolLookupResponse(ResponseModel):
     """Tool lookup response."""
 
-    match: ToolLookupMatch | None = Field(description="Matching recorded tool call.")
+    match: ToolLookupMatch | None = Field(
+        default=None, description="Matching recorded tool call."
+    )
