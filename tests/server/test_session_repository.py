@@ -720,7 +720,7 @@ async def test_update(setup: Setup) -> None:
     created.update_name("renamed")
     created.finish(
         status=SessionStatus.COMPLETED,
-        outputs=Payload.json({"a": 1}),
+        outputs=Payload.from_json({"a": 1}),
         error=None,
         ended_at=None,
     )

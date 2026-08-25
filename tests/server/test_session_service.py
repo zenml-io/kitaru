@@ -57,6 +57,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersionNotFound,
 )
 from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.session import (
     IllegalSessionStatusTransition,
@@ -1275,7 +1276,7 @@ async def test_create_session_offloads_over_threshold_inputs_and_outputs(
 
     inputs_blob = await blob_repository.get(session.inputs.blob_id)
     assert inputs_blob.owner_id == ACTOR.account.id
-    assert inputs_blob.media_type == "application/json"
+    assert inputs_blob.media_type == PayloadMediaType.JSON
     assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
 
 

@@ -44,6 +44,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     split_payload,
     unique_constraint_name,
 )
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import Session
 
 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -246,8 +247,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,
-            inputs=payload_from_columns(self.inputs, self.inputs_blob_id),
-            outputs=payload_from_columns(self.outputs, self.outputs_blob_id),
+            inputs=payload_from_columns(
+                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
+            ),
+            outputs=payload_from_columns(
+                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
+            ),
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

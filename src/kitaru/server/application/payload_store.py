@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Field-blind payload offload and resolve capability."""
+"""Content-addressed payload store."""
 
 import hashlib
 import json
@@ -22,7 +22,7 @@ from typing import Any
 from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
-from kitaru.server.domain.payload import TEXT_MEDIA_TYPE, Payload
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 
 
 def _serialize(payload: Payload) -> bytes:
@@ -34,12 +34,16 @@ def _serialize(payload: Payload) -> bytes:
     Returns:
         Serialized bytes.
     """
-    if payload.media_type == TEXT_MEDIA_TYPE:
-        return payload.value.encode("utf-8")
-    return json.dumps(payload.value, separators=(",", ":")).encode("utf-8")
+    media_type = payload.media_type
+    assert media_type is not None
+    match media_type:
+        case PayloadMediaType.TEXT:
+            return payload.value.encode("utf-8")
+        case PayloadMediaType.JSON:
+            return json.dumps(payload.value, separators=(",", ":")).encode("utf-8")
 
 
-def _deserialize(blob: Blob, data: bytes) -> Any:
+def _deserialize(blob: Blob, data: bytes) -> tuple[Any, PayloadMediaType]:
     """Deserialize stored bytes back into a payload value by media type.
 
     Args:
@@ -47,11 +51,14 @@ def _deserialize(blob: Blob, data: bytes) -> Any:
         data: Stored bytes.
 
     Returns:
-        Deserialized payload value.
+        Deserialized payload value and its media type.
     """
-    if blob.media_type == TEXT_MEDIA_TYPE:
-        return data.decode("utf-8")
-    return json.loads(data)
+    media_type = PayloadMediaType(blob.media_type)
+    match media_type:
+        case PayloadMediaType.TEXT:
+            return data.decode("utf-8"), media_type
+        case PayloadMediaType.JSON:
+            return json.loads(data), media_type
 
 
 class PayloadStore:
@@ -103,8 +110,8 @@ class PayloadStore:
         first_index_by_key: dict[tuple[str, str], int] = {}
         for index, sha256 in sha256_by_index.items():
             media_type = candidates[index].media_type
-            # A payload with no blob id was built via json() or text(),
-            # which always set the media type.
+            # A payload with no blob id was built via from_json() or
+            # from_text(), which always set the media type.
             assert media_type is not None
             first_index_by_key.setdefault((sha256, media_type), index)
 
@@ -171,5 +178,6 @@ class PayloadStore:
 
         for payload, blob_id in candidates:
             blob = registry[blob_id]
-            payload.value = _deserialize(blob, data_by_sha256[blob.sha256])
-            payload.media_type = blob.media_type
+            payload.value, payload.media_type = _deserialize(
+                blob, data_by_sha256[blob.sha256]
+            )

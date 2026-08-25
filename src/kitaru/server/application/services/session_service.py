@@ -156,8 +156,10 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
-            inputs=Payload.json(command.inputs) if command.inputs is not None else None,
-            outputs=Payload.json(command.outputs)
+            inputs=Payload.from_json(command.inputs)
+            if command.inputs is not None
+            else None,
+            outputs=Payload.from_json(command.outputs)
             if command.outputs is not None
             else None,
             error=command.error,
@@ -364,7 +366,9 @@ class SessionService:
                     raise SessionStatusCannotBeCleared(session_id)
                 target_status = command.status
             new_outputs = (
-                Payload.json(command.outputs) if command.outputs is not None else None
+                Payload.from_json(command.outputs)
+                if command.outputs is not None
+                else None
             )
             session.finish(
                 status=target_status,

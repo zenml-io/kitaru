@@ -205,7 +205,9 @@ def _node(index: int, **overrides: Any) -> SessionNode:
         if value is None or isinstance(value, Payload):
             continue
         values[field] = (
-            Payload.text(value) if field == "reasoning" else Payload.json(value)
+            Payload.from_text(value)
+            if field == "reasoning"
+            else Payload.from_json(value)
         )
     return SessionNode(**values)
 

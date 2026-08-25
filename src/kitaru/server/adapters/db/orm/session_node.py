@@ -47,6 +47,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     split_payload,
     unique_constraint_name,
 )
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session_node import SessionNode
 
 SESSION_NODE_SESSION_ID_INDEX_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -289,17 +290,25 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,
             reasoning=(
-                payload_from_columns(self.reasoning, self.reasoning_blob_id, text=True)
+                payload_from_columns(
+                    self.reasoning,
+                    self.reasoning_blob_id,
+                    media_type=PayloadMediaType.TEXT,
+                )
                 if include_payloads
                 else None
             ),
             inputs=(
-                payload_from_columns(self.inputs, self.inputs_blob_id)
+                payload_from_columns(
+                    self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
+                )
                 if include_payloads
                 else None
             ),
             outputs=(
-                payload_from_columns(self.outputs, self.outputs_blob_id)
+                payload_from_columns(
+                    self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
+                )
                 if include_payloads
                 else None
             ),
@@ -313,7 +322,11 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             cache_key=self.cache_key,
             subagent_id=self.subagent_id,
             attributes=(
-                payload_from_columns(self.attributes, self.attributes_blob_id)
+                payload_from_columns(
+                    self.attributes,
+                    self.attributes_blob_id,
+                    media_type=PayloadMediaType.JSON,
+                )
                 if include_payloads
                 else None
             ),

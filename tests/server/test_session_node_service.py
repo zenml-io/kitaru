@@ -51,6 +51,7 @@ from kitaru.server.application.services.session_node_service import (
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.session_node import SessionNodeParentNotFound
 from kitaru.server.domain.task import AgentTask
@@ -651,11 +652,11 @@ async def test_ingest_offloads_over_threshold_payloads(
 
     inputs_blob = await blob_repository.get(raw.inputs.blob_id)
     assert inputs_blob.owner_id == ACTOR.account.id
-    assert inputs_blob.media_type == "application/json"
+    assert inputs_blob.media_type == PayloadMediaType.JSON
     assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
 
     reasoning_blob = await blob_repository.get(raw.reasoning.blob_id)
-    assert reasoning_blob.media_type == "text/plain"
+    assert reasoning_blob.media_type == PayloadMediaType.TEXT
 
 
 async def test_ingest_under_threshold_stays_inline(

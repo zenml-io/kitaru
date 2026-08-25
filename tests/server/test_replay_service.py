@@ -62,7 +62,7 @@ from kitaru.server.domain.agent_version import (
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
-from kitaru.server.domain.payload import Payload
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.replay import (
     ReplayAccessDenied,
@@ -340,7 +340,7 @@ def _cache_node(
         error=error,
         tool_name="search",
         cache_key=cache_key,
-        outputs=Payload.json(outputs) if outputs is not None else None,
+        outputs=Payload.from_json(outputs) if outputs is not None else None,
     )
 
 
@@ -915,7 +915,7 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
         blob_repository,
         ACTOR.account.id,
         content=content,
-        media_type="application/json",
+        media_type=PayloadMediaType.JSON,
         data_store=data_store,
     )
     cache_key = "a" * 64
@@ -927,7 +927,7 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
         status=NodeStatus.COMPLETED,
         tool_name="search",
         cache_key=cache_key,
-        outputs=Payload.ref(blob.id),
+        outputs=Payload.from_ref(blob.id),
     )
     await services.session_nodes.upsert_batch(baseline.id, [node])
 

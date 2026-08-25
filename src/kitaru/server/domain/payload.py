@@ -14,26 +14,31 @@
 """Payload value type."""
 
 import uuid
+from enum import StrEnum
 from typing import Any
 
 from pydantic import PrivateAttr
 
 from kitaru.server.domain.base import DomainModel
 
-JSON_MEDIA_TYPE = "application/json"
-TEXT_MEDIA_TYPE = "text/plain"
+
+class PayloadMediaType(StrEnum):
+    """Payload media type."""
+
+    JSON = "application/json"
+    TEXT = "text/plain"
 
 
 class Payload(DomainModel):
     """Session or node payload, inline, offloaded, or both in memory."""
 
     blob_id: uuid.UUID | None = None
-    media_type: str | None = None
+    media_type: PayloadMediaType | None = None
 
     _value: Any = PrivateAttr(default=None)
 
     @classmethod
-    def json(cls, value: Any) -> "Payload":  # ty: ignore[invalid-method-override]
+    def from_json(cls, value: Any) -> "Payload":
         """Build an inline payload serialized as JSON.
 
         Raises:
@@ -44,12 +49,12 @@ class Payload(DomainModel):
         """
         if value is None:
             raise ValueError("A JSON payload value cannot be None")
-        payload = cls(media_type=JSON_MEDIA_TYPE)
+        payload = cls(media_type=PayloadMediaType.JSON)
         payload._value = value
         return payload
 
     @classmethod
-    def text(cls, value: str) -> "Payload":
+    def from_text(cls, value: str) -> "Payload":
         """Build an inline payload serialized as plain text.
 
         Raises:
@@ -60,12 +65,12 @@ class Payload(DomainModel):
         """
         if value is None:
             raise ValueError("A text payload value cannot be None")
-        payload = cls(media_type=TEXT_MEDIA_TYPE)
+        payload = cls(media_type=PayloadMediaType.TEXT)
         payload._value = value
         return payload
 
     @classmethod
-    def ref(cls, blob_id: uuid.UUID) -> "Payload":
+    def from_ref(cls, blob_id: uuid.UUID) -> "Payload":
         """Build a payload referencing blob content, unresolved.
 
         Returns:

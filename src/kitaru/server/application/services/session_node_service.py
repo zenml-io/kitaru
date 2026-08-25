@@ -46,6 +46,23 @@ from kitaru.server.domain.session_node import (
 )
 
 
+def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
+    """Gather the reasoning, inputs, outputs, and attributes payloads of a batch.
+
+    Args:
+        nodes: Nodes to gather payloads from.
+
+    Returns:
+        Non-None payloads across the batch.
+    """
+    return [
+        payload
+        for node in nodes
+        for payload in (node.reasoning, node.inputs, node.outputs, node.attributes)
+        if payload is not None
+    ]
+
+
 class SessionNodeService:
     """Session node use cases."""
 
@@ -164,11 +181,13 @@ class SessionNodeService:
                 input_text_selector=item.input_text_selector,
                 output_text_selector=item.output_text_selector,
                 system_prompt_selector=item.system_prompt_selector,
-                reasoning=Payload.text(item.reasoning)
+                reasoning=Payload.from_text(item.reasoning)
                 if item.reasoning is not None
                 else None,
-                inputs=Payload.json(item.inputs) if item.inputs is not None else None,
-                outputs=Payload.json(item.outputs)
+                inputs=Payload.from_json(item.inputs)
+                if item.inputs is not None
+                else None,
+                outputs=Payload.from_json(item.outputs)
                 if item.outputs is not None
                 else None,
                 requested_model=item.requested_model,
@@ -180,7 +199,7 @@ class SessionNodeService:
                 tool_name=item.tool_name,
                 cache_key=cache_key,
                 subagent_id=item.subagent_id,
-                attributes=Payload.json(item.attributes)
+                attributes=Payload.from_json(item.attributes)
                 if item.attributes is not None
                 else None,
                 metadata=item.metadata,
@@ -195,16 +214,12 @@ class SessionNodeService:
             )
             for node in resolved
         ]
-        payloads = [
-            p
-            for node in resolved
-            for p in (node.reasoning, node.inputs, node.outputs, node.attributes)
-            if p is not None
-        ]
-        await self._payload_store.offload(payloads, session.owner_id)
+        await self._payload_store.offload(
+            _get_node_payloads(resolved), session.owner_id
+        )
         stored = await self._repository.upsert_batch(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        return self._splice_payloads(stored, resolved)
+        return self._fill_payloads(stored, resolved)
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext
@@ -302,25 +317,19 @@ class SessionNodeService:
         Args:
             nodes: Nodes to resolve, mutated in place.
         """
-        payloads = [
-            p
-            for node in nodes
-            for p in (node.reasoning, node.inputs, node.outputs, node.attributes)
-            if p is not None
-        ]
-        await self._payload_store.resolve(payloads)
+        await self._payload_store.resolve(_get_node_payloads(nodes))
 
-    def _splice_payloads(
+    def _fill_payloads(
         self, stored: list[SessionNode], resolved: list[SessionNode]
     ) -> list[SessionNode]:
-        """Copy resolved nodes' in-memory payloads onto their stored rows.
+        """Fill stored nodes' payloads from their pre-storage in-memory values.
 
         Args:
             stored: Node rows as persisted, in the same order as resolved.
             resolved: Nodes before storage, holding the payloads in memory.
 
         Returns:
-            Stored nodes with payloads spliced in, in input order.
+            Stored nodes with payloads filled in, in input order.
         """
         return [
             row.model_copy(

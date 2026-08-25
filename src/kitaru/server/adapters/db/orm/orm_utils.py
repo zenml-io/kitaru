@@ -16,7 +16,7 @@
 import uuid
 from typing import Any
 
-from kitaru.server.domain.payload import Payload
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 
 # Postgres truncates identifiers to 63 bytes.
 _MAX_IDENTIFIER_LENGTH = 63
@@ -88,21 +88,25 @@ def split_payload(payload: Payload | None) -> tuple[Any | None, uuid.UUID | None
 
 
 def payload_from_columns(
-    inline: Any | None, blob_id: uuid.UUID | None, text: bool = False
+    inline: Any | None, blob_id: uuid.UUID | None, media_type: PayloadMediaType
 ) -> Payload | None:
     """Rebuild a payload from its inline value and blob ref columns.
 
     Args:
         inline: Inline value column.
         blob_id: Blob ref column.
-        text: Whether the payload serializes as plain text rather than JSON.
+        media_type: Media type of the inline value.
 
     Returns:
         Payload built from whichever column is set, ``None`` when both are
         null.
     """
     if blob_id is not None:
-        return Payload.ref(blob_id)
+        return Payload.from_ref(blob_id)
     if inline is not None:
-        return Payload.text(inline) if text else Payload.json(inline)
+        match media_type:
+            case PayloadMediaType.TEXT:
+                return Payload.from_text(inline)
+            case PayloadMediaType.JSON:
+                return Payload.from_json(inline)
     return None

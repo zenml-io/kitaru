@@ -2747,7 +2747,7 @@ async def create_session(
     for field in ("inputs", "outputs"):
         value = values.get(field)
         if value is not None and not isinstance(value, Payload):
-            values[field] = Payload.json(value)
+            values[field] = Payload.from_json(value)
     return await repository.create(Session(**values))
 
 
