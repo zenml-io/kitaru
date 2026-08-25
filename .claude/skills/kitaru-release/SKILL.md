@@ -1,6 +1,6 @@
 ---
 name: kitaru-release
-description: Prepare or execute Kitaru core and plugin releases, including Kitaru UI publication in the frontend monorepo, version and changelog updates, frontend declarations, default plugin pins, validation, release tags, artifact verification, and recovery. Use when a user asks to prepare, cut, publish, verify, or recover a Kitaru, Kitaru UI, or Kitaru plugin release.
+description: Discover dependencies and prepare or execute Kitaru core and plugin releases, including version proposals, Kitaru UI selection, release PRs, ordered tag commands, artifact verification, and recovery. Use when a user asks what a release depends on or wants to prepare, cut, publish, verify, or recover a Kitaru, Kitaru UI, or Kitaru plugin release.
 ---
 
 # Release Kitaru
@@ -21,12 +21,33 @@ Do not create a tag, dispatch a publishing workflow, approve an environment, or 
 Ask only for choices that cannot be derived from the repository and registries.
 
 1. **Core:** Release `kitaru`, the selected UI, public images, the managed image, and Helm from one core tag.
-2. **Plugin only:** Release one selected Python plugin distribution. Do not release the UI or core.
-3. **Coordinated:** Release changed plugins first. Then prepare and release core with the new exact default pins.
+2. **One plugin:** Release one selected Python plugin distribution. Do not release the UI or core.
+3. **All plugins:** Inspect and prepare every plugin release unit independently.
+4. **Coordinated:** Release core with its selected UI, then publish plugins that depend on that core version.
 
 There is no separate bundle tag. The core tag publishes the Python package and deployables in one workflow.
 
 Confirm the selected distributions, versions, frontend tag, publication order, and release commit before editing.
+
+## Discover release impact
+
+Fetch current remote state and load the release inventory:
+
+```bash
+git fetch origin --prune --tags
+uv run --no-project --with packaging==26.2 \
+  python scripts/release_units.py list --format json
+```
+
+For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Read changed paths, `requires:*` labels, `Release context`, linked work, and existing changelog entries.
+
+For one plugin, start at that plugin's previous tag. For all plugins, calculate a separate range for every plugin release unit. `requires:plugins` means every unit is expected; report a unit with no implementation change as a red flag and require an explanation in the release PR.
+
+For core, collect requirements for frontend, plugins, skills, ZenML docs, website, examples, and additional context from source PRs. Read linked repositories with `gh` or existing local checkouts. Do not write to them.
+
+Compare labels with the actual diff. Report missing, conflicting, or stale signals. Labels guide discovery; repository state decides what can be released.
+
+Propose explicit versions and changelog entries after discovery. Check PyPI versions and Git tags before proposing a version, and never reuse a published version. Get the user's acceptance before editing release metadata.
 
 ## Apply version rules
 
@@ -37,6 +58,8 @@ Confirm the selected distributions, versions, frontend tag, publication order, a
 - Never reuse a published version or move a published tag.
 - Increment the RC number for another candidate of the same target.
 - Remove the RC suffix to accept a candidate without changing `X.Y.Z`.
+
+For pre-1.0 plugins, use a patch when the public API and observable output stay compatible for existing supported inputs. Use a minor for new capabilities or breaking behavior. Importer output includes session grouping, IDs, node structure, field mappings, normalized values, and incomplete or failed trace handling.
 
 ## Release or select the frontend
 
@@ -114,6 +137,8 @@ uv version --project plugins --package <distribution> <version> --no-sync
 
 If the plugin becomes a new core default, publish the plugin before the core release. Then prepare a new core version with its exact pin.
 
+For a coordinated API change, the release PR can contain future core and plugin versions together. Publish the core first, then publish plugins whose dependency requires that new core version. A default pin may reference the queued plugin version; do not tag core until the repository's pending-default behavior is available and verified.
+
 ## Validate the preparation
 
 Always run:
@@ -150,13 +175,27 @@ Commit only the release files. Push the branch and open a draft PR to `develop`.
 Include:
 
 - release shape and versions
+- source PRs included for each release unit
 - frontend tag and asset status for core
 - dependency and default-pin decisions
+- plugin coverage and explanations for missing units in an all-plugin release
+- linked skills, ZenML docs, website, examples, and other follow-ups
 - validations run
-- publication order
+- exact post-merge tag and follow-up order
 - `## Reviewer Notes` with a concrete review path
 
 Stop after the PR unless the user explicitly asks to publish.
+
+After the PR merges, resolve its exact merge commit and write tag commands against that SHA:
+
+```bash
+RELEASE_SHA="$(gh pr view <release-pr> \
+  --repo zenml-io/kitaru \
+  --json mergeCommit \
+  --jq '.mergeCommit.oid')"
+```
+
+For a coordinated release, order the hand-off as frontend tag and bundle, core tag and publication, dependent plugin tags and publication, then linked skills, docs, website, examples, and other follow-ups. Do not execute these commands during preparation.
 
 ## Rehearse before publication
 
