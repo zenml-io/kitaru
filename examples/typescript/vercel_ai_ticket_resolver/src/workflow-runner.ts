@@ -1642,7 +1642,12 @@ async function runWorkflowUnlocked(
   }
   manifest.ids.replay_ids = replayEntries.map(({ id }) => id).sort();
   manifest.ids.replay_job_ids = replayEntries
-    .map(({ job_id }) => job_id)
+    .map(({ id, job_id }) => {
+      if (job_id === null || job_id === undefined) {
+        throw new Error(`Replay ${id} has no job`);
+      }
+      return job_id;
+    })
     .sort();
   await store.save(manifest);
   const replayJobs = await Promise.all(
