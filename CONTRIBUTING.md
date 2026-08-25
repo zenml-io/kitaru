@@ -4,7 +4,7 @@ Thank you for your interest in contributing to Kitaru!
 
 ## How contributions work
 
-We're happy to take pull requests from people outside the core team. We do restrict direct PRs to collaborators, though, because we were getting a lot of drive-by PRs that didn't fit the project and each one costs review time. So the flow is: talk to us first, then write the code.
+We're happy to take pull requests from people outside the core team, but direct PRs are limited to collaborators. That's because small fixes are usually quicker for us to make than to review, and bigger changes need a design conversation anyway. So the flow is: talk to us first, then write the code.
 
 1. Find an issue that covers what you want to change and comment on it saying you'd like to take it. If there isn't one, open a new issue (the [bug report](https://github.com/zenml-io/kitaru/issues/new?template=bug_report.md) and [feature request](https://github.com/zenml-io/kitaru/issues/new?template=feature_request.md) templates both have a box for this) and describe the problem and what you'd change.
 2. A maintainer replies on the issue. Sometimes that's a quick "yes, go ahead", sometimes it's a longer back and forth about scope or design. Either way, wait for that before you start.
@@ -12,7 +12,7 @@ We're happy to take pull requests from people outside the core team. We do restr
 
 If a PR shows up without an issue behind it, we'll probably close it and ask you to open one, even if the change looks fine. That's not a judgment on the code. We just can't tell from a cold PR whether it fits where the project is going, and it's a waste of your evening if it doesn't.
 
-Typo and broken link fixes go through the same route. The conversation will be about one sentence long.
+Typos and broken links: just open an issue and we'll fix them. No need to prepare a PR.
 
 ## Development Setup
 
