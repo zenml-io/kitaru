@@ -17,7 +17,7 @@ pnpm add @zenml-io/kitaru
 
 - [TypeScript SDK and adapter overview](https://docs.zenml.io/kitaru/adapters)
 - [Install and start a Kitaru server](https://docs.zenml.io/kitaru/getting-started/installation)
-- [Run the TypeScript returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/vercel_ai_ticket_resolver)
+- [Run the TypeScript returns agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/vercel_ai_ticket_resolver)
 
 ## Public API
 

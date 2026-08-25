@@ -12,7 +12,7 @@ You do not need to memorize commands to start. Kitaru is built for your coding a
 {% hint style="info" %}
 **Want to see the complete loop before setting anything up?** Watch the 26-minute [Kitaru guided tour](https://youtu.be/aYLfzXEr2Rk). It starts with this Quickstart, then uses the `kitaru-guided-tour` skill to inspect recorded sessions, collect human judgments, define an evaluator and cohort, and test one improvement.
 
-**No agent in production yet?** When you are ready to try it yourself, ask your assistant for the guided tour. The skill clones Kitaru and enters the [PydanticAI returns-agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns-agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
+**No agent in production yet?** When you are ready to try it yourself, ask your assistant for the guided tour. The skill clones Kitaru and enters the [PydanticAI returns agent example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver), prepares a three-session review for you to judge, turns one accepted finding into an evaluator without a paid model call, and ends with one approved replay experiment. Prefer to see every command yourself? The [returns agent tutorial](../tutorials/returns-agent/README.md) walks the same ground manually.
 {% endhint %}
 
 Before starting, [install Kitaru and log in](installation.md), then [set up your coding agent](../agent-native/setup.md): the MCP server gives it bounded Kitaru operations, and the skills teach it the procedures.
@@ -163,7 +163,7 @@ Four honest outcomes stay available: **improved**, **regressed**, **trade-off**,
 The five steps form a loop, not a one-time pipeline: a replay can expose a new failure, which becomes the next observation to review.
 
 {% hint style="info" %}
-**Every step also has a manual form.** The CLI covers the whole loop with `--output json`, and the [Python and TypeScript SDKs](../deploy/sdks.md) reach everything. The [guides](../guides/replay-and-overrides.md) and the [returns-agent tutorial](../tutorials/returns-agent/README.md) teach the manual path so you can see each object and boundary for yourself.
+**Every step also has a manual form.** The CLI covers the whole loop with `--output json`, and the [Python and TypeScript SDKs](../deploy/sdks.md) reach everything. The [guides](../guides/replay-and-overrides.md) and the [returns agent tutorial](../tutorials/returns-agent/README.md) teach the manual path so you can see each object and boundary for yourself.
 {% endhint %}
 
 ## Glossary

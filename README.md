@@ -80,7 +80,7 @@ Already have an agent in production? [Import its traces](https://docs.zenml.io/k
 **4. Let your assistant drive the loop.** Open the example directory in Claude Code, Codex, or Cursor, then take the guided tour:
 
 ```
-Use kitaru-guided-tour to walk me through Kitaru on the PydanticAI returns-agent example. I am new; explain each step as we go, and ask before anything paid or live.
+Use kitaru-guided-tour to walk me through Kitaru on the PydanticAI returns agent example. I am new; explain each step as we go, and ask before anything paid or live.
 ```
 
 On your own agent, run the investigation:
@@ -89,7 +89,7 @@ On your own agent, run the investigation:
 Use kitaru-investigation to investigate this agent and help me test one meaningful improvement. Show me the recorded evidence before asking for a judgment, and ask before creating resources or starting paid replay.
 ```
 
-The assistant sweeps the sessions with built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it handles the investigation work. The [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) walks the same loop on the PydanticAI returns-agent example, step by step.
+The assistant sweeps the sessions with built-in deterministic evaluators, interviews you over the ones that matter, drafts the evaluator, runs the experiment, and reports what improved and what regressed. You judge; it handles the investigation work. The [tutorial](https://docs.zenml.io/kitaru/guides/returns-agent) walks the same loop on the PydanticAI returns agent example, step by step.
 
 ## 🔌 Languages and frameworks
 
