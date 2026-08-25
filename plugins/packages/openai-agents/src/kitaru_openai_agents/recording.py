@@ -17,6 +17,7 @@ import asyncio
 import contextlib
 import inspect
 import json
+import math
 import os
 import uuid
 from collections.abc import Awaitable, Callable
@@ -643,6 +644,8 @@ def _consume_task_exception(task: asyncio.Task[None]) -> None:
 
 
 def _capture(value: Any, *, depth: int = 0) -> Any:
+    if isinstance(value, float) and not math.isfinite(value):
+        return {"_kitaru_unsupported_type": "non_finite_float"}
     if value is None or isinstance(value, bool | int | float):
         return value
     if isinstance(value, str):
