@@ -70,6 +70,7 @@ RUN test -n "$KITARU_VERSION" && \
     --no-dev \
     --no-install-project \
     --extra server \
+    --extra s3 \
     --extra otel && \
   sh ./install-release-wheel.sh && \
   uv pip check && \
