@@ -56,7 +56,7 @@ class BlobService:
         media_type: str,
         actor: AuthContext,
     ) -> tuple[Blob, bool]:
-        """Upload a blob, deduping identical content by sha256.
+        """Upload a blob, deduping identical content and media type.
 
         The content is hashed and buffered chunk by chunk, so the cap holds
         the whole way through and the buffer is used directly for the store

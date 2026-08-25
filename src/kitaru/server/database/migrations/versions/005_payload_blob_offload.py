@@ -37,6 +37,12 @@ def upgrade() -> None:
     with op.batch_alter_table("blob", schema=None) as batch_op:
         batch_op.alter_column("stored_in", nullable=False)
 
+    with op.batch_alter_table("blob", schema=None) as batch_op:
+        batch_op.drop_constraint("uq_blob_sha256", type_="unique")
+        batch_op.create_unique_constraint(
+            "uq_blob_sha256_media_type", ["sha256", "media_type"]
+        )
+
     op.create_table(
         "blob_content",
         sa.Column("sha256", sa.String(length=64), nullable=False),
@@ -101,6 +107,10 @@ def downgrade() -> None:
         batch_op.drop_constraint("fk_session_inputs_blob_id", type_="foreignkey")
         batch_op.drop_column("outputs_blob_id")
         batch_op.drop_column("inputs_blob_id")
+
+    with op.batch_alter_table("blob", schema=None) as batch_op:
+        batch_op.drop_constraint("uq_blob_sha256_media_type", type_="unique")
+        batch_op.create_unique_constraint("uq_blob_sha256", ["sha256"])
 
     with op.batch_alter_table("blob", schema=None) as batch_op:
         batch_op.add_column(sa.Column("data", sa.LargeBinary(), nullable=True))

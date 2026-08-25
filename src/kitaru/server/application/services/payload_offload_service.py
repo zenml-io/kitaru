@@ -151,40 +151,49 @@ class PayloadOffloadService:
             sha256 = hashlib.sha256(data).hexdigest() if offloaded else None
             serialized.append(_Serialized(data, sha256))
 
-        first_index_by_hash: dict[str, int] = {}
-        for index, item in enumerate(serialized):
+        # Keyed by (sha256, media_type), since two candidates can hash to the
+        # same content while carrying different media types.
+        first_index_by_key: dict[tuple[str, str], int] = {}
+        for index, (candidate, item) in enumerate(
+            zip(candidates, serialized, strict=True)
+        ):
             if item.sha256 is not None:
-                first_index_by_hash.setdefault(item.sha256, index)
+                first_index_by_key.setdefault(
+                    (item.sha256, candidate.media_type), index
+                )
 
-        registry = await self._repository.get_many_by_sha256s(list(first_index_by_hash))
-        missing_hashes = [
-            sha256 for sha256 in first_index_by_hash if sha256 not in registry
-        ]
+        hashes = {sha256 for sha256, _ in first_index_by_key}
+        registry = await self._repository.get_many_by_sha256s(list(hashes))
+        missing_keys = [key for key in first_index_by_key if key not in registry]
         data_by_hash: dict[str, bytes] = {}
-        for sha256 in missing_hashes:
-            data = serialized[first_index_by_hash[sha256]].data
-            # Every hash in missing_hashes came from a candidate that
+        for key in missing_keys:
+            sha256, _ = key
+            if sha256 in data_by_hash:
+                continue
+            data = serialized[first_index_by_key[key]].data
+            # Every key in missing_keys came from a candidate that
             # serialized to non-None bytes.
             assert data is not None
             data_by_hash[sha256] = data
         await self._put_missing(data_by_hash)
-        for sha256 in missing_hashes:
-            index = first_index_by_hash[sha256]
+        for key in missing_keys:
+            sha256, media_type = key
             blob, _ = await self._repository.create(
                 Blob(
                     owner_id=owner_id,
                     sha256=sha256,
                     size=len(data_by_hash[sha256]),
-                    media_type=candidates[index].media_type,
+                    media_type=media_type,
                     stored_in=self._backend,
                 )
             )
-            registry[sha256] = blob
+            registry[key] = blob
 
         results: list[_Offloaded] = []
         for candidate, item in zip(candidates, serialized, strict=True):
             if item.sha256 is not None:
-                results.append(_Offloaded(value=None, blob_id=registry[item.sha256].id))
+                blob_id = registry[(item.sha256, candidate.media_type)].id
+                results.append(_Offloaded(value=None, blob_id=blob_id))
             else:
                 results.append(_Offloaded(value=candidate.value, blob_id=None))
         return results

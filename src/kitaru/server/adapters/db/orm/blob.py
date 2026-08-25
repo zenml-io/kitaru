@@ -33,7 +33,9 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
 
-BLOB_SHA256_UNIQUE_CONSTRAINT = unique_constraint_name("blob", ["sha256"])
+BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "blob", ["sha256", "media_type"]
+)
 BLOB_OWNER_ID_FOREIGN_KEY = foreign_key_name("blob", ["owner_id"])
 BLOB_OWNER_ID_INDEX = index_name("blob", ["owner_id"])
 
@@ -43,7 +45,9 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
 
     __tablename__ = "blob"
     __table_args__ = (
-        UniqueConstraint("sha256", name=BLOB_SHA256_UNIQUE_CONSTRAINT),
+        UniqueConstraint(
+            "sha256", "media_type", name=BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT
+        ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=BLOB_OWNER_ID_FOREIGN_KEY
         ),

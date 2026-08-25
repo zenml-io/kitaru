@@ -59,14 +59,17 @@ class BlobRepository(Protocol):
         """
         ...
 
-    async def get_many_by_sha256s(self, sha256s: Sequence[str]) -> dict[str, Blob]:
-        """Bulk-load blobs by content hash, keyed by sha256, misses omitted.
+    async def get_many_by_sha256s(
+        self, sha256s: Sequence[str]
+    ) -> dict[tuple[str, str], Blob]:
+        """Bulk-load blobs by content hash, keyed by (sha256, media_type).
 
         Args:
             sha256s: Content hashes to look up.
 
         Returns:
-            Stored blobs keyed by sha256.
+            Stored blobs keyed by (sha256, media_type), hashes with no
+            matching row omitted.
         """
         ...
 

@@ -97,7 +97,7 @@ async def test_create_and_round_trip_without_owner(setup: Setup) -> None:
 
 
 async def test_create_dedup(setup: Setup) -> None:
-    """Return the existing row unmarked as created on a duplicate sha256."""
+    """Return the existing row unmarked as created on a duplicate sha256 and type."""
     repository, owner_id = setup
     first, created_first = await repository.create(_blob(owner_id, b"same"))
     assert created_first is True
@@ -105,6 +105,25 @@ async def test_create_dedup(setup: Setup) -> None:
     assert created_second is False
     assert second.id == first.id
     assert second.sha256 == first.sha256
+
+
+async def test_create_same_content_different_media_type_creates_second_row(
+    setup: Setup,
+) -> None:
+    """Create a second row for identical bytes stored under a different media type."""
+    repository, owner_id = setup
+    text_blob = _blob(owner_id, b"same")
+    json_blob = _blob(owner_id, b"same").model_copy(
+        update={"media_type": "application/json"}
+    )
+    first, created_first = await repository.create(text_blob)
+    assert created_first is True
+    second, created_second = await repository.create(json_blob)
+    assert created_second is True
+    assert second.id != first.id
+    assert second.sha256 == first.sha256
+    assert second.media_type == "application/json"
+    assert first.media_type == "text/plain"
 
 
 async def test_get(setup: Setup) -> None:

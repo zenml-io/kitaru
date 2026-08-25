@@ -3690,7 +3690,7 @@ class FakeBlobRepository:
             Stored blob and whether this call created it.
         """
         for other in self._blobs.values():
-            if other.sha256 == blob.sha256:
+            if other.sha256 == blob.sha256 and other.media_type == blob.media_type:
                 return other.model_copy(), False
         now = datetime.now(UTC)
         stored = blob.model_copy(update={"created": now})
@@ -3730,18 +3730,21 @@ class FakeBlobRepository:
             if blob.id in wanted
         }
 
-    async def get_many_by_sha256s(self, sha256s: Sequence[str]) -> dict[str, Blob]:
-        """Bulk-load blobs by content hash, keyed by sha256, misses omitted.
+    async def get_many_by_sha256s(
+        self, sha256s: Sequence[str]
+    ) -> dict[tuple[str, str], Blob]:
+        """Bulk-load blobs by content hash, keyed by (sha256, media_type).
 
         Args:
             sha256s: Content hashes to look up.
 
         Returns:
-            Stored blobs keyed by sha256.
+            Stored blobs keyed by (sha256, media_type), hashes with no
+            matching row omitted.
         """
         wanted = set(sha256s)
         return {
-            blob.sha256: blob.model_copy()
+            (blob.sha256, blob.media_type): blob.model_copy()
             for blob in self._blobs.values()
             if blob.sha256 in wanted
         }
