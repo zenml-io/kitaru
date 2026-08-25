@@ -51,7 +51,7 @@ async def test_put_is_idempotent(store: BlobDataStore) -> None:
 async def test_get_not_found(store: BlobDataStore) -> None:
     """Raise for a hash with no stored content."""
     with pytest.raises(
-        BlobContentNotFound, match=f"Blob content {'a' * 64} was not found"
+        BlobContentNotFound, match=f"Blob content for sha256 {'a' * 64} was not found"
     ):
         await store.get("a" * 64)
 

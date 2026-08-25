@@ -69,7 +69,7 @@ class BlobContentNotFound(NotFoundError):
         Args:
             sha256: Content hash of the missing blob.
         """
-        super().__init__(f"Blob content {sha256} was not found")
+        super().__init__(f"Blob content for sha256 {sha256} was not found")
 
 
 class BlobInUse(ConflictError):
