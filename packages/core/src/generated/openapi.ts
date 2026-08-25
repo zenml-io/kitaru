@@ -2349,7 +2349,7 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         Whether a cached result was found, and the result if so.
+         *         Matching recorded tool call, unset on a miss.
          */
         post: operations["tool_lookup_api_v1_replays__replay_id__tool_lookup_post"];
         delete?: never;
@@ -7860,6 +7860,24 @@ export interface components {
             reasoning_tokens?: number | null;
         };
         /**
+         * ToolLookupMatch
+         * @description Tool lookup match.
+         */
+        ToolLookupMatch: {
+            /**
+             * Error
+             * @description Error from a failed tool call.
+             */
+            error?: string | null;
+            /**
+             * Result
+             * @description Cached tool result.
+             */
+            result: unknown;
+            /** @description Tool call status. */
+            status: components["schemas"]["NodeStatus"];
+        };
+        /**
          * ToolLookupRequest
          * @description Tool lookup request.
          */
@@ -7885,16 +7903,8 @@ export interface components {
          * @description Tool lookup response.
          */
         ToolLookupResponse: {
-            /**
-             * Found
-             * @description Whether a cached result was found.
-             */
-            found: boolean;
-            /**
-             * Result
-             * @description Cached tool result.
-             */
-            result: unknown;
+            /** @description Matching recorded tool call. */
+            match?: components["schemas"]["ToolLookupMatch"] | null;
         };
         /**
          * ToolPolicy

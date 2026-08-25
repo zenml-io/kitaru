@@ -48,6 +48,7 @@ import kitaru_pydantic_ai.capability as capability_module
 from kitaru.api_models.v1.replay import (
     ReplayResponse,
     ReplayStatus,
+    ToolLookupMatch,
     ToolLookupResponse,
 )
 from kitaru.api_models.v1.replay_config import (
@@ -133,9 +134,7 @@ class _FakeReplays:
 class _FakeClient:
     instances: ClassVar[list["_FakeClient"]] = []
     next_fixture: ClassVar["_ReplayFixture | None"] = None
-    next_lookup_response: ClassVar[ToolLookupResponse] = ToolLookupResponse(
-        found=False, result=None
-    )
+    next_lookup_response: ClassVar[ToolLookupResponse] = ToolLookupResponse(match=None)
     next_lookup_responses: ClassVar[list[ToolLookupResponse] | None] = None
     next_ingest_error: ClassVar[BaseException | None] = None
     next_ingest_error_after: ClassVar[int | None] = None
@@ -179,7 +178,7 @@ def _fake_client(monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.delenv(name, raising=False)
     _FakeClient.instances.clear()
     _FakeClient.next_fixture = None
-    _FakeClient.next_lookup_response = ToolLookupResponse(found=False, result=None)
+    _FakeClient.next_lookup_response = ToolLookupResponse(match=None)
     _FakeClient.next_lookup_responses = None
     _FakeClient.next_ingest_error = None
     _FakeClient.next_ingest_error_after = None
@@ -1082,7 +1081,11 @@ async def test_tool_policies(
     _set_replay(monkeypatch, spec)
     if isinstance(policy, HistoryConfig):
         _FakeClient.next_lookup_response = ToolLookupResponse(
-            found=True, result=expected_result
+            match=ToolLookupMatch(
+                result=expected_result,
+                status=NodeStatus.COMPLETED,
+                error=None,
+            )
         )
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
@@ -1147,7 +1150,13 @@ async def test_history_policy_consumes_baseline_occurrences_in_order(
         ),
     )
     _FakeClient.next_lookup_responses = [
-        ToolLookupResponse(found=True, result={"ticket": ticket})
+        ToolLookupResponse(
+            match=ToolLookupMatch(
+                result={"ticket": ticket},
+                status=NodeStatus.COMPLETED,
+                error=None,
+            )
+        )
         for ticket in ["a", "b", "c"]
     ]
     agent = KitaruAgent(
@@ -1179,8 +1188,14 @@ async def test_history_policy_miss_does_not_advance_occurrence(
         ),
     )
     _FakeClient.next_lookup_responses = [
-        ToolLookupResponse(found=False, result=None),
-        ToolLookupResponse(found=True, result={"ticket": "a"}),
+        ToolLookupResponse(match=None),
+        ToolLookupResponse(
+            match=ToolLookupMatch(
+                result={"ticket": "a"},
+                status=NodeStatus.COMPLETED,
+                error=None,
+            )
+        ),
     ]
     agent = KitaruAgent(
         _repeating_tool_agent(real_calls, returned_results, 2),
@@ -1195,20 +1210,24 @@ async def test_history_policy_miss_does_not_advance_occurrence(
     assert [request.occurrence for _, request in client.replays.lookups] == [0, 0]
 
 
+@pytest.mark.parametrize("scope", [HistoryScope.AGENT, HistoryScope.COHORT_VERSION])
 async def test_history_policy_non_baseline_scope_sends_no_occurrence(
     monkeypatch: pytest.MonkeyPatch,
+    scope: HistoryScope,
 ) -> None:
-    """Agent-scoped history lookups carry no occurrence."""
+    """Agent- and cohort-scoped history lookups carry no occurrence."""
     real_calls: list[dict[str, Any]] = []
     returned_results: list[Any] = []
     _set_replay(
         monkeypatch,
-        _replay_spec(
-            HistoryConfig(scope=HistoryScope.AGENT, on_miss=ToolPolicyOnMiss.FAIL)
-        ),
+        _replay_spec(HistoryConfig(scope=scope, on_miss=ToolPolicyOnMiss.FAIL)),
     )
     _FakeClient.next_lookup_response = ToolLookupResponse(
-        found=True, result={"source": "history"}
+        match=ToolLookupMatch(
+            result={"source": "history"},
+            status=NodeStatus.COMPLETED,
+            error=None,
+        )
     )
     agent = KitaruAgent(
         _tool_agent(real_calls, returned_results),
@@ -1221,6 +1240,176 @@ async def test_history_policy_non_baseline_scope_sends_no_occurrence(
     client = _FakeClient.instances[0]
     assert len(client.replays.lookups) == 1
     assert client.replays.lookups[0][1].occurrence is None
+
+
+@pytest.mark.parametrize("recorded_result", [{"source": "history"}, None])
+async def test_history_policy_replays_completed_match_without_live_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    recorded_result: Any,
+) -> None:
+    """A completed match, including null, is a mocked successful tool call."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+            )
+        ),
+    )
+    _FakeClient.next_lookup_response = ToolLookupResponse(
+        match=ToolLookupMatch(
+            result=recorded_result,
+            status=NodeStatus.COMPLETED,
+            error=None,
+        )
+    )
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+    )
+
+    result = await agent.run("weather")
+
+    assert result.output == "finished"
+    assert returned_results == [recorded_result]
+    assert real_calls == []
+    client = _FakeClient.instances[0]
+    tool = next(node for node in _nodes(client) if node.node_type is NodeType.TOOL_CALL)
+    assert tool.status is NodeStatus.COMPLETED
+    assert tool.outputs == recorded_result
+    assert tool.error is None
+    assert tool.attributes == {"mocked": True, "policy": "history"}
+    assert client.replays.lookups[0][1].occurrence == 0
+
+
+@pytest.mark.parametrize(
+    ("recorded_error", "expected_error"),
+    [
+        ("recorded tool failure", "recorded tool failure"),
+        (None, "Recorded tool call 'lookup' failed"),
+    ],
+)
+async def test_history_policy_raises_and_records_failed_match(
+    monkeypatch: pytest.MonkeyPatch,
+    recorded_error: str | None,
+    expected_error: str,
+) -> None:
+    """A failed match raises at the tool boundary and records that failure."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    run_states: list[Any] = []
+    run_state_type = capability_module._RunState
+
+    def capture_run_state(**kwargs: Any) -> Any:
+        state = run_state_type(**kwargs)
+        run_states.append(state)
+        return state
+
+    monkeypatch.setattr(capability_module, "_RunState", capture_run_state)
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+            )
+        ),
+    )
+    _FakeClient.next_lookup_response = ToolLookupResponse(
+        match=ToolLookupMatch(
+            result=None,
+            status=NodeStatus.FAILED,
+            error=recorded_error,
+        )
+    )
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(ToolPolicyError, match=expected_error):
+        await agent.run("weather")
+
+    assert real_calls == []
+    assert returned_results == []
+    client = _FakeClient.instances[0]
+    tool = next(node for node in _nodes(client) if node.node_type is NodeType.TOOL_CALL)
+    assert tool.status is NodeStatus.FAILED
+    assert tool.outputs is None
+    assert tool.error == expected_error
+    assert tool.attributes == {"mocked": True, "policy": "history"}
+    assert client.replays.lookups[0][1].occurrence == 0
+    cache_key = client.replays.lookups[0][1].cache_key
+    assert run_states[0].history_occurrences[cache_key] == 1
+
+
+async def test_history_policy_legacy_lookup_response_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An old server response cannot be mistaken for a genuine history miss."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+            )
+        ),
+    )
+    _FakeClient.next_lookup_response = ToolLookupResponse()
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(ToolPolicyError, match="does not include 'match'"):
+        await agent.run("weather")
+
+    assert real_calls == []
+    assert returned_results == []
+
+
+async def test_history_policy_fails_closed_for_unexpected_match_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A nonterminal recorded match cannot execute the live tool."""
+    real_calls: list[dict[str, Any]] = []
+    returned_results: list[Any] = []
+    _set_replay(
+        monkeypatch,
+        _replay_spec(
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+            )
+        ),
+    )
+    _FakeClient.next_lookup_response = ToolLookupResponse(
+        match=ToolLookupMatch(
+            result=None,
+            status=NodeStatus.IN_PROGRESS,
+            error=None,
+        )
+    )
+    agent = KitaruAgent(
+        _tool_agent(real_calls, returned_results),
+        agent_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(ToolPolicyError, match="unexpected status 'in_progress'"):
+        await agent.run("weather")
+
+    assert real_calls == []
+    client = _FakeClient.instances[0]
+    tool = next(node for node in _nodes(client) if node.node_type is NodeType.TOOL_CALL)
+    assert tool.status is NodeStatus.FAILED
+    assert tool.attributes == {"mocked": True, "policy": "history"}
+    assert client.replays.lookups[0][1].occurrence == 0
 
 
 async def test_history_policy_without_cache_key_uses_miss_behavior(
@@ -1437,7 +1626,11 @@ async def test_history_policy_normalizes_validated_tool_arguments(
     )
     _set_replay(monkeypatch, spec)
     _FakeClient.next_lookup_response = ToolLookupResponse(
-        found=True, result={"source": "history"}
+        match=ToolLookupMatch(
+            result={"source": "history"},
+            status=NodeStatus.COMPLETED,
+            error=None,
+        )
     )
     agent = KitaruAgent(
         original,

@@ -25,6 +25,7 @@ from kitaru.api_models.v1.replay_config import (
     ToolConfig,
     ToolPolicyOnMiss,
 )
+from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.cache_keys import compute_tool_cache_key
 
 from .capability import ToolPolicyError, ToolPolicyMissError
@@ -158,9 +159,22 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
                     case.result, tool_call_id=call_id, tool_name=name
                 )
         elif isinstance(policy, HistoryConfig):
-            result = bridge.run(
-                self._history_result(recorder, policy, name, call_id, arguments)
-            )
+            try:
+                result = bridge.run(
+                    self._history_result(recorder, policy, name, call_id, arguments)
+                )
+            except ToolPolicyError as error:
+                bridge.run(
+                    recorder.record_tool_substitution(
+                        tool_call_id=call_id,
+                        tool_name=name,
+                        arguments=arguments,
+                        result=None,
+                        policy_name=policy.type,
+                        error=error,
+                    )
+                )
+                raise
         if result is None:
             if policy.on_miss is ToolPolicyOnMiss.PASSTHROUGH:
                 return handler(request)
@@ -247,9 +261,20 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
                     case.result, tool_call_id=call_id, tool_name=name
                 )
         elif isinstance(policy, HistoryConfig):
-            result = await self._history_result(
-                recorder, policy, name, call_id, arguments
-            )
+            try:
+                result = await self._history_result(
+                    recorder, policy, name, call_id, arguments
+                )
+            except ToolPolicyError as error:
+                await recorder.record_tool_substitution(
+                    tool_call_id=call_id,
+                    tool_name=name,
+                    arguments=arguments,
+                    result=None,
+                    policy_name=policy.type,
+                    error=error,
+                )
+                raise
         if result is None:
             return await self._handle_miss(
                 recorder, request, handler, policy.type, policy.on_miss
@@ -327,15 +352,25 @@ class KitaruLangGraphMiddleware(AgentMiddleware[Any, Any]):
                 tool_name=name, cache_key=cache_key, occurrence=occurrence
             ),
         )
-        if not lookup.found:
+        if "match" not in lookup.model_fields_set:
+            raise ToolPolicyError(
+                "Kitaru server tool lookup response does not include 'match'; "
+                "upgrade the server before using history replay"
+            )
+        match = lookup.match
+        if match is None:
             return None
         if occurrence is not None:
             recorder.history_occurrences[cache_key] = occurrence + 1
-        try:
+        if match.status is NodeStatus.COMPLETED:
             return decode_tool_outcome(
-                lookup.result,
+                match.result,
                 tool_call_id=call_id,
                 tool_name=name,
             )
-        except ToolPolicyError:
-            return None
+        if match.status is NodeStatus.FAILED:
+            raise ToolPolicyError(match.error or f"Recorded tool call '{name}' failed")
+        raise ToolPolicyError(
+            f"History lookup for tool '{name}' returned unexpected status "
+            f"'{match.status.value}'"
+        )

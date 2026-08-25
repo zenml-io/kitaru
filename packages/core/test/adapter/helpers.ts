@@ -97,8 +97,7 @@ export function fakeClient(
     async lookupToolResult(_replayId, request) {
       lookups.push(request);
       return (options.lookup?.(request) ?? {
-        found: false,
-        result: null,
+        match: null,
       }) as never;
     },
     async updateSession(_sessionId, request) {

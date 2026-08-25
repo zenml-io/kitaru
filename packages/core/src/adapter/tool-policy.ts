@@ -249,25 +249,30 @@ export async function decideToolCall(
       request.occurrence = occurrence;
     }
     const lookup = await state.client.lookupToolResult(state.replayId, request);
-    // Any hit consumes its recorded occurrence, even one the ambiguity guard
-    // below rejects, matching the Python adapters; a miss keeps the counter
-    // still so a later identical call can retry the same recorded position.
-    if (lookup.found && occurrence !== undefined) {
+    if (lookup.match == null) {
+      return policyMiss(entry, "history", policy.on_miss);
+    }
+    // Any recorded match consumes its occurrence before its outcome is
+    // applied. A miss keeps the counter still so a later identical call can
+    // retry the same recorded position.
+    if (occurrence !== undefined) {
       state.advanceHistoryOccurrence(cacheKey, occurrence);
     }
-    if (lookup.found && lookup.result === null) {
+    entry.mocked = true;
+    if (lookup.match.status === "completed") {
+      entry.outcome = "completed";
+      entry.output = toRecorderJson(lookup.match.result);
+      return { output: lookup.match.result, type: "mocked_result" };
+    }
+    if (lookup.match.status === "failed") {
       throw new ToolPolicyError(
-        `History lookup for tool '${input.toolName}' cannot distinguish a ` +
-          "failed recording from a null result; refusing to execute or mock it",
+        lookup.match.error ?? `Recorded tool call '${input.toolName}' failed`,
       );
     }
-    if (lookup.found) {
-      entry.mocked = true;
-      entry.outcome = "completed";
-      entry.output = toRecorderJson(lookup.result);
-      return { output: lookup.result, type: "mocked_result" };
-    }
-    return policyMiss(entry, "history", policy.on_miss);
+    throw new ToolPolicyError(
+      `History lookup for tool '${input.toolName}' returned unexpected status ` +
+        `'${lookup.match.status}'`,
+    );
   } catch (error) {
     if (entry.outcome !== "failed") {
       stateFailure(entry, error);

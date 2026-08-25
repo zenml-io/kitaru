@@ -230,7 +230,7 @@ class ReplayService:
         cache_key: str,
         occurrence: int | None,
         actor: AuthContext,
-    ) -> ToolLookupResult:
+    ) -> ToolLookupResult | None:
         """Search recorded tool-call history for a cached result.
 
         The tool's config and history scope come from the replay's config,
@@ -252,7 +252,7 @@ class ReplayService:
                 an occurrence was given for a non-baseline history scope.
 
         Returns:
-            Whether a cached result was found, and the result if so.
+            Matching tool call result, or ``None`` on a miss.
         """
         replay = await self._repository.get(replay_id)
         await self._check_task_access(replay, actor)
@@ -271,8 +271,10 @@ class ReplayService:
             replay, tool_config.scope, cache_key, occurrence
         )
         if node is None:
-            return ToolLookupResult(found=False, result=None)
-        return ToolLookupResult(found=True, result=node.outputs)
+            return None
+        return ToolLookupResult(
+            result=node.outputs, status=node.status, error=node.error
+        )
 
     async def _check_task_access(self, replay: Replay, actor: AuthContext) -> None:
         """Require a task principal's task to belong to the replay's job.

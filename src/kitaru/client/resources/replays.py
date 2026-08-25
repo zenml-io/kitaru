@@ -139,7 +139,7 @@ class ReplaysResource:
                 occurrence given for a non-baseline history scope.
 
         Returns:
-            Whether a cached result was found, and the result if so.
+            Matching recorded tool call, unset on a miss.
         """
         response = await self._client.request(
             "POST",

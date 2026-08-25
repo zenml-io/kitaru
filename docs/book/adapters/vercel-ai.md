@@ -155,7 +155,9 @@ Replay supports local executable tools under these policies:
 
 The `llm` tool policy is not supported. A replay that configures it fails with a tool-policy error.
 
-History compatibility is guaranteed only when both the baseline and replay use this Vercel AI SDK adapter. Frameworks can validate, default, or serialize the same logical arguments differently, so history recorded through another adapter is not a compatibility promise. If a baseline calls the same tool more than once with identical arguments, replay resolves every matching call to the last recorded result for that pair and warns once that the trajectory may differ.
+History compatibility is guaranteed only when both the baseline and replay use this Vercel AI SDK adapter. Frameworks can validate, default, or serialize the same logical arguments differently, so history recorded through another adapter is not a compatibility promise. If a baseline calls the same tool more than once with identical arguments, replay consumes those calls in baseline order. Agent- and cohort-version-scoped history use the newest completed matching call.
+
+A matched recorded failure throws `ToolPolicyError` with the stored error text and aborts `generateText` unless application code catches it. Kitaru does not recreate the original exception class or convert the failure into a native `tool-error` result.
 
 Static and history results are validated against the tool's `outputSchema` when one is declared. A schema created with `jsonSchema()` must include its optional runtime `validate` callback for replay to enforce it; otherwise replay fails closed. A configured `error_result` is an error sentinel rather than a successful tool value, so it bypasses output-schema validation and records a failed tool node.
 
