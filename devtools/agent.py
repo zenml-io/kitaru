@@ -42,7 +42,7 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
     SessionUpdateRequest,
 )
-from kitaru.api_models.v1.session_node import SessionNodeBatchRequest
+from kitaru.api_models.v1.session_node import NodeStatus, SessionNodeBatchRequest
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task import get_task_id, get_task_inputs
@@ -111,11 +111,23 @@ class PolicyToolResolver:
                     tool_name=tool_name, cache_key=cache_key, occurrence=occurrence
                 ),
             )
-            if response.found:
+            match = response.match
+            if match is not None:
                 if occurrence is not None:
                     self._history_occurrences[cache_key] = occurrence + 1
-                return ToolOutcome(
-                    result=response.result,
+                if match.status is NodeStatus.COMPLETED:
+                    return ToolOutcome(
+                        result=match.result,
+                        attributes={"mocked": True, "policy": policy.type},
+                    )
+                if match.status is NodeStatus.FAILED:
+                    raise ToolResolutionError(
+                        match.error or f"Recorded tool call {tool_name!r} failed",
+                        attributes={"mocked": True, "policy": policy.type},
+                    )
+                raise ToolResolutionError(
+                    f"History lookup for tool {tool_name!r} returned unexpected "
+                    f"status {match.status.value!r}",
                     attributes={"mocked": True, "policy": policy.type},
                 )
             return self._handle_miss(policy.type, policy.on_miss, tool_name, inputs)

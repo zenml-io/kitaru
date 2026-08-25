@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-pydantic-ai"
-version = "0.1.0"
+version = "0.1.1"
 description = "PydanticAI recording and replay adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -26,7 +26,7 @@ classifiers = [
 keywords = ["ai-agents", "kitaru", "pydantic-ai", "recording", "replay"]
 dependencies = [
     "genai-prices>=0.1.1,<0.2",
-    "kitaru>=0.22.0",
+    "kitaru>=0.22.3",
     "pydantic-ai-slim>=2.14.1,<2.23",
 ]
 

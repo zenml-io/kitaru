@@ -18,6 +18,7 @@ from collections.abc import Mapping
 from typing import Any, ClassVar, NamedTuple
 
 from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.base import ListFilter
@@ -61,8 +62,9 @@ class ReplayCreate(FrozenModel):
 class ToolLookupResult(NamedTuple):
     """Tool lookup result."""
 
-    found: bool
     result: Any
+    status: NodeStatus
+    error: str | None
 
 
 class ReplayWithDetails(NamedTuple):

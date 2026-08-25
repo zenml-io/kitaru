@@ -273,14 +273,20 @@ async def test_create_replay_rejects_cohort_version_scoped_history(
 
 
 def _cache_node(
-    session_id: uuid.UUID, index: int, cache_key: str, outputs: object
+    session_id: uuid.UUID,
+    index: int,
+    cache_key: str,
+    outputs: object,
+    status: NodeStatus = NodeStatus.COMPLETED,
+    error: str | None = None,
 ) -> SessionNode:
     return SessionNode(
         session_id=session_id,
         index=index,
         node_type=NodeType.TOOL_CALL,
         name="search",
-        status=NodeStatus.COMPLETED,
+        status=status,
+        error=error,
         tool_name="search",
         cache_key=cache_key,
         outputs=outputs,
@@ -334,14 +340,13 @@ async def test_tool_lookup_baseline_scope_hit_and_miss(
     hit = await services.replay_service.tool_lookup(
         replay_id, "search", cache_key, None, actor=ACTOR
     )
-    assert hit.found is True
+    assert hit is not None
     assert hit.result == {"result": "hit"}
 
     miss = await services.replay_service.tool_lookup(
         replay_id, "search", "c" * 64, None, actor=ACTOR
     )
-    assert miss.found is False
-    assert miss.result is None
+    assert miss is None
 
 
 async def test_tool_lookup_agent_scope_across_sessions(
@@ -371,7 +376,7 @@ async def test_tool_lookup_agent_scope_across_sessions(
     result = await services.replay_service.tool_lookup(
         replay_id, "search", cache_key, None, actor=ACTOR
     )
-    assert result.found is True
+    assert result is not None
     assert result.result == {"result": "from-sibling"}
 
 
@@ -420,7 +425,7 @@ async def test_tool_lookup_cohort_version_scope_within_the_runs_cohort_version(
     result = await services.replay_service.tool_lookup(
         replay_id, "search", cache_key, None, actor=ACTOR
     )
-    assert result.found is True
+    assert result is not None
     assert result.result == {"result": "in-cohort-version"}
 
 
@@ -470,7 +475,7 @@ async def test_tool_lookup_without_occurrence_newest_node_wins(
     result = await services.replay_service.tool_lookup(
         replay_id, "search", cache_key, None, actor=ACTOR
     )
-    assert result.found is True
+    assert result is not None
     assert result.result == {"result": "newer"}
 
 
@@ -498,8 +503,8 @@ async def test_tool_lookup_occurrence_replays_baseline_order(
         )
         for occurrence in range(3)
     ]
-    assert all(result.found for result in results)
-    assert [result.result for result in results] == [
+    assert all(result is not None for result in results)
+    assert [result.result for result in results if result is not None] == [
         {"ticket": "a"},
         {"ticket": "b"},
         {"ticket": "c"},
@@ -508,8 +513,7 @@ async def test_tool_lookup_occurrence_replays_baseline_order(
     exhausted = await services.replay_service.tool_lookup(
         replay_id, "search", cache_key, 3, actor=ACTOR
     )
-    assert exhausted.found is False
-    assert exhausted.result is None
+    assert exhausted is None
 
 
 async def test_tool_lookup_occurrence_interleaves_cache_keys(
@@ -541,6 +545,9 @@ async def test_tool_lookup_occurrence_interleaves_cache_keys(
     third = await services.replay_service.tool_lookup(
         replay_id, "search", first_key, 1, actor=ACTOR
     )
+    assert first is not None
+    assert second is not None
+    assert third is not None
     assert first.result == {"ticket": "a"}
     assert second.result == {"ticket": "x"}
     assert third.result == {"ticket": "b"}
@@ -558,6 +565,151 @@ async def test_tool_lookup_occurrence_rejected_for_non_baseline_scope(
         await services.replay_service.tool_lookup(
             replay_id, "search", "k" * 64, 0, actor=ACTOR
         )
+
+
+async def test_tool_lookup_occurrence_matches_a_failed_node(
+    services: ReplayServices,
+) -> None:
+    """Baseline scope with an occurrence matches a failed node and its error."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    cache_key = "l" * 64
+    await services.session_nodes.upsert_batch(
+        baseline.id,
+        [
+            _cache_node(
+                baseline.id,
+                0,
+                cache_key,
+                None,
+                status=NodeStatus.FAILED,
+                error="tool raised an exception",
+            )
+        ],
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    result = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, 0, actor=ACTOR
+    )
+
+    assert result is not None
+    assert result.status == NodeStatus.FAILED
+    assert result.error == "tool raised an exception"
+
+
+async def test_tool_lookup_occurrence_skips_an_in_progress_node(
+    services: ReplayServices,
+) -> None:
+    """Baseline scope with an occurrence skips an in-progress node."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    cache_key = "m" * 64
+    await services.session_nodes.upsert_batch(
+        baseline.id,
+        [
+            _cache_node(baseline.id, 0, cache_key, None, status=NodeStatus.IN_PROGRESS),
+            _cache_node(baseline.id, 1, cache_key, {"ticket": "b"}),
+        ],
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    result = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, 0, actor=ACTOR
+    )
+
+    assert result is not None
+    assert result.result == {"ticket": "b"}
+
+
+async def test_tool_lookup_without_occurrence_skips_a_failed_node(
+    services: ReplayServices,
+) -> None:
+    """Baseline scope without an occurrence skips a failed node."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    cache_key = "n" * 64
+    await services.session_nodes.upsert_batch(
+        baseline.id,
+        [_cache_node(baseline.id, 0, cache_key, None, status=NodeStatus.FAILED)],
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    result = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, None, actor=ACTOR
+    )
+
+    assert result is None
+
+
+async def test_tool_lookup_agent_scope_skips_a_failed_node(
+    services: ReplayServices,
+) -> None:
+    """Agent scope skips a failed node."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    sibling = await _session(services, agent_version)
+    cache_key = "o" * 64
+    await services.session_nodes.upsert_batch(
+        sibling.id,
+        [_cache_node(sibling.id, 0, cache_key, None, status=NodeStatus.FAILED)],
+    )
+    replay_id = await _replay_with_history_scope(services, HistoryScope.AGENT, baseline)
+
+    result = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, None, actor=ACTOR
+    )
+
+    assert result is None
+
+
+async def test_tool_lookup_cohort_version_scope_skips_a_failed_node(
+    services: ReplayServices,
+) -> None:
+    """Cohort version scope skips a failed node."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    cohort_member = await _session(services, agent_version)
+    cohort = await create_cohort(
+        services.cohorts, ACTOR.account.id, agent_version.agent_id
+    )
+    cohort_version = await create_cohort_version(
+        services.cohort_versions,
+        ACTOR.account.id,
+        cohort.id,
+        [baseline.id, cohort_member.id],
+    )
+    cache_key = "p" * 64
+    await services.session_nodes.upsert_batch(
+        cohort_member.id,
+        [_cache_node(cohort_member.id, 0, cache_key, None, status=NodeStatus.FAILED)],
+    )
+    run_id = uuid.uuid4()
+    await services.experiment_runs.create(
+        ExperimentRun(
+            id=run_id,
+            owner_id=ACTOR.account.id,
+            experiment_id=uuid.uuid4(),
+            number=1,
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+        )
+    )
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.COHORT_VERSION, baseline, experiment_run_id=run_id
+    )
+
+    result = await services.replay_service.tool_lookup(
+        replay_id, "search", cache_key, None, actor=ACTOR
+    )
+
+    assert result is None
 
 
 async def test_get_replay_result_session_id_appears_once_linked_on_the_replay(

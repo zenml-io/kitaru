@@ -44,6 +44,11 @@ FRAMEWORK = "langgraph"
 _LOGGER = logging.getLogger(__name__)
 
 
+def _error_text(error: BaseException) -> str:
+    """Return a useful stored error message with a class-name fallback."""
+    return str(error) or type(error).__name__
+
+
 @dataclass(frozen=True)
 class RecordingFailure:
     """Safe diagnostic for the first contained adapter failure."""
@@ -310,7 +315,7 @@ class InvocationRecorder:
                 node_type=NodeType.SPAN,
                 name=pending.name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=type(error).__name__ if error is not None else None,
+                error=_error_text(error) if error is not None else None,
                 started_at=pending.started_at,
                 ended_at=datetime.now(UTC),
                 inputs=pending.inputs,
@@ -383,7 +388,7 @@ class InvocationRecorder:
                 node_type=pending.node_type,
                 name=pending.name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=type(error).__name__ if error is not None else None,
+                error=_error_text(error) if error is not None else None,
                 started_at=pending.started_at,
                 ended_at=datetime.now(UTC),
                 inputs=pending.inputs,
@@ -431,7 +436,7 @@ class InvocationRecorder:
                 node_type=NodeType.TOOL_CALL,
                 name=tool_name,
                 status=NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED,
-                error=type(error).__name__ if error is not None else None,
+                error=_error_text(error) if error is not None else None,
                 started_at=datetime.now(UTC),
                 ended_at=datetime.now(UTC),
                 inputs=input_capture.value,
@@ -466,7 +471,7 @@ class InvocationRecorder:
         ended_at = datetime.now(UTC)
         interrupted = _has_interrupt(result)
         output_capture = capture_value(result, self.policy)
-        error_class = type(error).__name__ if error is not None else None
+        error_text = _error_text(error) if error is not None else None
         node_status = NodeStatus.FAILED if error is not None else NodeStatus.COMPLETED
         session_status = (
             SessionStatus.FAILED if error is not None else SessionStatus.COMPLETED
@@ -474,7 +479,7 @@ class InvocationRecorder:
         if interrupted and self.task_id is not None:
             node_status = NodeStatus.FAILED
             session_status = SessionStatus.FAILED
-            error_class = UnsupportedWorkerInterruptError.__name__
+            error_text = UnsupportedWorkerInterruptError.__name__
         metadata: dict[str, Any] = {
             "interrupted": interrupted,
             "recording_truncated": (
@@ -493,7 +498,7 @@ class InvocationRecorder:
                     node_type=NodeType.SPAN,
                     name="invoke",
                     status=node_status,
-                    error=error_class,
+                    error=error_text,
                     started_at=self.started_at,
                     ended_at=ended_at,
                     inputs=self.captured_input,
@@ -510,7 +515,7 @@ class InvocationRecorder:
                     SessionUpdateRequest(
                         status=session_status,
                         outputs=output_capture.value if error is None else None,
-                        error=error_class,
+                        error=error_text,
                         ended_at=ended_at,
                         metadata=metadata,
                     ),

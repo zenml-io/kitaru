@@ -53,8 +53,8 @@ function runWithHistory(
     },
     (request) =>
       request.cache_key === recordedKey
-        ? { found: true, result: RECORDED }
-        : { found: false, result: null },
+        ? { match: { error: null, result: RECORDED, status: "completed" } }
+        : { match: null },
   );
 }
 

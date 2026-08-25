@@ -143,7 +143,7 @@ async def tool_lookup(
         actor: Caller context.
 
     Returns:
-        Whether a cached result was found, and the result if so.
+        Matching recorded tool call, unset on a miss.
     """
     result = await service.tool_lookup(
         replay_id, body.tool_name, body.cache_key, body.occurrence, actor=actor

@@ -228,12 +228,11 @@ function executeBaseline(options: {
 }
 
 /**
- * Warn once when a replay repeats a tool call with identical arguments.
+ * Warn once when non-baseline history repeats a call with identical arguments.
  *
- * Kitaru looks recorded results up by (tool name, arguments), so every repeat
- * of the same call resolves to the last recorded result for that pair. The
- * replayed trajectory then diverges from the baseline, and only the run itself
- * can tell the operator that happened.
+ * Baseline history consumes recorded occurrences in order. Other history
+ * scopes have no stable per-run ordering, so repeated calls reuse the newest
+ * completed match and can diverge from the baseline trajectory.
  */
 function warnOnRepeatedCall(options: {
   cacheKey: string | undefined;
@@ -258,8 +257,8 @@ function warnOnRepeatedCall(options: {
   options.warned.add(key);
   console.warn(
     `Kitaru replay: tool '${options.toolName}' was called again with identical ` +
-      "arguments. Recorded results are keyed by tool name and arguments, so " +
-      "every repeat resolves to the last recorded result for that pair.",
+      "arguments under non-baseline history. Each repeat reuses the newest " +
+      "completed result for that scope.",
   );
 }
 
@@ -305,11 +304,12 @@ export function wrapTools<TOOLS extends ToolSet>(options: {
           });
         }
         const executeReplay = async () => {
-          // Under passthrough a repeated call runs live and resolves to its own
-          // result, so the warning would be both wrong and pure cost. A call
-          // with no history key resolves to no recorded result either, which
-          // `historyCacheKey` reports by returning nothing.
-          if (selectToolPolicy(spec, toolName).type === "history") {
+          // Passthrough repeats run live, while baseline history consumes
+          // recorded occurrences in order. Neither case needs a warning. A
+          // call with no history key resolves to no recorded result either,
+          // which `historyCacheKey` reports by returning nothing.
+          const policy = selectToolPolicy(spec, toolName);
+          if (policy.type === "history" && policy.scope !== "baseline") {
             warnOnRepeatedCall({
               cacheKey: historyCacheKey(
                 toolName,
