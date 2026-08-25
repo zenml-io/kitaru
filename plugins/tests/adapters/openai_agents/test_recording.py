@@ -693,6 +693,34 @@ async def test_reconciles_tools_hosted_calls_and_handoffs_by_public_ids() -> Non
         assert node.ended_at is None
 
 
+def test_records_user_fields_named_like_capture_metadata() -> None:
+    agent = Agent(name="source")
+    inputs, attributes = recording_module._capture_tool_input(
+        ToolCallItem(
+            agent=agent,
+            raw_item=ResponseFunctionToolCall(
+                arguments=(
+                    '{"_kitaru_truncated":false,'
+                    '"_kitaru_unsupported_type":"application_value",'
+                    '"value":1}'
+                ),
+                call_id="call-1",
+                name="lookup",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            ),
+        )
+    )
+
+    assert inputs == {
+        "_kitaru_truncated": False,
+        "_kitaru_unsupported_type": "application_value",
+        "value": 1,
+    }
+    assert attributes == {}
+
+
 async def test_same_name_tool_calls_match_outputs_and_parents_by_call_id() -> None:
     client = _FakeClient()
     recorder = RunRecorder(client=cast(KitaruAPIClient, client), batch_size=20)

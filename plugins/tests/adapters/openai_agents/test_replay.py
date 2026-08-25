@@ -585,7 +585,9 @@ async def test_history_miss_behavior(
 
 async def test_history_rejects_invalid_arguments_and_lossy_results() -> None:
     calls: list[str] = []
-    client = _FakeClient([_lookup_response({"_kitaru_truncated": {}})])
+    client = _FakeClient(
+        [_lookup_response({"_kitaru_truncated": {"reason": "max_depth"}})]
+    )
     prepared = prepare_replay(
         Agent[None](name="test", tools=[_function_tool(calls)]),
         "input",
@@ -608,6 +610,43 @@ async def test_history_rejects_invalid_arguments_and_lossy_results() -> None:
         await _invoke(tool, {"city": "Paris"})
     assert len(client.replays.lookups) == 1
     assert calls == []
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"_kitaru_truncated": False, "value": 1},
+        {"_kitaru_truncated": {"reason": "application_value"}},
+        {"_kitaru_unsupported_type": False},
+        {"_kitaru_unsupported_type": "application_value", "value": 1},
+    ],
+)
+async def test_history_accepts_user_fields_named_like_capture_metadata(
+    result: Any,
+) -> None:
+    client = _FakeClient([_lookup_response(result)])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool([])]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+
+    assert (
+        await _invoke(
+            cast(FunctionTool, prepared.starting_agent.tools[0]),
+            {"city": "Paris"},
+        )
+        == result
+    )
 
 
 async def test_concurrent_identical_history_calls_use_distinct_occurrences() -> None:
