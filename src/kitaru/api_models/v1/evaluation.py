@@ -126,7 +126,7 @@ class EvaluationBatchCreateRequest(RequestModel):
     """Evaluation batch create request."""
 
     input_session_ids: list[uuid.UUID] = Field(
-        min_length=1, description="Sessions to score."
+        min_length=1, description="Sessions to score, all belonging to one agent."
     )
     evaluators: list[EvaluatorConfig] = Field(
         min_length=1, description="Evaluators run against every session."

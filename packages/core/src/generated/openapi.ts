@@ -4509,7 +4509,7 @@ export interface components {
             evaluators: components["schemas"]["EvaluatorConfig"][];
             /**
              * Input Session Ids
-             * @description Sessions to score.
+             * @description Sessions to score, all belonging to one agent.
              */
             input_session_ids: string[];
         };
@@ -4755,6 +4755,11 @@ export interface components {
          */
         EvaluatorCreateRequest: {
             /**
+             * Agent Id
+             * @description Id of the agent this evaluator is scoped to, null for a global evaluator.
+             */
+            agent_id?: string | null;
+            /**
              * Description
              * @description Evaluator description.
              */
@@ -4782,6 +4787,11 @@ export interface components {
          * @description Evaluator response.
          */
         EvaluatorResponse: {
+            /**
+             * Agent Id
+             * @description Id of the agent this evaluator is scoped to, null for a global evaluator.
+             */
+            agent_id: string | null;
             /**
              * Created
              * Format: date-time

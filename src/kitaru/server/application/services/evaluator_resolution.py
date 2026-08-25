@@ -58,6 +58,7 @@ def _validate_builtin_evaluator_params(config: EvaluatorConfigInput) -> None:
 async def resolve_evaluator_config(
     config: EvaluatorConfigInput,
     plugin_repository: PluginRepository,
+    agent_id: uuid.UUID | None,
     actor: AuthContext | None = None,
 ) -> EvaluatorConfig:
     """Resolve an evaluator config to a concrete plugin version.
@@ -67,12 +68,15 @@ async def resolve_evaluator_config(
     Args:
         config: Evaluator config awaiting resolution.
         plugin_repository: Plugin repository, queried for the evaluator kind.
+        agent_id: Caller's agent context, must match a scoped evaluator's
+            agent id.
         actor: Caller context, unused, ownership is provenance only.
 
     Raises:
         PluginNotFound: No evaluator plugin has this name.
         PluginVersionNotFound: The resolved version has no matching plugin
             version.
+        ValidationError: The evaluator is scoped to a different agent.
 
     Returns:
         Resolved evaluator config carrying the concrete version and its id.
@@ -81,6 +85,10 @@ async def resolve_evaluator_config(
     plugin = await resolve_plugin(
         config.evaluator, PluginKind.EVALUATOR, plugin_repository
     )
+    if plugin.agent_id is not None and plugin.agent_id != agent_id:
+        raise ValidationError(
+            f"Evaluator '{config.evaluator}' is scoped to a different agent"
+        )
     plugin_version = await resolve_plugin_version(
         plugin, config.version, plugin_repository
     )
@@ -96,6 +104,7 @@ async def resolve_evaluator_config(
 async def validate_evaluators(
     configs: list[EvaluatorConfigInput],
     plugin_repository: PluginRepository,
+    agent_id: uuid.UUID | None,
     actor: AuthContext | None = None,
 ) -> list[EvaluatorConfig]:
     """Resolve every evaluator config, rejecting a repeated resolved version.
@@ -103,18 +112,21 @@ async def validate_evaluators(
     Args:
         configs: Evaluator configs awaiting resolution.
         plugin_repository: Plugin repository, queried for the evaluator kind.
+        agent_id: Caller's agent context, must match a scoped evaluator's
+            agent id.
         actor: Caller context, unused, ownership is provenance only.
 
     Raises:
         PluginNotFound: A config names an unknown evaluator.
         PluginVersionNotFound: A config names an unknown version.
-        ValidationError: Two configs resolve to the same evaluator version.
+        ValidationError: A config's evaluator is scoped to a different
+            agent, or two configs resolve to the same evaluator version.
 
     Returns:
         Resolved evaluator configs.
     """
     resolved = [
-        await resolve_evaluator_config(config, plugin_repository, actor)
+        await resolve_evaluator_config(config, plugin_repository, agent_id, actor)
         for config in configs
     ]
     seen_ids: set[uuid.UUID] = set()

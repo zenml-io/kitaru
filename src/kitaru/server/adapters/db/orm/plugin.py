@@ -53,6 +53,8 @@ PLUGIN_KIND_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("plugin", ["kind", "
 PLUGIN_OWNER_ID_FOREIGN_KEY = foreign_key_name("plugin", ["owner_id"])
 PLUGIN_OWNER_ID_INDEX = index_name("plugin", ["owner_id"])
 PLUGIN_KIND_PROVIDER_INDEX = index_name("plugin", ["kind", "provider"])
+PLUGIN_AGENT_ID_FOREIGN_KEY = foreign_key_name("plugin", ["agent_id"])
+PLUGIN_AGENT_ID_INDEX = index_name("plugin", ["agent_id"])
 
 
 class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -64,8 +66,15 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=PLUGIN_OWNER_ID_FOREIGN_KEY
         ),
+        ForeignKeyConstraint(
+            ["agent_id"],
+            ["agent.id"],
+            name=PLUGIN_AGENT_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
+        ),
         Index(PLUGIN_OWNER_ID_INDEX, "owner_id"),
         Index(PLUGIN_KIND_PROVIDER_INDEX, "kind", "provider"),
+        Index(PLUGIN_AGENT_ID_INDEX, "agent_id"),
     )
 
     owner_id: Mapped[uuid.UUID | None]
@@ -76,6 +85,7 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     logo_url: Mapped[str | None] = mapped_column(Text)
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
     latest_version: Mapped[int]
+    agent_id: Mapped[uuid.UUID | None]
 
     @classmethod
     def from_domain(cls, plugin: Plugin) -> "PluginORM":
@@ -97,6 +107,7 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             logo_url=plugin.logo_url,
             metadata_=plugin.metadata,
             latest_version=plugin.latest_version,
+            agent_id=plugin.agent_id,
         )
 
     def to_domain(self) -> Plugin:
@@ -115,6 +126,7 @@ class PluginORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             logo_url=self.logo_url,
             metadata=self.metadata_,
             latest_version=self.latest_version,
+            agent_id=self.agent_id,
             created=self.created,
             updated=self.updated,
         )

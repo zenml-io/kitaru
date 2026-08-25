@@ -116,9 +116,15 @@ async def _agent_version(
     )
 
 
-async def _evaluator(services: ReplayServices, name: str = "accuracy") -> uuid.UUID:
+async def _evaluator(
+    services: ReplayServices, name: str = "accuracy", agent_id: uuid.UUID | None = None
+) -> uuid.UUID:
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, kind=PluginKind.EVALUATOR, name=name
+        services.plugins,
+        ACTOR.account.id,
+        kind=PluginKind.EVALUATOR,
+        name=name,
+        agent_id=agent_id,
     )
     blob = await create_blob(services.blobs, ACTOR.account.id, content=name.encode())
     version = await services.plugins.create_version(
@@ -270,6 +276,42 @@ async def test_create_replay_rejects_cohort_version_scoped_history(
             ),
             actor=ACTOR,
         )
+
+
+async def test_create_replay_evaluator_scoped_to_other_agent(
+    services: ReplayServices,
+) -> None:
+    """Reject an evaluator scoped to an agent other than the baseline's."""
+    agent_version = await _agent_version(services)
+    await _evaluator(services, agent_id=uuid.uuid4())
+    baseline = await _session(services, agent_version)
+    with pytest.raises(ValidationError, match="scoped to a different agent"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                agent_version_id=agent_version.id,
+                evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_replay_evaluator_scoped_to_baseline_agent(
+    services: ReplayServices,
+) -> None:
+    """Resolve an evaluator scoped to the baseline session's own agent."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    await _evaluator(services, agent_id=baseline.agent_id)
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            agent_version_id=agent_version.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+        ),
+        actor=ACTOR,
+    )
+    assert bundle.replay.baseline_session_id == baseline.id
 
 
 def _cache_node(

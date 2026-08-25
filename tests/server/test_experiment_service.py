@@ -121,10 +121,16 @@ async def agent_id(services: ReplayServices) -> uuid.UUID:
 
 
 async def _register_evaluator(
-    plugin_repository: FakePluginRepository, name: str = "accuracy"
+    plugin_repository: FakePluginRepository,
+    name: str = "accuracy",
+    agent_id: uuid.UUID | None = None,
 ) -> uuid.UUID:
     plugin = await create_plugin(
-        plugin_repository, ACTOR.account.id, kind=PluginKind.EVALUATOR, name=name
+        plugin_repository,
+        ACTOR.account.id,
+        kind=PluginKind.EVALUATOR,
+        name=name,
+        agent_id=agent_id,
     )
     version = await plugin_repository.create_version(
         plugin.id, SOURCE, display_version="v1"
@@ -239,6 +245,38 @@ async def test_create_experiment_duplicate_evaluator_version(
     )
     with pytest.raises(ValidationError, match="appears more than once"):
         await service.create_experiment(command, actor=ACTOR)
+
+
+async def test_create_experiment_evaluator_scoped_to_other_agent(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Reject an evaluator scoped to an agent other than the experiment's."""
+    await _register_evaluator(plugin_repository, agent_id=uuid.uuid4())
+    command = ExperimentCreate(
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+    )
+    with pytest.raises(ValidationError, match="scoped to a different agent"):
+        await service.create_experiment(command, actor=ACTOR)
+
+
+async def test_create_experiment_evaluator_scoped_to_same_agent(
+    service: ExperimentService,
+    plugin_repository: FakePluginRepository,
+    agent_id: uuid.UUID,
+) -> None:
+    """Resolve an evaluator scoped to the experiment's own agent."""
+    await _register_evaluator(plugin_repository, agent_id=agent_id)
+    command = ExperimentCreate(
+        name="exp1",
+        agent_id=agent_id,
+        evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+    )
+    experiment, _ = await service.create_experiment(command, actor=ACTOR)
+    assert experiment.name == "exp1"
 
 
 async def test_get_experiment(

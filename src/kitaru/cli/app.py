@@ -2871,6 +2871,10 @@ def _plugin_register_parameters(kind: str) -> tuple[ParameterSpec, ...]:
         parent.append(
             ParameterSpec("--provider", "string", "option", False, "Source provider.")
         )
+    if kind == "evaluator":
+        parent.append(
+            ParameterSpec("--agent-id", "UUID", "option", False, "Scoping agent.")
+        )
     return (*parent, *_PLUGIN_SOURCE_PARAMETERS)
 
 
@@ -2884,6 +2888,7 @@ async def _register_plugin_command(
     description: str | None,
     provider: str | None,
     metadata: str | None,
+    agent_id: uuid.UUID | None,
     display_version: str | None,
 ) -> CommandResult:
     """Run one kind-specific parent-plus-version registration."""
@@ -2896,6 +2901,7 @@ async def _register_plugin_command(
         description=description,
         provider=provider,
         metadata=metadata,
+        agent_id=agent_id,
     )
     async with _open_asset_client() as client:
         return await registration.register_plugin(
@@ -3087,6 +3093,7 @@ async def importer_register(
         description=description,
         provider=provider,
         metadata=metadata,
+        agent_id=None,
         display_version=display_version,
     )
 
@@ -3294,6 +3301,7 @@ async def evaluator_register(
     entrypoint: str | None = None,
     description: str | None = None,
     metadata: str | None = None,
+    agent_id: uuid.UUID | None = None,
     display_version: str | None = None,
 ) -> CommandResult:
     """Create an evaluator parent, source, and initial version."""
@@ -3306,6 +3314,7 @@ async def evaluator_register(
         description=description,
         provider=None,
         metadata=metadata,
+        agent_id=agent_id,
         display_version=display_version,
     )
 
