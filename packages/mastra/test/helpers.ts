@@ -91,9 +91,7 @@ export function installTestApi(options: TestApiOptions = {}): TestApi {
       });
     }
     if (method === "POST" && url.pathname.endsWith("/tool-lookup")) {
-      return jsonResponse(
-        options.lookup?.(body ?? {}) ?? { found: false, result: null },
-      );
+      return jsonResponse(options.lookup?.(body ?? {}) ?? { match: null });
     }
     throw new Error(`Unexpected request: ${method} ${url.pathname}`);
   });

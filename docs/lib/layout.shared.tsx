@@ -1,9 +1,9 @@
-import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 
 export const gitConfig = {
-  user: 'zenml-io',
-  repo: 'kitaru',
-  branch: 'develop',
+  user: "zenml-io",
+  repo: "kitaru",
+  branch: "develop",
 };
 
 export function baseOptions(): BaseLayoutProps {
@@ -29,7 +29,7 @@ export function baseOptions(): BaseLayoutProps {
           <span style={{ fontWeight: 600 }}>Kitaru</span>
         </span>
       ),
-      url: '/',
+      url: "/",
     },
     githubUrl: `https://github.com/${gitConfig.user}/${gitConfig.repo}`,
   };

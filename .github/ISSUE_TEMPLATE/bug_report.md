@@ -17,3 +17,7 @@ labels: bug
 - Kitaru version:
 - Python version:
 - OS:
+
+**Would you like to fix this yourself?**
+<!-- Tell us here. Only collaborators can open PRs directly, so once we've agreed on the approach a maintainer will add you. See CONTRIBUTING.md. -->
+

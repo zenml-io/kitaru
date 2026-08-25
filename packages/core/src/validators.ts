@@ -234,10 +234,31 @@ export function validateToolLookup(
   path: string,
   status: number,
 ): asserts value is ToolLookupResponse {
-  if (!isRecord(value) || typeof value.found !== "boolean") {
-    invalidResponse(method, path, status, "missing found discriminator");
+  if (!isRecord(value) || !Object.hasOwn(value, "match")) {
+    invalidResponse(method, path, status, "missing match");
   }
-  if (!Object.hasOwn(value, "result")) {
+  if (value.match === null) {
+    return;
+  }
+  if (!isRecord(value.match)) {
+    invalidResponse(method, path, status, "invalid match");
+  }
+  if (!Object.hasOwn(value.match, "result")) {
     invalidResponse(method, path, status, "missing result");
+  }
+  requireDiscriminator(
+    value.match,
+    "status",
+    NODE_STATUSES,
+    method,
+    path,
+    status,
+  );
+  if (
+    value.match.error !== undefined &&
+    value.match.error !== null &&
+    typeof value.match.error !== "string"
+  ) {
+    invalidResponse(method, path, status, "invalid error");
   }
 }

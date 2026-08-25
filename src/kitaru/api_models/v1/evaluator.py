@@ -35,6 +35,12 @@ class EvaluatorCreateRequest(RequestModel):
     metadata: dict[str, JsonValue] = Field(
         default_factory=dict, description="Arbitrary metadata."
     )
+    agent_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Id of the agent this evaluator is scoped to, null for a global evaluator."
+        ),
+    )
 
 
 class EvaluatorUpdateRequest(RequestModel):
@@ -66,6 +72,10 @@ class EvaluatorResponse(TimestampedResponseModel):
     metadata: dict[str, JsonValue] = Field(description="Arbitrary metadata.")
     latest_version: int = Field(
         description="Highest version number created for this evaluator."
+    )
+    agent_id: uuid.UUID | None = Field(
+        description="Id of the agent this evaluator is scoped to, null for a "
+        "global evaluator."
     )
 
 

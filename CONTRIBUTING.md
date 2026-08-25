@@ -2,6 +2,18 @@
 
 Thank you for your interest in contributing to Kitaru!
 
+## How contributions work
+
+We're happy to take pull requests from people outside the core team, but direct PRs are limited to collaborators. That's because small fixes are usually quicker for us to make than to review, and bigger changes need a design conversation anyway. So the flow is: talk to us first, then write the code.
+
+1. Find an issue that covers what you want to change and comment on it saying you'd like to take it. If there isn't one, open a new issue (the [bug report](https://github.com/zenml-io/kitaru/issues/new?template=bug_report.md) and [feature request](https://github.com/zenml-io/kitaru/issues/new?template=feature_request.md) templates both have a box for this) and describe the problem and what you'd change.
+2. A maintainer replies on the issue. Sometimes that's a quick "yes, go ahead", sometimes it's a longer back and forth about scope or design. Either way, wait for that before you start.
+3. Once we've agreed, a maintainer adds you as a collaborator and you open your PR against `develop`. If you already have a branch on a fork, link it in the issue and we'll look at it there.
+
+If a PR shows up without an issue behind it, we'll probably close it and ask you to open one, even if the change looks fine. That's not a judgment on the code. We just can't tell from a cold PR whether it fits where the project is going, and it's a waste of your evening if it doesn't.
+
+Typos and broken links: just open an issue and we'll fix them. No need to prepare a PR.
+
 ## Development Setup
 
 ### Python SDK
@@ -70,17 +82,6 @@ just fix    # Auto-fix formatting and lint issues
 - Bug fixes should include a regression test
 - Write clear PR titles (no `feat:`/`fix:` prefixes) and describe what the
   changes do and why
-
-## Outside Contributor Flow
-
-If you are not able to open a pull request directly, please open an issue first
-and include the change you want to make. If you already have a branch ready,
-link to it in the issue so maintainers can review it.
-
-Maintainers may invite issue authors as repository collaborators when the change
-looks appropriate for the project and direct PR access would make review easier.
-Opening an issue or branch does not guarantee collaborator access; it gives the
-team the context needed to decide.
 
 ## Reporting Issues
 

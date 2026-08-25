@@ -136,7 +136,8 @@ class ReplayService:
             SessionNotFound: No session has the baseline session id.
             ValidationError: The baseline session carries no agent version
                 and none was given, the resolved agent version has no run
-                spec, or the config uses cohort-version-scoped history.
+                spec, the config uses cohort-version-scoped history, or an
+                evaluator config is scoped to another agent.
             AgentVersionNotFound: No agent version has the resolved id.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
@@ -157,7 +158,9 @@ class ReplayService:
         agent_version = await resolve_runnable_agent_version(
             agent_version_id, self._agent_versions
         )
-        evaluators = await validate_evaluators(command.evaluators, self._plugins, actor)
+        evaluators = await validate_evaluators(
+            command.evaluators, self._plugins, baseline.agent_id, actor
+        )
         config = ReplayConfig(
             owner_id=actor.account.id,
             override=command.override,
@@ -230,7 +233,7 @@ class ReplayService:
         cache_key: str,
         occurrence: int | None,
         actor: AuthContext,
-    ) -> ToolLookupResult:
+    ) -> ToolLookupResult | None:
         """Search recorded tool-call history for a cached result.
 
         The tool's config and history scope come from the replay's config,
@@ -252,7 +255,7 @@ class ReplayService:
                 an occurrence was given for a non-baseline history scope.
 
         Returns:
-            Whether a cached result was found, and the result if so.
+            Matching tool call result, or ``None`` on a miss.
         """
         replay = await self._repository.get(replay_id)
         await self._check_task_access(replay, actor)
@@ -271,8 +274,10 @@ class ReplayService:
             replay, tool_config.scope, cache_key, occurrence
         )
         if node is None:
-            return ToolLookupResult(found=False, result=None)
-        return ToolLookupResult(found=True, result=node.outputs)
+            return None
+        return ToolLookupResult(
+            result=node.outputs, status=node.status, error=node.error
+        )
 
     async def _check_task_access(self, replay: Replay, actor: AuthContext) -> None:
         """Require a task principal's task to belong to the replay's job.

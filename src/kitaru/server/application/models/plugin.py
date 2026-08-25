@@ -42,6 +42,7 @@ class EvaluatorFilter(PluginFilter):
     filterable_fields: ClassVar[Mapping[str, FilterField]] = {
         "id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS),
         "name": FilterField(value_type=str, ops=STRING_OPS),
+        "agent_id": FilterField(value_type=uuid.UUID, ops=EQUALITY_OPS | NULLABLE_OPS),
     }
 
 
@@ -69,6 +70,7 @@ class PluginCreate(FrozenModel):
     provider: str | None = None
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
+    agent_id: uuid.UUID | None = None
 
 
 class PluginUpdate(FrozenModel):

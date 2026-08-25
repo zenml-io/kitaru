@@ -199,7 +199,7 @@ describe("execution lifecycle resources", () => {
       .mockResolvedValueOnce(
         jsonResponse({ items: [replay], next_cursor: null }),
       )
-      .mockResolvedValueOnce(jsonResponse({ found: false, result: null }))
+      .mockResolvedValueOnce(jsonResponse({ match: null }))
       .mockResolvedValueOnce(new Response(null, { status: 204 }));
     const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
 

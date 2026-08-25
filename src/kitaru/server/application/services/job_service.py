@@ -352,8 +352,9 @@ class JobService:
             actor: Caller context.
 
         Raises:
-            ValidationError: The pair count exceeds the cap, or an input
-                session does not exist.
+            ValidationError: The pair count exceeds the cap, an input
+                session does not exist, the input sessions do not all belong
+                to one agent, or a config is scoped to another agent.
             PluginNotFound: A config names an unknown evaluator.
             PluginVersionNotFound: A config names an unknown version.
 
@@ -366,11 +367,16 @@ class JobService:
                 f"Evaluation request holds {pairs} pairs, the cap is "
                 f"{self._policy.evaluation_pair_limit}"
             )
-        evaluators = await validate_evaluators(command.evaluators, self._plugins, actor)
         stored = await self._sessions.get_many(command.input_session_ids)
         for session_id in command.input_session_ids:
             if session_id not in stored:
                 raise ValidationError(f"Session {session_id} was not found")
+        agent_ids = {session.agent_id for session in stored.values()}
+        if len(agent_ids) > 1:
+            raise ValidationError("Input sessions must belong to a single agent")
+        evaluators = await validate_evaluators(
+            command.evaluators, self._plugins, next(iter(agent_ids)), actor
+        )
         job = await self.create_job(JobKind.EVALUATION, actor)
         # The job was just created in this call and cannot have settled yet, so
         # each pair skips add_task's redundant per-iteration settled check.

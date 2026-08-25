@@ -37,6 +37,9 @@ LOGIN_PATH = "/auth/login"
 API_KEY_GRANT_TYPE = "zenml_api_key"
 DEVICE_CODE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
 
+# Product the verification page is told to render for.
+PRODUCT = "kitaru"
+
 
 class ControlPlaneLoginError(Exception):
     """Raised when a control plane login cannot be started."""
@@ -166,13 +169,12 @@ class ControlPlaneSession:
         authorization = ControlPlaneDeviceAuthorization.model_validate(response.json())
         uri = authorization.verification_uri_complete or authorization.verification_uri
         verification_uri = self._url + uri if uri.startswith("/") else uri
+        parsed = urlparse(verification_uri)
+        query_params = dict(parse_qsl(parsed.query))
+        query_params["product"] = PRODUCT
         if workspace_id is not None:
-            parsed = urlparse(verification_uri)
-            query_params = dict(parse_qsl(parsed.query))
             query_params["workspace"] = workspace_id
-            verification_uri = urlunparse(
-                parsed._replace(query=urlencode(query_params))
-            )
+        verification_uri = urlunparse(parsed._replace(query=urlencode(query_params)))
         # Written back so the prompt shows the same URL the browser opens.
         authorization.verification_uri_complete = verification_uri
         if prompt is not None:

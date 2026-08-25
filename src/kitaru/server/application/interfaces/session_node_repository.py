@@ -102,7 +102,7 @@ class SessionNodeRepository(Protocol):
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
-        """Find the newest node with a cache key within one session.
+        """Find the newest completed node with a cache key within one session.
 
         Args:
             session_id: Id of the session to search.
@@ -116,7 +116,10 @@ class SessionNodeRepository(Protocol):
     async def find_nth_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str, occurrence: int
     ) -> SessionNode | None:
-        """Find the nth node with a cache key within one session, in index order.
+        """Find the nth finished node with a cache key in one session, in index order.
+
+        Only completed and failed tool calls are candidates, so the
+        occurrence offset counts finished calls only.
 
         Args:
             session_id: Id of the session to search.
@@ -131,7 +134,7 @@ class SessionNodeRepository(Protocol):
     async def find_latest_by_cache_key_in_agent(
         self, agent_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
-        """Find the newest node with a cache key across an agent's recorded history.
+        """Find the newest completed node with a cache key in an agent's history.
 
         Only sessions with a recorded or imported origin are searched, so a
         replay's own result session is never a match.
@@ -148,7 +151,7 @@ class SessionNodeRepository(Protocol):
     async def find_latest_by_cache_key_in_cohort_version(
         self, cohort_version_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
-        """Find the newest node with a cache key across a cohort version's sessions.
+        """Find the newest completed node with a cache key in a cohort version.
 
         Args:
             cohort_version_id: Id of the cohort version to search.

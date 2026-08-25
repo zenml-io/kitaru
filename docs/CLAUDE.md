@@ -103,15 +103,18 @@ These are registered globally in `mdx-components.tsx`:
 # From repo root:
 just docs           # Start dev server at localhost:3000
 just docs-build     # Full static build
+just docs-lint      # Biome lint + format check
 just docs-validate  # Validate the static export as served under /docs
 
 # Or from docs/:
 pnpm run dev        # Dev server
 pnpm run build      # Static build
 pnpm run types:check # TypeScript type checking
-pnpm run lint       # Biome lint
+pnpm run lint       # Biome lint + format check
 pnpm run format     # Biome format
 ```
+
+The `SDK Reference Docs` workflow runs `pnpm run lint` on every PR that touches `docs/`, and root `just check` does not cover it, so run `just docs-lint` before pushing. `pnpm exec biome check --write` applies the safe fixes (formatting, import order). Rule exceptions live in `biome.jsonc` with a comment explaining each one.
 
 **Important:** Generated content (the local/reference changelog page and SDK reference) is gitignored. On a fresh clone, run `uv sync --extra cli` (the CLI generator runs `kitaru schema` in-process), `pnpm install` in `docs/`, then `uv pip install ./docs/node_modules/fumadocs-python`, then `just generate-docs` to materialize the reference before `just docs` shows the full sidebar. The deployed public changelog still lives at `docs.zenml.io/changelog`; the generated `changelog.mdx` here is not the public changelog source.
 

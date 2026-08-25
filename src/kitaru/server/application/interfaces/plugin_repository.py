@@ -30,6 +30,7 @@ class PluginRepository(Protocol):
             plugin: Plugin to store.
 
         Raises:
+            AgentNotFound: The plugin names an agent id and no agent has it.
             DuplicatePluginName: The (kind, name) pair is already registered.
 
         Returns:

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- History replay now distinguishes a genuine miss from a matched tool call, replays completed results including `None`, and raises a matched failure with its stored error without executing the live tool.
+
 ## 0.1.0
 
 - First stable release of the Pydantic AI recording and replay adapter.

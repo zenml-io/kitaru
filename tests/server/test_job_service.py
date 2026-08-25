@@ -85,9 +85,15 @@ async def _runnable_agent_version(services: JobAndTaskServices) -> uuid.UUID:
     return version.id
 
 
-async def _evaluator_version(services: JobAndTaskServices, name: str) -> uuid.UUID:
+async def _evaluator_version(
+    services: JobAndTaskServices, name: str, agent_id: uuid.UUID | None = None
+) -> uuid.UUID:
     plugin = await create_plugin(
-        services.plugins, ACTOR.account.id, PluginKind.EVALUATOR, name=name
+        services.plugins,
+        ACTOR.account.id,
+        PluginKind.EVALUATOR,
+        name=name,
+        agent_id=agent_id,
     )
     version = await services.plugins.create_version(
         plugin.id,
@@ -319,18 +325,72 @@ async def test_create_evaluations_rejects_an_unknown_session(
         )
 
 
-async def test_create_evaluations_makes_one_continue_task_per_pair(
+async def test_create_evaluations_scoped_evaluator_all_sessions_match(
     services: JobAndTaskServices,
 ) -> None:
-    """One continue evaluator task is created per (session, evaluator) pair."""
-    await _evaluator_version(services, "accuracy")
-    await _evaluator_version(services, "tone")
+    """Accept a scoped evaluator when every input session belongs to its agent."""
+    agent_id = uuid.uuid4()
+    await _evaluator_version(services, "scorer", agent_id=agent_id)
+    session_a = await create_session(services.sessions, ACTOR.account.id, agent_id)
+    session_b = await create_session(services.sessions, ACTOR.account.id, agent_id)
+    job = await services.job_service.create_evaluations(
+        EvaluationBatchCreate(
+            input_session_ids=[session_a.id, session_b.id],
+            evaluators=[EvaluatorConfigInput(evaluator="scorer")],
+        ),
+        actor=ACTOR,
+    )
+    assert job.kind is JobKind.EVALUATION
+
+
+async def test_create_evaluations_scoped_evaluator_session_from_other_agent(
+    services: JobAndTaskServices,
+) -> None:
+    """Reject a scoped evaluator whose only session belongs to another agent."""
+    await _evaluator_version(services, "scorer", agent_id=uuid.uuid4())
+    session = await create_session(
+        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+    )
+    with pytest.raises(ValidationError, match="scoped to a different agent"):
+        await services.job_service.create_evaluations(
+            EvaluationBatchCreate(
+                input_session_ids=[session.id],
+                evaluators=[EvaluatorConfigInput(evaluator="scorer")],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_evaluations_rejects_sessions_spanning_agents(
+    services: JobAndTaskServices,
+) -> None:
+    """Reject input sessions that do not all belong to one agent."""
+    await _evaluator_version(services, "scorer")
     session_a = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
     )
     session_b = await create_session(
         services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
     )
+    with pytest.raises(ValidationError, match="single agent"):
+        await services.job_service.create_evaluations(
+            EvaluationBatchCreate(
+                input_session_ids=[session_a.id, session_b.id],
+                evaluators=[EvaluatorConfigInput(evaluator="scorer")],
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_evaluations_makes_one_continue_task_per_pair(
+    services: JobAndTaskServices,
+) -> None:
+    """One continue evaluator task is created per (session, evaluator) pair."""
+    await _evaluator_version(services, "accuracy")
+    await _evaluator_version(services, "tone")
+    agent_id = uuid.uuid4()
+    session_a = await create_session(services.sessions, ACTOR.account.id, agent_id)
+    session_b = await create_session(services.sessions, ACTOR.account.id, agent_id)
 
     job = await services.job_service.create_evaluations(
         EvaluationBatchCreate(

@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """End-to-end evaluator tests against PostgreSQL."""
 
+import uuid
 from collections.abc import AsyncGenerator
 
 import httpx
@@ -91,3 +92,31 @@ async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
     )
     response = await client.delete(f"/api/v1/evaluators/{created['id']}")
     assert response.status_code == 204
+
+
+async def test_agent_deletion_nulls_scoped_evaluator_agent_id(
+    client: httpx.AsyncClient,
+) -> None:
+    """Clear a scoped evaluator's agent id when its agent is deleted."""
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    created = (
+        await client.post(
+            "/api/v1/evaluators", json={"name": "accuracy", "agent_id": agent["id"]}
+        )
+    ).json()
+
+    response = await client.delete(f"/api/v1/agents/{agent['id']}")
+    assert response.status_code == 204
+
+    response = await client.get(f"/api/v1/evaluators/{created['id']}")
+    assert response.status_code == 200
+    assert response.json()["agent_id"] is None
+
+
+async def test_create_unknown_agent_not_found(client: httpx.AsyncClient) -> None:
+    """Translate the database constraint into HTTP 404."""
+    response = await client.post(
+        "/api/v1/evaluators",
+        json={"name": "accuracy", "agent_id": str(uuid.uuid4())},
+    )
+    assert response.status_code == 404

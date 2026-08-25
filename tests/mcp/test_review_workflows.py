@@ -1028,6 +1028,7 @@ async def test_evaluation_start_protocol_returns_typed_receipt() -> None:
             logo_url=None,
             metadata={},
             latest_version=1,
+            agent_id=None,
             created=now,
             updated=now,
         )

@@ -21,8 +21,10 @@ import httpx
 import pytest
 
 from conftest import (
+    FakeAgentRepository,
     FakeBlobRepository,
     FakePluginRepository,
+    create_agent,
     create_blob,
     override_idempotency,
 )
@@ -47,14 +49,25 @@ def blob_repository() -> FakeBlobRepository:
 
 
 @pytest.fixture
-def repository(blob_repository: FakeBlobRepository) -> FakePluginRepository:
+def agent_repository() -> FakeAgentRepository:
+    """Provide the fake agent repository backing the app."""
+    return FakeAgentRepository()
+
+
+@pytest.fixture
+def repository(
+    blob_repository: FakeBlobRepository, agent_repository: FakeAgentRepository
+) -> FakePluginRepository:
     """Provide the fake plugin repository backing the app."""
-    return FakePluginRepository(blob_repository=blob_repository)
+    return FakePluginRepository(
+        blob_repository=blob_repository, agent_repository=agent_repository
+    )
 
 
 @pytest.fixture
 async def client(
-    repository: FakePluginRepository, blob_repository: FakeBlobRepository
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with a fake-backed evaluator service."""
     app = create_app(
@@ -501,3 +514,62 @@ async def test_update_evaluator_logo_url(client: httpx.AsyncClient) -> None:
     )
     assert updated.status_code == 200
     assert updated.json()["logo_url"] == "https://example.com/new.svg"
+
+
+async def test_create_evaluator_scoped_to_agent(
+    client: httpx.AsyncClient, agent_repository: FakeAgentRepository
+) -> None:
+    """Create an evaluator scoped to an agent and observe agent_id in the response."""
+    agent = await create_agent(agent_repository, ACCOUNT.id)
+    response = await client.post(
+        "/api/v1/evaluators", json={"name": "accuracy", "agent_id": str(agent.id)}
+    )
+    assert response.status_code == 201
+    assert response.json()["agent_id"] == str(agent.id)
+
+
+async def test_create_evaluator_without_agent_id(client: httpx.AsyncClient) -> None:
+    """Return a null agent id for a global evaluator."""
+    response = await client.post("/api/v1/evaluators", json={"name": "accuracy"})
+    assert response.status_code == 201
+    assert response.json()["agent_id"] is None
+
+
+async def test_create_evaluator_unknown_agent_id(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for an evaluator scoped to an unknown agent."""
+    missing_agent_id = uuid.uuid4()
+    response = await client.post(
+        "/api/v1/evaluators",
+        json={"name": "accuracy", "agent_id": str(missing_agent_id)},
+    )
+    assert response.status_code == 404
+    assert response.json() == {"detail": f"Agent {missing_agent_id} was not found"}
+
+
+async def test_list_evaluators_filtered_by_agent(
+    client: httpx.AsyncClient, agent_repository: FakeAgentRepository
+) -> None:
+    """List global evaluators together with one agent's scoped evaluators."""
+    agent = await create_agent(agent_repository, ACCOUNT.id)
+    other_agent = await create_agent(agent_repository, ACCOUNT.id, name="other")
+    await client.post("/api/v1/evaluators", json={"name": "global"})
+    await client.post(
+        "/api/v1/evaluators", json={"name": "scoped", "agent_id": str(agent.id)}
+    )
+    await client.post(
+        "/api/v1/evaluators",
+        json={"name": "other-scoped", "agent_id": str(other_agent.id)},
+    )
+
+    filter_expression = {
+        "or": [
+            {"field": "agent_id", "op": "is_null"},
+            {"field": "agent_id", "op": "eq", "value": str(agent.id)},
+        ]
+    }
+    response = await client.get(
+        "/api/v1/evaluators", params={"filter": json.dumps(filter_expression)}
+    )
+    assert response.status_code == 200
+    names = {item["name"] for item in response.json()["items"]}
+    assert names == {"global", "scoped"}

@@ -63,7 +63,7 @@ You never instantiate anything special for replay. When a worker runs your scrip
 - `KITARU_TASK_INPUTS` (or the task spec) carries the baseline's recorded inputs, and the adapter **substitutes them for your script's own prompt**, which is why a hardcoded prompt in `__main__` is fine.
 - `KITARU_REPLAY_ID` makes the adapter fetch the replay's override and tool policy: model swaps and `model_params` apply at the model-request boundary, and tool calls are answered per policy: `history` lookups against the recording, `static` cases, or live `passthrough`.
 
-A `history` miss with `on_miss="fail"` raises `ToolPolicyMissError` inside the run, failing the task, which is the guarantee that nothing unrecorded slips through to a live system. Both error types are importable from the adapter package:
+A `history` miss with `on_miss="fail"` raises `ToolPolicyMissError` inside the run, failing the task, which is the guarantee that nothing unrecorded slips through to a live system. A matched recorded failure raises `ToolPolicyError` with the stored error text and aborts the run unless application code catches it. Kitaru does not recreate the original exception class or a PydanticAI retry signal such as `ModelRetry`. Both error types are importable from the adapter package:
 
 ```python
 from kitaru_pydantic_ai import ToolPolicyError, ToolPolicyMissError

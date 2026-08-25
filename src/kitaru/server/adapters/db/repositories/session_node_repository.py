@@ -20,6 +20,7 @@ from sqlalchemy import Select, select
 from sqlalchemy.orm import defer
 
 from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
@@ -31,6 +32,7 @@ from kitaru.server.application.models.session_node import SessionNodeFilter
 from kitaru.server.domain.session_node import SessionNode
 
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
+FINISHED_NODE_STATUSES = [NodeStatus.COMPLETED.value, NodeStatus.FAILED.value]
 
 PAYLOAD_COLUMNS = (
     SessionNodeORM.reasoning,
@@ -203,7 +205,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
-        """Find the newest node with a cache key within one session.
+        """Find the newest completed node with a cache key within one session.
 
         Args:
             session_id: Id of the session to search.
@@ -216,13 +218,17 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             select(SessionNodeORM).where(
                 SessionNodeORM.session_id == session_id,
                 SessionNodeORM.cache_key == cache_key,
+                SessionNodeORM.status == NodeStatus.COMPLETED.value,
             )
         )
 
     async def find_nth_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str, occurrence: int
     ) -> SessionNode | None:
-        """Find the nth node with a cache key within one session, in index order.
+        """Find the nth finished node with a cache key in one session, in index order.
+
+        Only completed and failed tool calls are candidates, so the
+        occurrence offset counts finished calls only.
 
         Args:
             session_id: Id of the session to search.
@@ -237,6 +243,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             .where(
                 SessionNodeORM.session_id == session_id,
                 SessionNodeORM.cache_key == cache_key,
+                SessionNodeORM.status.in_(FINISHED_NODE_STATUSES),
             )
             .order_by(SessionNodeORM.index)
             .offset(occurrence)
@@ -248,7 +255,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     async def find_latest_by_cache_key_in_agent(
         self, agent_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
-        """Find the newest node with a cache key across an agent's recorded history.
+        """Find the newest completed node with a cache key in an agent's history.
 
         Only sessions with a recorded or imported origin are searched, so a
         replay's own result session is never a match.
@@ -267,13 +274,14 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 SessionORM.agent_id == agent_id,
                 SessionORM.origin.in_(RECORDED_HISTORY_ORIGINS),
                 SessionNodeORM.cache_key == cache_key,
+                SessionNodeORM.status == NodeStatus.COMPLETED.value,
             )
         )
 
     async def find_latest_by_cache_key_in_cohort_version(
         self, cohort_version_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
-        """Find the newest node with a cache key across a cohort version's sessions.
+        """Find the newest completed node with a cache key in a cohort version.
 
         Args:
             cohort_version_id: Id of the cohort version to search.
@@ -291,5 +299,6 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             .where(
                 CohortVersionSessionORM.cohort_version_id == cohort_version_id,
                 SessionNodeORM.cache_key == cache_key,
+                SessionNodeORM.status == NodeStatus.COMPLETED.value,
             )
         )
