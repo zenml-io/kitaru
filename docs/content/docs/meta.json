@@ -1,8 +1,4 @@
 {
   "title": "Kitaru Reference",
-  "pages": [
-    "index",
-    "reference/python",
-    "cli"
-  ]
+  "pages": ["index", "reference/python", "cli"]
 }

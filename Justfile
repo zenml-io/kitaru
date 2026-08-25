@@ -210,6 +210,10 @@ docs:
 docs-build:
     cd docs && pnpm run build
 
+# Lint and format-check the docs app (Biome); CI runs this in docs.yml
+docs-lint:
+    cd docs && pnpm run lint
+
 # Validate the docs static export as it will be served under /docs
 docs-validate:
     cd docs && pnpm run validate:export

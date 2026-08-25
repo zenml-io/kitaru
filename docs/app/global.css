@@ -1,7 +1,7 @@
-@import 'tailwindcss';
-@import 'fumadocs-ui/css/neutral.css';
-@import 'fumadocs-ui/css/preset.css';
-@import 'fumadocs-python/preset.css';
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@import "fumadocs-python/preset.css";
 
 /* ═══════════════════════════════════════════════════
    Kitaru Brand Overrides
@@ -9,51 +9,51 @@
    ═══════════════════════════════════════════════════ */
 
 @theme {
-  --color-fd-background: #FAFAF8;
-  --color-fd-foreground: #1A1714;
-  --color-fd-muted: #F0EDE8;
-  --color-fd-muted-foreground: #6B6560;
-  --color-fd-popover: #FFFFFF;
-  --color-fd-popover-foreground: #1A1714;
-  --color-fd-card: #FCFCFA;
-  --color-fd-card-foreground: #1A1714;
-  --color-fd-border: #E5E2DC;
-  --color-fd-primary: #F17829;
-  --color-fd-primary-foreground: #FFFFFF;
-  --color-fd-secondary: #FCFCFA;
-  --color-fd-secondary-foreground: #6B6560;
-  --color-fd-accent: #F5EDE4;
-  --color-fd-accent-foreground: #1A1714;
-  --color-fd-ring: #F17829;
+  --color-fd-background: #fafaf8;
+  --color-fd-foreground: #1a1714;
+  --color-fd-muted: #f0ede8;
+  --color-fd-muted-foreground: #6b6560;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #1a1714;
+  --color-fd-card: #fcfcfa;
+  --color-fd-card-foreground: #1a1714;
+  --color-fd-border: #e5e2dc;
+  --color-fd-primary: #f17829;
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: #fcfcfa;
+  --color-fd-secondary-foreground: #6b6560;
+  --color-fd-accent: #f5ede4;
+  --color-fd-accent-foreground: #1a1714;
+  --color-fd-ring: #f17829;
   --color-fd-overlay: hsla(20, 10%, 10%, 0.2);
 }
 
 /* Safety net: force light palette even if .dark class is applied */
 .dark {
-  --color-fd-background: #FAFAF8;
-  --color-fd-foreground: #1A1714;
-  --color-fd-muted: #F0EDE8;
-  --color-fd-muted-foreground: #6B6560;
-  --color-fd-popover: #FFFFFF;
-  --color-fd-popover-foreground: #1A1714;
-  --color-fd-card: #FCFCFA;
-  --color-fd-card-foreground: #1A1714;
-  --color-fd-border: #E5E2DC;
-  --color-fd-primary: #F17829;
-  --color-fd-primary-foreground: #FFFFFF;
-  --color-fd-secondary: #FCFCFA;
-  --color-fd-secondary-foreground: #6B6560;
-  --color-fd-accent: #F5EDE4;
-  --color-fd-accent-foreground: #1A1714;
-  --color-fd-ring: #F17829;
+  --color-fd-background: #fafaf8;
+  --color-fd-foreground: #1a1714;
+  --color-fd-muted: #f0ede8;
+  --color-fd-muted-foreground: #6b6560;
+  --color-fd-popover: #ffffff;
+  --color-fd-popover-foreground: #1a1714;
+  --color-fd-card: #fcfcfa;
+  --color-fd-card-foreground: #1a1714;
+  --color-fd-border: #e5e2dc;
+  --color-fd-primary: #f17829;
+  --color-fd-primary-foreground: #ffffff;
+  --color-fd-secondary: #fcfcfa;
+  --color-fd-secondary-foreground: #6b6560;
+  --color-fd-accent: #f5ede4;
+  --color-fd-accent-foreground: #1a1714;
+  --color-fd-ring: #f17829;
   --color-fd-overlay: hsla(20, 10%, 10%, 0.2);
 }
 
 /* Neutralize sidebar dark overrides from neutral.css */
 .dark #nd-sidebar {
-  --color-fd-muted: #F0EDE8;
-  --color-fd-secondary: #FCFCFA;
-  --color-fd-muted-foreground: #6B6560;
+  --color-fd-muted: #f0ede8;
+  --color-fd-secondary: #fcfcfa;
+  --color-fd-muted-foreground: #6b6560;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -65,7 +65,7 @@ html {
 }
 
 body {
-  font-family: var(--font-dm-sans), 'DM Sans', -apple-system, sans-serif;
+  font-family: var(--font-dm-sans), "DM Sans", -apple-system, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -80,7 +80,7 @@ body {
    ═══════════════════════════════════════════════════ */
 
 body::before {
-  content: '';
+  content: "";
   position: fixed;
   inset: 0;
   z-index: 9999;
@@ -94,9 +94,13 @@ body::before {
    Typography
    ═══════════════════════════════════════════════════ */
 
-code, kbd, pre, .font-mono {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
-    'Liberation Mono', 'Courier New', monospace;
+code,
+kbd,
+pre,
+.font-mono {
+  font-family:
+    ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    "Courier New", monospace;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -115,7 +119,7 @@ figure:has(> pre) {
   --color-fd-muted-foreground: #8b949e;
   --color-fd-accent-foreground: #e1e4e8;
   --color-fd-border: #3a4149;
-  --color-fd-ring: #F17829;
+  --color-fd-ring: #f17829;
   border: none !important;
   border-radius: 11px !important;
   background: #24292e !important;
@@ -138,9 +142,9 @@ figure:has(> pre) code span {
   --color-fd-secondary: #2f363d;
   --color-fd-muted-foreground: #8b949e;
   --color-fd-accent-foreground: #e1e4e8;
-  --color-fd-primary: #F17829;
+  --color-fd-primary: #f17829;
   --color-fd-border: #3a4149;
-  --color-fd-ring: #F17829;
+  --color-fd-ring: #f17829;
   border: none !important;
   border-radius: 11px !important;
   background: #24292e !important;
@@ -152,18 +156,19 @@ figure:has(> pre) code span {
 }
 
 /* Tabbed code blocks: divider between tab bar and code */
-:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre) [role="tablist"] {
+:has(> [role="tablist"]):has(> [role="tabpanel"] > figure > pre)
+[role="tablist"] {
   border-bottom: 1px solid #3a4149;
 }
 
 /* Inline code: warm accent-light background with high-contrast text */
 :not(pre) > code {
-  background: #F5EDE4;
-  color: #1A1714;
+  background: #f5ede4;
+  color: #1a1714;
   padding: 0.15em 0.4em;
   border-radius: 4px;
   font-size: 0.85em;
-  border: 1px solid #E5E2DC;
+  border: 1px solid #e5e2dc;
 }
 
 /* ═══════════════════════════════════════════════════
@@ -171,8 +176,12 @@ figure:has(> pre) code span {
    ═══════════════════════════════════════════════════ */
 
 @keyframes ring-spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .logo-ring {
