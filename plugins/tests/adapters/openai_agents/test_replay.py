@@ -583,7 +583,9 @@ async def test_history_miss_behavior(
     assert len(calls) == (1 if on_miss is ToolPolicyOnMiss.PASSTHROUGH else 0)
 
 
-async def test_history_rejects_invalid_arguments_and_lossy_results() -> None:
+async def test_history_rejects_invalid_arguments_and_lossy_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     calls: list[str] = []
     client = _FakeClient(
         [_lookup_response({"_kitaru_truncated": {"reason": "max_depth"}})]
@@ -606,6 +608,17 @@ async def test_history_rejects_invalid_arguments_and_lossy_results() -> None:
 
     with pytest.raises(ToolPolicyError, match="Invalid JSON arguments"):
         await tool.on_invoke_tool(cast(Any, None), "{")
+
+    def raise_recursion(_: str) -> Any:
+        raise RecursionError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "kitaru_openai_agents.replay.parse_tool_arguments",
+            raise_recursion,
+        )
+        with pytest.raises(ToolPolicyError, match="Invalid JSON arguments"):
+            await tool.on_invoke_tool(cast(Any, None), "deep JSON")
     with pytest.raises(ToolPolicyError, match="cannot be replayed safely"):
         await _invoke(tool, {"city": "Paris"})
     assert len(client.replays.lookups) == 1

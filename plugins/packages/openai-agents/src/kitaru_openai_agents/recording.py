@@ -775,6 +775,8 @@ def _capture_tool_input(item: ToolCallItem) -> tuple[Any, dict[str, str]]:
     if isinstance(raw, ResponseFunctionToolCall):
         try:
             arguments = parse_tool_arguments(raw.arguments)
+        except RecursionError:
+            return None, {"kitaru.tool_arguments": "capture_loss"}
         except (ValueError, TypeError):
             return None, {"kitaru.tool_arguments": "invalid_json"}
         try:

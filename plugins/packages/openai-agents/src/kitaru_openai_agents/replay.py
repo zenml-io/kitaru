@@ -194,7 +194,7 @@ def _copy_static_tool(tool: FunctionTool, policy: StaticConfig) -> FunctionTool:
     async def invoke(context: Any, arguments_json: str) -> Any:
         try:
             arguments = parse_tool_arguments(arguments_json)
-        except (ValueError, TypeError) as error:
+        except (ValueError, TypeError, RecursionError) as error:
             raise ToolPolicyError(
                 f"Invalid JSON arguments for tool '{tool.name}'"
             ) from error
@@ -266,7 +266,7 @@ def _copy_history_tool(
     async def invoke(context: Any, arguments_json: str) -> Any:
         try:
             arguments = parse_tool_arguments(arguments_json)
-        except (ValueError, TypeError) as error:
+        except (ValueError, TypeError, RecursionError) as error:
             raise ToolPolicyError(
                 f"Invalid JSON arguments for tool '{tool.name}'"
             ) from error
