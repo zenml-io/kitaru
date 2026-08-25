@@ -477,32 +477,19 @@ async def test_local_logout_stops_runtime_and_clears_selection(
     assert get_server_url() is None
 
 
-async def test_volume_logout_cleans_orphans_without_runtime_state(
+async def test_volume_logout_rejects_unowned_localhost_target(
     tmp_path, monkeypatch
 ) -> None:
-    """Explicit local volume cleanup reaches orphan removal without state."""
-    credential_store = CredentialStore(tmp_path / "credentials.json")
-    captured: dict[str, object] = {}
+    """Volume deletion cannot target an unrelated localhost server."""
+    monkeypatch.setattr(auth.local_runtime, "is_local_runtime_url", lambda _: False)
 
-    async def fake_stop(*, delete_volumes: bool):
-        captured["delete_volumes"] = delete_volumes
-        return {
-            "server_url": "http://localhost:8000",
-            "deployment": "deleted",
-            "data_deleted": True,
-        }
-
-    monkeypatch.setattr(auth.local_runtime, "stop_local_runtime", fake_stop)
-
-    result = await auth.logout(
-        server_url="http://localhost:9010/",
-        all_servers=False,
-        delete_volumes=True,
-        credential_store=credential_store,
-    )
-
-    assert captured["delete_volumes"] is True
-    assert result.item["deployment"] == "deleted"
+    with pytest.raises(CLIError, match="CLI-owned local deployment"):
+        await auth.logout(
+            server_url="http://localhost:9010",
+            all_servers=False,
+            delete_volumes=True,
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+        )
 
 
 async def test_logout_all_rejects_volume_deletion(tmp_path) -> None:

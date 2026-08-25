@@ -16,7 +16,6 @@
 import getpass
 from collections.abc import Callable
 from typing import TextIO, cast
-from urllib.parse import urlsplit
 
 from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
@@ -255,15 +254,7 @@ async def logout(
             raise CLIError(
                 "invalid_configuration", "No server was resolved for logout."
             )
-        normalized_server_url = validate_server_url(server_url)
-        parsed_server_url = urlsplit(normalized_server_url)
-        orphan_cleanup = (
-            delete_volumes
-            and parsed_server_url.scheme == "http"
-            and parsed_server_url.hostname == "localhost"
-            and not parsed_server_url.path
-        )
-        if local_runtime.is_local_runtime_url(server_url) or orphan_cleanup:
+        if local_runtime.is_local_runtime_url(server_url):
             item = await local_runtime.stop_local_runtime(delete_volumes=delete_volumes)
             credential_store.clear(server_url)
             set_server_url(None)
