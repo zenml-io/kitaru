@@ -617,6 +617,7 @@ async def test_history_rejects_invalid_arguments_and_lossy_results() -> None:
     [
         {"_kitaru_truncated": False, "value": 1},
         {"_kitaru_truncated": {"reason": "application_value"}},
+        {"_kitaru_truncated": {"reason": "max_depth", "source": "user"}},
         {"_kitaru_unsupported_type": False},
         {"_kitaru_unsupported_type": "application_value", "value": 1},
     ],

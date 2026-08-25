@@ -20,12 +20,12 @@ from agents import TResponseInputItem
 from pydantic import TypeAdapter, ValidationError
 
 _INPUT_ITEMS_ADAPTER = TypeAdapter(list[TResponseInputItem])
-_TRUNCATION_REASONS = {
-    "max_bytes",
-    "max_characters",
-    "max_depth",
-    "max_items",
-    "max_items_or_non_string_keys",
+_TRUNCATION_MARKER_KEYS = {
+    "max_bytes": {"reason", "original_characters"},
+    "max_characters": {"reason", "original_characters"},
+    "max_depth": {"reason"},
+    "max_items": {"reason", "omitted"},
+    "max_items_or_non_string_keys": {"reason", "omitted"},
 }
 
 
@@ -42,11 +42,12 @@ def contains_capture_marker(value: Any) -> bool:
     """Check whether captured data contains a lossy serialization marker."""
     if isinstance(value, dict):
         truncation = value.get("_kitaru_truncated")
-        if (
-            isinstance(truncation, dict)
-            and truncation.get("reason") in _TRUNCATION_REASONS
-        ):
-            return True
+        if isinstance(truncation, dict):
+            reason = truncation.get("reason")
+            if isinstance(reason, str) and set(truncation) == (
+                _TRUNCATION_MARKER_KEYS.get(reason)
+            ):
+                return True
         if set(value) == {"_kitaru_unsupported_type"} and isinstance(
             value["_kitaru_unsupported_type"], str
         ):
