@@ -116,7 +116,7 @@ One server runs on your infrastructure, with Docker image and Helm chart include
 | [Documentation](https://docs.zenml.io/kitaru) | Concepts, guides, and the quickstart |
 | [Quickstart](https://docs.zenml.io/kitaru/getting-started/quickstart) | From an agent in production to your first replay-backed decision |
 | [Set up your coding agent](https://docs.zenml.io/kitaru/getting-started/setup) | Install the MCP server and the agent skills |
-| [PydanticAI returns agent](https://github.com/zenml-io/kitaru/tree/develop/examples/python/pydantic_ai_ticket_resolver) | A ready agent and checked-in traces to try the method on |
+| [PydanticAI returns agent](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver) | A ready agent and checked-in traces to try the method on |
 | [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) | Langfuse, LangSmith, Braintrust, Logfire, Arize Phoenix, or any format |
 | [Build a regression suite](https://docs.zenml.io/kitaru/guides/regression-suite) | Replay production traffic against a change and gate it in CI |
 | [Deploy Kitaru](https://docs.zenml.io/kitaru/getting-started/deploy) | Self-host for your team |

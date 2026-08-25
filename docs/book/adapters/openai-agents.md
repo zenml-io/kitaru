@@ -145,4 +145,4 @@ uv run --project plugins python -m examples.python.openai_agents_v2.agent \
   "Use the tool to check order ORD-1007"
 ```
 
-See [`examples/python/openai_agents_v2/README.md`](https://github.com/zenml-io/kitaru/tree/develop/examples/python/openai_agents_v2) for setup details.
+See [`examples/python/openai_agents_v2/README.md`](https://github.com/zenml-io/kitaru/tree/main/examples/python/openai_agents_v2) for setup details.
