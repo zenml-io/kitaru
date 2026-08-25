@@ -15,7 +15,7 @@ For one local deployment per user, let the CLI own the lifecycle:
 kitaru login --local
 ```
 
-Requires [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/). The CLI runs the version-matched `zenmldocker/kitaru-server` image with PostgreSQL kept private to the Compose network, stores generated runtime secrets in the Kitaru configuration directory, and opens `http://localhost:8000` once healthy. Existing images are reused without an automatic pull; `kitaru login --local --upgrade` is the explicit upgrade path, and `KITARU_LOCAL_IMAGE` points source builds at a locally built image. `kitaru local logs` inspects it; `kitaru logout` stops it (add `--volumes` to delete the database).
+Requires [Docker](https://docs.docker.com/get-started/get-docker/) with the [Compose v2 plugin](https://docs.docker.com/compose/install/). The CLI runs the version-matched `zenmldocker/kitaru-server` image with PostgreSQL kept private to the Compose network, stores generated runtime secrets in the Kitaru configuration directory, and opens the selected local URL once healthy (`http://localhost:8000` by default). Use `kitaru login --local --port 9000` or set `KITARU_LOCAL_PORT=9000` to expose it on another loopback port; the flag takes precedence and the selected port is persisted with the deployment. Existing images are reused without an automatic pull; `kitaru login --local --upgrade` is the explicit upgrade path, and `KITARU_LOCAL_IMAGE` points source builds at a locally built image. `kitaru local logs` inspects it; `kitaru logout` stops it (add `--volumes` to delete the database).
 
 The rest of this page covers manually managed deployments, which are separate from the CLI-owned one.
 

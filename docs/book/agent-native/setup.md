@@ -38,7 +38,7 @@ Installing with uv puts the `kitaru-mcp` executable inside your project's virtua
 {% hint style="warning" %}
 Two settings trip people up:
 
-- The `--server` URL must match the server you are logged into. `http://localhost:8000` is only right after `kitaru login --local`; on a managed or self-hosted workspace, use your workspace URL. `kitaru status` shows the URL it resolved and whether your credential works there. The MCP server does not follow the CLI's current selection, and a mismatch usually looks like an empty workspace.
+- The `--server` URL must match the server you are logged into. `http://localhost:8000` is the default after `kitaru login --local`; if you selected a different local port, use the URL shown by `kitaru status`. On a managed or self-hosted workspace, use your workspace URL. The MCP server does not follow the CLI's current selection, and a mismatch usually looks like an empty workspace.
 - The default mode is `read-only`, which leaves an assistant mid-investigation with nothing it can write. `--mode standard` lets it build cohorts and start runs; read-only is still a sensible place to start, as long as you expect that.
 {% endhint %}
 

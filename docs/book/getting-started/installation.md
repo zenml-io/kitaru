@@ -124,7 +124,7 @@ The server is FastAPI + Postgres, and the CLI can run both for you. All it needs
 kitaru login --local
 ```
 
-This provisions a server and PostgreSQL pinned to your installed Kitaru version, waits for `http://localhost:8000` to become healthy, selects it as your active server, and opens it in your browser. The lifecycle is three commands:
+This provisions a server and PostgreSQL pinned to your installed Kitaru version, waits for `http://localhost:8000` to become healthy, selects it as your active server, and opens it in your browser. If port 8000 is unavailable, select another host port with either `kitaru login --local --port 9000` or `KITARU_LOCAL_PORT=9000 kitaru login --local`. The command-line flag takes precedence over the environment variable, and the CLI remembers the selected port for later logins and logout. The lifecycle is three commands:
 
 ```bash
 kitaru local logs            # inspect (add --service server --follow)

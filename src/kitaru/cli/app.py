@@ -631,7 +631,14 @@ def _add_parameter_help(function: F, spec: CommandSpec) -> None:
                 "boolean",
                 "option",
                 False,
-                "Provision and use http://localhost:8000.",
+                "Provision and use a local Docker deployment.",
+            ),
+            ParameterSpec(
+                "--port",
+                "integer",
+                "option",
+                False,
+                "Host port for --local; overrides KITARU_LOCAL_PORT.",
             ),
             ParameterSpec(
                 "--upgrade",
@@ -688,6 +695,7 @@ async def login(
     /,
     *,
     local: bool = False,
+    port: int | None = None,
     upgrade: bool = False,
     username: str | None = None,
     password_stdin: bool = False,
@@ -702,6 +710,7 @@ async def login(
     return await auth_commands.login(
         server=chosen_server,
         local=local,
+        port=port,
         upgrade=upgrade,
         refresh=refresh,
         username=username,

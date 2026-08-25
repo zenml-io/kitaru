@@ -74,6 +74,12 @@ def runtime_paths(tmp_path: Path) -> LocalRuntimePaths:
     )
 
 
+@pytest.fixture(autouse=True)
+def clear_local_port_environment(monkeypatch) -> None:
+    """Keep local-port tests independent of the developer environment."""
+    monkeypatch.delenv(local_runtime.LOCAL_PORT_ENV, raising=False)
+
+
 async def test_first_start_writes_private_state_and_starts_compose(
     runtime_paths, monkeypatch
 ) -> None:
@@ -81,9 +87,10 @@ async def test_first_start_writes_private_state_and_starts_compose(
     runner = FakeDockerRunner()
     server_image = "zenmldocker/kitaru-server:0.21.0"
     runner.results[("image", "inspect", server_image)] = ProcessResult(1, "", "")
-    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda: None)
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda _: None)
 
-    async def healthy(timeout: float) -> None:
+    async def healthy(server_url: str, timeout: float) -> None:
+        assert server_url == "http://localhost:8000"
         assert timeout == 120
 
     monkeypatch.setattr(local_runtime, "_wait_for_health", healthy)
@@ -107,6 +114,185 @@ async def test_first_start_writes_private_state_and_starts_compose(
     assert runner.stream_calls == []
 
 
+async def test_custom_port_is_persisted_and_used_for_startup(
+    runtime_paths, monkeypatch
+) -> None:
+    """A requested host port controls Compose and the reported local URL."""
+    runner = FakeDockerRunner()
+    checked_ports: list[int] = []
+    health_checks: list[tuple[str, float]] = []
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", checked_ports.append)
+
+    async def healthy(server_url: str, timeout: float) -> None:
+        health_checks.append((server_url, timeout))
+
+    monkeypatch.setattr(local_runtime, "_wait_for_health", healthy)
+
+    item, _ = await local_runtime.start_local_runtime(
+        package_version="0.21.0",
+        upgrade=False,
+        timeout=30,
+        port=9010,
+        runner=runner,
+        paths=runtime_paths,
+    )
+
+    state = json.loads(runtime_paths.state.read_text())
+    assert state["port"] == 9010
+    assert "KITARU_LOCAL_HOST_PORT=9010" in runtime_paths.environment.read_text()
+    assert item["server_url"] == "http://localhost:9010"
+    assert item["port"] == 9010
+    assert checked_ports == [9010]
+    assert health_checks == [("http://localhost:9010", 120)]
+
+
+def test_local_port_precedence_and_validation(runtime_paths, monkeypatch) -> None:
+    """The flag wins over the environment, which wins over stored state."""
+    state = local_runtime.LocalRuntimeState(
+        server_image="zenmldocker/kitaru-server:0.21.0", port=9001
+    )
+    monkeypatch.setenv(local_runtime.LOCAL_PORT_ENV, "9002")
+
+    assert local_runtime._resolve_local_port(9003, state) == 9003
+    assert local_runtime._resolve_local_port(None, state) == 9002
+    monkeypatch.delenv(local_runtime.LOCAL_PORT_ENV)
+    assert local_runtime._resolve_local_port(None, state) == 9001
+    assert local_runtime._resolve_local_port(None, None) == 8000
+
+    with pytest.raises(CLIError) as explicit_error:
+        local_runtime._resolve_local_port(0, state)
+    assert explicit_error.value.kind == "invalid_arguments"
+
+    monkeypatch.setenv(local_runtime.LOCAL_PORT_ENV, "not-a-port")
+    with pytest.raises(CLIError) as environment_error:
+        local_runtime._resolve_local_port(None, state)
+    assert environment_error.value.kind == "invalid_configuration"
+
+
+def test_legacy_runtime_state_defaults_to_port_8000(runtime_paths) -> None:
+    """State written before configurable ports remains readable."""
+    runtime_paths.directory.mkdir(parents=True)
+    runtime_paths.state.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "project": "kitaru-local",
+                "server_image": "zenmldocker/kitaru-server:0.21.0",
+            }
+        )
+    )
+
+    state = local_runtime._read_state(runtime_paths.state)
+
+    assert state is not None
+    assert state.port == 8000
+    assert state.server_url == "http://localhost:8000"
+
+
+def test_local_runtime_url_uses_persisted_custom_port(runtime_paths) -> None:
+    """Owned-runtime detection follows the persisted port and normalizes URLs."""
+    local_runtime._write_runtime_files(
+        runtime_paths,
+        image="zenmldocker/kitaru-server:0.21.0",
+        port=9010,
+    )
+
+    assert local_runtime.is_local_runtime_url(
+        "http://localhost:9010/", paths=runtime_paths
+    )
+    assert not local_runtime.is_local_runtime_url(
+        "http://localhost:8000", paths=runtime_paths
+    )
+
+
+async def test_changed_port_reconfigures_running_deployment(
+    runtime_paths, monkeypatch
+) -> None:
+    """Changing the requested port recreates the server without deleting data."""
+    image = "zenmldocker/kitaru-server:0.21.0"
+    local_runtime._write_runtime_files(runtime_paths, image=image, port=8000)
+    runner = FakeDockerRunner()
+    compose = local_runtime._compose_arguments(runtime_paths)
+    runner.results[(*compose, "ps", "--status", "running", "--quiet")] = ProcessResult(
+        0, "server\ndb\n", ""
+    )
+    checked_ports: list[int] = []
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", checked_ports.append)
+
+    async def healthy(server_url: str, timeout: float) -> None:
+        assert server_url == "http://localhost:9010"
+
+    monkeypatch.setattr(local_runtime, "_wait_for_health", healthy)
+
+    item, _ = await local_runtime.start_local_runtime(
+        package_version="0.21.0",
+        upgrade=False,
+        timeout=30,
+        port=9010,
+        runner=runner,
+        paths=runtime_paths,
+    )
+
+    assert item["deployment"] == "reconfigured"
+    assert checked_ports == [9010]
+    assert any("up" in call for call in runner.calls)
+    assert not any("--volumes" in call for call in runner.calls)
+    assert json.loads(runtime_paths.state.read_text())["port"] == 9010
+
+
+async def test_failed_port_reconfiguration_restores_running_deployment(
+    runtime_paths, monkeypatch
+) -> None:
+    """A failed port change restores the previous files and Compose mapping."""
+    image = "zenmldocker/kitaru-server:0.21.0"
+    local_runtime._write_runtime_files(runtime_paths, image=image, port=8000)
+    previous_environment = runtime_paths.environment.read_text()
+    previous_state = runtime_paths.state.read_text()
+    runner = FakeDockerRunner()
+    compose = local_runtime._compose_arguments(runtime_paths)
+    runner.results[(*compose, "ps", "--status", "running", "--quiet")] = ProcessResult(
+        0, "server\ndb\n", ""
+    )
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda _: None)
+
+    async def health(server_url: str, timeout: float) -> None:
+        del timeout
+        if server_url == "http://localhost:9010":
+            raise CLIError("timeout", "unhealthy")
+
+    monkeypatch.setattr(local_runtime, "_wait_for_health", health)
+
+    with pytest.raises(CLIError, match="unhealthy"):
+        await local_runtime.start_local_runtime(
+            package_version="0.21.0",
+            upgrade=False,
+            timeout=30,
+            port=9010,
+            runner=runner,
+            paths=runtime_paths,
+        )
+
+    assert runtime_paths.environment.read_text() == previous_environment
+    assert runtime_paths.state.read_text() == previous_state
+    compose_ups = [
+        call
+        for call in runner.calls
+        if call[-5:] == ("up", "-d", "--pull", "never", "--remove-orphans")
+    ]
+    assert len(compose_ups) == 2
+    assert not any("down" in call or "--volumes" in call for call in runner.calls)
+
+    item, _ = await local_runtime.start_local_runtime(
+        package_version="0.21.0",
+        upgrade=False,
+        timeout=30,
+        runner=runner,
+        paths=runtime_paths,
+    )
+    assert item["deployment"] == "reused"
+    assert item["server_url"] == "http://localhost:8000"
+
+
 async def test_interactive_start_streams_pull_and_compose_progress(
     runtime_paths, monkeypatch
 ) -> None:
@@ -114,10 +300,10 @@ async def test_interactive_start_streams_pull_and_compose_progress(
     runner = FakeDockerRunner()
     server_image = "zenmldocker/kitaru-server:0.21.0"
     runner.results[("image", "inspect", server_image)] = ProcessResult(1, "", "")
-    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda: None)
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda _: None)
 
-    async def healthy(timeout: float) -> None:
-        pass
+    async def healthy(server_url: str, timeout: float) -> None:
+        del server_url, timeout
 
     monkeypatch.setattr(local_runtime, "_wait_for_health", healthy)
     progress: list[str] = []
@@ -179,7 +365,7 @@ async def test_developer_override_must_exist_locally(
         1, "", "missing"
     )
     monkeypatch.setenv(local_runtime.LOCAL_IMAGE_ENV, "kitaru-dev:test")
-    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda: None)
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda _: None)
 
     with pytest.raises(CLIError, match="not available locally"):
         await local_runtime.start_local_runtime(
@@ -200,7 +386,7 @@ async def test_version_mismatch_requires_explicit_upgrade(
     local_runtime._write_runtime_files(
         runtime_paths,
         image="zenmldocker/kitaru-server:0.20.0",
-        existing_state=None,
+        port=8000,
     )
     monkeypatch.delenv(local_runtime.LOCAL_IMAGE_ENV, raising=False)
 
@@ -228,11 +414,11 @@ async def test_version_mismatch_requires_explicit_upgrade(
 async def test_upgrade_refreshes_release_image(runtime_paths, monkeypatch) -> None:
     """An explicit upgrade pulls and recreates a cached release image."""
     image = "zenmldocker/kitaru-server:0.21.0"
-    local_runtime._write_runtime_files(runtime_paths, image=image, existing_state=None)
+    local_runtime._write_runtime_files(runtime_paths, image=image, port=8000)
     runner = FakeDockerRunner()
 
-    async def healthy(timeout: float) -> None:
-        pass
+    async def healthy(server_url: str, timeout: float) -> None:
+        del server_url, timeout
 
     monkeypatch.setattr(local_runtime, "_wait_for_health", healthy)
     item, _ = await local_runtime.start_local_runtime(
@@ -252,9 +438,10 @@ async def test_failed_first_start_removes_containers_but_keeps_data(
 ) -> None:
     """A failed first startup runs Compose down without deleting volumes."""
     runner = FakeDockerRunner()
-    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda: None)
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda _: None)
 
-    async def unhealthy(timeout: float) -> None:
+    async def unhealthy(server_url: str, timeout: float) -> None:
+        del server_url, timeout
         raise CLIError("timeout", "unhealthy")
 
     monkeypatch.setattr(local_runtime, "_wait_for_health", unhealthy)
@@ -278,7 +465,7 @@ async def test_failed_first_start_removes_containers_but_keeps_data(
 async def test_stop_with_volumes_deletes_runtime_state(runtime_paths) -> None:
     """Volume deletion also removes the secrets and ownership files."""
     image = "zenmldocker/kitaru-server:0.21.0"
-    local_runtime._write_runtime_files(runtime_paths, image=image, existing_state=None)
+    local_runtime._write_runtime_files(runtime_paths, image=image, port=8000)
     result = await local_runtime.stop_local_runtime(
         delete_volumes=True,
         runner=FakeDockerRunner(),
@@ -296,7 +483,7 @@ async def test_logs_use_bounded_tail_and_service(runtime_paths) -> None:
     local_runtime._write_runtime_files(
         runtime_paths,
         image="zenmldocker/kitaru-server:0.21.0",
-        existing_state=None,
+        port=8000,
     )
     runner = FakeDockerRunner()
     compose = local_runtime._compose_arguments(runtime_paths)
@@ -383,7 +570,7 @@ def test_runtime_files_contain_no_world_readable_secrets(runtime_paths) -> None:
     local_runtime._write_runtime_files(
         runtime_paths,
         image="zenmldocker/kitaru-server:0.21.0",
-        existing_state=None,
+        port=8000,
     )
     assert os.stat(runtime_paths.directory).st_mode & 0o777 == 0o700
     assert os.stat(runtime_paths.environment).st_mode & 0o777 == 0o600

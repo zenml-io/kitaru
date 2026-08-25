@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Local Docker deployments can now select their host port with `kitaru login --local --port PORT` or `KITARU_LOCAL_PORT`. The CLI remembers the selected port and continues to default to port 8000.
 - Added the PydanticAI returns agent example and its checked-in evidence under `examples/python/pydantic_ai_ticket_resolver`, alongside the existing TypeScript variant. The quickstart example now runs end to end in release-critical CI without depending on a separate repository.
 - Evaluators can now be scoped to a single agent with `agent_id` on `POST /api/v1/evaluators`, null for a workspace-global evaluator. A scoped evaluator can only be used by experiments, replays, and evaluation batches whose sessions belong to that agent. `agent_id` is immutable and importers cannot be scoped.
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
