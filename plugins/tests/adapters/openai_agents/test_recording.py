@@ -721,6 +721,26 @@ def test_records_user_fields_named_like_capture_metadata() -> None:
     assert attributes == {}
 
 
+def test_lone_surrogate_tool_argument_is_recorded_as_capture_loss() -> None:
+    agent = Agent(name="source")
+    inputs, attributes = recording_module._capture_tool_input(
+        ToolCallItem(
+            agent=agent,
+            raw_item=ResponseFunctionToolCall(
+                arguments=r'{"value":"\ud800"}',
+                call_id="call-1",
+                name="lookup",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            ),
+        )
+    )
+
+    assert inputs is None
+    assert attributes == {"kitaru.tool_arguments": "capture_loss"}
+
+
 async def test_same_name_tool_calls_match_outputs_and_parents_by_call_id() -> None:
     client = _FakeClient()
     recorder = RunRecorder(client=cast(KitaruAPIClient, client), batch_size=20)

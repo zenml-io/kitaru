@@ -774,7 +774,10 @@ def _capture_tool_input(item: ToolCallItem) -> tuple[Any, dict[str, str]]:
             arguments = parse_tool_arguments(raw.arguments)
         except (ValueError, TypeError):
             return None, {"kitaru.tool_arguments": "invalid_json"}
-        captured = _capture(arguments)
+        try:
+            captured = _capture(arguments)
+        except UnicodeEncodeError:
+            return None, {"kitaru.tool_arguments": "capture_loss"}
         if contains_capture_marker(captured):
             return None, {"kitaru.tool_arguments": "capture_loss"}
         return captured, {}
