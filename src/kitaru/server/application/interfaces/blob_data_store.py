@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Blob data store interface."""
 
+from collections.abc import Mapping, Sequence
 from typing import Protocol
 
 from kitaru.server.domain.blob import BlobStorageBackend
@@ -30,6 +31,14 @@ class BlobDataStore(Protocol):
         """
         ...
 
+    async def put_many(self, data_by_sha256: Mapping[str, bytes]) -> None:
+        """Store many contents under their hashes, idempotent per hash.
+
+        Args:
+            data_by_sha256: Content bytes keyed by their sha256.
+        """
+        ...
+
     async def get(self, sha256: str) -> bytes:
         """Load content by its hash.
 
@@ -41,6 +50,20 @@ class BlobDataStore(Protocol):
 
         Returns:
             Content bytes.
+        """
+        ...
+
+    async def get_many(self, sha256s: Sequence[str]) -> dict[str, bytes]:
+        """Load many contents by their hashes.
+
+        Args:
+            sha256s: Content hashes.
+
+        Raises:
+            BlobContentNotFound: A requested hash has no stored content.
+
+        Returns:
+            Content bytes keyed by their sha256.
         """
         ...
 

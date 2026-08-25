@@ -112,6 +112,7 @@ from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
@@ -3790,6 +3791,15 @@ class FakeBlobDataStore:
         """
         self._content.setdefault(sha256, data)
 
+    async def put_many(self, data_by_sha256: Mapping[str, bytes]) -> None:
+        """Store many contents under their hashes, idempotent per hash.
+
+        Args:
+            data_by_sha256: Content bytes keyed by their sha256.
+        """
+        for sha256, data in data_by_sha256.items():
+            self._content.setdefault(sha256, data)
+
     async def get(self, sha256: str) -> bytes:
         """Load content by its hash.
 
@@ -3806,6 +3816,26 @@ class FakeBlobDataStore:
         if data is None:
             raise BlobContentNotFound(sha256)
         return data
+
+    async def get_many(self, sha256s: Sequence[str]) -> dict[str, bytes]:
+        """Load many contents by their hashes.
+
+        Args:
+            sha256s: Content hashes.
+
+        Raises:
+            BlobContentNotFound: A requested hash has no stored content.
+
+        Returns:
+            Content bytes keyed by their sha256.
+        """
+        data_by_sha256: dict[str, bytes] = {}
+        for sha256 in sha256s:
+            data = self._content.get(sha256)
+            if data is None:
+                raise BlobContentNotFound(sha256)
+            data_by_sha256[sha256] = data
+        return data_by_sha256
 
     async def delete(self, sha256: str) -> None:
         """Delete content by its hash, idempotent on a missing hash.
@@ -3885,6 +3915,37 @@ def build_blob_service(
         offload_threshold_bytes=offload_threshold_bytes,
     )
     return BlobServiceFakes(service, blob_repository, blob_data_store)
+
+
+class PayloadStoreFakes(NamedTuple):
+    """Payload store backed by fresh fake blob storage."""
+
+    store: PayloadStore
+    blob_repository: FakeBlobRepository
+    blob_data_store: FakeBlobDataStore
+
+
+def build_payload_store(
+    threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+) -> PayloadStoreFakes:
+    """Build a payload store backed by fresh fake blob storage.
+
+    Args:
+        threshold_bytes: Serialized size above which a payload is offloaded.
+
+    Returns:
+        Payload store bound to fresh fakes, and the fakes themselves.
+    """
+    blob_repository = FakeBlobRepository()
+    blob_data_store = FakeBlobDataStore()
+    store = PayloadStore(
+        repository=blob_repository,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: blob_data_store}, BlobStorageBackend.DATABASE
+        ),
+        threshold_bytes=threshold_bytes,
+    )
+    return PayloadStoreFakes(store, blob_repository, blob_data_store)
 
 
 class FakePluginRepository:

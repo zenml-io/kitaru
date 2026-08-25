@@ -67,3 +67,38 @@ async def test_delete(store: BlobDataStore) -> None:
 async def test_delete_missing_is_idempotent(store: BlobDataStore) -> None:
     """Delete a hash with no stored content without raising."""
     await store.delete("a" * 64)
+
+
+async def test_put_many_and_get_many(store: BlobDataStore) -> None:
+    """Store multiple contents and load them back by hash in one call."""
+    await store.put_many({"a" * 64: b"first", "b" * 64: b"second"})
+    assert await store.get_many(["a" * 64, "b" * 64]) == {
+        "a" * 64: b"first",
+        "b" * 64: b"second",
+    }
+
+
+async def test_put_many_is_idempotent_on_repeat_hashes(store: BlobDataStore) -> None:
+    """Keep the first write on a repeat put_many of the same hashes."""
+    await store.put_many({"a" * 64: b"first"})
+    await store.put_many({"a" * 64: b"first"})
+    assert await store.get_many(["a" * 64]) == {"a" * 64: b"first"}
+
+
+async def test_put_many_empty_is_a_no_op(store: BlobDataStore) -> None:
+    """Accept an empty put_many without raising."""
+    await store.put_many({})
+
+
+async def test_get_many_missing_hash_raises(store: BlobDataStore) -> None:
+    """Raise for a hash with no stored content among the requested hashes."""
+    await store.put_many({"a" * 64: b"content"})
+    with pytest.raises(
+        BlobContentNotFound, match=f"Blob content for sha256 {'b' * 64} was not found"
+    ):
+        await store.get_many(["a" * 64, "b" * 64])
+
+
+async def test_get_many_empty_is_a_no_op(store: BlobDataStore) -> None:
+    """Return an empty mapping for an empty get_many."""
+    assert await store.get_many([]) == {}

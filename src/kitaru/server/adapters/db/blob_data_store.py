@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Blob data store backed by the application database."""
 
+from collections.abc import Mapping, Sequence
+
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -46,6 +48,26 @@ class DatabaseBlobDataStore:
         )
         await self._session.execute(statement)
 
+    async def put_many(self, data_by_sha256: Mapping[str, bytes]) -> None:
+        """Store many contents under their hashes, idempotent per hash.
+
+        Args:
+            data_by_sha256: Content bytes keyed by their sha256.
+        """
+        if not data_by_sha256:
+            return
+        statement = (
+            insert(BlobContentORM)
+            .values(
+                [
+                    {"sha256": sha256, "data": data}
+                    for sha256, data in data_by_sha256.items()
+                ]
+            )
+            .on_conflict_do_nothing()
+        )
+        await self._session.execute(statement)
+
     async def get(self, sha256: str) -> bytes:
         """Load content by its hash.
 
@@ -63,6 +85,28 @@ class DatabaseBlobDataStore:
         if data is None:
             raise BlobContentNotFound(sha256)
         return data
+
+    async def get_many(self, sha256s: Sequence[str]) -> dict[str, bytes]:
+        """Load many contents by their hashes.
+
+        Args:
+            sha256s: Content hashes.
+
+        Raises:
+            BlobContentNotFound: A requested hash has no stored content.
+
+        Returns:
+            Content bytes keyed by their sha256.
+        """
+        if not sha256s:
+            return {}
+        statement = select(BlobContentORM).where(BlobContentORM.sha256.in_(sha256s))
+        rows = (await self._session.scalars(statement)).all()
+        data_by_sha256 = {row.sha256: row.data for row in rows}
+        for sha256 in sha256s:
+            if sha256 not in data_by_sha256:
+                raise BlobContentNotFound(sha256)
+        return data_by_sha256
 
     async def delete(self, sha256: str) -> None:
         """Delete content by its hash, idempotent on a missing hash.

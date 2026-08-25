@@ -118,6 +118,7 @@ from kitaru.server.application.models.auth import (
 )
 from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.models.task import TaskPolicy
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
@@ -457,6 +458,28 @@ def get_blob_service(
         data_stores=data_stores,
         max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
         offload_threshold_bytes=settings.PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+    )
+
+
+def get_payload_store(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    data_stores: Annotated[BlobDataStores, Depends(get_blob_data_stores)],
+) -> PayloadStore:
+    """Return a payload store for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+        data_stores: Content stores keyed by the backend they serve.
+
+    Returns:
+        Payload store bound to the SQL repository.
+    """
+    return PayloadStore(
+        repository=SQLBlobRepository(session),
+        data_stores=data_stores,
+        threshold_bytes=settings.PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     )
 
 

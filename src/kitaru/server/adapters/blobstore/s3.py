@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Blob data store backed by S3."""
 
+import asyncio
+from collections.abc import Mapping, Sequence
 from typing import Any
 
 import obstore
@@ -65,6 +67,16 @@ class S3BlobDataStore:
         """
         await obstore.put_async(self._store, self._key(sha256), data)
 
+    async def put_many(self, data_by_sha256: Mapping[str, bytes]) -> None:
+        """Store many contents under their hashes, idempotent per hash.
+
+        Args:
+            data_by_sha256: Content bytes keyed by their sha256.
+        """
+        await asyncio.gather(
+            *(self.put(sha256, data) for sha256, data in data_by_sha256.items())
+        )
+
     async def get(self, sha256: str) -> bytes:
         """Load content by its hash.
 
@@ -82,6 +94,21 @@ class S3BlobDataStore:
         except FileNotFoundError as exc:
             raise BlobContentNotFound(sha256) from exc
         return bytes(await result.bytes_async())
+
+    async def get_many(self, sha256s: Sequence[str]) -> dict[str, bytes]:
+        """Load many contents by their hashes.
+
+        Args:
+            sha256s: Content hashes.
+
+        Raises:
+            BlobContentNotFound: A requested hash has no stored content.
+
+        Returns:
+            Content bytes keyed by their sha256.
+        """
+        data = await asyncio.gather(*(self.get(sha256) for sha256 in sha256s))
+        return dict(zip(sha256s, data, strict=True))
 
     async def delete(self, sha256: str) -> None:
         """Delete content by its hash, idempotent on a missing hash.
