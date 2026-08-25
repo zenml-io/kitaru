@@ -123,7 +123,7 @@ One server runs on your infrastructure, with Docker image and Helm chart include
 
 ## 🤝 Contributing
 
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and how to submit changes. The default branch is `develop`; all PRs should target it.
+We're happy to take contributions from outside the core team. Comment on an existing issue or open a new one before you write code; direct PRs are limited to collaborators, and a maintainer will add you once we've agreed on the change. [CONTRIBUTING.md](CONTRIBUTING.md) has the full flow, dev setup, and code style. The default branch is `develop`; all PRs should target it.
 
 ## 💬 Community and support
 

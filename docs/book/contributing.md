@@ -22,7 +22,7 @@ just test    # Run tests
 - **Default branch:** `develop`; all PRs target this branch
 - **Checks:** `just check` runs formatting, linting, type checking, typos, and YAML validation
 - **Docs:** These pages live in `docs/book/` (GitBook source, plain Markdown). Edit the `.md` files and register new pages in `docs/book/toc.md`
-- **Outside contributors:** If you cannot open a PR directly, open an issue and link to any branch you already prepared. Maintainers may invite issue authors as repository collaborators when direct PR access would help review.
+- **Outside contributors:** Direct PRs are limited to collaborators. Comment on an existing issue or open a new one before you write code; once a maintainer agrees on the approach, they will add you as a collaborator so you can open the PR. Small fixes like typos: just open an issue and we'll make the change.
 
 ## Links
 
