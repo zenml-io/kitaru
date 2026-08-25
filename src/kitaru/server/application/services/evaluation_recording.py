@@ -73,4 +73,10 @@ async def record_task_evaluations(
         await session_repository.get(task.input_session_id, exclusive=True)
     except NotFoundError:
         return
-    await evaluation_repository.create_task_evaluations(evaluations)
+    # The evaluator can be deleted while its task runs, cascading its version
+    # away. The insert then references a missing evaluator version, which
+    # leaves nothing to record.
+    try:
+        await evaluation_repository.create_task_evaluations(evaluations)
+    except NotFoundError:
+        return

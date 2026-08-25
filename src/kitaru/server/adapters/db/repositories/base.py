@@ -132,6 +132,30 @@ class BaseSQLRepository(Generic[RowT]):
         except IntegrityError as exc:
             self._raise_translated(exc, constraints)
 
+    async def _add_all(
+        self,
+        rows: Sequence[UUIDPrimaryKeyMixin],
+        constraints: ConstraintErrors | None = None,
+    ) -> None:
+        """Add many rows and flush, translating constraint violations.
+
+        The rows are added inside the savepoint so a mapped violation leaves
+        the outer transaction free of their pending inserts.
+
+        Args:
+            rows: Rows to add.
+            constraints: Domain error factories keyed by constraint name.
+
+        Raises:
+            DomainError: A mapped constraint was violated.
+        """
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(rows)
+                await self._session.flush()
+        except IntegrityError as exc:
+            self._raise_translated(exc, constraints)
+
     async def _flush(self, constraints: ConstraintErrors | None = None) -> None:
         """Flush pending changes, translating constraint violations.
 

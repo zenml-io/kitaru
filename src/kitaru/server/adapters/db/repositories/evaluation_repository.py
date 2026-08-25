@@ -14,7 +14,7 @@
 """SQL evaluation repository."""
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, select, text
@@ -29,7 +29,10 @@ from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
-from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.evaluation import (
+    EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
+    EvaluationORM,
+)
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.session import SessionORM
@@ -40,8 +43,9 @@ from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
 from kitaru.server.application.models.evaluation import EvaluationFilter
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.base import DomainError, NotFoundError
 from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
+from kitaru.server.domain.plugin import PluginVersionIdNotFound
 from kitaru.server.filtering import FilterCondition
 
 EvaluatorInfo = tuple[str, int]
@@ -284,6 +288,10 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
         Args:
             evaluations: Fully resolved evaluations to store, in result order.
 
+        Raises:
+            PluginVersionIdNotFound: The evaluator version was deleted
+                concurrently with the task it scored.
+
         Returns:
             Stored evaluations in result order.
         """
@@ -293,6 +301,12 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
             EvaluationORM(**EvaluationORM.column_values(evaluation))
             for evaluation in evaluations
         ]
-        self._session.add_all(rows)
-        await self._flush()
+        constraints: dict[str, Callable[[], DomainError]] = {}
+        evaluator_version_id = evaluations[0].evaluator_version_id
+        if evaluator_version_id is not None:
+            missing_version_id = evaluator_version_id
+            constraints[EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY] = lambda: (
+                PluginVersionIdNotFound(missing_version_id)
+            )
+        await self._add_all(rows, constraints)
         return [row.to_domain() for row in rows]

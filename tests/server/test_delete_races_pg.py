@@ -254,6 +254,33 @@ async def test_session_delete_race() -> None:
         assert (await client.get(url)).status_code == 404
 
 
+async def test_session_evaluation_merge_races_session_delete() -> None:
+    """Race manual evaluation merges against the session's delete.
+
+    The merge insert references the session, so a delete landing mid-merge
+    must surface as a clean 404 rather than an unmapped foreign key 500. Many
+    rounds keep the narrow window from hiding behind a lucky interleaving.
+    """
+    settings = db_settings(DB_POOL_SIZE=RACERS + 10, DB_MAX_OVERFLOW=20)
+    async with lifespan_client(settings) as client:
+        agent_id, version_id = await _agent_version(client)
+        for _ in range(30):
+            session_id = await _baseline_session(client, agent_id, version_id)
+            url = f"/api/v1/sessions/{session_id}"
+            merges = [
+                client.post(
+                    f"{url}/evaluations",
+                    json={"evaluations": [{"name": f"m{index}", "score": 1.0}]},
+                )
+                for index in range(RACERS)
+            ]
+            responses = list(await asyncio.gather(client.delete(url), *merges))
+
+            assert_no_server_error(responses)
+            merge_statuses = [response.status_code for response in responses[1:]]
+            assert set(merge_statuses) <= {200, 404}, merge_statuses
+
+
 async def test_experiment_delete_race() -> None:
     """Race concurrent deletes of one experiment with a run and a replay."""
     settings = db_settings(DB_POOL_SIZE=RACERS + 10, DB_MAX_OVERFLOW=20)

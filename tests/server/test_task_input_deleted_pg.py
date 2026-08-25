@@ -526,6 +526,70 @@ async def test_completing_evaluator_task_after_input_deleted_never_5xx() -> None
         assert count == 0
 
 
+async def test_completing_evaluator_task_after_evaluator_deleted_never_5xx() -> None:
+    """A completed evaluator task whose evaluator vanished records nothing.
+
+    Deleting the evaluator cascades its version away, so the completion insert
+    would reference a missing evaluator version. The transition must still
+    commit and settle the job rather than 500 and strand the task.
+    """
+    settings = db_settings(DB_POOL_SIZE=20, DB_MAX_OVERFLOW=10)
+    async with lifespan_client(settings) as client:
+        owner_id = await _account_id(client)
+        agent = await _agent(client, "assistant")
+        session = await _session(client, agent["id"])
+        plugin = await _evaluator_plugin(client, "accuracy")
+
+        job_id, task_id = await _raw_evaluator_job(
+            settings,
+            owner_id,
+            uuid.UUID(plugin["version"]["id"]),
+            uuid.UUID(session["id"]),
+        )
+
+        _worker_id, worker_token = await _register_worker(
+            client, {"claims": [{"kind": "evaluator"}]}
+        )
+        entries = await _claim_all(client, worker_token)
+        assert [entry["task"]["id"] for entry in entries] == [task_id], entries
+        task_token = entries[0]["token"]
+
+        running = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={"status": "running"},
+            headers=_bearer(task_token),
+        )
+        assert running.status_code == 200, running.text
+
+        # Delete the evaluator while its task is mid-flight.
+        deleted = await client.delete(f"/api/v1/evaluators/{plugin['evaluator']['id']}")
+        assert deleted.status_code == 204, deleted.text
+
+        completed = await client.patch(
+            f"/api/v1/tasks/{task_id}",
+            json={
+                "status": "completed",
+                "result": [{"name": "accuracy", "score": 0.9}],
+            },
+            headers=_bearer(task_token),
+        )
+        assert completed.status_code == 200, completed.text
+        assert completed.json()["status"] == "completed"
+
+        # The transition committed, so the job settles rather than stranding a
+        # task stuck running behind a failed evaluation insert.
+        job = (await client.get(f"/api/v1/jobs/{job_id}")).json()
+        assert job["status"] == JobStatus.COMPLETED.value, job
+
+        # The evaluator is gone, so the completion writes no evaluation row.
+        async with _raw_session(settings) as raw:
+            count = await raw.scalar(
+                text("SELECT count(*) FROM evaluation WHERE session_id = :sid"),
+                {"sid": session["id"]},
+            )
+        assert count == 0
+
+
 # ---------------------------------------------------------------------------
 # 3. Highest-value hypothesis: a job left permanently unsettleable.
 # ---------------------------------------------------------------------------
