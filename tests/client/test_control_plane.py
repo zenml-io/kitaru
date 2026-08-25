@@ -39,6 +39,7 @@ class FakeControlPlane:
         self,
         pending_polls: int = 0,
         login_error: dict[str, str] | None = None,
+        verification_uri: str = "/devices/verify",
     ) -> None:
         """Initialize the stub.
 
@@ -46,9 +47,11 @@ class FakeControlPlane:
             pending_polls: Device code polls answered with
                 ``authorization_pending`` before the confirmation lands.
             login_error: OAuth 2.0 error body every login is refused with.
+            verification_uri: Verification URI the authorization carries.
         """
         self.pending_polls = pending_polls
         self.login_error = login_error
+        self.verification_uri = verification_uri
         self.requests: list[httpx.Request] = []
         self.logins = 0
 
@@ -69,7 +72,7 @@ class FakeControlPlane:
                 json={
                     "device_code": "cp-device-code",
                     "user_code": "ABCD-EFGH",
-                    "verification_uri": "/devices/verify",
+                    "verification_uri": self.verification_uri,
                     "verification_uri_complete": None,
                     "expires_in": 300,
                     "interval": 0,
@@ -268,7 +271,26 @@ async def test_relative_verification_uri_is_opened_against_the_control_plane(
     await session.device_login(prompt=lambda _: None)
     await session.close()
 
-    assert opened == [f"{CONTROL_PLANE_URL}/devices/verify"]
+    assert opened == [f"{CONTROL_PLANE_URL}/devices/verify?product=kitaru"]
+
+
+async def test_device_login_adds_the_product_to_the_verification_uri(
+    credential_store: CredentialStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Open the verification page with the product query parameter."""
+    opened: list[str] = []
+    monkeypatch.setattr(
+        "kitaru.client.control_plane.webbrowser.open", lambda uri: opened.append(uri)
+    )
+    session = _session(
+        credential_store,
+        FakeControlPlane(verification_uri="https://control.example.com/verify?foo=bar"),
+    )
+
+    await session.device_login(prompt=lambda _: None)
+    await session.close()
+
+    assert opened == ["https://control.example.com/verify?foo=bar&product=kitaru"]
 
 
 async def test_device_login_adds_the_workspace_to_the_verification_uri(
@@ -290,6 +312,8 @@ async def test_device_login_adds_the_workspace_to_the_verification_uri(
     )
     await session.close()
 
-    expected = f"{CONTROL_PLANE_URL}/devices/verify?workspace=workspace-id"
+    expected = (
+        f"{CONTROL_PLANE_URL}/devices/verify?product=kitaru&workspace=workspace-id"
+    )
     assert opened == [expected]
     assert prompted == [expected]
