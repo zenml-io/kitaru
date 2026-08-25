@@ -37,6 +37,8 @@ A policy belongs to a replay or an [experiment](../concepts/experiments.md). The
                 "tools": {"get_current_time": {"type": "passthrough"}}}'
 ```
 
+{% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
+
 ## The four policies
 
 ### `history`: use a recorded result
@@ -76,8 +78,6 @@ Each `StaticCase` matches arguments with `match_mode="exact"` or `"subset"` and 
 History matching is guaranteed only within the same adapter implementation. Different frameworks can apply schema defaults, coercion, or serialization differently, which changes the cache key even when a tool call looks equivalent. A completed history match replays its result, including `null`, except in LangGraph: it requires a recorded `ToolMessage` or `Command` envelope and fails closed for `null` or malformed completed results. An occurrence-based `baseline` lookup can also match a failed call; the adapter raises its stored error without executing the live tool. Lookups without an occurrence, including `agent` and `cohort_version` scope, consider completed calls only, so a failed-only history is a miss and follows `on_miss`.
 
 Adapters raise a Kitaru replay error for a failed match rather than recreating the original exception class or structured retry signal. This aborts the current adapter run unless application code catches that replay error.
-
-{% hint style="info" %} The OpenAI Agents adapter supports history only for named direct function tools and requires the default policy to remain `passthrough`. See the [OpenAI Agents adapter page](../adapters/openai-agents.md) for its target and concurrency limits. {% endhint %}
 
 ## How matching works
 

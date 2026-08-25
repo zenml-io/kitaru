@@ -97,6 +97,8 @@ experiment = await client.experiments.create(
 
 Both evaluators must already be registered. In this example, `tone-judge` represents a second evaluator written for your application. See [Write an evaluator](write-an-evaluator.md).
 
+{% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
+
 To test a code change, omit `override` and register the branch as a new agent version. The experiment run selects that version. The `history` policy with `scope="cohort_version"` can answer tool calls from any recording in the cohort. With `on_miss="fail"`, an unmatched call stops its replay instead of reaching the live tool.
 
 The CLI form takes the override and tool policy as JSON:

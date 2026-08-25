@@ -59,6 +59,8 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+{% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
+
 The same two steps from the CLI (the change as JSON on the experiment, the population and code on the run):
 
 ```bash

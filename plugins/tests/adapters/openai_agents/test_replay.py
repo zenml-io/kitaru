@@ -32,7 +32,9 @@ from agents import (
     TResponseInputItem,
     tool_namespace,
 )
+from agents.items import ToolCallItem
 from agents.run_config import CallModelData, ModelInputData
+from openai.types.responses import ResponseFunctionToolCall
 
 from kitaru.api_models.v1.replay import (
     ReplayResponse,
@@ -53,7 +55,9 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicyOnMiss,
 )
 from kitaru.api_models.v1.session_node import NodeStatus
+from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
+from kitaru_openai_agents.recording import _capture_tool_input
 from kitaru_openai_agents.replay import (
     ToolPolicyError,
     ToolPolicyMissError,
@@ -121,18 +125,34 @@ async def _invoke(tool: FunctionTool, arguments: dict[str, Any]) -> Any:
 
 
 class _FakeReplays:
-    def __init__(self, responses: list[ToolLookupResponse]) -> None:
+    def __init__(
+        self,
+        responses: list[ToolLookupResponse],
+        *,
+        yield_before_response: bool = False,
+    ) -> None:
         self.responses = responses
         self.lookups: list[tuple[uuid.UUID, Any]] = []
+        self.yield_before_response = yield_before_response
 
     async def tool_lookup(self, replay_id: uuid.UUID, request: Any) -> Any:
         self.lookups.append((replay_id, request))
+        if self.yield_before_response:
+            await asyncio.sleep(0)
         return self.responses.pop(0)
 
 
 class _FakeClient:
-    def __init__(self, responses: list[ToolLookupResponse]) -> None:
-        self.replays = _FakeReplays(responses)
+    def __init__(
+        self,
+        responses: list[ToolLookupResponse],
+        *,
+        yield_before_response: bool = False,
+    ) -> None:
+        self.replays = _FakeReplays(
+            responses,
+            yield_before_response=yield_before_response,
+        )
 
 
 def _lookup_response(
@@ -596,7 +616,8 @@ async def test_concurrent_identical_history_calls_use_distinct_occurrences() -> 
         [
             _lookup_response("first"),
             _lookup_response("second"),
-        ]
+        ],
+        yield_before_response=True,
     )
     prepared = prepare_replay(
         Agent[None](name="test", tools=[_function_tool(calls)]),
@@ -619,6 +640,45 @@ async def test_concurrent_identical_history_calls_use_distinct_occurrences() -> 
         _invoke(tool, {"city": "Paris"}),
     ) == ["first", "second"]
     assert [request.occurrence for _, request in client.replays.lookups] == [0, 1]
+
+
+async def test_recorded_tool_input_produces_the_replay_lookup_cache_key() -> None:
+    raw_call = ResponseFunctionToolCall(
+        arguments='{"units":"metric","city":"Paris"}',
+        call_id="call-1",
+        name="lookup",
+        type="function_call",
+        id="item-1",
+        status="completed",
+    )
+    recorded_input, _ = _capture_tool_input(
+        ToolCallItem(agent=Agent[None](name="test"), raw_item=raw_call)
+    )
+    client = _FakeClient([_lookup_response("recorded result")])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool([])]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+
+    result = await _invoke(
+        cast(FunctionTool, prepared.starting_agent.tools[0]),
+        {"city": "Paris", "units": "metric"},
+    )
+
+    assert result == "recorded result"
+    assert client.replays.lookups[0][1].cache_key == compute_tool_cache_key(
+        "lookup", recorded_input
+    )
 
 
 async def test_history_replays_null_and_consumes_recorded_failures() -> None:
