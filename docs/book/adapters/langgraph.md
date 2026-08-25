@@ -110,7 +110,7 @@ Misses follow the replay policy without silent fallback:
 - `error_result` returns a tool error result without a live tool call.
 - `passthrough` calls the live tool exactly once.
 
-Malformed, unsupported, or lossy recorded results count as misses. The adapter rejects the `llm` tool policy. It does not substitute stored model responses.
+Malformed, unsupported, or lossy recorded results fail closed with `ToolPolicyError`; they do not become misses or permit passthrough. A matched recorded failure also raises `ToolPolicyError` with the stored error text and aborts the graph unless application middleware catches it. Kitaru does not recreate the original exception class or LangGraph recovery behavior. The adapter rejects the `llm` tool policy. It does not substitute stored model responses.
 
 ## Interrupts and unsupported invocation modes
 

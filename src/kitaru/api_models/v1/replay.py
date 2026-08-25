@@ -30,6 +30,7 @@ from kitaru.api_models.v1.replay_config import (
     ReplayOverride,
     ToolPolicy,
 )
+from kitaru.api_models.v1.session_node import NodeStatus
 
 
 class ReplayStatus(StrEnum):
@@ -106,8 +107,19 @@ class ToolLookupRequest(RequestModel):
     )
 
 
+class ToolLookupMatch(ResponseModel):
+    """Tool lookup match."""
+
+    result: Any = Field(description="Cached tool result.")
+    status: NodeStatus = Field(description="Tool call status.")
+    error: str | None = Field(
+        default=None, description="Error from a failed tool call."
+    )
+
+
 class ToolLookupResponse(ResponseModel):
     """Tool lookup response."""
 
-    found: bool = Field(description="Whether a cached result was found.")
-    result: Any = Field(description="Cached tool result.")
+    match: ToolLookupMatch | None = Field(
+        default=None, description="Matching recorded tool call."
+    )

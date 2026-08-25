@@ -47,6 +47,13 @@ _COST_PER_TOKEN = Decimal("0.000004")
 class ToolResolutionError(RuntimeError):
     """Raised when a tool call cannot be resolved."""
 
+    def __init__(
+        self, message: str, *, attributes: dict[str, Any] | None = None
+    ) -> None:
+        """Initialize the error with attributes for its failed tool node."""
+        super().__init__(message)
+        self.attributes = attributes or {}
+
 
 @dataclass(frozen=True)
 class SimulationConfig:
@@ -437,7 +444,7 @@ async def simulate_session(
                         parent_index=tools_parent,
                         tool_name=tool_name,
                         tool_inputs=tool_inputs,
-                        outcome=None,
+                        outcome=ToolOutcome(result=None, attributes=exc.attributes),
                         node_started=tool_started,
                         error=str(exc),
                     )

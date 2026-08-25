@@ -41,7 +41,7 @@ Successful static and history values are validated against a tool's `outputSchem
 
 History matching is guaranteed only for traces recorded and replayed through this Vercel AI SDK adapter. Another framework may validate, default, or serialize the same logical tool input differently, so cross-framework history replay is not a compatibility promise.
 
-Kitaru looks recorded tool results up by tool name and arguments. When one run calls the same tool twice with identical arguments, both replayed calls resolve to the last recorded result for that pair, so a polling loop replays differently from its baseline. The adapter writes a `console.warn` the first time a run repeats a call, because nothing else can tell you the replayed trajectory diverged.
+Kitaru looks recorded tool results up by tool name and arguments. Baseline-scoped history consumes repeated matching calls in their recorded order. Agent- and cohort-version-scoped history use the newest completed matching call instead, so the adapter writes a `console.warn` when those scopes repeat a call and may diverge from the baseline trajectory.
 
 ## Model identity
 

@@ -31,7 +31,11 @@ from agents import (
 from agents.run_config import CallModelData, ModelInputData
 from agents.tool import Tool, get_function_tool_origin
 
-from kitaru.api_models.v1.replay import ReplayResponse, ToolLookupRequest
+from kitaru.api_models.v1.replay import (
+    ReplayResponse,
+    ToolLookupMatch,
+    ToolLookupRequest,
+)
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     HistoryScope,
@@ -41,6 +45,7 @@ from kitaru.api_models.v1.replay_config import (
     StaticMatchMode,
     ToolPolicyOnMiss,
 )
+from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
 
@@ -223,7 +228,25 @@ def _copy_history_tool(
     copied_tool = copy.copy(tool)
     original_invoke = copied_tool.on_invoke_tool
 
-    async def lookup(arguments: Any) -> tuple[bool, Any]:
+    async def request_lookup(
+        cache_key: str, occurrence: int | None
+    ) -> ToolLookupMatch | None:
+        response = await client.replays.tool_lookup(
+            replay.id,
+            ToolLookupRequest(
+                tool_name=tool.name,
+                cache_key=cache_key,
+                occurrence=occurrence,
+            ),
+        )
+        if "match" not in response.model_fields_set:
+            raise ToolPolicyError(
+                "Kitaru server tool lookup response does not include 'match'; "
+                "upgrade the server before using history replay"
+            )
+        return response.match
+
+    async def lookup(arguments: Any) -> ToolLookupMatch | None:
         cache_key = compute_tool_cache_key(tool.name, arguments)
         if cache_key is None:
             raise ToolPolicyError(
@@ -234,26 +257,11 @@ def _copy_history_tool(
             lock = state.locks.setdefault(cache_key, asyncio.Lock())
             async with lock:
                 occurrence = state.occurrences.get(cache_key, 0)
-                response = await client.replays.tool_lookup(
-                    replay.id,
-                    ToolLookupRequest(
-                        tool_name=tool.name,
-                        cache_key=cache_key,
-                        occurrence=occurrence,
-                    ),
-                )
-                if response.found:
+                match = await request_lookup(cache_key, occurrence)
+                if match is not None:
                     state.occurrences[cache_key] = occurrence + 1
-                return response.found, response.result
-        response = await client.replays.tool_lookup(
-            replay.id,
-            ToolLookupRequest(
-                tool_name=tool.name,
-                cache_key=cache_key,
-                occurrence=None,
-            ),
-        )
-        return response.found, response.result
+                return match
+        return await request_lookup(cache_key, None)
 
     async def invoke(context: Any, arguments_json: str) -> Any:
         try:
@@ -263,13 +271,22 @@ def _copy_history_tool(
                 f"Invalid JSON arguments for tool '{tool.name}'"
             ) from error
 
-        found, result = await lookup(arguments)
-        if found:
-            if result is None or contains_capture_marker(result):
+        match = await lookup(arguments)
+        if match is not None:
+            if match.status is NodeStatus.FAILED:
+                raise ToolPolicyError(
+                    match.error or f"Recorded tool call '{tool.name}' failed"
+                )
+            if match.status is not NodeStatus.COMPLETED:
+                raise ToolPolicyError(
+                    f"History lookup for tool '{tool.name}' returned unexpected "
+                    f"status '{match.status.value}'"
+                )
+            if contains_capture_marker(match.result):
                 raise ToolPolicyError(
                     f"History result for tool '{tool.name}' cannot be replayed safely"
                 )
-            return result
+            return match.result
         if policy.on_miss is ToolPolicyOnMiss.PASSTHROUGH:
             return await original_invoke(context, arguments_json)
 

@@ -181,6 +181,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "ReplayListParams",
                 "ReplayResponse",
                 "ReplayStatus",
+                "ToolLookupMatch",
                 "ToolLookupRequest",
                 "ToolLookupResponse",
             }

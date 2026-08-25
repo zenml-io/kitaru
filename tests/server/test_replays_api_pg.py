@@ -315,8 +315,8 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["found"] is True
-    assert body["result"] == {"result": "hit"}
+    assert body["match"]["result"] == {"result": "hit"}
+    assert body["match"]["status"] == "completed"
 
     miss = (
         await client.post(
@@ -324,5 +324,4 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
             json={"tool_name": "search", "cache_key": "b" * 64},
         )
     ).json()
-    assert miss["found"] is False
-    assert miss["result"] is None
+    assert miss["match"] is None

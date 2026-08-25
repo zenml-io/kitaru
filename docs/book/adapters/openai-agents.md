@@ -107,7 +107,7 @@ The default policy must remain passthrough, so configure history for each named 
 
 With baseline history scope, repeated calls with identical arguments consume matching recorded results in invocation order. Concurrent identical calls receive distinct occurrences, but the adapter does not promise that callback scheduling reproduces the model response's source order. Cohort-version and agent history scopes use the newest matching result for every call.
 
-History fails closed when arguments are not strict canonical JSON, when a found result is `null` or contains Kitaru truncation metadata, or when the target tool has an SDK timeout. Sessions recorded by `kitaru-openai-agents` 0.1.x stored function arguments in a different shape and may not match calls made by 0.2.0; record a new baseline when you need history replay.
+Completed history matches replay their result, including `null`. A matched recorded failure raises `ToolPolicyError` with its stored error and does not execute the live tool. History also fails closed when arguments are not strict canonical JSON, when a completed result contains Kitaru truncation metadata, when the target tool has an SDK timeout, or when the server predates the explicit match contract introduced in Kitaru 0.22.3. Sessions recorded by `kitaru-openai-agents` 0.1.x stored function arguments in a different shape and may not match calls made by 0.2.0; record a new baseline when you need history replay.
 
 ## Deliberate exclusions
 
