@@ -16,33 +16,24 @@
 import uuid
 from typing import Any
 
+from pydantic import PrivateAttr
+
+from kitaru.server.domain.base import DomainModel
+
 JSON_MEDIA_TYPE = "application/json"
 TEXT_MEDIA_TYPE = "text/plain"
 
-_UNSET = object()
 
-
-class Payload:
+class Payload(DomainModel):
     """Session or node payload, inline, offloaded, or both in memory."""
 
-    __slots__ = ("_value", "blob_id", "media_type")
+    blob_id: uuid.UUID | None = None
+    media_type: str | None = None
 
-    def __init__(
-        self, value: Any, blob_id: uuid.UUID | None, media_type: str | None
-    ) -> None:
-        """Initialize the payload state directly, prefer json, text, or ref.
-
-        Raises:
-            ValueError: Neither a value nor a blob ref is given.
-        """
-        if value is _UNSET and blob_id is None:
-            raise ValueError("A payload requires a value, a blob ref, or both")
-        self._value = value
-        self.blob_id = blob_id
-        self.media_type = media_type
+    _value: Any = PrivateAttr(default=None)
 
     @classmethod
-    def json(cls, value: Any) -> "Payload":
+    def json(cls, value: Any) -> "Payload":  # ty: ignore[invalid-method-override]
         """Build an inline payload serialized as JSON.
 
         Raises:
@@ -53,7 +44,9 @@ class Payload:
         """
         if value is None:
             raise ValueError("A JSON payload value cannot be None")
-        return cls(value, blob_id=None, media_type=JSON_MEDIA_TYPE)
+        payload = cls(media_type=JSON_MEDIA_TYPE)
+        payload._value = value
+        return payload
 
     @classmethod
     def text(cls, value: str) -> "Payload":
@@ -67,7 +60,9 @@ class Payload:
         """
         if value is None:
             raise ValueError("A text payload value cannot be None")
-        return cls(value, blob_id=None, media_type=TEXT_MEDIA_TYPE)
+        payload = cls(media_type=TEXT_MEDIA_TYPE)
+        payload._value = value
+        return payload
 
     @classmethod
     def ref(cls, blob_id: uuid.UUID) -> "Payload":
@@ -76,7 +71,7 @@ class Payload:
         Returns:
             Payload holding the ref, with no value until resolved.
         """
-        return cls(_UNSET, blob_id=blob_id, media_type=None)
+        return cls(blob_id=blob_id)
 
     @property
     def resolved(self) -> bool:
@@ -85,7 +80,7 @@ class Payload:
         Returns:
             Whether the value is set.
         """
-        return self._value is not _UNSET
+        return self._value is not None
 
     @property
     def value(self) -> Any:
@@ -97,7 +92,7 @@ class Payload:
         Returns:
             The payload value.
         """
-        if self._value is _UNSET:
+        if self._value is None:
             raise RuntimeError(f"Payload for blob {self.blob_id} was not resolved")
         return self._value
 
@@ -113,7 +108,7 @@ class Payload:
 
     def __repr__(self) -> str:
         """Represent the payload for debugging."""
-        value = self._value if self._value is not _UNSET else "<unresolved>"
+        value = self._value if self._value is not None else "<unresolved>"
         return (
             f"Payload(value={value!r}, blob_id={self.blob_id!r}, "
             f"media_type={self.media_type!r})"

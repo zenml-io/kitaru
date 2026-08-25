@@ -19,6 +19,7 @@ import pytest
 
 from conftest import build_payload_store
 from kitaru.server.domain.payload import Payload
+from kitaru.server.domain.session import Session
 
 OWNER_ID = uuid.uuid4()
 
@@ -114,3 +115,23 @@ async def test_unresolved_value_access_raises() -> None:
     payload = Payload.ref(uuid.uuid4())
     with pytest.raises(RuntimeError):
         _ = payload.value
+
+
+async def test_resolve_mutates_the_payload_assigned_to_a_session_field() -> None:
+    """Resolve a payload in place without pydantic copying it on assignment."""
+    fakes = build_payload_store(threshold_bytes=10)
+    value = {"a": "z" * 50}
+    offloaded = Payload.json(value)
+    await fakes.store.offload([offloaded], OWNER_ID)
+    assert offloaded.blob_id is not None
+
+    ref_only = Payload.ref(offloaded.blob_id)
+    session = Session(
+        owner_id=OWNER_ID, agent_id=uuid.uuid4(), number=1, origin="recorded"
+    )
+    session.inputs = ref_only
+    assert session.inputs is ref_only
+
+    await fakes.store.resolve([session.inputs])
+    assert session.inputs is ref_only
+    assert session.inputs.value == value
