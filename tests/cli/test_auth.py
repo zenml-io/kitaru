@@ -216,7 +216,8 @@ async def test_local_login_starts_runtime_before_selecting_target(
         captured.update(kwargs)
         return (
             {
-                "server_url": auth.local_runtime.LOCAL_SERVER_URL,
+                "server_url": "http://localhost:8000",
+                "port": 8000,
                 "deployment": "created",
                 "auth_scheme": "none",
                 "authentication": "not_required",
@@ -226,7 +227,8 @@ async def test_local_login_starts_runtime_before_selecting_target(
             [],
         )
 
-    async def opened() -> bool:
+    async def opened(server_url: str) -> bool:
+        assert server_url == "http://localhost:8000"
         return False
 
     monkeypatch.setattr(auth.local_runtime, "start_local_runtime", fake_start)
@@ -256,10 +258,90 @@ async def test_local_login_starts_runtime_before_selecting_target(
         "package_version": "0.21.0",
         "upgrade": upgrade,
         "timeout": 30,
+        "port": None,
     }
     assert result.item["deployment"] == "created"
     assert "could not be opened" in result.warnings[0]
-    assert get_server_url() == auth.local_runtime.LOCAL_SERVER_URL
+    assert get_server_url() == "http://localhost:8000"
+
+
+async def test_custom_local_port_selects_and_opens_dynamic_url(
+    tmp_path, monkeypatch
+) -> None:
+    """Local login uses the runtime URL derived from the requested port."""
+    credential_store = CredentialStore(tmp_path / "credentials.json")
+    clients: list[str] = []
+    opened_urls: list[str] = []
+
+    async def fake_start(**kwargs):
+        assert kwargs["port"] == 9010
+        return (
+            {
+                "server_url": "http://localhost:9010",
+                "port": 9010,
+                "deployment": "created",
+                "auth_scheme": "none",
+                "authentication": "not_required",
+                "credential_kind": "none",
+                "credential_stored": False,
+            },
+            [],
+        )
+
+    async def opened(server_url: str) -> bool:
+        opened_urls.append(server_url)
+        return True
+
+    monkeypatch.setattr(auth.local_runtime, "start_local_runtime", fake_start)
+    monkeypatch.setattr(auth.local_runtime, "open_local_dashboard", opened)
+    client = FakeClient(AuthScheme.NONE)
+
+    def build_client(**kwargs):
+        clients.append(kwargs["base_url"])
+        return client
+
+    monkeypatch.setattr(auth, "KitaruAPIClient", build_client)
+
+    result = await auth.login(
+        server=None,
+        local=True,
+        port=9010,
+        username=None,
+        password_stdin=False,
+        api_key_stdin=False,
+        credential_store=credential_store,
+        timeout=30,
+        non_interactive=False,
+        no_browser=False,
+        stdin=io.StringIO(),
+        package_version="0.21.0",
+    )
+
+    assert clients == ["http://localhost:9010"]
+    assert opened_urls == ["http://localhost:9010"]
+    assert result.links == {"dashboard": "http://localhost:9010"}
+    assert get_server_url() == "http://localhost:9010"
+
+
+async def test_port_requires_local_login(tmp_path) -> None:
+    """A host port cannot be combined with a managed server login."""
+    with pytest.raises(CLIError) as raised:
+        await auth.login(
+            server="https://managed.example.com",
+            local=False,
+            port=9010,
+            username=None,
+            password_stdin=False,
+            api_key_stdin=False,
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+            timeout=30,
+            non_interactive=True,
+            no_browser=True,
+            stdin=io.StringIO(),
+        )
+
+    assert raised.value.kind == "invalid_arguments"
+    assert "--port requires --local" in raised.value.message
 
 
 async def test_failed_local_start_does_not_replace_selected_target(
@@ -364,21 +446,26 @@ async def test_local_logout_stops_runtime_and_clears_selection(
 ) -> None:
     """Logging out from the owned local target stops it and clears selection."""
     credential_store = CredentialStore(tmp_path / "credentials.json")
-    auth.set_server_url(auth.local_runtime.LOCAL_SERVER_URL)
-    monkeypatch.setattr(auth.local_runtime, "is_local_runtime_owned", lambda: True)
+    server_url = "http://localhost:8000"
+    auth.set_server_url(server_url)
+    monkeypatch.setattr(
+        auth.local_runtime,
+        "is_local_runtime_url",
+        lambda candidate: candidate == server_url,
+    )
     captured: dict[str, object] = {}
 
     async def fake_stop(*, delete_volumes: bool):
         captured["delete_volumes"] = delete_volumes
         return {
-            "server_url": auth.local_runtime.LOCAL_SERVER_URL,
+            "server_url": server_url,
             "deployment": "deleted",
             "data_deleted": True,
         }
 
     monkeypatch.setattr(auth.local_runtime, "stop_local_runtime", fake_stop)
     result = await auth.logout(
-        server_url=auth.local_runtime.LOCAL_SERVER_URL,
+        server_url=server_url,
         all_servers=False,
         delete_volumes=True,
         credential_store=credential_store,
@@ -388,6 +475,51 @@ async def test_local_logout_stops_runtime_and_clears_selection(
     assert result.item["deployment"] == "deleted"
     assert result.warnings
     assert get_server_url() is None
+
+
+async def test_volume_logout_rejects_unowned_localhost_target(
+    tmp_path, monkeypatch
+) -> None:
+    """Volume deletion cannot target an unrelated localhost server."""
+    monkeypatch.setattr(auth.local_runtime, "is_local_runtime_url", lambda _: False)
+
+    with pytest.raises(CLIError, match="CLI-owned local deployment"):
+        await auth.logout(
+            server_url="http://localhost:9010",
+            all_servers=False,
+            delete_volumes=True,
+            credential_store=CredentialStore(tmp_path / "credentials.json"),
+        )
+
+
+async def test_volume_logout_cleans_default_orphans_without_runtime_state(
+    tmp_path, monkeypatch
+) -> None:
+    """A targetless volume logout cleans labeled resources without state."""
+    monkeypatch.setattr(auth.local_runtime, "is_local_runtime_url", lambda _: False)
+    monkeypatch.setattr(auth.local_runtime, "has_local_runtime_state", lambda: False)
+    captured: dict[str, object] = {}
+
+    async def fake_stop(*, delete_volumes: bool):
+        captured["delete_volumes"] = delete_volumes
+        return {
+            "server_url": "http://localhost:8000",
+            "deployment": "deleted",
+            "data_deleted": True,
+        }
+
+    monkeypatch.setattr(auth.local_runtime, "stop_local_runtime", fake_stop)
+
+    result = await auth.logout(
+        server_url="http://localhost:9010",
+        all_servers=False,
+        delete_volumes=True,
+        allow_orphan_cleanup=True,
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+    )
+
+    assert captured["delete_volumes"] is True
+    assert result.item["deployment"] == "deleted"
 
 
 async def test_logout_all_rejects_volume_deletion(tmp_path) -> None:

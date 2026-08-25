@@ -15,7 +15,7 @@
 
 import getpass
 from collections.abc import Callable
-from typing import TextIO
+from typing import TextIO, cast
 
 from kitaru.analytics.source import AnalyticsSource
 from kitaru.api_models.v1.auth import DeviceAuthorizationResponse
@@ -32,13 +32,12 @@ from kitaru.client.credentials import ApiToken
 from kitaru.client.device_auth import device_login
 from kitaru.client.exceptions import NotFoundError
 
-LOCAL_SERVER_URL = "http://localhost:8000"
-
 
 async def login(
     *,
     server: str | None,
     local: bool,
+    port: int | None = None,
     username: str | None,
     password_stdin: bool,
     api_key_stdin: bool,
@@ -57,6 +56,7 @@ async def login(
     Args:
         server: Full managed or self-hosted server URL.
         local: Provision and target the local server.
+        port: Host port for the local server.
         upgrade: Replace an existing local server with the requested image.
         refresh: Skip stored control plane credentials and force a new device
             login flow.
@@ -83,6 +83,8 @@ async def login(
         )
     if upgrade and not local:
         raise CLIError("invalid_arguments", "--upgrade requires --local.")
+    if port is not None and not local:
+        raise CLIError("invalid_arguments", "--port requires --local.")
     if password_stdin and api_key_stdin:
         raise CLIError(
             "invalid_arguments",
@@ -99,10 +101,12 @@ async def login(
             package_version=package_version,
             upgrade=upgrade,
             timeout=timeout,
+            port=port,
             progress=None if non_interactive else write_interaction,
         )
+        server_url = cast(str, item["server_url"])
         client = KitaruAPIClient(
-            base_url=local_runtime.LOCAL_SERVER_URL,
+            base_url=server_url,
             timeout=timeout,
             analytics_source=AnalyticsSource.CLI,
         )
@@ -115,7 +119,7 @@ async def login(
                     "authentication.",
                     hint="Run `kitaru local logs` to inspect its configuration.",
                 )
-            set_server_url(local_runtime.LOCAL_SERVER_URL)
+            set_server_url(server_url)
         except OSError as error:
             raise CLIError(
                 "invalid_configuration",
@@ -126,19 +130,18 @@ async def login(
         item["auth_scheme"] = info.auth_scheme.value
         item["server_version"] = info.version
         if not no_browser and not non_interactive:
-            opened = await local_runtime.open_local_dashboard()
+            opened = await local_runtime.open_local_dashboard(server_url)
             if not opened:
                 warnings.append(
-                    "The dashboard could not be opened. Visit "
-                    f"{local_runtime.LOCAL_DASHBOARD_URL}."
+                    f"The dashboard could not be opened. Visit {server_url}."
                 )
         return CommandResult(
             item=item,
             warnings=warnings,
-            links={"dashboard": local_runtime.LOCAL_DASHBOARD_URL},
+            links={"dashboard": server_url},
             next_actions=["Run `kitaru status` to inspect the local server."],
         )
-    server_url = validate_server_url(LOCAL_SERVER_URL if local else str(server))
+    server_url = validate_server_url(str(server))
     client = KitaruAPIClient(
         base_url=server_url, timeout=timeout, analytics_source=AnalyticsSource.CLI
     )
@@ -226,6 +229,7 @@ async def logout(
     all_servers: bool,
     credential_store: CredentialStore,
     delete_volumes: bool = False,
+    allow_orphan_cleanup: bool = False,
 ) -> CommandResult:
     """Remove local credentials without changing server state.
 
@@ -233,6 +237,8 @@ async def logout(
         server_url: Resolved server whose credential should be removed.
         all_servers: Whether to clear the complete credential store.
         delete_volumes: Whether to delete CLI-owned local deployment data.
+        allow_orphan_cleanup: Whether a targetless volume deletion may remove
+            labeled resources when ownership state is missing.
         credential_store: Existing secret credential store.
 
     Returns:
@@ -251,19 +257,21 @@ async def logout(
             raise CLIError(
                 "invalid_configuration", "No server was resolved for logout."
             )
-        if server_url == local_runtime.LOCAL_SERVER_URL:
-            if delete_volumes or local_runtime.is_local_runtime_owned():
-                item = await local_runtime.stop_local_runtime(
-                    delete_volumes=delete_volumes
-                )
-                credential_store.clear(server_url)
-                set_server_url(None)
-                warnings = (
-                    ["The local Kitaru database and its stored data were deleted."]
-                    if delete_volumes
-                    else []
-                )
-                return CommandResult(item=item, warnings=warnings)
+        orphan_cleanup = (
+            allow_orphan_cleanup
+            and delete_volumes
+            and not local_runtime.has_local_runtime_state()
+        )
+        if local_runtime.is_local_runtime_url(server_url) or orphan_cleanup:
+            item = await local_runtime.stop_local_runtime(delete_volumes=delete_volumes)
+            credential_store.clear(server_url)
+            set_server_url(None)
+            warnings = (
+                ["The local Kitaru database and its stored data were deleted."]
+                if delete_volumes
+                else []
+            )
+            return CommandResult(item=item, warnings=warnings)
         elif delete_volumes:
             raise CLIError(
                 "invalid_arguments",

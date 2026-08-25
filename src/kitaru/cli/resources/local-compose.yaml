@@ -3,7 +3,7 @@ services:
     image: ${KITARU_LOCAL_SERVER_IMAGE}
     platform: linux/amd64
     ports:
-      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:${KITARU_LOCAL_HOST_PORT:-8000}:8000"
     depends_on:
       db:
         condition: service_healthy
