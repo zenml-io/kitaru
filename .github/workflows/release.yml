@@ -96,6 +96,10 @@ jobs:
         env:
           KITARU_UI_RELEASE_TOKEN: ${{ secrets.KITARU_UI_RELEASE_TOKEN }}
         run: bash scripts/download-ui.sh
+      - name: Compress the sample data
+        run: |
+          sample_data=src/kitaru/server/application/services/sample_data.json
+          gzip -9 -n -c "$sample_data" > "$sample_data.gz"
       - name: Build Kitaru Python distribution
         run: |
           uv build --out-dir package-dist

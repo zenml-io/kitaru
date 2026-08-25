@@ -16,6 +16,7 @@
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import asynccontextmanager
 from importlib.metadata import version
+from typing import Any
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,9 +26,9 @@ from sqlalchemy.exc import TimeoutError as SQLAlchemyTimeoutError
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
-    AnalyticsAttribution,
     AnalyticsSource,
-    current_attribution,
+    EventContext,
+    current_event_context,
 )
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.headers import CLIENT_HEADER, SKILL_HEADER
@@ -223,10 +224,10 @@ def _register_token_grant_exception_handler(app: FastAPI) -> None:
         )
 
 
-async def _set_analytics_attribution(
+async def _set_event_context(
     request: Request, call_next: Callable[[Request], Awaitable[Response]]
 ) -> Response:
-    """Set the analytics attribution for the request from the client headers.
+    """Set the analytics event context for the request from the client headers.
 
     Args:
         request: Incoming request.
@@ -236,17 +237,20 @@ async def _set_analytics_attribution(
         HTTP response.
     """
     identity = parse_client_identity(request.headers.get(CLIENT_HEADER, ""))
-    token = current_attribution.set(
-        AnalyticsAttribution(
-            source=identity.source if identity else AnalyticsSource.API,
-            version=identity.version if identity else None,
-            skill=request.headers.get(SKILL_HEADER) or None,
-        )
+    source = identity.source if identity else AnalyticsSource.API
+    properties: dict[str, Any] = {}
+    if identity is not None and identity.version is not None:
+        properties["client_version"] = f"{source.value}/{identity.version}"
+    skill = request.headers.get(SKILL_HEADER)
+    if skill:
+        properties["skill"] = skill
+    token = current_event_context.set(
+        EventContext(source=source, properties=properties)
     )
     try:
         return await call_next(request)
     finally:
-        current_attribution.reset(token)
+        current_event_context.reset(token)
 
 
 def create_app(settings: APISettings) -> FastAPI:
@@ -337,7 +341,7 @@ def create_app(settings: APISettings) -> FastAPI:
     _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)
     _register_token_grant_exception_handler(app)
-    app.middleware("http")(_set_analytics_attribution)
+    app.middleware("http")(_set_event_context)
     # FastAPIInstrumentor registers its middleware last, which makes the
     # OTel span the outermost layer, so this call must come after every
     # other middleware registration.

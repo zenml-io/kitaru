@@ -11,11 +11,14 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Analytics source tracking."""
+"""Analytics source and event context tracking."""
 
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
+from typing import Any
 
 
 class AnalyticsSource(StrEnum):
@@ -30,16 +33,28 @@ class AnalyticsSource(StrEnum):
 
 
 @dataclass(frozen=True)
-class AnalyticsAttribution:
-    """Analytics attribution."""
+class EventContext:
+    """Event context."""
 
     source: AnalyticsSource = AnalyticsSource.PYTHON
-    version: str | None = None
-    skill: str | None = None
+    properties: Mapping[str, Any] = field(default_factory=dict)
 
 
-_DEFAULT_ATTRIBUTION = AnalyticsAttribution()
+_DEFAULT_CONTEXT = EventContext()
 
-current_attribution: ContextVar[AnalyticsAttribution] = ContextVar(
-    "kitaru_analytics_attribution", default=_DEFAULT_ATTRIBUTION
+current_event_context: ContextVar[EventContext] = ContextVar(
+    "kitaru_analytics_event_context", default=_DEFAULT_CONTEXT
 )
+
+
+@contextmanager
+def analytics_event_context(**properties: Any) -> Iterator[None]:
+    """Merge properties into every analytics event tracked inside the block."""
+    current = current_event_context.get()
+    token = current_event_context.set(
+        replace(current, properties={**current.properties, **properties})
+    )
+    try:
+        yield
+    finally:
+        current_event_context.reset(token)

@@ -101,10 +101,13 @@ build-backend = "hatchling.build"
 artifacts = [
     "src/kitaru/_ui/dist/**",
     "src/kitaru/_ui/bundle_manifest.json",
+    "src/kitaru/server/application/services/sample_data.json.gz",
 ]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/kitaru"]
+# The wheel ships only the gzipped sample data, written by the release workflow.
+exclude = ["src/kitaru/server/application/services/sample_data.json"]
 
 [tool.uv]
 exclude-newer = "3 days"
