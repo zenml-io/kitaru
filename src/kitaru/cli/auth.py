@@ -229,6 +229,7 @@ async def logout(
     all_servers: bool,
     credential_store: CredentialStore,
     delete_volumes: bool = False,
+    allow_orphan_cleanup: bool = False,
 ) -> CommandResult:
     """Remove local credentials without changing server state.
 
@@ -236,6 +237,8 @@ async def logout(
         server_url: Resolved server whose credential should be removed.
         all_servers: Whether to clear the complete credential store.
         delete_volumes: Whether to delete CLI-owned local deployment data.
+        allow_orphan_cleanup: Whether a targetless volume deletion may remove
+            labeled resources when ownership state is missing.
         credential_store: Existing secret credential store.
 
     Returns:
@@ -254,7 +257,12 @@ async def logout(
             raise CLIError(
                 "invalid_configuration", "No server was resolved for logout."
             )
-        if local_runtime.is_local_runtime_url(server_url):
+        orphan_cleanup = (
+            allow_orphan_cleanup
+            and delete_volumes
+            and not local_runtime.has_local_runtime_state()
+        )
+        if local_runtime.is_local_runtime_url(server_url) or orphan_cleanup:
             item = await local_runtime.stop_local_runtime(delete_volumes=delete_volumes)
             credential_store.clear(server_url)
             set_server_url(None)

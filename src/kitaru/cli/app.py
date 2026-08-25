@@ -783,6 +783,7 @@ async def logout(
         server_url=server_url,
         all_servers=all,
         delete_volumes=volumes,
+        allow_orphan_cleanup=volumes and server is None and invocation.server is None,
         credential_store=invocation.credential_store,
     )
 

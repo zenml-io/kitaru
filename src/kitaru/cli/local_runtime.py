@@ -392,12 +392,12 @@ def is_local_runtime_url(
     if parsed_server_url.scheme != "http" or parsed_server_url.hostname != "localhost":
         return False
     state = _read_state((paths or get_local_runtime_paths()).state)
-    expected_url = (
-        state.server_url
-        if state is not None
-        else _get_local_server_url(DEFAULT_LOCAL_PORT)
-    )
-    return normalized_server_url == expected_url
+    return state is not None and normalized_server_url == state.server_url
+
+
+def has_local_runtime_state(paths: LocalRuntimePaths | None = None) -> bool:
+    """Return whether local deployment ownership state exists."""
+    return (paths or get_local_runtime_paths()).state.exists()
 
 
 async def open_local_dashboard(server_url: str) -> bool:

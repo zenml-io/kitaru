@@ -205,9 +205,9 @@ def test_local_runtime_url_uses_persisted_custom_port(runtime_paths) -> None:
     )
 
 
-def test_local_runtime_url_defaults_orphans_to_port_8000(runtime_paths) -> None:
-    """Missing ownership state retains the historical orphan cleanup target."""
-    assert local_runtime.is_local_runtime_url(
+def test_local_runtime_url_requires_ownership_state(runtime_paths) -> None:
+    """Orphan cleanup does not guess a URL when ownership state is missing."""
+    assert not local_runtime.is_local_runtime_url(
         "http://localhost:8000", paths=runtime_paths
     )
     assert not local_runtime.is_local_runtime_url(
