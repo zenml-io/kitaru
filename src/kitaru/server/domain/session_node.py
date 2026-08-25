@@ -63,8 +63,11 @@ class SessionNode(DomainModel):
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None
     reasoning: str | None = None
+    reasoning_blob_id: uuid.UUID | None = None
     inputs: Any = None
+    inputs_blob_id: uuid.UUID | None = None
     outputs: Any = None
+    outputs_blob_id: uuid.UUID | None = None
     requested_model: str | None = None
     model: str | None = None
     model_provider: str | None = None
@@ -75,6 +78,7 @@ class SessionNode(DomainModel):
     cache_key: str | None = None
     subagent_id: str | None = None
     attributes: Any = None
+    attributes_blob_id: uuid.UUID | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created: datetime | None = None
     updated: datetime | None = None

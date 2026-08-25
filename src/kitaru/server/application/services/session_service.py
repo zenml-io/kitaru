@@ -32,6 +32,9 @@ from kitaru.server.application.models.session import (
 )
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
+from kitaru.server.application.services.payload_offload_service import (
+    PayloadOffloadService,
+)
 from kitaru.server.application.services.resource_access import (
     check_task_attempt,
     check_task_session_read,
@@ -64,6 +67,7 @@ class SessionService:
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
         replay_repository: ReplayRepository,
+        payload_offload: PayloadOffloadService,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -74,12 +78,14 @@ class SessionService:
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
             replay_repository: Replay repository, for the baseline lookup.
+            payload_offload: Payload offload service, for inputs and outputs.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
         self._replays = replay_repository
+        self._payload_offload = payload_offload
         self._analytics = analytics
 
     async def create_session(
@@ -161,7 +167,9 @@ class SessionService:
             framework=command.framework,
             adapter_version=command.adapter_version,
         )
+        session = await self._payload_offload.offload_session(session)
         stored = await self._repository.create(session)
+        stored = (await self._payload_offload.hydrate_sessions([stored]))[0]
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -247,7 +255,7 @@ class SessionService:
         """
         session = await self._repository.get(session_id)
         check_task_session_read(session_id, session.task_id, actor)
-        return session
+        return (await self._payload_offload.hydrate_sessions([session]))[0]
 
     async def get_baseline_session(
         self, session_id: uuid.UUID, actor: AuthContext
@@ -276,7 +284,8 @@ class SessionService:
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
-        return await self._repository.get(replay.baseline_session_id)
+        baseline = await self._repository.get(replay.baseline_session_id)
+        return (await self._payload_offload.hydrate_sessions([baseline]))[0]
 
     async def list_sessions(
         self, session_filter: SessionFilter, actor: AuthContext
@@ -291,7 +300,8 @@ class SessionService:
             Page of matching sessions and the next cursor.
         """
         _ = actor
-        return await self._repository.query(session_filter)
+        sessions, next_cursor = await self._repository.query(session_filter)
+        return await self._payload_offload.hydrate_sessions(sessions), next_cursor
 
     async def update_session(
         self, session_id: uuid.UUID, command: SessionUpdate, actor: AuthContext
@@ -338,6 +348,13 @@ class SessionService:
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
+            if "outputs" in fields:
+                # Only re-derive the offload state when outputs actually
+                # changed, otherwise a session whose outputs were already
+                # offloaded would lose its ref: session.outputs reads back
+                # as None (the value lives in the blob) and offloading that
+                # None would overwrite outputs_blob_id with None too.
+                session = await self._payload_offload.offload_session_outputs(session)
             if (
                 self._analytics is not None
                 and previous_status == SessionStatus.IN_PROGRESS
@@ -354,7 +371,8 @@ class SessionService:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}
             )
-        return await self._repository.update(session)
+        stored = await self._repository.update(session)
+        return (await self._payload_offload.hydrate_sessions([stored]))[0]
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

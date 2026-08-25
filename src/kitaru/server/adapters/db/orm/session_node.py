@@ -54,6 +54,18 @@ SESSION_NODE_SESSION_ID_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session_node", ["session_id", "external_id"]
 )
 SESSION_NODE_SESSION_ID_FOREIGN_KEY = foreign_key_name("session_node", ["session_id"])
+SESSION_NODE_INPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name(
+    "session_node", ["inputs_blob_id"]
+)
+SESSION_NODE_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name(
+    "session_node", ["outputs_blob_id"]
+)
+SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY = foreign_key_name(
+    "session_node", ["attributes_blob_id"]
+)
+SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY = foreign_key_name(
+    "session_node", ["reasoning_blob_id"]
+)
 SESSION_NODE_CACHE_KEY_INDEX = index_name("session_node", ["cache_key"])
 
 NODE_TYPE_LENGTH = 32
@@ -82,6 +94,26 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_NODE_SESSION_ID_FOREIGN_KEY,
             ondelete="CASCADE",
         ),
+        ForeignKeyConstraint(
+            ["inputs_blob_id"],
+            ["blob.id"],
+            name=SESSION_NODE_INPUTS_BLOB_ID_FOREIGN_KEY,
+        ),
+        ForeignKeyConstraint(
+            ["outputs_blob_id"],
+            ["blob.id"],
+            name=SESSION_NODE_OUTPUTS_BLOB_ID_FOREIGN_KEY,
+        ),
+        ForeignKeyConstraint(
+            ["attributes_blob_id"],
+            ["blob.id"],
+            name=SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY,
+        ),
+        ForeignKeyConstraint(
+            ["reasoning_blob_id"],
+            ["blob.id"],
+            name=SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY,
+        ),
         Index(
             SESSION_NODE_CACHE_KEY_INDEX,
             "cache_key",
@@ -107,8 +139,11 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     output_text_selector: Mapped[str | None] = mapped_column(Text)
     system_prompt_selector: Mapped[str | None] = mapped_column(Text)
     reasoning: Mapped[str | None] = mapped_column(Text)
+    reasoning_blob_id: Mapped[uuid.UUID | None]
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    outputs_blob_id: Mapped[uuid.UUID | None]
     requested_model: Mapped[str | None] = mapped_column(Text)
     model: Mapped[str | None] = mapped_column(Text)
     model_provider: Mapped[str | None] = mapped_column(Text)
@@ -124,6 +159,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     cache_key: Mapped[str | None] = mapped_column(CHAR(CACHE_KEY_LENGTH))
     subagent_id: Mapped[str | None] = mapped_column(String(255))
     attributes: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    attributes_blob_id: Mapped[uuid.UUID | None]
     metadata_: Mapped[dict[str, Any]] = mapped_column("metadata", JSONB)
 
     @classmethod
@@ -171,8 +207,11 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.output_text_selector = node.output_text_selector
         self.system_prompt_selector = node.system_prompt_selector
         self.reasoning = node.reasoning
+        self.reasoning_blob_id = node.reasoning_blob_id
         self.inputs = node.inputs
+        self.inputs_blob_id = node.inputs_blob_id
         self.outputs = node.outputs
+        self.outputs_blob_id = node.outputs_blob_id
         self.requested_model = node.requested_model
         self.model = node.model
         self.model_provider = node.model_provider
@@ -188,6 +227,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.cache_key = node.cache_key
         self.subagent_id = node.subagent_id
         self.attributes = node.attributes
+        self.attributes_blob_id = node.attributes_blob_id
         self.metadata_ = node.metadata
 
     def to_domain(self, include_payloads: bool) -> SessionNode:
@@ -240,8 +280,11 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,
             reasoning=self.reasoning if include_payloads else None,
+            reasoning_blob_id=self.reasoning_blob_id,
             inputs=self.inputs if include_payloads else None,
+            inputs_blob_id=self.inputs_blob_id,
             outputs=self.outputs if include_payloads else None,
+            outputs_blob_id=self.outputs_blob_id,
             requested_model=self.requested_model,
             model=self.model,
             model_provider=self.model_provider,
@@ -252,6 +295,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             cache_key=self.cache_key,
             subagent_id=self.subagent_id,
             attributes=self.attributes if include_payloads else None,
+            attributes_blob_id=self.attributes_blob_id,
             metadata=self.metadata_,
             created=self.created,
             updated=self.updated,

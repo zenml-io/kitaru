@@ -29,6 +29,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
+    build_payload_offload_service,
     create_plugin,
     override_idempotency,
 )
@@ -95,6 +96,7 @@ async def api_client(
         task_repository=FakeTaskRepository(),
         agent_version_repository=agent_versions,
         replay_repository=FakeReplayRepository(),
+        payload_offload=build_payload_offload_service(),
     )
     evaluation_service = EvaluationService(
         repository=evaluation_repository, session_repository=session_repository

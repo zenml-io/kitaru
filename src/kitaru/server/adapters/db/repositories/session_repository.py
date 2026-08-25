@@ -332,7 +332,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.status = session.status.value
         row.name = session.name
         row.inputs = session.inputs
+        row.inputs_blob_id = session.inputs_blob_id
         row.outputs = session.outputs
+        row.outputs_blob_id = session.outputs_blob_id
         row.error = session.error
         row.started_at = session.started_at
         row.ended_at = session.ended_at

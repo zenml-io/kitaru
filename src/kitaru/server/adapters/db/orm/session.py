@@ -54,6 +54,8 @@ SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
 SESSION_TASK_ID_FOREIGN_KEY = foreign_key_name("session", ["task_id"])
+SESSION_INPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["inputs_blob_id"])
+SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["outputs_blob_id"])
 SESSION_AGENT_ID_ID_INDEX = index_name("session", ["agent_id", "id"])
 SESSION_AGENT_VERSION_ID_ID_INDEX = index_name("session", ["agent_version_id", "id"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
@@ -104,6 +106,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="SET NULL",
             use_alter=True,
         ),
+        ForeignKeyConstraint(
+            ["inputs_blob_id"], ["blob.id"], name=SESSION_INPUTS_BLOB_ID_FOREIGN_KEY
+        ),
+        ForeignKeyConstraint(
+            ["outputs_blob_id"], ["blob.id"], name=SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY
+        ),
         Index(SESSION_AGENT_ID_ID_INDEX, "agent_id", "id"),
         Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),
         Index(SESSION_STATUS_INDEX, "status"),
@@ -120,7 +128,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    outputs_blob_id: Mapped[uuid.UUID | None]
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -162,7 +172,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             status=session.status.value,
             name=session.name,
             inputs=session.inputs,
+            inputs_blob_id=session.inputs_blob_id,
             outputs=session.outputs,
+            outputs_blob_id=session.outputs_blob_id,
             error=session.error,
             started_at=session.started_at,
             ended_at=session.ended_at,
@@ -221,7 +233,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             status=SessionStatus(self.status),
             name=self.name,
             inputs=self.inputs,
+            inputs_blob_id=self.inputs_blob_id,
             outputs=self.outputs,
+            outputs_blob_id=self.outputs_blob_id,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

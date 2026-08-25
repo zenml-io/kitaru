@@ -116,6 +116,9 @@ from kitaru.server.application.services.experiment_run_service import (
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.job_service import JobService
+from kitaru.server.application.services.payload_offload_service import (
+    PayloadOffloadService,
+)
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
@@ -3711,6 +3714,38 @@ class FakeBlobRepository:
             raise BlobNotFound(blob_id)
         return blob.model_copy()
 
+    async def get_many(self, blob_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Blob]:
+        """Bulk-load blobs by id, keyed by id, missing ids omitted.
+
+        Args:
+            blob_ids: Ids of the blobs to load.
+
+        Returns:
+            Stored blobs keyed by id.
+        """
+        wanted = set(blob_ids)
+        return {
+            blob.id: blob.model_copy()
+            for blob in self._blobs.values()
+            if blob.id in wanted
+        }
+
+    async def get_many_by_sha256s(self, sha256s: Sequence[str]) -> dict[str, Blob]:
+        """Bulk-load blobs by content hash, keyed by sha256, misses omitted.
+
+        Args:
+            sha256s: Content hashes to look up.
+
+        Returns:
+            Stored blobs keyed by sha256.
+        """
+        wanted = set(sha256s)
+        return {
+            blob.sha256: blob.model_copy()
+            for blob in self._blobs.values()
+            if blob.sha256 in wanted
+        }
+
     async def delete(self, blob_id: uuid.UUID) -> None:
         """Delete a blob by id.
 
@@ -3810,6 +3845,28 @@ async def create_blob(
         )
     )
     return blob
+
+
+DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES = 20 * 1024
+
+
+def build_payload_offload_service(
+    threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+) -> PayloadOffloadService:
+    """Build a payload offload service backed by fresh fake blob storage.
+
+    Args:
+        threshold_bytes: Serialized size above which a payload is offloaded.
+
+    Returns:
+        Payload offload service bound to fresh fakes.
+    """
+    return PayloadOffloadService(
+        repository=FakeBlobRepository(),
+        data_stores={BlobStorageBackend.DATABASE: FakeBlobDataStore()},
+        backend=BlobStorageBackend.DATABASE,
+        threshold_bytes=threshold_bytes,
+    )
 
 
 class FakePluginRepository:
@@ -6177,6 +6234,7 @@ class ReplayServices(NamedTuple):
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
     transitions: TaskTransitions
+    payload_offload: PayloadOffloadService
 
 
 def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
@@ -6266,6 +6324,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         transitions=transitions,
         policy=task_policy,
     )
+    payload_offload = build_payload_offload_service()
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,
@@ -6278,6 +6337,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         job_repository=jobs,
         task_repository=tasks,
         transitions=transitions,
+        payload_offload=payload_offload,
     )
     replay_service = ReplayService(
         repository=replays,
@@ -6289,6 +6349,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_node_repository=session_nodes,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
+        payload_offload=payload_offload,
     )
     experiment_run_service = ExperimentRunService(
         repository=experiment_runs,
@@ -6320,6 +6381,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluations=evaluations,
         tags=tags,
         transitions=transitions,
+        payload_offload=payload_offload,
     )
 
 

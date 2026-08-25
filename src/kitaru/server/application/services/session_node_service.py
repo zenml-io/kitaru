@@ -30,6 +30,9 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
+from kitaru.server.application.services.payload_offload_service import (
+    PayloadOffloadService,
+)
 from kitaru.server.application.services.resource_access import (
     check_task_attempt,
     check_task_session_read,
@@ -52,6 +55,7 @@ class SessionNodeService:
         repository: SessionNodeRepository,
         session_repository: SessionRepository,
         task_repository: TaskRepository,
+        payload_offload: PayloadOffloadService,
     ) -> None:
         """Initialize the service.
 
@@ -60,10 +64,12 @@ class SessionNodeService:
             session_repository: Session repository, for the ingest gate and
                 the rollup update.
             task_repository: Task repository, for the attempt fence.
+            payload_offload: Payload offload service, for node payloads.
         """
         self._repository = repository
         self._sessions = session_repository
         self._tasks = task_repository
+        self._payload_offload = payload_offload
 
     async def ingest_nodes(
         self,
@@ -183,9 +189,10 @@ class SessionNodeService:
             )
             for node in resolved
         ]
+        resolved = await self._payload_offload.offload_nodes(resolved, session.owner_id)
         stored = await self._repository.upsert_batch(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        return stored
+        return await self._payload_offload.hydrate_nodes(stored)
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext
@@ -211,7 +218,10 @@ class SessionNodeService:
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_node_filter.session_id)
             check_task_session_read(session.id, session.task_id, actor)
-        return await self._repository.query(session_node_filter)
+        nodes, next_cursor = await self._repository.query(session_node_filter)
+        if session_node_filter.include_payloads:
+            nodes = await self._payload_offload.hydrate_nodes(nodes)
+        return nodes, next_cursor
 
     async def list_all_nodes(
         self, session_id: uuid.UUID, include_payloads: bool, actor: AuthContext
@@ -239,7 +249,10 @@ class SessionNodeService:
         if isinstance(actor.principal, TaskPrincipal):
             session = await self._sessions.get(session_id)
             check_task_session_read(session_id, session.task_id, actor)
-        return await self._repository.list_all(session_id, include_payloads)
+        nodes = await self._repository.list_all(session_id, include_payloads)
+        if include_payloads:
+            nodes = await self._payload_offload.hydrate_nodes(nodes)
+        return nodes
 
     async def get_indexes_by_ids(
         self,

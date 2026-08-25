@@ -13,12 +13,15 @@
 #  permissions and limitations under the License.
 """Tests for replay use cases: creation validation, reads, and tool lookup."""
 
+import json
 import uuid
 from typing import Any
 
 import pytest
 
 from conftest import (
+    FakeBlobDataStore,
+    FakeBlobRepository,
     ReplayServices,
     build_replay_services,
     create_agent,
@@ -49,6 +52,9 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.services.payload_offload_service import (
+    PayloadOffloadService,
+)
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
@@ -58,6 +64,7 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.base import ValidationError
+from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.replay import (
@@ -869,8 +876,75 @@ def _replay_service_with_analytics(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
+        payload_offload=services.payload_offload,
         analytics=analytics,
     )
+
+
+def _replay_service_with_payload_offload(
+    services: ReplayServices, payload_offload: PayloadOffloadService
+) -> ReplayService:
+    return ReplayService(
+        repository=services.replays,
+        experiment_repository=services.experiments,
+        experiment_run_repository=services.experiment_runs,
+        job_repository=services.jobs,
+        task_repository=services.tasks,
+        session_repository=services.sessions,
+        session_node_repository=services.session_nodes,
+        agent_version_repository=services.agent_versions,
+        plugin_repository=services.plugins,
+        payload_offload=payload_offload,
+    )
+
+
+async def test_tool_lookup_hydrates_an_offloaded_output(
+    services: ReplayServices,
+) -> None:
+    """Return the original output for a tool call whose output was offloaded."""
+    blob_repository = FakeBlobRepository()
+    data_store = FakeBlobDataStore()
+    payload_offload = PayloadOffloadService(
+        repository=blob_repository,
+        data_stores={BlobStorageBackend.DATABASE: data_store},
+        backend=BlobStorageBackend.DATABASE,
+        threshold_bytes=1024,
+    )
+    service = _replay_service_with_payload_offload(services, payload_offload)
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    outputs = {"result": "x" * 5000}
+    content = json.dumps(outputs, separators=(",", ":")).encode("utf-8")
+    blob = await create_blob(
+        blob_repository,
+        ACTOR.account.id,
+        content=content,
+        media_type="application/json",
+        data_store=data_store,
+    )
+    cache_key = "a" * 64
+    node = SessionNode(
+        session_id=baseline.id,
+        index=0,
+        node_type=NodeType.TOOL_CALL,
+        name="search",
+        status=NodeStatus.COMPLETED,
+        tool_name="search",
+        cache_key=cache_key,
+        outputs=None,
+        outputs_blob_id=blob.id,
+    )
+    await services.session_nodes.upsert_batch(baseline.id, [node])
+
+    result = await service.tool_lookup(
+        replay_id, "search", cache_key, None, actor=ACTOR
+    )
+    assert result is not None
+    assert result.result == outputs
 
 
 async def test_create_replay_tracks_replay_created(services: ReplayServices) -> None:

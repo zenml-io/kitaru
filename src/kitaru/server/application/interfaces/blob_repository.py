@@ -14,6 +14,7 @@
 """Blob repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.domain.blob import Blob
@@ -44,6 +45,28 @@ class BlobRepository(Protocol):
 
         Returns:
             Stored blob.
+        """
+        ...
+
+    async def get_many(self, blob_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Blob]:
+        """Bulk-load blobs by id, keyed by id, missing ids omitted.
+
+        Args:
+            blob_ids: Ids of the blobs to load.
+
+        Returns:
+            Stored blobs keyed by id.
+        """
+        ...
+
+    async def get_many_by_sha256s(self, sha256s: Sequence[str]) -> dict[str, Blob]:
+        """Bulk-load blobs by content hash, keyed by sha256, misses omitted.
+
+        Args:
+            sha256s: Content hashes to look up.
+
+        Returns:
+            Stored blobs keyed by sha256.
         """
         ...
 

@@ -28,6 +28,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
+    build_payload_offload_service,
     override_idempotency,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest
@@ -94,6 +95,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(agent_repository),
         replay_repository=FakeReplayRepository(),
+        payload_offload=build_payload_offload_service(),
     )
     app.dependency_overrides[get_investigation_service] = lambda: InvestigationService(
         repository=investigation_repository,

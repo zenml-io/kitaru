@@ -14,6 +14,7 @@
 """SQL blob repository."""
 
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -89,6 +90,33 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
         """
         row = await self._get_row(blob_id)
         return row.to_domain()
+
+    async def get_many(self, blob_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Blob]:
+        """Bulk-load blobs by id, keyed by id, missing ids omitted.
+
+        Args:
+            blob_ids: Ids of the blobs to load.
+
+        Returns:
+            Stored blobs keyed by id.
+        """
+        rows = await self._load_by_ids(list(blob_ids))
+        return {blob_id: row.to_domain() for blob_id, row in rows.items()}
+
+    async def get_many_by_sha256s(self, sha256s: Sequence[str]) -> dict[str, Blob]:
+        """Bulk-load blobs by content hash, keyed by sha256, misses omitted.
+
+        Args:
+            sha256s: Content hashes to look up.
+
+        Returns:
+            Stored blobs keyed by sha256.
+        """
+        if not sha256s:
+            return {}
+        statement = select(BlobORM).where(BlobORM.sha256.in_(sha256s))
+        rows = (await self._session.scalars(statement)).all()
+        return {row.sha256: row.to_domain() for row in rows}
 
     async def delete(self, blob_id: uuid.UUID) -> None:
         """Delete a blob by id.

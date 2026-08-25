@@ -271,7 +271,9 @@ class Session(DomainModel):
     status: SessionStatus = SessionStatus.IN_PROGRESS
     name: str | None = None
     inputs: Any = None
+    inputs_blob_id: uuid.UUID | None = None
     outputs: Any = None
+    outputs_blob_id: uuid.UUID | None = None
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None

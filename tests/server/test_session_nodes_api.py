@@ -27,6 +27,7 @@ from conftest import (
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    build_payload_offload_service,
     override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -72,16 +73,19 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
+    payload_offload = build_payload_offload_service()
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        payload_offload=payload_offload,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=FakeTaskRepository(),
+        payload_offload=payload_offload,
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
