@@ -259,8 +259,6 @@ async def start_local_runtime(
                 pull_if_missing=True,
                 progress=progress,
             )
-            if state is not None and (state.server_image != image or port_changed):
-                _write_runtime_files(paths, image=image, port=resolved_port)
             if upgrade:
                 action = "upgraded"
             elif port_changed:
@@ -269,14 +267,16 @@ async def start_local_runtime(
                 action = "created"
             else:
                 action = "started"
+            compose_arguments = (
+                "up",
+                "-d",
+                "--pull",
+                "never",
+                "--remove-orphans",
+            )
             try:
-                compose_arguments = (
-                    "up",
-                    "-d",
-                    "--pull",
-                    "never",
-                    "--remove-orphans",
-                )
+                if state is not None and (state.server_image != image or port_changed):
+                    _write_runtime_files(paths, image=image, port=resolved_port)
                 if progress is None:
                     await _run_compose(
                         runner,

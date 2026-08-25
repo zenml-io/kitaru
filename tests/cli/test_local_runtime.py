@@ -313,6 +313,46 @@ async def test_failed_port_reconfiguration_restores_running_deployment(
     assert item["server_url"] == "http://localhost:8000"
 
 
+async def test_failed_runtime_file_update_restores_previous_files(
+    runtime_paths, monkeypatch
+) -> None:
+    """A partial reconfiguration write restores both runtime files."""
+    image = "zenmldocker/kitaru-server:0.21.0"
+    local_runtime._write_runtime_files(runtime_paths, image=image, port=8000)
+    previous_environment = runtime_paths.environment.read_text()
+    previous_state = runtime_paths.state.read_text()
+    runner = FakeDockerRunner()
+    compose = local_runtime._compose_arguments(runtime_paths)
+    runner.results[(*compose, "ps", "--status", "running", "--quiet")] = ProcessResult(
+        0, "server\ndb\n", ""
+    )
+    monkeypatch.setattr(local_runtime, "_reject_occupied_port", lambda _: None)
+    original_write = local_runtime.write_json_file
+    failed = False
+
+    def write(path: Path, content: dict[str, object]) -> None:
+        nonlocal failed
+        if path == runtime_paths.state and content.get("port") == 9010 and not failed:
+            failed = True
+            raise OSError("interrupted state write")
+        original_write(path, content)
+
+    monkeypatch.setattr(local_runtime, "write_json_file", write)
+
+    with pytest.raises(OSError, match="interrupted state write"):
+        await local_runtime.start_local_runtime(
+            package_version="0.21.0",
+            upgrade=False,
+            timeout=30,
+            port=9010,
+            runner=runner,
+            paths=runtime_paths,
+        )
+
+    assert runtime_paths.environment.read_text() == previous_environment
+    assert runtime_paths.state.read_text() == previous_state
+
+
 async def test_interactive_start_streams_pull_and_compose_progress(
     runtime_paths, monkeypatch
 ) -> None:
