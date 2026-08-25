@@ -205,6 +205,26 @@ def test_local_runtime_url_uses_persisted_custom_port(runtime_paths) -> None:
     )
 
 
+def test_local_runtime_url_defaults_orphans_to_port_8000(runtime_paths) -> None:
+    """Missing ownership state retains the historical orphan cleanup target."""
+    assert local_runtime.is_local_runtime_url(
+        "http://localhost:8000", paths=runtime_paths
+    )
+    assert not local_runtime.is_local_runtime_url(
+        "http://localhost:9010", paths=runtime_paths
+    )
+
+
+def test_managed_url_does_not_read_malformed_local_state(runtime_paths) -> None:
+    """Unrelated logout targets are independent of local state integrity."""
+    runtime_paths.directory.mkdir(parents=True)
+    runtime_paths.state.write_text("not json")
+
+    assert not local_runtime.is_local_runtime_url(
+        "https://managed.example.com", paths=runtime_paths
+    )
+
+
 async def test_changed_port_reconfigures_running_deployment(
     runtime_paths, monkeypatch
 ) -> None:

@@ -492,6 +492,34 @@ async def test_volume_logout_rejects_unowned_localhost_target(
         )
 
 
+async def test_volume_logout_cleans_default_orphans_without_runtime_state(
+    tmp_path, monkeypatch
+) -> None:
+    """The historical default target can still clean labeled orphan resources."""
+    monkeypatch.setattr(auth.local_runtime, "is_local_runtime_url", lambda _: True)
+    captured: dict[str, object] = {}
+
+    async def fake_stop(*, delete_volumes: bool):
+        captured["delete_volumes"] = delete_volumes
+        return {
+            "server_url": "http://localhost:8000",
+            "deployment": "deleted",
+            "data_deleted": True,
+        }
+
+    monkeypatch.setattr(auth.local_runtime, "stop_local_runtime", fake_stop)
+
+    result = await auth.logout(
+        server_url="http://localhost:8000",
+        all_servers=False,
+        delete_volumes=True,
+        credential_store=CredentialStore(tmp_path / "credentials.json"),
+    )
+
+    assert captured["delete_volumes"] is True
+    assert result.item["deployment"] == "deleted"
+
+
 async def test_logout_all_rejects_volume_deletion(tmp_path) -> None:
     """Credential-wide logout cannot delete local Docker data."""
     with pytest.raises(CLIError, match="cannot be combined"):

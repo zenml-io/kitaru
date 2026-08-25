@@ -27,6 +27,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from packaging.version import InvalidVersion, Version
@@ -386,8 +387,17 @@ def is_local_runtime_url(
     server_url: str, paths: LocalRuntimePaths | None = None
 ) -> bool:
     """Return whether a URL identifies the CLI-owned local deployment."""
+    normalized_server_url = normalize_server_url(server_url)
+    parsed_server_url = urlsplit(normalized_server_url)
+    if parsed_server_url.scheme != "http" or parsed_server_url.hostname != "localhost":
+        return False
     state = _read_state((paths or get_local_runtime_paths()).state)
-    return state is not None and normalize_server_url(server_url) == state.server_url
+    expected_url = (
+        state.server_url
+        if state is not None
+        else _get_local_server_url(DEFAULT_LOCAL_PORT)
+    )
+    return normalized_server_url == expected_url
 
 
 async def open_local_dashboard(server_url: str) -> bool:
