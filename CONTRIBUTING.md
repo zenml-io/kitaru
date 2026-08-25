@@ -10,7 +10,7 @@ We're happy to take pull requests from people outside the core team. We do restr
 2. A maintainer replies on the issue. Sometimes that's a quick "yes, go ahead", sometimes it's a longer back and forth about scope or design. Either way, wait for that before you start.
 3. Once we've agreed, a maintainer adds you as a collaborator and you open your PR against `develop`. If you already have a branch on a fork, link it in the issue and we'll look at it there.
 
-If a PR shows up without an issue behind it, we'll probably close it and ask you to open one, even if the change looks fine. That's not a judgement on the code. We just can't tell from a cold PR whether it fits where the project is going, and it's a waste of your evening if it doesn't.
+If a PR shows up without an issue behind it, we'll probably close it and ask you to open one, even if the change looks fine. That's not a judgment on the code. We just can't tell from a cold PR whether it fits where the project is going, and it's a waste of your evening if it doesn't.
 
 Typo and broken link fixes go through the same route. The conversation will be about one sentence long.
 
