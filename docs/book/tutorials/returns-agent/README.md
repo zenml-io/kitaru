@@ -1,5 +1,5 @@
 ---
-description: Investigate supplied returns-agent traces and test one evidence-led improvement.
+description: Investigate supplied returns agent traces and test one evidence-led improvement.
 icon: graduation-cap
 ---
 
@@ -15,7 +15,7 @@ The tutorial is intentionally more detailed than the [Quickstart](../../getting-
 
 | Phase | You will create | Why it exists |
 | --- | --- | --- |
-| [1. Observe](observe.md) | A verified [agent version](../../concepts/agents-and-sessions.md), ten imported [sessions](../../concepts/agents-and-sessions.md), and descriptive [evaluations](../../concepts/evaluators.md) | Confirm what the template preserved and select a bounded, varied review worklist. |
+| [1. Observe](observe.md) | A verified [agent version](../../concepts/agents-and-sessions.md), ten imported [sessions](../../concepts/agents-and-sessions.md), and descriptive [evaluations](../../concepts/evaluators.md) | Confirm what the example preserved and select a bounded, varied review worklist. |
 | [2. Judge](judge.md) | An [investigation](../../concepts/investigations.md), evidence-linked annotations, and verdicts | Store what a human concluded without rewriting the trace. |
 | [3. Define](define.md) | One accepted behavior, an immutable [cohort version](../../concepts/cohorts.md), and an evaluator version | Turn reviewed evidence into a repeatable measurement. |
 | [4. Replay](replay.md) | A candidate agent version, [experiment](../../concepts/experiments.md), and experiment run | Run one bounded change against the frozen population under an explicit tool policy. |
@@ -23,26 +23,26 @@ The tutorial is intentionally more detailed than the [Quickstart](../../getting-
 
 Each page begins with the same five-step map. The first four phase pages end with a **Checkpoint**, and the final page summarizes the complete evidence chain. Because this is evidence-led, placeholders such as `YOUR_SESSION_UUID` are deliberate: substitute IDs produced by your own review rather than copying a predetermined ticket list.
 
-## Prepare the public template
+## Prepare the PydanticAI returns agent
 
-Install `jq`, then open the public [`kitaru-template` README](https://github.com/zenml-io/kitaru-template#prepare-the-template) and complete its setup through the ten-session confirmation. That README is the source of truth for cloning, the frozen environment, workspace selection, agent registration, worker startup, and the checked-in Langfuse import. Keep running the commands below from the template repository root.
+Install `jq`, then open the [PydanticAI returns agent README](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver) and complete its setup through the ten-session confirmation. That README is the source of truth for cloning, entering the example directory, the frozen environment, workspace selection, agent registration, worker startup, and the checked-in Langfuse import. Keep running the commands below from the example directory.
 
-The template uses synthetic customers, orders, shipments, and actions. Refund and replacement tools modify only an isolated in-memory store. No model-provider or Langfuse credentials are needed for setup, import, or the deterministic parts of this tutorial.
+The example uses synthetic customers, orders, shipments, and actions. Refund and replacement tools modify only an isolated in-memory store. No model-provider or Langfuse credentials are needed for setup, import, or the deterministic parts of this tutorial.
 
-Before continuing, confirm these conditions from the template README:
+Before continuing, confirm these conditions from the example README:
 
 - the selected workspace does not already contain tutorial resources named `returns-resolver`, `returns-discovery`, `returns-regression`, `returns-behavior`, or `returns-candidate`;
-- `returns-resolver@1` is registered from the template root;
+- `returns-resolver@1` is registered from the example directory;
 - ten imported sessions have the `returns-baseline` tag; and
-- the template worker remains running in the second terminal.
+- the example worker remains running in the second terminal.
 
 Stop and select another workspace if those resource names already exist. Do not delete an existing workspace merely to make its names available.
 
-Some tutorial commands create jobs. The [worker](../../concepts/workers.md) claims those jobs and performs the work in your environment, so the Kitaru server does not receive your agent code or model credentials. Keep the template worker running while you Observe, Judge, and Define. In the Replay phase you will restart it with `OPENAI_API_KEY` before any paid model call.
+Some tutorial commands create jobs. The [worker](../../concepts/workers.md) claims those jobs and performs the work in your environment, so the Kitaru server does not receive your agent code or model credentials. Keep the example worker running while you Observe, Judge, and Define. In the Replay phase you will restart it with `OPENAI_API_KEY` before any paid model call.
 
 ## Prefer a coding agent?
 
-The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/setup.md) and use the template-specific prompt in the [`kitaru-template` README](https://github.com/zenml-io/kitaru-template#continue-with-a-coding-agent).
+The pages that follow teach the manual path so you can see each object and boundary. If you want an agent to guide the same evidence loop, install the [Kitaru skills](../../agent-native/setup.md) and use the guided-tour prompt in the [PydanticAI returns agent README](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver).
 
 ## Start the investigation
 

@@ -7,15 +7,15 @@ icon: eye
 
 **Observe** → Judge → Define → Replay → Compare
 
-The first task is factual: confirm what the template preserved and inspect the population before deciding what was right or wrong. By the end of this page, you will have descriptive measurements and a bounded, varied worklist for human review.
+The first task is factual: confirm what the example preserved and inspect the population before deciding what was right or wrong. By the end of this page, you will have descriptive measurements and a bounded, varied worklist for human review.
 
 ## Confirm the prepared evidence
 
-The [`kitaru-template` setup](https://github.com/zenml-io/kitaru-template#prepare-the-template) registered the logical agent `returns-resolver` and assigned its first immutable run specification the reference `returns-resolver@1`. That version stores the command, working directory, timeout, and declared tools Kitaru can use for later replay. Registration did not run the agent.
+The [PydanticAI returns agent setup](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver) registered the logical agent `returns-resolver` and assigned its first immutable run specification the reference `returns-resolver@1`. That version stores the command, working directory, timeout, and declared tools Kitaru can use for later replay. Registration did not run the agent.
 
 The setup also imported `traces/langfuse-traces.jsonl` under that exact version. One complete recorded run became a [session](../../concepts/agents-and-sessions.md); model calls, tool calls, tool results, and other events inside it became session nodes. Importing preserved the evidence and its source identity without calling the historical agent.
 
-Do not repeat registration or import here. If either `returns-resolver@1` or the ten `returns-baseline` sessions is missing, return to the template README and resolve that setup failure before continuing.
+Do not repeat registration or import here. If either `returns-resolver@1` or the ten `returns-baseline` sessions is missing, return to the example README and resolve that setup failure before continuing.
 
 ## Survey before judging
 
