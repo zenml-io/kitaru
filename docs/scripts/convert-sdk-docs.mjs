@@ -17,7 +17,7 @@
  */
 
 import { existsSync } from "node:fs";
-import { readFile, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { convert, write } from "fumadocs-python";
@@ -155,7 +155,7 @@ function renderDocstringItems(items) {
       const body = item.value?.description ?? "";
       parts.push(`**${title}**\n\n${body}`);
     } else if (item.kind === "code" && item.value) {
-      parts.push("```\n" + item.value + "\n```");
+      parts.push(`\`\`\`\n${item.value}\n\`\`\``);
     }
   }
   return parts.filter(Boolean).join("\n\n");
@@ -199,7 +199,7 @@ function flattenSingletonPaths(files) {
 
     // Check no nested subdirectories exist under this dir
     const hasNestedDirs = [...allDirs].some(
-      (d) => d !== dir && d.startsWith(dir + "/"),
+      (d) => d !== dir && d.startsWith(`${dir}/`),
     );
     if (hasNestedDirs) continue;
 
@@ -223,9 +223,7 @@ function flattenSingletonPaths(files) {
  */
 async function generateMetaFiles(files, outDir) {
   // Apply the same path stripping that write() does: remove root module prefix
-  const strippedPaths = files.map((f) =>
-    f.path.split("/").slice(1).join("/"),
-  );
+  const strippedPaths = files.map((f) => f.path.split("/").slice(1).join("/"));
 
   // Build directory tree from stripped paths
   const dirs = new Map();
@@ -267,10 +265,9 @@ async function generateMetaFiles(files, outDir) {
     const pages = Array.from(children).sort();
     const ordered = pages.filter((p) => p !== "index");
 
-    const meta = { title: dirName, pages: ordered };
     const metaPath = resolve(outDir, dirPath, "meta.json");
     await mkdir(dirname(metaPath), { recursive: true });
-    await writeFile(metaPath, JSON.stringify(meta, null, 2) + "\n");
+    await writeJson(metaPath, { title: dirName, pages: ordered });
   }
 
   // Write top-level python/ meta.json
@@ -278,15 +275,17 @@ async function generateMetaFiles(files, outDir) {
   const topPages = Array.from(topChildren).sort();
   const ordered = topPages.filter((p) => p !== "index");
 
-  await writeFile(
-    resolve(outDir, "meta.json"),
-    JSON.stringify(
-      { title: "Python SDK", defaultOpen: false, pages: ordered },
-      null,
-      2,
-    ) + "\n",
-  );
+  await writeJson(resolve(outDir, "meta.json"), {
+    title: "Python SDK",
+    defaultOpen: false,
+    pages: ordered,
+  });
 
   // Note: no reference/meta.json needed — the top-level meta.json
   // references "reference/python" directly to avoid redundant nesting.
+}
+
+/** Write `value` as pretty-printed JSON with a trailing newline. */
+async function writeJson(path, value) {
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`);
 }

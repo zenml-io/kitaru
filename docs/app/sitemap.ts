@@ -1,9 +1,8 @@
-import { source } from '@/lib/source';
-import { canonicalDocsUrl, isRetiredRedirectedDocsPath } from '@/lib/seo';
-import type { MetadataRoute } from 'next';
+import type { MetadataRoute } from "next";
+import { canonicalDocsUrl, isRetiredRedirectedDocsPath } from "@/lib/seo";
+import { source } from "@/lib/source";
 
 export const revalidate = false;
-
 
 export default function sitemap(): MetadataRoute.Sitemap {
   return source
