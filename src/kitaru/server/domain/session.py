@@ -31,6 +31,7 @@ from kitaru.server.domain.base import (
     ValidationError,
 )
 from kitaru.server.domain.ids import uuid7
+from kitaru.server.domain.payload import Payload
 
 
 class SessionNotFound(NotFoundError):
@@ -270,10 +271,8 @@ class Session(DomainModel):
     origin: SessionOrigin
     status: SessionStatus = SessionStatus.IN_PROGRESS
     name: str | None = None
-    inputs: Any = None
-    inputs_blob_id: uuid.UUID | None = None
-    outputs: Any = None
-    outputs_blob_id: uuid.UUID | None = None
+    inputs: Payload | None = None
+    outputs: Payload | None = None
     error: str | None = None
     started_at: datetime | None = None
     ended_at: datetime | None = None
@@ -333,7 +332,7 @@ class Session(DomainModel):
     def finish(
         self,
         status: SessionStatus,
-        outputs: Any,
+        outputs: Payload | None,
         error: str | None,
         ended_at: datetime | None,
     ) -> None:

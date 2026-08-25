@@ -195,6 +195,7 @@ from kitaru.server.domain.investigation import (
 )
 from kitaru.server.domain.job import Job, JobNotFound
 from kitaru.server.domain.keys import generate_secret, hash_secret
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
     DuplicatePluginVersion,
@@ -2743,6 +2744,10 @@ async def create_session(
     values.update(overrides)
     if "number" not in values:
         values["number"] = await repository.allocate_session_number(values["agent_id"])
+    for field in ("inputs", "outputs"):
+        value = values.get(field)
+        if value is not None and not isinstance(value, Payload):
+            values[field] = Payload.json(value)
     return await repository.create(Session(**values))
 
 
@@ -2899,7 +2904,15 @@ class FakeSessionNodeRepository:
             Every node of the session.
         """
         nodes = [node for node in self._nodes.values() if node.session_id == session_id]
-        return sorted(nodes, key=lambda node: node.index)
+        ordered = sorted(nodes, key=lambda node: node.index)
+        if include_payloads:
+            return [node.model_copy() for node in ordered]
+        return [
+            node.model_copy(
+                update={"inputs": None, "outputs": None, "attributes": None}
+            )
+            for node in ordered
+        ]
 
     async def get_indexes_by_ids(
         self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
@@ -3892,14 +3905,8 @@ class BlobServiceFakes(NamedTuple):
     blob_data_store: FakeBlobDataStore
 
 
-def build_blob_service(
-    offload_threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
-) -> BlobServiceFakes:
+def build_blob_service() -> BlobServiceFakes:
     """Build a blob service backed by fresh fake blob storage.
-
-    Args:
-        offload_threshold_bytes: Serialized size above which a payload is
-            offloaded.
 
     Returns:
         Blob service bound to fresh fakes, and the fakes themselves.
@@ -3912,7 +3919,6 @@ def build_blob_service(
             {BlobStorageBackend.DATABASE: blob_data_store}, BlobStorageBackend.DATABASE
         ),
         max_size_bytes=DEFAULT_MAX_BLOB_SIZE_BYTES,
-        offload_threshold_bytes=offload_threshold_bytes,
     )
     return BlobServiceFakes(service, blob_repository, blob_data_store)
 
@@ -6313,7 +6319,7 @@ class ReplayServices(NamedTuple):
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
     transitions: TaskTransitions
-    blob_service: BlobService
+    payload_store: PayloadStore
 
 
 def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
@@ -6403,7 +6409,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         transitions=transitions,
         policy=task_policy,
     )
-    blob_service = build_blob_service().service
+    payload_store = build_payload_store().store
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,
@@ -6416,7 +6422,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         job_repository=jobs,
         task_repository=tasks,
         transitions=transitions,
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
     replay_service = ReplayService(
         repository=replays,
@@ -6428,7 +6434,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_node_repository=session_nodes,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
     experiment_run_service = ExperimentRunService(
         repository=experiment_runs,
@@ -6460,7 +6466,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluations=evaluations,
         tags=tags,
         transitions=transitions,
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
 
 

@@ -28,7 +28,7 @@ from conftest import (
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
-    build_blob_service,
+    build_payload_store,
     create_session,
 )
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
@@ -44,7 +44,7 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
-from kitaru.server.application.services.blob_service import BlobService
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -77,9 +77,9 @@ def task_repository() -> FakeTaskRepository:
 
 
 @pytest.fixture
-def blob_service() -> BlobService:
-    """Provide a blob service backed by fresh fake blob storage."""
-    return build_blob_service().service
+def payload_store() -> PayloadStore:
+    """Provide a payload store backed by fresh fake blob storage."""
+    return build_payload_store().store
 
 
 @pytest.fixture
@@ -87,20 +87,20 @@ def service(
     node_repository: FakeSessionNodeRepository,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
-    blob_service: BlobService,
+    payload_store: PayloadStore,
 ) -> SessionNodeService:
     """Provide a session node service backed by the fake repositories."""
     return SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
 
 
 @pytest.fixture
 def session_service(
-    session_repository: FakeSessionRepository, blob_service: BlobService
+    session_repository: FakeSessionRepository, payload_store: PayloadStore
 ) -> SessionService:
     """Provide a session service sharing the fake session repository."""
     return SessionService(
@@ -108,7 +108,7 @@ def session_service(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
 
 
@@ -394,9 +394,12 @@ async def test_list_nodes_include_payloads_true(
         SessionNodeFilter(session_id=session_id, include_payloads=True), actor=ACTOR
     )
     assert next_cursor is None
-    assert nodes[0].inputs == {"q": "hi"}
-    assert nodes[0].outputs == {"a": "there"}
-    assert nodes[0].attributes == {"k": 1}
+    assert nodes[0].inputs is not None
+    assert nodes[0].inputs.value == {"q": "hi"}
+    assert nodes[0].outputs is not None
+    assert nodes[0].outputs.value == {"a": "there"}
+    assert nodes[0].attributes is not None
+    assert nodes[0].attributes.value == {"k": 1}
 
 
 async def test_list_nodes_include_payloads_false(
@@ -584,13 +587,13 @@ def _service_with_threshold(
     task_repository: FakeTaskRepository,
     threshold_bytes: int,
 ) -> tuple[SessionNodeService, FakeBlobRepository, FakeBlobDataStore]:
-    """Build a session node service backed by a blob service at an offload threshold."""
-    fakes = build_blob_service(threshold_bytes)
+    """Build a session node service backed by a payload store at a given threshold."""
+    fakes = build_payload_store(threshold_bytes)
     service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        blob_service=fakes.service,
+        payload_store=fakes.store,
     )
     return service, fakes.blob_repository, fakes.blob_data_store
 
@@ -620,34 +623,38 @@ async def test_ingest_offloads_over_threshold_payloads(
     ]
     stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
-    # The service response is hydrated back to the original inline values.
-    assert stored[0].reasoning == reasoning
-    assert stored[0].inputs == inputs
-    assert stored[0].outputs == outputs
-    assert stored[0].attributes == attributes
-    assert stored[0].reasoning_blob_id is None
-    assert stored[0].inputs_blob_id is None
-    assert stored[0].outputs_blob_id is None
-    assert stored[0].attributes_blob_id is None
+    # The service response carries the original values in memory.
+    assert stored[0].reasoning is not None
+    assert stored[0].reasoning.value == reasoning
+    assert stored[0].reasoning.blob_id is not None
+    assert stored[0].inputs is not None
+    assert stored[0].inputs.value == inputs
+    assert stored[0].inputs.blob_id is not None
+    assert stored[0].outputs is not None
+    assert stored[0].outputs.value == outputs
+    assert stored[0].outputs.blob_id is not None
+    assert stored[0].attributes is not None
+    assert stored[0].attributes.value == attributes
+    assert stored[0].attributes.blob_id is not None
 
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
     )[0]
-    assert raw.reasoning is None
-    assert raw.inputs is None
-    assert raw.outputs is None
-    assert raw.attributes is None
-    assert raw.reasoning_blob_id is not None
-    assert raw.inputs_blob_id is not None
-    assert raw.outputs_blob_id is not None
-    assert raw.attributes_blob_id is not None
+    assert raw.reasoning is not None
+    assert raw.reasoning.blob_id is not None
+    assert raw.inputs is not None
+    assert raw.inputs.blob_id is not None
+    assert raw.outputs is not None
+    assert raw.outputs.blob_id is not None
+    assert raw.attributes is not None
+    assert raw.attributes.blob_id is not None
 
-    inputs_blob = await blob_repository.get(raw.inputs_blob_id)
+    inputs_blob = await blob_repository.get(raw.inputs.blob_id)
     assert inputs_blob.owner_id == ACTOR.account.id
     assert inputs_blob.media_type == "application/json"
     assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
 
-    reasoning_blob = await blob_repository.get(raw.reasoning_blob_id)
+    reasoning_blob = await blob_repository.get(raw.reasoning.blob_id)
     assert reasoning_blob.media_type == "text/plain"
 
 
@@ -669,13 +676,16 @@ async def test_ingest_under_threshold_stays_inline(
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
     )[0]
-    assert raw.reasoning == "short"
-    assert raw.inputs == {"a": 1}
-    assert raw.attributes == {"c": 3}
-    assert raw.reasoning_blob_id is None
-    assert raw.inputs_blob_id is None
-    assert raw.outputs_blob_id is None
-    assert raw.attributes_blob_id is None
+    assert raw.reasoning is not None
+    assert raw.reasoning.value == "short"
+    assert raw.reasoning.blob_id is None
+    assert raw.inputs is not None
+    assert raw.inputs.value == {"a": 1}
+    assert raw.inputs.blob_id is None
+    assert raw.attributes is not None
+    assert raw.attributes.value == {"c": 3}
+    assert raw.attributes.blob_id is None
+    assert raw.outputs is None
 
 
 async def test_ingest_dedupes_identical_inputs_across_nodes(
@@ -698,8 +708,10 @@ async def test_ingest_dedupes_identical_inputs_across_nodes(
     raw = await node_repository.get_by_indexes(
         session_id, [0, 1], include_payloads=True
     )
-    assert raw[0].inputs_blob_id is not None
-    assert raw[0].inputs_blob_id == raw[1].inputs_blob_id
+    assert raw[0].inputs is not None
+    assert raw[1].inputs is not None
+    assert raw[0].inputs.blob_id is not None
+    assert raw[0].inputs.blob_id == raw[1].inputs.blob_id
 
 
 async def test_ingest_threshold_zero_offloads_every_non_null_payload(
@@ -718,11 +730,10 @@ async def test_ingest_threshold_zero_offloads_every_non_null_payload(
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
     )[0]
-    assert raw.inputs is None
-    assert raw.inputs_blob_id is not None
-    # outputs was never set, so it stays trivially inline with no blob.
+    assert raw.inputs is not None
+    assert raw.inputs.blob_id is not None
+    # outputs was never set, so it stays trivially None with no payload at all.
     assert raw.outputs is None
-    assert raw.outputs_blob_id is None
 
 
 async def test_ingest_cache_key_computed_from_raw_inputs_before_offload(
@@ -764,8 +775,8 @@ async def test_list_all_nodes_include_payloads_hydrates_offloaded_values(
     await service.ingest_nodes(session_id, [_llm_node(0, inputs=inputs)], actor=ACTOR)
 
     nodes = await service.list_all_nodes(session_id, include_payloads=True, actor=ACTOR)
-    assert nodes[0].inputs == inputs
-    assert nodes[0].inputs_blob_id is None
+    assert nodes[0].inputs is not None
+    assert nodes[0].inputs.value == inputs
 
 
 async def test_list_all_nodes_exclude_payloads_returns_no_payloads(

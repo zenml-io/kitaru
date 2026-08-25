@@ -19,7 +19,9 @@ from pydantic import BaseModel, ConfigDict
 class DomainModel(BaseModel):
     """Base type for mutable domain entities and value objects."""
 
-    model_config = ConfigDict(extra="forbid", validate_assignment=True)
+    model_config = ConfigDict(
+        extra="forbid", validate_assignment=True, arbitrary_types_allowed=True
+    )
 
 
 class DomainError(Exception):

@@ -27,7 +27,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
-    build_blob_service,
+    build_payload_store,
     override_idempotency,
 )
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
@@ -78,19 +78,19 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     session_repository = FakeSessionRepository()
     node_repository = FakeSessionNodeRepository()
-    blob_service = build_blob_service().service
+    payload_store = build_payload_store().store
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=FakeTaskRepository(),
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service

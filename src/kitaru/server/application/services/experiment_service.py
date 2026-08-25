@@ -46,11 +46,11 @@ from kitaru.server.application.models.experiment import (
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.replay import ReplayStatusCounts
 from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.evaluator_resolution import (
     validate_evaluators,
 )
@@ -89,7 +89,7 @@ class ExperimentService:
         job_repository: JobRepository,
         task_repository: TaskRepository,
         transitions: TaskTransitions,
-        blob_service: BlobService,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -110,7 +110,7 @@ class ExperimentService:
             job_repository: Job repository, for run fan-out.
             task_repository: Task repository, for run fan-out.
             transitions: Task transition dispatch, for job cancellation.
-            blob_service: Blob service, for run fan-out's baseline sessions.
+            payload_store: Payload store, for run fan-out's baseline sessions.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
@@ -124,7 +124,7 @@ class ExperimentService:
         self._jobs = job_repository
         self._tasks = task_repository
         self._transitions = transitions
-        self._blob_service = blob_service
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def _create_replay_config(
@@ -466,7 +466,7 @@ class ExperimentService:
             replay_repository=self._replays,
             job_repository=self._jobs,
             task_repository=self._tasks,
-            blob_service=self._blob_service,
+            payload_store=self._payload_store,
         )
         counts = await self._replays.count_by_status(run.id)
         return run, counts

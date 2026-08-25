@@ -20,7 +20,6 @@ import httpx
 import pytest
 
 from conftest import (
-    DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     FakeBlobDataStore,
     FakeBlobRepository,
     create_blob,
@@ -67,7 +66,6 @@ async def client(
             BlobStorageBackend.DATABASE,
         ),
         max_size_bytes=16,
-        offload_threshold_bytes=DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     )
     app.dependency_overrides[get_blob_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)

@@ -15,7 +15,6 @@
 
 import uuid
 from collections.abc import Collection
-from typing import Any
 
 from kitaru.api_models.v1.session_node import NodeType
 from kitaru.cache_keys import compute_tool_cache_key
@@ -31,18 +30,14 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
-from kitaru.server.application.services.blob_service import (
-    JSON_MEDIA_TYPE,
-    TEXT_MEDIA_TYPE,
-    BlobService,
-    Candidate,
-)
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.resource_access import (
     check_task_attempt,
     check_task_session_read,
     check_task_session_write,
 )
 from kitaru.server.domain.ids import uuid7
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import combine_rollups, rollup_delta
 from kitaru.server.domain.session_node import (
     SessionNode,
@@ -59,7 +54,7 @@ class SessionNodeService:
         repository: SessionNodeRepository,
         session_repository: SessionRepository,
         task_repository: TaskRepository,
-        blob_service: BlobService,
+        payload_store: PayloadStore,
     ) -> None:
         """Initialize the service.
 
@@ -68,12 +63,13 @@ class SessionNodeService:
             session_repository: Session repository, for the ingest gate and
                 the rollup update.
             task_repository: Task repository, for the attempt fence.
-            blob_service: Blob service, for node payload offload.
+            payload_store: Payload store, for node payload offload and
+                resolve.
         """
         self._repository = repository
         self._sessions = session_repository
         self._tasks = task_repository
-        self._blob_service = blob_service
+        self._payload_store = payload_store
 
     async def ingest_nodes(
         self,
@@ -168,9 +164,13 @@ class SessionNodeService:
                 input_text_selector=item.input_text_selector,
                 output_text_selector=item.output_text_selector,
                 system_prompt_selector=item.system_prompt_selector,
-                reasoning=item.reasoning,
-                inputs=item.inputs,
-                outputs=item.outputs,
+                reasoning=Payload.text(item.reasoning)
+                if item.reasoning is not None
+                else None,
+                inputs=Payload.json(item.inputs) if item.inputs is not None else None,
+                outputs=Payload.json(item.outputs)
+                if item.outputs is not None
+                else None,
                 requested_model=item.requested_model,
                 model=item.model,
                 model_provider=item.model_provider,
@@ -180,7 +180,9 @@ class SessionNodeService:
                 tool_name=item.tool_name,
                 cache_key=cache_key,
                 subagent_id=item.subagent_id,
-                attributes=item.attributes,
+                attributes=Payload.json(item.attributes)
+                if item.attributes is not None
+                else None,
                 metadata=item.metadata,
             )
             resolved.append(node)
@@ -193,10 +195,16 @@ class SessionNodeService:
             )
             for node in resolved
         ]
-        offloaded = await self._offload_payloads(resolved, session.owner_id)
-        stored = await self._repository.upsert_batch(session_id, offloaded)
+        payloads = [
+            p
+            for node in resolved
+            for p in (node.reasoning, node.inputs, node.outputs, node.attributes)
+            if p is not None
+        ]
+        await self._payload_store.offload(payloads, session.owner_id)
+        stored = await self._repository.upsert_batch(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        return self._restore_payloads(stored, resolved)
+        return self._splice_payloads(stored, resolved)
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext
@@ -224,7 +232,7 @@ class SessionNodeService:
             check_task_session_read(session.id, session.task_id, actor)
         nodes, next_cursor = await self._repository.query(session_node_filter)
         if session_node_filter.include_payloads:
-            nodes = await self._hydrate_payloads(nodes)
+            await self._resolve_payloads(nodes)
         return nodes, next_cursor
 
     async def list_all_nodes(
@@ -255,7 +263,7 @@ class SessionNodeService:
             check_task_session_read(session_id, session.task_id, actor)
         nodes = await self._repository.list_all(session_id, include_payloads)
         if include_payloads:
-            nodes = await self._hydrate_payloads(nodes)
+            await self._resolve_payloads(nodes)
         return nodes
 
     async def get_indexes_by_ids(
@@ -288,108 +296,40 @@ class SessionNodeService:
             check_task_session_read(session_id, session.task_id, actor)
         return await self._repository.get_indexes_by_ids(session_id, node_ids)
 
-    async def _offload_payloads(
-        self, nodes: list[SessionNode], owner_id: uuid.UUID
-    ) -> list[SessionNode]:
-        """Offload reasoning, inputs, outputs, and attributes above threshold.
-
-        Args:
-            nodes: Nodes to offload, in batch order.
-            owner_id: Owner stamped on newly created blob registry rows.
-
-        Returns:
-            Nodes with payloads offloaded above threshold, in input order.
-        """
-        if not nodes:
-            return []
-        candidates: list[Candidate] = []
-        for node in nodes:
-            candidates.append(Candidate(node.reasoning, TEXT_MEDIA_TYPE))
-            candidates.append(Candidate(node.inputs, JSON_MEDIA_TYPE))
-            candidates.append(Candidate(node.outputs, JSON_MEDIA_TYPE))
-            candidates.append(Candidate(node.attributes, JSON_MEDIA_TYPE))
-        offloaded = await self._blob_service.offload_values(candidates, owner_id)
-        result: list[SessionNode] = []
-        for index, node in enumerate(nodes):
-            reasoning, inputs, outputs, attributes = offloaded[
-                4 * index : 4 * index + 4
-            ]
-            result.append(
-                node.model_copy(
-                    update={
-                        "reasoning": reasoning.value,
-                        "reasoning_blob_id": reasoning.blob_id,
-                        "inputs": inputs.value,
-                        "inputs_blob_id": inputs.blob_id,
-                        "outputs": outputs.value,
-                        "outputs_blob_id": outputs.blob_id,
-                        "attributes": attributes.value,
-                        "attributes_blob_id": attributes.blob_id,
-                    }
-                )
-            )
-        return result
-
-    async def _hydrate_payloads(self, nodes: list[SessionNode]) -> list[SessionNode]:
+    async def _resolve_payloads(self, nodes: list[SessionNode]) -> None:
         """Resolve reasoning, inputs, outputs, and attributes refs across nodes.
 
-        Returns:
-            Nodes with payloads filled and refs cleared.
+        Args:
+            nodes: Nodes to resolve, mutated in place.
         """
-        refs = {
-            blob_id
+        payloads = [
+            p
             for node in nodes
-            for blob_id in (
-                node.reasoning_blob_id,
-                node.inputs_blob_id,
-                node.outputs_blob_id,
-                node.attributes_blob_id,
-            )
-            if blob_id is not None
-        }
-        values = await self._blob_service.hydrate_values(list(refs))
-        result: list[SessionNode] = []
-        for node in nodes:
-            update: dict[str, Any] = {}
-            if node.reasoning_blob_id is not None:
-                update["reasoning"] = values[node.reasoning_blob_id]
-                update["reasoning_blob_id"] = None
-            if node.inputs_blob_id is not None:
-                update["inputs"] = values[node.inputs_blob_id]
-                update["inputs_blob_id"] = None
-            if node.outputs_blob_id is not None:
-                update["outputs"] = values[node.outputs_blob_id]
-                update["outputs_blob_id"] = None
-            if node.attributes_blob_id is not None:
-                update["attributes"] = values[node.attributes_blob_id]
-                update["attributes_blob_id"] = None
-            result.append(node.model_copy(update=update) if update else node)
-        return result
+            for p in (node.reasoning, node.inputs, node.outputs, node.attributes)
+            if p is not None
+        ]
+        await self._payload_store.resolve(payloads)
 
-    def _restore_payloads(
-        self, stored: list[SessionNode], original: list[SessionNode]
+    def _splice_payloads(
+        self, stored: list[SessionNode], resolved: list[SessionNode]
     ) -> list[SessionNode]:
-        """Copy nodes' pre-offload payloads onto their stored rows.
+        """Copy resolved nodes' in-memory payloads onto their stored rows.
 
         Args:
-            stored: Node rows as persisted, in the same order as original.
-            original: Nodes before offload, holding the values in memory.
+            stored: Node rows as persisted, in the same order as resolved.
+            resolved: Nodes before storage, holding the payloads in memory.
 
         Returns:
-            Stored nodes with payloads restored and refs cleared, in input order.
+            Stored nodes with payloads spliced in, in input order.
         """
         return [
             row.model_copy(
                 update={
-                    "reasoning": orig.reasoning,
-                    "reasoning_blob_id": None,
-                    "inputs": orig.inputs,
-                    "inputs_blob_id": None,
-                    "outputs": orig.outputs,
-                    "outputs_blob_id": None,
-                    "attributes": orig.attributes,
-                    "attributes_blob_id": None,
+                    "reasoning": node.reasoning,
+                    "inputs": node.inputs,
+                    "outputs": node.outputs,
+                    "attributes": node.attributes,
                 }
             )
-            for row, orig in zip(stored, original, strict=True)
+            for row, node in zip(stored, resolved, strict=True)
         ]

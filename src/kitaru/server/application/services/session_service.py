@@ -14,7 +14,6 @@
 """Session use cases."""
 
 import uuid
-from typing import Any
 
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.interfaces.agent_version_repository import (
@@ -31,19 +30,16 @@ from kitaru.server.application.models.session import (
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
-from kitaru.server.application.services.blob_service import (
-    JSON_MEDIA_TYPE,
-    BlobService,
-    Candidate,
-)
 from kitaru.server.application.services.resource_access import (
     check_task_attempt,
     check_task_session_read,
     check_task_session_write,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
     Session,
     SessionAgentMismatch,
@@ -70,7 +66,7 @@ class SessionService:
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
         replay_repository: ReplayRepository,
-        blob_service: BlobService,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -81,14 +77,15 @@ class SessionService:
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
             replay_repository: Replay repository, for the baseline lookup.
-            blob_service: Blob service, for inputs and outputs offload.
+            payload_store: Payload store, for inputs and outputs offload and
+                resolve.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
         self._replays = replay_repository
-        self._blob_service = blob_service
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def create_session(
@@ -159,8 +156,10 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
-            inputs=command.inputs,
-            outputs=command.outputs,
+            inputs=Payload.json(command.inputs) if command.inputs is not None else None,
+            outputs=Payload.json(command.outputs)
+            if command.outputs is not None
+            else None,
             error=command.error,
             started_at=command.started_at,
             ended_at=command.ended_at,
@@ -170,9 +169,14 @@ class SessionService:
             framework=command.framework,
             adapter_version=command.adapter_version,
         )
-        offloaded = await self._offload_payloads(session)
-        stored = await self._repository.create(offloaded)
-        stored = self._restore_payloads(stored, session)
+        await self._payload_store.offload(
+            [p for p in (session.inputs, session.outputs) if p is not None],
+            session.owner_id,
+        )
+        stored = await self._repository.create(session)
+        stored = stored.model_copy(
+            update={"inputs": session.inputs, "outputs": session.outputs}
+        )
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -258,7 +262,10 @@ class SessionService:
         """
         session = await self._repository.get(session_id)
         check_task_session_read(session_id, session.task_id, actor)
-        return await self._hydrate_payload(session)
+        await self._payload_store.resolve(
+            [p for p in (session.inputs, session.outputs) if p is not None]
+        )
+        return session
 
     async def get_baseline_session(
         self, session_id: uuid.UUID, actor: AuthContext
@@ -288,7 +295,10 @@ class SessionService:
         if replay is None:
             raise SessionBaselineNotFound(session_id)
         baseline = await self._repository.get(replay.baseline_session_id)
-        return await self._hydrate_payload(baseline)
+        await self._payload_store.resolve(
+            [p for p in (baseline.inputs, baseline.outputs) if p is not None]
+        )
+        return baseline
 
     async def list_sessions(
         self, session_filter: SessionFilter, actor: AuthContext
@@ -304,7 +314,15 @@ class SessionService:
         """
         _ = actor
         sessions, next_cursor = await self._repository.query(session_filter)
-        return await self._hydrate_payloads(sessions), next_cursor
+        await self._payload_store.resolve(
+            [
+                p
+                for session in sessions
+                for p in (session.inputs, session.outputs)
+                if p is not None
+            ]
+        )
+        return sessions, next_cursor
 
     async def update_session(
         self, session_id: uuid.UUID, command: SessionUpdate, actor: AuthContext
@@ -345,19 +363,17 @@ class SessionService:
                 if command.status is None:
                     raise SessionStatusCannotBeCleared(session_id)
                 target_status = command.status
+            new_outputs = (
+                Payload.json(command.outputs) if command.outputs is not None else None
+            )
             session.finish(
                 status=target_status,
-                outputs=command.outputs if "outputs" in fields else session.outputs,
+                outputs=new_outputs if "outputs" in fields else session.outputs,
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
-            if "outputs" in fields:
-                # Only re-derive the offload state when outputs actually
-                # changed, otherwise a session whose outputs were already
-                # offloaded would lose its ref: session.outputs reads back
-                # as None (the value lives in the blob) and offloading that
-                # None would overwrite outputs_blob_id with None too.
-                session = await self._offload_outputs(session)
+            if "outputs" in fields and session.outputs is not None:
+                await self._payload_store.offload([session.outputs], session.owner_id)
             if (
                 self._analytics is not None
                 and previous_status == SessionStatus.IN_PROGRESS
@@ -375,7 +391,15 @@ class SessionService:
                 command.metadata if command.metadata is not None else {}
             )
         stored = await self._repository.update(session)
-        return await self._hydrate_payload(stored)
+        # The untouched inputs ref, and outputs when this update did not
+        # carry a new value, still need a round trip to the blob store.
+        to_resolve = [session.inputs]
+        if "outputs" not in fields:
+            to_resolve.append(session.outputs)
+        await self._payload_store.resolve([p for p in to_resolve if p is not None])
+        return stored.model_copy(
+            update={"inputs": session.inputs, "outputs": session.outputs}
+        )
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.
@@ -393,93 +417,3 @@ class SessionService:
         """
         _ = actor
         await self._repository.delete(session_id)
-
-    async def _offload_payloads(self, session: Session) -> Session:
-        """Offload a session's inputs and outputs above the configured threshold.
-
-        Returns:
-            Session with inputs and outputs offloaded above threshold.
-        """
-        inputs, outputs = await self._blob_service.offload_values(
-            [
-                Candidate(session.inputs, JSON_MEDIA_TYPE),
-                Candidate(session.outputs, JSON_MEDIA_TYPE),
-            ],
-            session.owner_id,
-        )
-        return session.model_copy(
-            update={
-                "inputs": inputs.value,
-                "inputs_blob_id": inputs.blob_id,
-                "outputs": outputs.value,
-                "outputs_blob_id": outputs.blob_id,
-            }
-        )
-
-    async def _offload_outputs(self, session: Session) -> Session:
-        """Offload a session's outputs above the configured threshold.
-
-        Inputs are immutable after creation and stay untouched.
-
-        Returns:
-            Session with outputs offloaded above threshold.
-        """
-        (outputs,) = await self._blob_service.offload_values(
-            [Candidate(session.outputs, JSON_MEDIA_TYPE)], session.owner_id
-        )
-        return session.model_copy(
-            update={"outputs": outputs.value, "outputs_blob_id": outputs.blob_id}
-        )
-
-    async def _hydrate_payloads(self, sessions: list[Session]) -> list[Session]:
-        """Resolve inputs and outputs refs across a batch of sessions.
-
-        Returns:
-            Sessions with inputs and outputs filled and refs cleared.
-        """
-        refs = {
-            blob_id
-            for session in sessions
-            for blob_id in (session.inputs_blob_id, session.outputs_blob_id)
-            if blob_id is not None
-        }
-        values = await self._blob_service.hydrate_values(list(refs))
-        result: list[Session] = []
-        for session in sessions:
-            update: dict[str, Any] = {}
-            if session.inputs_blob_id is not None:
-                update["inputs"] = values[session.inputs_blob_id]
-                update["inputs_blob_id"] = None
-            if session.outputs_blob_id is not None:
-                update["outputs"] = values[session.outputs_blob_id]
-                update["outputs_blob_id"] = None
-            result.append(session.model_copy(update=update) if update else session)
-        return result
-
-    async def _hydrate_payload(self, session: Session) -> Session:
-        """Resolve inputs and outputs refs of a session.
-
-        Returns:
-            Session with inputs and outputs filled and refs cleared.
-        """
-        return (await self._hydrate_payloads([session]))[0]
-
-    def _restore_payloads(self, stored: Session, original: Session) -> Session:
-        """Copy a session's pre-offload inputs and outputs onto its stored row.
-
-        Args:
-            stored: Session row as persisted, refs pointing at the blobs
-                offload created.
-            original: Session before offload, holding the values in memory.
-
-        Returns:
-            Stored session with inputs and outputs restored and refs cleared.
-        """
-        return stored.model_copy(
-            update={
-                "inputs": original.inputs,
-                "inputs_blob_id": None,
-                "outputs": original.outputs,
-                "outputs_blob_id": None,
-            }
-        )

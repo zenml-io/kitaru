@@ -21,7 +21,7 @@ import pytest
 
 from conftest import (
     ReplayServices,
-    build_blob_service,
+    build_payload_store,
     build_replay_services,
     create_agent,
     create_agent_task,
@@ -51,7 +51,7 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
-from kitaru.server.application.services.blob_service import BlobService
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
@@ -62,6 +62,7 @@ from kitaru.server.domain.agent_version import (
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.replay import (
     ReplayAccessDenied,
@@ -339,7 +340,7 @@ def _cache_node(
         error=error,
         tool_name="search",
         cache_key=cache_key,
-        outputs=outputs,
+        outputs=Payload.json(outputs) if outputs is not None else None,
     )
 
 
@@ -872,13 +873,13 @@ def _replay_service_with_analytics(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
-        blob_service=services.blob_service,
+        payload_store=services.payload_store,
         analytics=analytics,
     )
 
 
-def _replay_service_with_blob_service(
-    services: ReplayServices, blob_service: BlobService
+def _replay_service_with_payload_store(
+    services: ReplayServices, payload_store: PayloadStore
 ) -> ReplayService:
     return ReplayService(
         repository=services.replays,
@@ -890,7 +891,7 @@ def _replay_service_with_blob_service(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
 
 
@@ -898,10 +899,10 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
     services: ReplayServices,
 ) -> None:
     """Return the original output for a tool call whose output was offloaded."""
-    fakes = build_blob_service(offload_threshold_bytes=1024)
+    fakes = build_payload_store(threshold_bytes=1024)
     blob_repository = fakes.blob_repository
     data_store = fakes.blob_data_store
-    service = _replay_service_with_blob_service(services, fakes.service)
+    service = _replay_service_with_payload_store(services, fakes.store)
     agent_version = await _agent_version(services)
     baseline = await _session(services, agent_version)
     replay_id = await _replay_with_history_scope(
@@ -926,8 +927,7 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
         status=NodeStatus.COMPLETED,
         tool_name="search",
         cache_key=cache_key,
-        outputs=None,
-        outputs_blob_id=blob.id,
+        outputs=Payload.ref(blob.id),
     )
     await services.session_nodes.upsert_batch(baseline.id, [node])
 

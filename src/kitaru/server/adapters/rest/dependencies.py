@@ -457,7 +457,6 @@ def get_blob_service(
         repository=SQLBlobRepository(session),
         data_stores=data_stores,
         max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
-        offload_threshold_bytes=settings.PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     )
 
 
@@ -528,7 +527,7 @@ def get_importer_service(
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
-    blob_service: Annotated[BlobService, Depends(get_blob_service)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> SessionService:
     """Return a session service for the current request.
@@ -536,7 +535,7 @@ def get_session_service(
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
-        blob_service: Blob service for the current request.
+        payload_store: Payload store for the current request.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -547,7 +546,7 @@ def get_session_service(
         task_repository=SQLTaskRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_repository=SQLReplayRepository(session),
-        blob_service=blob_service,
+        payload_store=payload_store,
         analytics=analytics,
     )
 
@@ -668,14 +667,14 @@ def get_task_service(
 def get_session_node_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
-    blob_service: Annotated[BlobService, Depends(get_blob_service)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
 ) -> SessionNodeService:
     """Return a session node service for the current request.
 
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
-        blob_service: Blob service for the current request.
+        payload_store: Payload store for the current request.
 
     Returns:
         Session node service bound to the SQL repositories.
@@ -684,14 +683,14 @@ def get_session_node_service(
         repository=SQLSessionNodeRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         task_repository=SQLTaskRepository(session),
-        blob_service=blob_service,
+        payload_store=payload_store,
     )
 
 
 def get_experiment_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
-    blob_service: Annotated[BlobService, Depends(get_blob_service)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentService:
     """Return an experiment service for the current request.
@@ -699,7 +698,7 @@ def get_experiment_service(
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
-        blob_service: Blob service for the current request.
+        payload_store: Payload store for the current request.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -717,7 +716,7 @@ def get_experiment_service(
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
         transitions=_build_task_transitions(session, engine, analytics),
-        blob_service=blob_service,
+        payload_store=payload_store,
         analytics=analytics,
     )
 
@@ -725,7 +724,7 @@ def get_experiment_service(
 def get_replay_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
-    blob_service: Annotated[BlobService, Depends(get_blob_service)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ReplayService:
     """Return a replay service for the current request.
@@ -733,7 +732,7 @@ def get_replay_service(
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
-        blob_service: Blob service for the current request.
+        payload_store: Payload store for the current request.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -749,7 +748,7 @@ def get_replay_service(
         session_node_repository=SQLSessionNodeRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
-        blob_service=blob_service,
+        payload_store=payload_store,
         analytics=analytics,
     )
 

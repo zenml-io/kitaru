@@ -24,6 +24,7 @@ from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.domain.base import DomainModel, ValidationError
 from kitaru.server.domain.ids import uuid7
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import SessionRollups
 
 
@@ -62,12 +63,9 @@ class SessionNode(DomainModel):
     input_text_selector: str | None = None
     output_text_selector: str | None = None
     system_prompt_selector: str | None = None
-    reasoning: str | None = None
-    reasoning_blob_id: uuid.UUID | None = None
-    inputs: Any = None
-    inputs_blob_id: uuid.UUID | None = None
-    outputs: Any = None
-    outputs_blob_id: uuid.UUID | None = None
+    reasoning: Payload | None = None
+    inputs: Payload | None = None
+    outputs: Payload | None = None
     requested_model: str | None = None
     model: str | None = None
     model_provider: str | None = None
@@ -77,8 +75,7 @@ class SessionNode(DomainModel):
     tool_name: str | None = None
     cache_key: str | None = None
     subagent_id: str | None = None
-    attributes: Any = None
-    attributes_blob_id: uuid.UUID | None = None
+    attributes: Payload | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     created: datetime | None = None
     updated: datetime | None = None

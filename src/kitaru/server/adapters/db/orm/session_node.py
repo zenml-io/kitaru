@@ -43,6 +43,8 @@ from kitaru.server.adapters.db.orm.base import (
 from kitaru.server.adapters.db.orm.orm_utils import (
     foreign_key_name,
     index_name,
+    payload_from_columns,
+    split_payload,
     unique_constraint_name,
 )
 from kitaru.server.domain.session_node import SessionNode
@@ -183,12 +185,19 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """Copy every mutable field of a domain node onto this row.
 
         Used both to populate a freshly inserted row and to replace an
-        existing row whole on an upsert.
+        existing row whole on an upsert. A payload with a blob ref writes the
+        ref column and leaves the inline column null, an inline-only payload
+        writes the inline column and leaves the ref column null, and
+        ``None`` writes null to both.
 
         Args:
             node: Session node carrying the desired field values.
         """
         tokens = node.tokens
+        reasoning, reasoning_blob_id = split_payload(node.reasoning)
+        inputs, inputs_blob_id = split_payload(node.inputs)
+        outputs, outputs_blob_id = split_payload(node.outputs)
+        attributes, attributes_blob_id = split_payload(node.attributes)
         self.session_id = node.session_id
         self.parent_id = node.parent_id
         self.secondary_parent_ids = [
@@ -206,12 +215,12 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.input_text_selector = node.input_text_selector
         self.output_text_selector = node.output_text_selector
         self.system_prompt_selector = node.system_prompt_selector
-        self.reasoning = node.reasoning
-        self.reasoning_blob_id = node.reasoning_blob_id
-        self.inputs = node.inputs
-        self.inputs_blob_id = node.inputs_blob_id
-        self.outputs = node.outputs
-        self.outputs_blob_id = node.outputs_blob_id
+        self.reasoning = reasoning
+        self.reasoning_blob_id = reasoning_blob_id
+        self.inputs = inputs
+        self.inputs_blob_id = inputs_blob_id
+        self.outputs = outputs
+        self.outputs_blob_id = outputs_blob_id
         self.requested_model = node.requested_model
         self.model = node.model
         self.model_provider = node.model_provider
@@ -226,8 +235,8 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.tool_name = node.tool_name
         self.cache_key = node.cache_key
         self.subagent_id = node.subagent_id
-        self.attributes = node.attributes
-        self.attributes_blob_id = node.attributes_blob_id
+        self.attributes = attributes
+        self.attributes_blob_id = attributes_blob_id
         self.metadata_ = node.metadata
 
     def to_domain(self, include_payloads: bool) -> SessionNode:
@@ -279,12 +288,21 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             input_text_selector=self.input_text_selector,
             output_text_selector=self.output_text_selector,
             system_prompt_selector=self.system_prompt_selector,
-            reasoning=self.reasoning if include_payloads else None,
-            reasoning_blob_id=self.reasoning_blob_id,
-            inputs=self.inputs if include_payloads else None,
-            inputs_blob_id=self.inputs_blob_id,
-            outputs=self.outputs if include_payloads else None,
-            outputs_blob_id=self.outputs_blob_id,
+            reasoning=(
+                payload_from_columns(self.reasoning, self.reasoning_blob_id, text=True)
+                if include_payloads
+                else None
+            ),
+            inputs=(
+                payload_from_columns(self.inputs, self.inputs_blob_id)
+                if include_payloads
+                else None
+            ),
+            outputs=(
+                payload_from_columns(self.outputs, self.outputs_blob_id)
+                if include_payloads
+                else None
+            ),
             requested_model=self.requested_model,
             model=self.model,
             model_provider=self.model_provider,
@@ -294,8 +312,11 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             tool_name=self.tool_name,
             cache_key=self.cache_key,
             subagent_id=self.subagent_id,
-            attributes=self.attributes if include_payloads else None,
-            attributes_blob_id=self.attributes_blob_id,
+            attributes=(
+                payload_from_columns(self.attributes, self.attributes_blob_id)
+                if include_payloads
+                else None
+            ),
             metadata=self.metadata_,
             created=self.created,
             updated=self.updated,

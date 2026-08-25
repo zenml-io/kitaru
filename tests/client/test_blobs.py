@@ -19,7 +19,6 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import (
-    DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     FakeBlobDataStore,
     FakeBlobRepository,
     asgi_api_client,
@@ -60,7 +59,6 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
             BlobStorageBackend.DATABASE,
         ),
         max_size_bytes=1024,
-        offload_threshold_bytes=DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     )
     app.dependency_overrides[get_blob_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)

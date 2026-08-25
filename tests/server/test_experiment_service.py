@@ -807,7 +807,7 @@ async def test_create_experiment_tracks_experiment_created(
         job_repository=services.jobs,
         task_repository=services.tasks,
         transitions=services.transitions,
-        blob_service=services.blob_service,
+        payload_store=services.payload_store,
         analytics=analytics,
     )
     command = ExperimentCreate(

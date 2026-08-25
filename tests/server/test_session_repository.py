@@ -108,6 +108,7 @@ from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.investigation import Investigation, InvestigationSession
 from kitaru.server.domain.job import Job
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import (
     PassthroughConfig,
@@ -718,12 +719,16 @@ async def test_update(setup: Setup) -> None:
     )
     created.update_name("renamed")
     created.finish(
-        status=SessionStatus.COMPLETED, outputs={"a": 1}, error=None, ended_at=None
+        status=SessionStatus.COMPLETED,
+        outputs=Payload.json({"a": 1}),
+        error=None,
+        ended_at=None,
     )
     updated = await repository.update(created)
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.COMPLETED
-    assert updated.outputs == {"a": 1}
+    assert updated.outputs is not None
+    assert updated.outputs.value == {"a": 1}
     assert updated.created == created.created
     assert updated.updated is not None
     assert created.updated is not None

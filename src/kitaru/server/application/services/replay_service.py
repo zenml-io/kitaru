@@ -41,11 +41,11 @@ from kitaru.server.application.models.replay import (
     ReplayWithDetails,
     ToolLookupResult,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
-from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
@@ -78,7 +78,7 @@ class ReplayService:
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
-        blob_service: BlobService,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -95,7 +95,7 @@ class ReplayService:
                 lookup.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
-            blob_service: Blob service, for the baseline session's inputs
+            payload_store: Payload store, for the baseline session's inputs
                 and the tool lookup's node output.
             analytics: Analytics tracker, None skips tracking.
         """
@@ -108,7 +108,7 @@ class ReplayService:
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
-        self._blob_service = blob_service
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def _bundle(self, replays: list[Replay]) -> list[ReplayWithDetails]:
@@ -192,7 +192,7 @@ class ReplayService:
             replay_repository=self._repository,
             job_repository=self._jobs,
             task_repository=self._tasks,
-            blob_service=self._blob_service,
+            payload_store=self._payload_store,
         )
         if self._analytics is not None:
             self._analytics.track(
@@ -309,16 +309,12 @@ class ReplayService:
         )
         if node is None:
             return None
-        if node.outputs_blob_id is not None:
-            values = await self._blob_service.hydrate_values([node.outputs_blob_id])
-            node = node.model_copy(
-                update={
-                    "outputs": values[node.outputs_blob_id],
-                    "outputs_blob_id": None,
-                }
-            )
+        if node.outputs is not None:
+            await self._payload_store.resolve([node.outputs])
         return ToolLookupResult(
-            result=node.outputs, status=node.status, error=node.error
+            result=node.outputs.value if node.outputs is not None else None,
+            status=node.status,
+            error=node.error,
         )
 
     async def _check_task_access(self, replay: Replay, actor: AuthContext) -> None:
