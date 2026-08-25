@@ -19,11 +19,13 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import (
+    FakeAgentRepository,
     FakeBlobRepository,
     FakePluginRepository,
     asgi_api_client,
     override_idempotency,
 )
+from kitaru.api_models.v1.agent import AgentCreateRequest
 from kitaru.api_models.v1.evaluator import (
     EvaluatorCreateRequest,
     EvaluatorUpdateRequest,
@@ -33,10 +35,15 @@ from kitaru.api_models.v1.evaluator import (
 from kitaru.api_models.v1.plugin import PackagePluginSource
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
-from kitaru.server.adapters.rest.dependencies import authorize, get_evaluator_service
+from kitaru.server.adapters.rest.dependencies import (
+    authorize,
+    get_agent_service,
+    get_evaluator_service,
+)
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.plugin import PluginKind
@@ -54,12 +61,16 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
+    agent_repository = FakeAgentRepository()
     service = PluginService(
         kind=PluginKind.EVALUATOR,
-        repository=FakePluginRepository(),
+        repository=FakePluginRepository(agent_repository=agent_repository),
         blob_repository=FakeBlobRepository(),
     )
     app.dependency_overrides[get_evaluator_service] = lambda: service
+    app.dependency_overrides[get_agent_service] = lambda: AgentService(
+        repository=agent_repository
+    )
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     override_idempotency(app, ACCOUNT)
     async with asgi_api_client(app) as client:
@@ -73,6 +84,18 @@ async def test_create(api_client: KitaruAPIClient) -> None:
     )
     assert evaluator.name == "accuracy"
     assert evaluator.metadata == {"a": 1}
+
+
+async def test_create_scoped_to_agent(api_client: KitaruAPIClient) -> None:
+    """Round-trip an evaluator's agent scoping through the SDK."""
+    agent = await api_client.agents.create(AgentCreateRequest(name="assistant"))
+    evaluator = await api_client.evaluators.create(
+        EvaluatorCreateRequest(name="accuracy", agent_id=agent.id)
+    )
+    assert evaluator.agent_id == agent.id
+
+    loaded = await api_client.evaluators.get(evaluator.id)
+    assert loaded.agent_id == agent.id
 
 
 async def test_create_duplicate_name(api_client: KitaruAPIClient) -> None:

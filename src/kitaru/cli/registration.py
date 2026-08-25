@@ -651,10 +651,15 @@ def plugin_parent_request(
     description: str | None,
     provider: str | None,
     metadata: str | None,
+    agent_id: uuid.UUID | None,
 ) -> ImporterCreateRequest | EvaluatorCreateRequest:
     """Build one kind-specific plugin parent request."""
     parsed_metadata = parse_json_object(metadata, option="--metadata")
     if kind == "importer":
+        if agent_id is not None:
+            raise CLIError(
+                "invalid_arguments", "--agent-id is only valid for evaluators."
+            )
         return ImporterCreateRequest(
             name=name,
             description=description,
@@ -664,7 +669,7 @@ def plugin_parent_request(
     if provider is not None:
         raise CLIError("invalid_arguments", "--provider is only valid for importers.")
     return EvaluatorCreateRequest(
-        name=name, description=description, metadata=parsed_metadata
+        name=name, description=description, metadata=parsed_metadata, agent_id=agent_id
     )
 
 

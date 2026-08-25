@@ -147,6 +147,14 @@ class InvalidPluginProvider(ValidationError):
         super().__init__("Evaluator plugins do not carry a provider")
 
 
+class InvalidPluginAgentScope(ValidationError):
+    """Raised when an importer plugin carries an agent id."""
+
+    def __init__(self) -> None:
+        """Initialize the error."""
+        super().__init__("Importer plugins do not carry an agent id")
+
+
 class InvalidPluginRequirement(ValidationError):
     """Raised when a package plugin requirement fails validation."""
 
@@ -279,6 +287,7 @@ class Plugin(DomainModel):
     logo_url: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     latest_version: int = 0
+    agent_id: uuid.UUID | None = None
     created: datetime | None = None
     updated: datetime | None = None
 
@@ -294,6 +303,21 @@ class Plugin(DomainModel):
         """
         if self.kind is PluginKind.EVALUATOR and self.provider is not None:
             raise InvalidPluginProvider
+        return self
+
+    @model_validator(mode="after")
+    def _check_agent_id(self) -> "Plugin":
+        """Reject an agent id on an importer plugin.
+
+        Raises:
+            InvalidPluginAgentScope: The kind is importer and agent_id is
+                set.
+
+        Returns:
+            The validated plugin.
+        """
+        if self.kind is PluginKind.IMPORTER and self.agent_id is not None:
+            raise InvalidPluginAgentScope
         return self
 
     def update_description(self, description: str | None) -> None:

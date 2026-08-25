@@ -55,6 +55,7 @@ const annotation = {
 };
 
 const evaluator = {
+  agent_id: null,
   created: "2026-01-01T00:00:00Z",
   description: null,
   id: ID,
@@ -289,6 +290,24 @@ describe("management resources", () => {
       ],
       [`https://api.example/api/v1/evaluators/${ID}`, "DELETE"],
     ]);
+  });
+
+  it("creates an agent-scoped evaluator", async () => {
+    const request = {
+      agent_id: RELATED_ID,
+      name: "correctness",
+    } satisfies EvaluatorCreateRequest;
+    const scopedEvaluator = { ...evaluator, agent_id: RELATED_ID };
+    const fetch = vi
+      .fn<typeof globalThis.fetch>()
+      .mockResolvedValueOnce(jsonResponse(scopedEvaluator, 201));
+    const client = new KitaruClient({ apiUrl: "https://api.example", fetch });
+
+    await expect(client.evaluators.create(request)).resolves.toEqual(
+      scopedEvaluator,
+    );
+
+    expect(fetch.mock.calls[0]?.[1]?.body).toBe(JSON.stringify(request));
   });
 
   it("returns an evaluation job and reads evaluation results", async () => {

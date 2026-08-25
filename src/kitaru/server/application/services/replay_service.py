@@ -136,7 +136,8 @@ class ReplayService:
             SessionNotFound: No session has the baseline session id.
             ValidationError: The baseline session carries no agent version
                 and none was given, the resolved agent version has no run
-                spec, or the config uses cohort-version-scoped history.
+                spec, the config uses cohort-version-scoped history, or an
+                evaluator config is scoped to another agent.
             AgentVersionNotFound: No agent version has the resolved id.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
@@ -157,7 +158,9 @@ class ReplayService:
         agent_version = await resolve_runnable_agent_version(
             agent_version_id, self._agent_versions
         )
-        evaluators = await validate_evaluators(command.evaluators, self._plugins, actor)
+        evaluators = await validate_evaluators(
+            command.evaluators, self._plugins, baseline.agent_id, actor
+        )
         config = ReplayConfig(
             owner_id=actor.account.id,
             override=command.override,

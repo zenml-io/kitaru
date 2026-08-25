@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Evaluators can now be scoped to a single agent with `agent_id` on `POST /api/v1/evaluators`, null for a workspace-global evaluator. A scoped evaluator can only be used by experiments, replays, and evaluation batches whose sessions belong to that agent. `agent_id` is immutable and importers cannot be scoped.
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
 - SDK methods that call an endpoint supporting idempotency now take an `idempotency_key` argument, so callers can supply their own key instead of the per-request key the transport generates. Those endpoints declare an `Idempotency-Key` header parameter in the OpenAPI schema.
 - MCP tools that create a resource take an optional `idempotency_key` field, so a retried tool call whose response was lost returns the original result instead of acting twice.
@@ -16,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- `POST /api/v1/evaluations` requires every input session to belong to the same agent.
 - Every worker start now registers a new worker, worker names are labels and no longer need to be unique. Worker listings leave stale workers out unless `include_stale` is set. `kitaru worker get` takes a worker id, the name lookup it also accepted is gone.
 - Server analytics events now carry the reporting client in `client_version`, as the client name and the version it reported. Each client versions on its own series, so a bare version says nothing without the client that sent it.
 - Registering a worker from the Kitaru 0.22.2 Python SDK or older is rejected with HTTP 426. Those versions renew a worker token by registering again, which a server that gives every registration its own id cannot serve: the worker goes on heartbeating an id its token no longer names, and the tasks it is running get swept away from it. Upgrade workers along with the server. Every other caller is unaffected.

@@ -18,7 +18,13 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeBlobRepository, FakePluginRepository, create_blob
+from conftest import (
+    FakeAgentRepository,
+    FakeBlobRepository,
+    FakePluginRepository,
+    create_agent,
+    create_blob,
+)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import (
@@ -30,9 +36,11 @@ from kitaru.server.application.models.plugin import (
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
     DuplicatePluginName,
+    InvalidPluginAgentScope,
     InvalidPluginProvider,
     PackagePluginSource,
     PluginKind,
@@ -75,14 +83,25 @@ def blob_repository() -> FakeBlobRepository:
 
 
 @pytest.fixture
-def repository(blob_repository: FakeBlobRepository) -> FakePluginRepository:
+def agent_repository() -> FakeAgentRepository:
+    """Provide a fake agent repository."""
+    return FakeAgentRepository()
+
+
+@pytest.fixture
+def repository(
+    blob_repository: FakeBlobRepository, agent_repository: FakeAgentRepository
+) -> FakePluginRepository:
     """Provide a fake plugin repository wired to the fake blob repository."""
-    return FakePluginRepository(blob_repository=blob_repository)
+    return FakePluginRepository(
+        blob_repository=blob_repository, agent_repository=agent_repository
+    )
 
 
 @pytest.fixture
 def evaluator_service(
-    repository: FakePluginRepository, blob_repository: FakeBlobRepository
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> PluginService:
     """Provide a plugin service bound to the evaluator kind."""
     return PluginService(
@@ -94,11 +113,14 @@ def evaluator_service(
 
 @pytest.fixture
 def importer_service(
-    repository: FakePluginRepository, blob_repository: FakeBlobRepository
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> PluginService:
     """Provide a plugin service bound to the importer kind, sharing the repository."""
     return PluginService(
-        kind=PluginKind.IMPORTER, repository=repository, blob_repository=blob_repository
+        kind=PluginKind.IMPORTER,
+        repository=repository,
+        blob_repository=blob_repository,
     )
 
 
@@ -476,7 +498,8 @@ async def test_update_version_not_found(evaluator_service: PluginService) -> Non
 
 
 async def test_create_version_tracks_plugin_version_registered(
-    repository: FakePluginRepository, blob_repository: FakeBlobRepository
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> None:
     """Fire PLUGIN_VERSION_REGISTERED with the plugin kind and source type."""
     analytics = _RecordingAnalytics()
@@ -572,3 +595,42 @@ async def test_update_plugin_explicit_null_clears_logo_url(
         created.id, PluginUpdate(logo_url=None), actor=ACTOR
     )
     assert updated.logo_url is None
+
+
+async def test_create_plugin_scoped_to_agent(
+    evaluator_service: PluginService, agent_repository: FakeAgentRepository
+) -> None:
+    """Store the agent id given at creation."""
+    agent = await create_agent(agent_repository, ACTOR.account.id)
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy", agent_id=agent.id), actor=ACTOR
+    )
+    assert plugin.agent_id == agent.id
+
+
+async def test_create_plugin_without_agent_id(evaluator_service: PluginService) -> None:
+    """Leave the agent id unset when the command omits it."""
+    plugin = await evaluator_service.create_plugin(
+        PluginCreate(name="accuracy"), actor=ACTOR
+    )
+    assert plugin.agent_id is None
+
+
+async def test_create_plugin_unknown_agent_id(evaluator_service: PluginService) -> None:
+    """Reject an agent id naming no agent."""
+    missing_agent_id = uuid.uuid4()
+    with pytest.raises(AgentNotFound, match=f"Agent {missing_agent_id} was not found"):
+        await evaluator_service.create_plugin(
+            PluginCreate(name="accuracy", agent_id=missing_agent_id), actor=ACTOR
+        )
+
+
+async def test_create_plugin_importer_rejects_agent_id(
+    importer_service: PluginService, agent_repository: FakeAgentRepository
+) -> None:
+    """Reject an agent id on an importer plugin."""
+    agent = await create_agent(agent_repository, ACTOR.account.id)
+    with pytest.raises(InvalidPluginAgentScope):
+        await importer_service.create_plugin(
+            PluginCreate(name="langfuse-import", agent_id=agent.id), actor=ACTOR
+        )

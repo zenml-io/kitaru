@@ -169,8 +169,9 @@ class ExperimentService:
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.
-            ValidationError: Two evaluator configs resolve to the same
-                evaluator version.
+            ValidationError: An evaluator config is scoped to another agent,
+                or two evaluator configs resolve to the same evaluator
+                version.
             DuplicateExperimentName: The experiment name is already
                 registered.
 
@@ -179,7 +180,7 @@ class ExperimentService:
         """
         await self._agents.get(command.agent_id)
         evaluators = await validate_evaluators(
-            command.evaluators, self._plugin_repository, actor
+            command.evaluators, self._plugin_repository, command.agent_id, actor
         )
         config = await self._create_replay_config(
             actor.account.id,
@@ -269,8 +270,9 @@ class ExperimentService:
             PluginVersionNotFound: A new evaluator config names an unknown
                 version.
             ValidationError: The command clears the experiment name, the
-                tool policy, or every evaluator, or two evaluator configs
-                resolve to the same evaluator version.
+                tool policy, or every evaluator, a new evaluator config is
+                scoped to another agent, or two evaluator configs resolve to
+                the same evaluator version.
             DuplicateExperimentName: The experiment name is already
                 registered.
             ExperimentFrozen: The experiment has runs and the command
@@ -305,7 +307,7 @@ class ExperimentService:
             if not command.evaluators:
                 raise ValidationError("Experiment evaluators cannot be cleared")
             evaluators = await validate_evaluators(
-                command.evaluators, self._plugin_repository, actor
+                command.evaluators, self._plugin_repository, experiment.agent_id, actor
             )
         tool_policy = current_config.tool_policy
         if "tool_policy" in config_fields:

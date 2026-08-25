@@ -69,7 +69,11 @@ class PluginService:
             actor: Caller context.
 
         Raises:
+            AgentNotFound: The command names an agent id and no agent has
+                it.
             DuplicatePluginName: The (kind, name) pair is already registered.
+            InvalidPluginAgentScope: The kind is importer and agent_id is
+                set.
             InvalidPluginProvider: The kind is evaluator and provider is set.
             ReservedPluginName: The name is under the reserved namespace.
 
@@ -86,6 +90,7 @@ class PluginService:
             provider=command.provider,
             logo_url=command.logo_url,
             metadata=command.metadata,
+            agent_id=command.agent_id,
         )
         return await self._repository.create(plugin)
 

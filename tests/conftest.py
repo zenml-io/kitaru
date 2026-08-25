@@ -1711,6 +1711,17 @@ class FakeAgentRepository:
             if other.id != agent.id and other.name == agent.name:
                 raise DuplicateAgentName(agent.name)
 
+    def exists(self, agent_id: uuid.UUID) -> bool:
+        """Report whether an agent has this id.
+
+        Args:
+            agent_id: Id of the agent.
+
+        Returns:
+            Whether an agent has this id.
+        """
+        return agent_id in self._agents
+
     def increment_latest_version(self, agent_id: uuid.UUID) -> int:
         """Bump and return the agent's version counter.
 
@@ -3665,16 +3676,23 @@ async def create_blob(
 class FakePluginRepository:
     """In-memory plugin and plugin version repository."""
 
-    def __init__(self, blob_repository: FakeBlobRepository | None = None) -> None:
+    def __init__(
+        self,
+        blob_repository: FakeBlobRepository | None = None,
+        agent_repository: FakeAgentRepository | None = None,
+    ) -> None:
         """Initialize the repository.
 
         Args:
             blob_repository: Blob repository, marked when a script version
                 references one of its blobs, mirroring the FK restrict.
+            agent_repository: Agent repository, checked against a plugin's
+                agent id on create, mirroring the FK.
         """
         self._plugins: dict[uuid.UUID, Plugin] = {}
         self._versions: dict[uuid.UUID, PluginVersion] = {}
         self._blob_repository = blob_repository
+        self._agent_repository = agent_repository
         self._referenced_version_ids: set[uuid.UUID] = set()
 
     def mark_version_referenced(self, version_id: uuid.UUID) -> None:
@@ -3704,11 +3722,18 @@ class FakePluginRepository:
             plugin: Plugin to store.
 
         Raises:
+            AgentNotFound: The plugin names an agent id and no agent has it.
             DuplicatePluginName: The (kind, name) pair is already registered.
 
         Returns:
             Stored plugin with timestamps set.
         """
+        if (
+            plugin.agent_id is not None
+            and self._agent_repository is not None
+            and not self._agent_repository.exists(plugin.agent_id)
+        ):
+            raise AgentNotFound(plugin.agent_id)
         self._check_duplicate_name(plugin)
         now = datetime.now(UTC)
         stored = plugin.model_copy(update={"created": now, "updated": now})
@@ -3955,6 +3980,7 @@ async def create_plugin(
     description: str | None = None,
     provider: str | None = None,
     metadata: dict[str, Any] | None = None,
+    agent_id: uuid.UUID | None = None,
 ) -> Plugin:
     """Store a plugin in the fake repository.
 
@@ -3966,6 +3992,8 @@ async def create_plugin(
         description: Plugin description.
         provider: Source system, evaluators must leave this unset.
         metadata: Arbitrary metadata.
+        agent_id: Agent the plugin is scoped to, importers must leave this
+            unset.
 
     Returns:
         Stored plugin.
@@ -3978,6 +4006,7 @@ async def create_plugin(
             description=description,
             provider=provider,
             metadata=metadata or {},
+            agent_id=agent_id,
         )
     )
 

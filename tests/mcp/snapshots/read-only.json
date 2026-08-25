@@ -842,6 +842,19 @@
         "EvaluatorResponse": {
           "description": "Evaluator response.",
           "properties": {
+            "agent_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Id of the agent this evaluator is scoped to, null for a global evaluator.",
+              "title": "Agent Id"
+            },
             "created": {
               "description": "Creation time.",
               "format": "date-time",
@@ -923,7 +936,8 @@
             "description",
             "logo_url",
             "metadata",
-            "latest_version"
+            "latest_version",
+            "agent_id"
           ],
           "title": "EvaluatorResponse",
           "type": "object"

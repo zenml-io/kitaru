@@ -53,7 +53,8 @@ def repository(blob_repository: FakeBlobRepository) -> FakePluginRepository:
 
 @pytest.fixture
 async def client(
-    repository: FakePluginRepository, blob_repository: FakeBlobRepository
+    repository: FakePluginRepository,
+    blob_repository: FakeBlobRepository,
 ) -> AsyncGenerator[httpx.AsyncClient, None]:
     """Provide an HTTP client for the app with a fake-backed importer service."""
     app = create_app(
@@ -64,7 +65,9 @@ async def client(
         )
     )
     service = PluginService(
-        kind=PluginKind.IMPORTER, repository=repository, blob_repository=blob_repository
+        kind=PluginKind.IMPORTER,
+        repository=repository,
+        blob_repository=blob_repository,
     )
     app.dependency_overrides[get_importer_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
@@ -84,6 +87,7 @@ async def test_create_importer(client: httpx.AsyncClient) -> None:
     assert body["name"] == "langfuse-import"
     assert body["provider"] == "langfuse"
     assert body["latest_version"] == 0
+    assert "agent_id" not in body
 
 
 async def test_create_importer_duplicate_name(client: httpx.AsyncClient) -> None:

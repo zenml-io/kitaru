@@ -129,6 +129,8 @@ def plugin_to_response(
     }
     if plugin.kind is PluginKind.IMPORTER:
         fields["provider"] = plugin.provider
+    if plugin.kind is PluginKind.EVALUATOR:
+        fields["agent_id"] = plugin.agent_id
     return response_class(**fields)
 
 
@@ -198,12 +200,15 @@ def plugin_create_to_command(
     """
     # Read the provider off importer requests only, evaluators reject one.
     provider = body.provider if isinstance(body, ImporterCreateRequest) else None
+    # Read agent_id off evaluator requests only, importers are not scopeable.
+    agent_id = body.agent_id if isinstance(body, EvaluatorCreateRequest) else None
     return PluginCreate(
         name=body.name,
         description=body.description,
         provider=provider,
         logo_url=body.logo_url,
         metadata=body.metadata,
+        agent_id=agent_id,
     )
 
 

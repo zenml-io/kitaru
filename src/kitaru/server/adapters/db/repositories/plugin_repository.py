@@ -23,6 +23,7 @@ from kitaru.server.adapters.db.orm.evaluation import (
     EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.plugin import (
+    PLUGIN_AGENT_ID_FOREIGN_KEY,
     PLUGIN_KIND_NAME_UNIQUE_CONSTRAINT,
     PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY,
     PLUGIN_VERSION_PLUGIN_ID_VERSION_UNIQUE_CONSTRAINT,
@@ -32,6 +33,7 @@ from kitaru.server.adapters.db.orm.plugin import (
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.plugin import PluginFilter, PluginVersionFilter
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import DomainError, NotFoundError
 from kitaru.server.domain.blob import BlobNotFound
 from kitaru.server.domain.plugin import (
@@ -52,6 +54,7 @@ PLUGIN_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": PluginORM.id,
     "name": PluginORM.name,
     "provider": PluginORM.provider,
+    "agent_id": PluginORM.agent_id,
 }
 
 
@@ -78,20 +81,22 @@ class SQLPluginRepository(BaseSQLRepository[PluginORM]):
             plugin: Plugin to store.
 
         Raises:
+            AgentNotFound: The plugin names an agent id and no agent has it.
             DuplicatePluginName: The (kind, name) pair is already registered.
 
         Returns:
             Stored plugin with timestamps set.
         """
         row = PluginORM.from_domain(plugin)
-        await self._add(
-            row,
-            {
-                PLUGIN_KIND_NAME_UNIQUE_CONSTRAINT: lambda: DuplicatePluginName(
-                    plugin.kind, plugin.name
-                )
-            },
-        )
+        constraints: dict[str, Callable[[], DomainError]] = {
+            PLUGIN_KIND_NAME_UNIQUE_CONSTRAINT: lambda: DuplicatePluginName(
+                plugin.kind, plugin.name
+            ),
+        }
+        if plugin.agent_id is not None:
+            agent_id = plugin.agent_id
+            constraints[PLUGIN_AGENT_ID_FOREIGN_KEY] = lambda: AgentNotFound(agent_id)
+        await self._add(row, constraints)
         return row.to_domain()
 
     async def get(self, plugin_id: uuid.UUID) -> Plugin:

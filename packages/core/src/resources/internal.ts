@@ -251,6 +251,9 @@ export function validateEvaluator(
   if (value.owner_id !== null) {
     requireUuid(value, "owner_id", method, path, status);
   }
+  if (value.agent_id !== null) {
+    requireUuid(value, "agent_id", method, path, status);
+  }
   requireString(value, "name", method, path, status);
   requireNumber(value, "latest_version", method, path, status);
   if (!isRecord(value.metadata)) {
