@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Deletion rules across the schema, from foreign keys to agent soft delete.
 
-Revision ID: 005_deletion_rules
-Revises: 004_replay_result_session_id
+Revision ID: 006_deletion_rules
+Revises: 005_evaluator_agent_scoping
 Create Date: 2026-08-24
 
 """
@@ -76,8 +76,8 @@ from kitaru.server.adapters.db.orm.tag import (
 )
 
 # revision identifiers, used by Alembic.
-revision = "005_deletion_rules"
-down_revision = "004_replay_result_session_id"
+revision = "006_deletion_rules"
+down_revision = "005_evaluator_agent_scoping"
 branch_labels = None
 depends_on = None
 
@@ -378,6 +378,6 @@ def downgrade() -> None:
     # An agent name reused after a soft delete exists on two rows, which the
     # restored plain unique constraint cannot represent.
     raise RuntimeError(
-        "005_deletion_rules cannot be downgraded. The schema before it "
+        "006_deletion_rules cannot be downgraded. The schema before it "
         "cannot hold an agent name reused after a soft delete."
     )

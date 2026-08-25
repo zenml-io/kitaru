@@ -28,6 +28,7 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("blob", "owner_id"): None,
     ("job", "owner_id"): None,
     ("plugin", "owner_id"): None,
+    ("plugin", "agent_id"): "SET NULL",
     ("replay_config", "owner_id"): None,
     ("tag", "owner_id"): None,
     ("worker", "owner_id"): None,

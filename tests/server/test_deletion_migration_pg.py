@@ -34,8 +34,8 @@ from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 
-BEFORE_DELETION_RULES = "004_replay_result_session_id"
-DELETION_RULES = "005_deletion_rules"
+BEFORE_DELETION_RULES = "005_evaluator_agent_scoping"
+DELETION_RULES = "006_deletion_rules"
 
 
 async def _seed_agents(engine: AsyncEngine, names: list[str]) -> None:
