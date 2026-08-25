@@ -76,6 +76,7 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.composition import register_subscribers
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.events import EventDispatcher
+from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
@@ -111,14 +112,12 @@ from kitaru.server.application.models.tag import TagFilter
 from kitaru.server.application.models.task import TaskFilter, TaskPolicy
 from kitaru.server.application.models.worker import WorkerFilter
 from kitaru.server.application.pagination import decode_cursor, encode_cursor
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.experiment_service import ExperimentService
 from kitaru.server.application.services.job_service import JobService
-from kitaru.server.application.services.payload_offload_service import (
-    PayloadOffloadService,
-)
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.task_service import TaskService
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
@@ -154,6 +153,7 @@ from kitaru.server.domain.api_key import (
 )
 from kitaru.server.domain.blob import (
     Blob,
+    BlobContentNotFound,
     BlobInUse,
     BlobNotFound,
     BlobStorageBackend,
@@ -3797,14 +3797,14 @@ class FakeBlobDataStore:
             sha256: Content hash.
 
         Raises:
-            BlobNotFound: No content is stored under this hash.
+            BlobContentNotFound: No content is stored under this hash.
 
         Returns:
             Content bytes.
         """
         data = self._content.get(sha256)
         if data is None:
-            raise BlobNotFound(sha256)
+            raise BlobContentNotFound(sha256)
         return data
 
     async def delete(self, sha256: str) -> None:
@@ -3851,36 +3851,40 @@ async def create_blob(
 
 
 DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES = 20 * 1024
+DEFAULT_MAX_BLOB_SIZE_BYTES = 100 * 1024 * 1024
 
 
-class PayloadOffloadServiceFakes(NamedTuple):
-    """Payload offload service backed by fresh fake blob storage."""
+class BlobServiceFakes(NamedTuple):
+    """Blob service backed by fresh fake blob storage."""
 
-    service: PayloadOffloadService
+    service: BlobService
     blob_repository: FakeBlobRepository
     blob_data_store: FakeBlobDataStore
 
 
-def build_payload_offload_service(
-    threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
-) -> PayloadOffloadServiceFakes:
-    """Build a payload offload service backed by fresh fake blob storage.
+def build_blob_service(
+    offload_threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+) -> BlobServiceFakes:
+    """Build a blob service backed by fresh fake blob storage.
 
     Args:
-        threshold_bytes: Serialized size above which a payload is offloaded.
+        offload_threshold_bytes: Serialized size above which a payload is
+            offloaded.
 
     Returns:
-        Payload offload service bound to fresh fakes, and the fakes themselves.
+        Blob service bound to fresh fakes, and the fakes themselves.
     """
     blob_repository = FakeBlobRepository()
     blob_data_store = FakeBlobDataStore()
-    service = PayloadOffloadService(
+    service = BlobService(
         repository=blob_repository,
-        data_stores={BlobStorageBackend.DATABASE: blob_data_store},
-        backend=BlobStorageBackend.DATABASE,
-        threshold_bytes=threshold_bytes,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: blob_data_store}, BlobStorageBackend.DATABASE
+        ),
+        max_size_bytes=DEFAULT_MAX_BLOB_SIZE_BYTES,
+        offload_threshold_bytes=offload_threshold_bytes,
     )
-    return PayloadOffloadServiceFakes(service, blob_repository, blob_data_store)
+    return BlobServiceFakes(service, blob_repository, blob_data_store)
 
 
 class FakePluginRepository:
@@ -6248,7 +6252,7 @@ class ReplayServices(NamedTuple):
     evaluations: FakeEvaluationRepository
     tags: FakeTagRepository
     transitions: TaskTransitions
-    payload_offload: PayloadOffloadService
+    blob_service: BlobService
 
 
 def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
@@ -6338,7 +6342,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         transitions=transitions,
         policy=task_policy,
     )
-    payload_offload = build_payload_offload_service().service
+    blob_service = build_blob_service().service
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,
@@ -6351,7 +6355,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         job_repository=jobs,
         task_repository=tasks,
         transitions=transitions,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
     replay_service = ReplayService(
         repository=replays,
@@ -6363,7 +6367,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         session_node_repository=session_nodes,
         agent_version_repository=agent_versions,
         plugin_repository=plugins,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
     experiment_run_service = ExperimentRunService(
         repository=experiment_runs,
@@ -6395,7 +6399,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         evaluations=evaluations,
         tags=tags,
         transitions=transitions,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
 
 

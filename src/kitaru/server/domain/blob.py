@@ -51,13 +51,25 @@ class BlobAccessDenied(ForbiddenError):
 class BlobNotFound(NotFoundError):
     """Raised when a blob lookup does not resolve."""
 
-    def __init__(self, blob_id: uuid.UUID | str) -> None:
+    def __init__(self, blob_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
-            blob_id: Id or content hash of the missing blob.
+            blob_id: Id of the missing blob.
         """
         super().__init__(f"Blob {blob_id} was not found")
+
+
+class BlobContentNotFound(NotFoundError):
+    """Raised when a blob content lookup does not resolve."""
+
+    def __init__(self, sha256: str) -> None:
+        """Initialize the error.
+
+        Args:
+            sha256: Content hash of the missing blob.
+        """
+        super().__init__(f"Blob content {sha256} was not found")
 
 
 class BlobInUse(ConflictError):

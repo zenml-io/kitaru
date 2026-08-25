@@ -21,7 +21,7 @@ import pytest
 
 from conftest import (
     ReplayServices,
-    build_payload_offload_service,
+    build_blob_service,
     build_replay_services,
     create_agent,
     create_agent_task,
@@ -51,9 +51,7 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
-from kitaru.server.application.services.payload_offload_service import (
-    PayloadOffloadService,
-)
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
@@ -874,13 +872,13 @@ def _replay_service_with_analytics(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
-        payload_offload=services.payload_offload,
+        blob_service=services.blob_service,
         analytics=analytics,
     )
 
 
-def _replay_service_with_payload_offload(
-    services: ReplayServices, payload_offload: PayloadOffloadService
+def _replay_service_with_blob_service(
+    services: ReplayServices, blob_service: BlobService
 ) -> ReplayService:
     return ReplayService(
         repository=services.replays,
@@ -892,7 +890,7 @@ def _replay_service_with_payload_offload(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
 
 
@@ -900,10 +898,10 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
     services: ReplayServices,
 ) -> None:
     """Return the original output for a tool call whose output was offloaded."""
-    payload_offload = build_payload_offload_service(threshold_bytes=1024)
-    blob_repository = payload_offload.blob_repository
-    data_store = payload_offload.blob_data_store
-    service = _replay_service_with_payload_offload(services, payload_offload.service)
+    fakes = build_blob_service(offload_threshold_bytes=1024)
+    blob_repository = fakes.blob_repository
+    data_store = fakes.blob_data_store
+    service = _replay_service_with_blob_service(services, fakes.service)
     agent_version = await _agent_version(services)
     baseline = await _session(services, agent_version)
     replay_id = await _replay_with_history_scope(

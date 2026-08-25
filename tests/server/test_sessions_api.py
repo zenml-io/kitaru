@@ -33,7 +33,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTagRepository,
     FakeTaskRepository,
-    build_payload_offload_service,
+    build_blob_service,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -156,19 +156,19 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    payload_offload = build_payload_offload_service().service
+    blob_service = build_blob_service().service
     session_service = SessionService(
         repository=session_repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
@@ -892,7 +892,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     app.dependency_overrides[get_auth_session] = stub_auth_session
@@ -945,7 +945,7 @@ def _build_task_scoped_app(
         HTTP client routed to the app.
     """
     app = create_app(local_settings())
-    payload_offload = build_payload_offload_service().service
+    blob_service = build_blob_service().service
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
         task_repository=task_repository,
@@ -953,13 +953,13 @@ def _build_task_scoped_app(
         if agent_version_repository is not None
         else FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
     app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
     app.dependency_overrides[get_evaluation_service] = lambda: EvaluationService(
         repository=evaluation_repository, session_repository=session_repository

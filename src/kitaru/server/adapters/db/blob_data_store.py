@@ -18,7 +18,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.server.adapters.db.orm.blob_content import BlobContentORM
-from kitaru.server.domain.blob import BlobNotFound
+from kitaru.server.domain.blob import BlobContentNotFound
 
 
 class DatabaseBlobDataStore:
@@ -53,7 +53,7 @@ class DatabaseBlobDataStore:
             sha256: Content hash.
 
         Raises:
-            BlobNotFound: No content is stored under this hash.
+            BlobContentNotFound: No content is stored under this hash.
 
         Returns:
             Content bytes.
@@ -61,7 +61,7 @@ class DatabaseBlobDataStore:
         statement = select(BlobContentORM.data).where(BlobContentORM.sha256 == sha256)
         data = (await self._session.execute(statement)).scalar_one_or_none()
         if data is None:
-            raise BlobNotFound(sha256)
+            raise BlobContentNotFound(sha256)
         return data
 
     async def delete(self, sha256: str) -> None:

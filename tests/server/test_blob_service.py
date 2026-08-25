@@ -19,13 +19,24 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from conftest import FakeBlobDataStore, FakeBlobRepository, create_blob
+from conftest import (
+    DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    create_blob,
+)
+from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.models.auth import (
     AuthContext,
     GrantKind,
     TaskPrincipal,
 )
-from kitaru.server.application.services.blob_service import BlobService
+from kitaru.server.application.services.blob_service import (
+    JSON_MEDIA_TYPE,
+    TEXT_MEDIA_TYPE,
+    BlobService,
+    Candidate,
+)
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.blob import (
     BlobAccessDenied,
@@ -62,9 +73,11 @@ def service(
     """Provide a blob service backed by the fake repository, capped at 16 bytes."""
     return BlobService(
         repository=repository,
-        data_stores={BlobStorageBackend.DATABASE: data_store},
-        backend=BlobStorageBackend.DATABASE,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: data_store}, BlobStorageBackend.DATABASE
+        ),
         max_size_bytes=16,
+        offload_threshold_bytes=DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     )
 
 
@@ -234,3 +247,109 @@ async def test_download_blob_allows_a_task_principal_holding_the_grant(
     blob = await create_blob(repository, ACTOR.account.id, data_store=data_store)
     stored, _ = await service.download_blob(blob.id, actor=_task_actor(blob.id))
     assert stored.id == blob.id
+
+
+async def test_offload_values_under_threshold_stay_inline(
+    service: BlobService,
+) -> None:
+    """Keep a value at or under the offload threshold inline, with no blob id."""
+    (result,) = await service.offload_values(
+        [Candidate("short", TEXT_MEDIA_TYPE)], ACTOR.account.id
+    )
+    assert result.value == "short"
+    assert result.blob_id is None
+
+
+async def test_offload_values_keeps_byte_identical_values_apart_by_media_type(
+    repository: FakeBlobRepository, data_store: FakeBlobDataStore
+) -> None:
+    """Store a text value and a byte-identical JSON value as separate blobs."""
+    service = BlobService(
+        repository=repository,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: data_store}, BlobStorageBackend.DATABASE
+        ),
+        max_size_bytes=16,
+        offload_threshold_bytes=10,
+    )
+
+    padded = "x" * 50
+    # The JSON encoding of the plain string equals the raw text of the quoted
+    # string, so the two candidates hash to the same sha256 despite carrying
+    # different media types.
+    text_value = f'"{padded}"'
+    json_value = padded
+
+    text_result, json_result = await service.offload_values(
+        [
+            Candidate(text_value, TEXT_MEDIA_TYPE),
+            Candidate(json_value, JSON_MEDIA_TYPE),
+        ],
+        ACTOR.account.id,
+    )
+    assert text_result.blob_id is not None
+    assert json_result.blob_id is not None
+    assert text_result.blob_id != json_result.blob_id
+    assert text_result.value is None
+    assert json_result.value is None
+
+    text_blob = await repository.get(text_result.blob_id)
+    json_blob = await repository.get(json_result.blob_id)
+    assert text_blob.sha256 == json_blob.sha256
+    assert text_blob.media_type == TEXT_MEDIA_TYPE
+    assert json_blob.media_type == JSON_MEDIA_TYPE
+
+    values = await service.hydrate_values([text_result.blob_id, json_result.blob_id])
+    assert values[text_result.blob_id] == text_value
+    assert values[json_result.blob_id] == json_value
+
+
+async def test_offload_values_dedupes_identical_values(
+    repository: FakeBlobRepository, data_store: FakeBlobDataStore
+) -> None:
+    """Share one blob between two candidates offloading the same value."""
+    service = BlobService(
+        repository=repository,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: data_store}, BlobStorageBackend.DATABASE
+        ),
+        max_size_bytes=16,
+        offload_threshold_bytes=10,
+    )
+    shared_value = {"a": "i" * 50}
+    first, second = await service.offload_values(
+        [
+            Candidate(shared_value, JSON_MEDIA_TYPE),
+            Candidate(shared_value, JSON_MEDIA_TYPE),
+        ],
+        ACTOR.account.id,
+    )
+    assert first.blob_id is not None
+    assert first.blob_id == second.blob_id
+
+
+async def test_offload_values_threshold_zero_offloads_every_non_null_value(
+    repository: FakeBlobRepository, data_store: FakeBlobDataStore
+) -> None:
+    """Offload every non-null value when the threshold is zero, leave None inline."""
+    service = BlobService(
+        repository=repository,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: data_store}, BlobStorageBackend.DATABASE
+        ),
+        max_size_bytes=16,
+        offload_threshold_bytes=0,
+    )
+    value_result, null_result = await service.offload_values(
+        [Candidate({"a": 1}, JSON_MEDIA_TYPE), Candidate(None, JSON_MEDIA_TYPE)],
+        ACTOR.account.id,
+    )
+    assert value_result.blob_id is not None
+    assert value_result.value is None
+    assert null_result.blob_id is None
+    assert null_result.value is None
+
+
+async def test_hydrate_values_empty_refs_is_a_no_op(service: BlobService) -> None:
+    """Return an empty mapping for an empty batch of refs."""
+    assert await service.hydrate_values([]) == {}

@@ -31,9 +31,7 @@ from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
-from kitaru.server.application.services.payload_offload_service import (
-    PayloadOffloadService,
-)
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
@@ -53,7 +51,7 @@ async def create_replay_pipelines(
     replay_repository: ReplayRepository,
     job_repository: JobRepository,
     task_repository: TaskRepository,
-    payload_offload: PayloadOffloadService,
+    blob_service: BlobService,
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
@@ -73,15 +71,27 @@ async def create_replay_pipelines(
         replay_repository: Replay repository.
         job_repository: Job repository.
         task_repository: Task repository.
-        payload_offload: Payload offload service, for the baseline sessions'
-            inputs.
+        blob_service: Blob service, for the baseline sessions' inputs.
 
     Returns:
         Created replays, in baseline order.
     """
     if not baselines:
         return []
-    baselines = await payload_offload.hydrate_sessions(list(baselines))
+    refs = {
+        baseline.inputs_blob_id
+        for baseline in baselines
+        if baseline.inputs_blob_id is not None
+    }
+    values = await blob_service.hydrate_values(list(refs))
+    baselines = [
+        baseline.model_copy(
+            update={"inputs": values[baseline.inputs_blob_id], "inputs_blob_id": None}
+        )
+        if baseline.inputs_blob_id is not None
+        else baseline
+        for baseline in baselines
+    ]
     jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in baselines]
     replays = [
         Replay(

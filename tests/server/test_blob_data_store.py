@@ -20,7 +20,7 @@ import pytest
 from conftest import FakeBlobDataStore, pg_session, postgres_available
 from kitaru.server.adapters.db.blob_data_store import DatabaseBlobDataStore
 from kitaru.server.application.interfaces.blob_data_store import BlobDataStore
-from kitaru.server.domain.blob import BlobNotFound
+from kitaru.server.domain.blob import BlobContentNotFound
 
 
 @pytest.fixture(params=["fake", "postgres"])
@@ -50,7 +50,9 @@ async def test_put_is_idempotent(store: BlobDataStore) -> None:
 
 async def test_get_not_found(store: BlobDataStore) -> None:
     """Raise for a hash with no stored content."""
-    with pytest.raises(BlobNotFound, match=f"Blob {'a' * 64} was not found"):
+    with pytest.raises(
+        BlobContentNotFound, match=f"Blob content {'a' * 64} was not found"
+    ):
         await store.get("a" * 64)
 
 
@@ -58,7 +60,7 @@ async def test_delete(store: BlobDataStore) -> None:
     """Delete stored content."""
     await store.put("a" * 64, b"content")
     await store.delete("a" * 64)
-    with pytest.raises(BlobNotFound):
+    with pytest.raises(BlobContentNotFound):
         await store.get("a" * 64)
 
 

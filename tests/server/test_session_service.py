@@ -27,7 +27,7 @@ from conftest import (
     FakeReplayRepository,
     FakeSessionRepository,
     FakeTaskRepository,
-    build_payload_offload_service,
+    build_blob_service,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -151,7 +151,7 @@ def service(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=replay_repository,
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
     )
 
 
@@ -517,7 +517,7 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
         analytics=analytics,
     )
     started_at = datetime.now(UTC)
@@ -569,7 +569,7 @@ async def test_update_session_non_status_update_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
         analytics=analytics,
     )
     created = await service.create_session(
@@ -593,7 +593,7 @@ async def test_update_session_already_terminal_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
         analytics=analytics,
     )
     created = await create_session(
@@ -622,7 +622,7 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
         analytics=analytics,
     )
     created = await service.create_session(
@@ -658,7 +658,7 @@ async def test_create_session_in_progress_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service().service,
+        blob_service=build_blob_service().service,
         analytics=analytics,
     )
     await service.create_session(
@@ -1233,16 +1233,16 @@ def _service_with_threshold(
     agent_version_repository: FakeAgentVersionRepository,
     threshold_bytes: int,
 ) -> tuple[SessionService, FakeBlobRepository, FakeBlobDataStore]:
-    """Build a session service backed by a payload offload service at a threshold."""
-    payload_offload = build_payload_offload_service(threshold_bytes)
+    """Build a session service backed by a blob service at an offload threshold."""
+    fakes = build_blob_service(threshold_bytes)
     service = SessionService(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=payload_offload.service,
+        blob_service=fakes.service,
     )
-    return service, payload_offload.blob_repository, payload_offload.blob_data_store
+    return service, fakes.blob_repository, fakes.blob_data_store
 
 
 async def test_create_session_offloads_over_threshold_inputs_and_outputs(

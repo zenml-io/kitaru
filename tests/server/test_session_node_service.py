@@ -28,7 +28,7 @@ from conftest import (
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
-    build_payload_offload_service,
+    build_blob_service,
     create_session,
 )
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
@@ -44,9 +44,7 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
-from kitaru.server.application.services.payload_offload_service import (
-    PayloadOffloadService,
-)
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
@@ -79,9 +77,9 @@ def task_repository() -> FakeTaskRepository:
 
 
 @pytest.fixture
-def payload_offload() -> PayloadOffloadService:
-    """Provide a payload offload service backed by fresh fake blob storage."""
-    return build_payload_offload_service().service
+def blob_service() -> BlobService:
+    """Provide a blob service backed by fresh fake blob storage."""
+    return build_blob_service().service
 
 
 @pytest.fixture
@@ -89,20 +87,20 @@ def service(
     node_repository: FakeSessionNodeRepository,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
-    payload_offload: PayloadOffloadService,
+    blob_service: BlobService,
 ) -> SessionNodeService:
     """Provide a session node service backed by the fake repositories."""
     return SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
 
 
 @pytest.fixture
 def session_service(
-    session_repository: FakeSessionRepository, payload_offload: PayloadOffloadService
+    session_repository: FakeSessionRepository, blob_service: BlobService
 ) -> SessionService:
     """Provide a session service sharing the fake session repository."""
     return SessionService(
@@ -110,7 +108,7 @@ def session_service(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
-        payload_offload=payload_offload,
+        blob_service=blob_service,
     )
 
 
@@ -586,15 +584,15 @@ def _service_with_threshold(
     task_repository: FakeTaskRepository,
     threshold_bytes: int,
 ) -> tuple[SessionNodeService, FakeBlobRepository, FakeBlobDataStore]:
-    """Build a session node service backed by a payload offload service at threshold."""
-    payload_offload = build_payload_offload_service(threshold_bytes)
+    """Build a session node service backed by a blob service at an offload threshold."""
+    fakes = build_blob_service(threshold_bytes)
     service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        payload_offload=payload_offload.service,
+        blob_service=fakes.service,
     )
-    return service, payload_offload.blob_repository, payload_offload.blob_data_store
+    return service, fakes.blob_repository, fakes.blob_data_store
 
 
 async def test_ingest_offloads_over_threshold_payloads(

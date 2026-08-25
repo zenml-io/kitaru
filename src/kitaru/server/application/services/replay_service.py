@@ -45,10 +45,8 @@ from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
 )
+from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.application.services.evaluator_resolution import validate_evaluators
-from kitaru.server.application.services.payload_offload_service import (
-    PayloadOffloadService,
-)
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
@@ -80,7 +78,7 @@ class ReplayService:
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
-        payload_offload: PayloadOffloadService,
+        blob_service: BlobService,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -97,8 +95,8 @@ class ReplayService:
                 lookup.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
-            payload_offload: Payload offload service, for the baseline
-                session's inputs and the tool lookup's node output.
+            blob_service: Blob service, for the baseline session's inputs
+                and the tool lookup's node output.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
@@ -110,7 +108,7 @@ class ReplayService:
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
-        self._payload_offload = payload_offload
+        self._blob_service = blob_service
         self._analytics = analytics
 
     async def _bundle(self, replays: list[Replay]) -> list[ReplayWithDetails]:
@@ -194,7 +192,7 @@ class ReplayService:
             replay_repository=self._repository,
             job_repository=self._jobs,
             task_repository=self._tasks,
-            payload_offload=self._payload_offload,
+            blob_service=self._blob_service,
         )
         if self._analytics is not None:
             self._analytics.track(
@@ -311,7 +309,14 @@ class ReplayService:
         )
         if node is None:
             return None
-        node = await self._payload_offload.hydrate_node(node)
+        if node.outputs_blob_id is not None:
+            values = await self._blob_service.hydrate_values([node.outputs_blob_id])
+            node = node.model_copy(
+                update={
+                    "outputs": values[node.outputs_blob_id],
+                    "outputs_blob_id": None,
+                }
+            )
         return ToolLookupResult(
             result=node.outputs, status=node.status, error=node.error
         )

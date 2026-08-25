@@ -15,6 +15,8 @@
 
 from typing import Protocol
 
+from kitaru.server.domain.blob import BlobStorageBackend
+
 
 class BlobDataStore(Protocol):
     """Blob content storage operations."""
@@ -35,7 +37,7 @@ class BlobDataStore(Protocol):
             sha256: Content hash.
 
         Raises:
-            BlobNotFound: No content is stored under this hash.
+            BlobContentNotFound: No content is stored under this hash.
 
         Returns:
             Content bytes.
@@ -49,3 +51,46 @@ class BlobDataStore(Protocol):
             sha256: Content hash.
         """
         ...
+
+
+class BlobDataStores:
+    """Blob content stores keyed by backend, with one active for writes."""
+
+    def __init__(
+        self,
+        stores: dict[BlobStorageBackend, BlobDataStore],
+        backend: BlobStorageBackend,
+    ) -> None:
+        """Initialize the stores.
+
+        Args:
+            stores: Content stores keyed by the backend they serve.
+            backend: Backend newly offloaded payloads are written to.
+        """
+        self._stores = stores
+        self.backend = backend
+
+    def get_write_store(self) -> BlobDataStore:
+        """Return the store new content is written to.
+
+        Returns:
+            Store configured for the active backend.
+        """
+        return self.get_store(self.backend)
+
+    def get_store(self, backend: BlobStorageBackend) -> BlobDataStore:
+        """Look up the store configured for a backend.
+
+        Args:
+            backend: Backend to resolve a store for.
+
+        Raises:
+            RuntimeError: No data store is configured for the backend.
+
+        Returns:
+            Store configured for the backend.
+        """
+        store = self._stores.get(backend)
+        if store is None:
+            raise RuntimeError(f"No data store configured for backend {backend}")
+        return store

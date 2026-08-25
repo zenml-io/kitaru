@@ -19,7 +19,7 @@ import obstore
 from obstore.store import S3Store
 
 from kitaru.server.blob_storage_settings import S3BlobStorageSettings
-from kitaru.server.domain.blob import BlobNotFound
+from kitaru.server.domain.blob import BlobContentNotFound
 
 
 class S3BlobDataStore:
@@ -72,7 +72,7 @@ class S3BlobDataStore:
             sha256: Content hash.
 
         Raises:
-            BlobNotFound: No content is stored under this hash.
+            BlobContentNotFound: No content is stored under this hash.
 
         Returns:
             Content bytes.
@@ -80,7 +80,7 @@ class S3BlobDataStore:
         try:
             result = await obstore.get_async(self._store, self._key(sha256))
         except FileNotFoundError as exc:
-            raise BlobNotFound(sha256) from exc
+            raise BlobContentNotFound(sha256) from exc
         return bytes(await result.bytes_async())
 
     async def delete(self, sha256: str) -> None:
