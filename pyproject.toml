@@ -83,6 +83,9 @@ otel = [
     "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
     "opentelemetry-instrumentation-logging>=0.65b0",
 ]
+s3 = [
+    "obstore>=0.11.1",
+]
 
 [project.scripts]
 kitaru = "kitaru.cli:main"

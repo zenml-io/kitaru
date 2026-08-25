@@ -19,7 +19,7 @@ from collections.abc import AsyncIterator
 
 import pytest
 
-from conftest import FakeBlobRepository, create_blob
+from conftest import FakeBlobDataStore, FakeBlobRepository, create_blob
 from kitaru.server.application.models.auth import (
     AuthContext,
     GrantKind,
@@ -31,6 +31,7 @@ from kitaru.server.domain.blob import (
     BlobAccessDenied,
     BlobInUse,
     BlobNotFound,
+    BlobStorageBackend,
     BlobTooLarge,
 )
 
@@ -49,9 +50,22 @@ def repository() -> FakeBlobRepository:
 
 
 @pytest.fixture
-def service(repository: FakeBlobRepository) -> BlobService:
+def data_store() -> FakeBlobDataStore:
+    """Provide a fake blob data store."""
+    return FakeBlobDataStore()
+
+
+@pytest.fixture
+def service(
+    repository: FakeBlobRepository, data_store: FakeBlobDataStore
+) -> BlobService:
     """Provide a blob service backed by the fake repository, capped at 16 bytes."""
-    return BlobService(repository=repository, max_size_bytes=16)
+    return BlobService(
+        repository=repository,
+        data_stores={BlobStorageBackend.DATABASE: data_store},
+        backend=BlobStorageBackend.DATABASE,
+        max_size_bytes=16,
+    )
 
 
 async def test_upload_blob(service: BlobService) -> None:
@@ -64,7 +78,7 @@ async def test_upload_blob(service: BlobService) -> None:
     assert blob.media_type == "text/plain"
     assert blob.size == len(b"hello ")
     assert blob.sha256 == hashlib.sha256(b"hello ").hexdigest()
-    assert blob.data == b"hello "
+    assert blob.stored_in == BlobStorageBackend.DATABASE
     assert blob.created is not None
 
 
@@ -90,12 +104,14 @@ async def test_upload_blob_dedup(service: BlobService) -> None:
     assert second.sha256 == first.sha256
 
 
-async def test_upload_blob_streams_in_chunks(service: BlobService) -> None:
+async def test_upload_blob_streams_in_chunks(
+    service: BlobService, data_store: FakeBlobDataStore
+) -> None:
     """Assemble content spread across multiple chunks."""
     blob, _ = await service.upload_blob(
         _chunks(b"ab", b"cd", b"ef"), media_type="text/plain", actor=ACTOR
     )
-    assert blob.data == b"abcdef"
+    assert await data_store.get(blob.sha256) == b"abcdef"
     assert blob.sha256 == hashlib.sha256(b"abcdef").hexdigest()
 
 
@@ -136,8 +152,9 @@ async def test_download_blob(service: BlobService) -> None:
     created, _ = await service.upload_blob(
         _chunks(b"content"), media_type="text/plain", actor=ACTOR
     )
-    downloaded = await service.download_blob(created.id, actor=ACTOR)
-    assert downloaded.data == b"content"
+    downloaded, data = await service.download_blob(created.id, actor=ACTOR)
+    assert downloaded.id == created.id
+    assert data == b"content"
 
 
 async def test_download_blob_not_found(service: BlobService) -> None:
@@ -209,9 +226,11 @@ async def test_download_blob_denies_a_task_principal_without_a_grant(
 
 
 async def test_download_blob_allows_a_task_principal_holding_the_grant(
-    service: BlobService, repository: FakeBlobRepository
+    service: BlobService,
+    repository: FakeBlobRepository,
+    data_store: FakeBlobDataStore,
 ) -> None:
     """Download a blob the task principal's spec granted it."""
-    blob = await create_blob(repository, ACTOR.account.id)
-    stored = await service.download_blob(blob.id, actor=_task_actor(blob.id))
+    blob = await create_blob(repository, ACTOR.account.id, data_store=data_store)
+    stored, _ = await service.download_blob(blob.id, actor=_task_actor(blob.id))
     assert stored.id == blob.id

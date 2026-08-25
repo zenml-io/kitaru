@@ -149,7 +149,12 @@ from kitaru.server.domain.api_key import (
     DuplicateApiKeyName,
     encode_api_key,
 )
-from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
+from kitaru.server.domain.blob import (
+    Blob,
+    BlobInUse,
+    BlobNotFound,
+    BlobStorageBackend,
+)
 from kitaru.server.domain.cohort import (
     Cohort,
     CohortInUse,
@@ -3679,19 +3684,18 @@ class FakeBlobRepository:
             blob: Blob to store.
 
         Returns:
-            Stored blob and whether this call created it. A dedup hit
-            returns the existing row with its content left unloaded.
+            Stored blob and whether this call created it.
         """
         for other in self._blobs.values():
             if other.sha256 == blob.sha256:
-                return other.model_copy(update={"data": b""}), False
+                return other.model_copy(), False
         now = datetime.now(UTC)
         stored = blob.model_copy(update={"created": now})
         self._blobs[stored.id] = stored
         return stored.model_copy(), True
 
     async def get(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob by id, content included.
+        """Load a blob by id.
 
         Args:
             blob_id: Id of the blob.
@@ -3706,23 +3710,6 @@ class FakeBlobRepository:
         if blob is None:
             raise BlobNotFound(blob_id)
         return blob.model_copy()
-
-    async def get_metadata(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob's metadata by id, leaving its content unloaded.
-
-        Args:
-            blob_id: Id of the blob.
-
-        Raises:
-            BlobNotFound: No blob has this id.
-
-        Returns:
-            Blob with an empty content placeholder.
-        """
-        blob = self._blobs.get(blob_id)
-        if blob is None:
-            raise BlobNotFound(blob_id)
-        return blob.model_copy(update={"data": b""})
 
     async def delete(self, blob_id: uuid.UUID) -> None:
         """Delete a blob by id.
@@ -3749,11 +3736,54 @@ class FakeBlobRepository:
         self._referenced.add(blob_id)
 
 
+class FakeBlobDataStore:
+    """In-memory blob content store."""
+
+    def __init__(self) -> None:
+        """Initialize the data store."""
+        self._content: dict[str, bytes] = {}
+
+    async def put(self, sha256: str, data: bytes) -> None:
+        """Store content under its hash, idempotent on a repeat hash.
+
+        Args:
+            sha256: Content hash.
+            data: Content bytes.
+        """
+        self._content.setdefault(sha256, data)
+
+    async def get(self, sha256: str) -> bytes:
+        """Load content by its hash.
+
+        Args:
+            sha256: Content hash.
+
+        Raises:
+            BlobNotFound: No content is stored under this hash.
+
+        Returns:
+            Content bytes.
+        """
+        data = self._content.get(sha256)
+        if data is None:
+            raise BlobNotFound(sha256)
+        return data
+
+    async def delete(self, sha256: str) -> None:
+        """Delete content by its hash, idempotent on a missing hash.
+
+        Args:
+            sha256: Content hash.
+        """
+        self._content.pop(sha256, None)
+
+
 async def create_blob(
     repository: FakeBlobRepository,
     owner_id: uuid.UUID | None,
     content: bytes = b"blob-content",
     media_type: str = "application/octet-stream",
+    data_store: FakeBlobDataStore | None = None,
 ) -> Blob:
     """Store a blob in the fake repository.
 
@@ -3762,18 +3792,21 @@ async def create_blob(
         owner_id: Id of the owning account.
         content: Blob content.
         media_type: Content media type.
+        data_store: Fake data store to seed with the content, if given.
 
     Returns:
         Stored blob.
     """
     sha256 = hashlib.sha256(content).hexdigest()
+    if data_store is not None:
+        await data_store.put(sha256, content)
     blob, _ = await repository.create(
         Blob(
             owner_id=owner_id,
             sha256=sha256,
             size=len(content),
             media_type=media_type,
-            data=content,
+            stored_in=BlobStorageBackend.DATABASE,
         )
     )
     return blob

@@ -31,6 +31,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneClient,
 )
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.blob_data_store import DatabaseBlobDataStore
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -101,6 +102,7 @@ from kitaru.server.adapters.rest.request_state import (
 )
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.blob_data_store import BlobDataStore
 from kitaru.server.application.interfaces.idempotency_key_repository import (
     IdempotencyKeyRepository,
 )
@@ -157,6 +159,7 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
@@ -407,21 +410,50 @@ def get_secret_service(
     )
 
 
-def get_blob_service(
+def get_blob_data_stores(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
-) -> BlobService:
-    """Return a blob service for the current request.
+) -> dict[BlobStorageBackend, BlobDataStore]:
+    """Return the blob content stores configured for the current process.
 
     Args:
         session: Request-scoped database session.
         settings: API settings for this process.
 
     Returns:
+        Content stores keyed by the backend they serve.
+    """
+    stores: dict[BlobStorageBackend, BlobDataStore] = {
+        BlobStorageBackend.DATABASE: DatabaseBlobDataStore(session)
+    }
+    if settings.BLOB_STORAGE.s3 is not None:
+        from kitaru.server.adapters.blobstore.s3 import S3BlobDataStore
+
+        stores[BlobStorageBackend.S3] = S3BlobDataStore(settings.BLOB_STORAGE.s3)
+    return stores
+
+
+def get_blob_service(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    data_stores: Annotated[
+        dict[BlobStorageBackend, BlobDataStore], Depends(get_blob_data_stores)
+    ],
+) -> BlobService:
+    """Return a blob service for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+        data_stores: Content stores keyed by the backend they serve.
+
+    Returns:
         Blob service bound to the SQL repository.
     """
     return BlobService(
         repository=SQLBlobRepository(session),
+        data_stores=data_stores,
+        backend=settings.BLOB_STORAGE.backend,
         max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
     )
 

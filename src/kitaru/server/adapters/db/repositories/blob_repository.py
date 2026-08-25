@@ -14,9 +14,8 @@
 """SQL blob repository."""
 
 import uuid
-from typing import Any
 
-from sqlalchemy import Row, Select, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.server.adapters.db.errors import violated_constraint
@@ -50,8 +49,7 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
             blob: Blob to store.
 
         Returns:
-            Stored blob and whether this call created it. A dedup hit
-            returns the existing row with its content left unloaded.
+            Stored blob and whether this call created it.
         """
         row = BlobORM.from_domain(blob)
         try:
@@ -60,82 +58,25 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
                 await self._session.flush()
         except IntegrityError as exc:
             if violated_constraint(exc) == BLOB_SHA256_UNIQUE_CONSTRAINT:
-                return await self._get_by_sha256_without_content(blob.sha256), False
+                return await self._get_by_sha256(blob.sha256), False
             raise
         return row.to_domain(), True
 
-    @staticmethod
-    def _select_metadata() -> Select[
-        tuple[uuid.UUID, uuid.UUID | None, str, int, str, Any]
-    ]:
-        """Build the select over every blob column except the content.
-
-        Returns:
-            Unfiltered metadata select.
-        """
-        return select(
-            BlobORM.id,
-            BlobORM.owner_id,
-            BlobORM.sha256,
-            BlobORM.size,
-            BlobORM.media_type,
-            BlobORM.created,
-        )
-
-    @staticmethod
-    def _to_metadata(
-        row: Row[tuple[uuid.UUID, uuid.UUID | None, str, int, str, Any]],
-    ) -> Blob:
-        """Build a domain blob from a metadata row.
-
-        Args:
-            row: Metadata row.
-
-        Returns:
-            Blob with an empty content placeholder.
-        """
-        return Blob(
-            id=row.id,
-            owner_id=row.owner_id,
-            sha256=row.sha256,
-            size=row.size,
-            media_type=row.media_type,
-            data=b"",
-            created=row.created,
-        )
-
-    async def _get_by_sha256_without_content(self, sha256: str) -> Blob:
-        """Load a blob's metadata by sha256 without its content column.
+    async def _get_by_sha256(self, sha256: str) -> Blob:
+        """Load a blob by sha256.
 
         Args:
             sha256: Content hash.
 
         Returns:
-            Blob with an empty content placeholder.
+            Stored blob.
         """
-        statement = self._select_metadata().where(BlobORM.sha256 == sha256)
-        return self._to_metadata((await self._session.execute(statement)).one())
-
-    async def get_metadata(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob's metadata by id, leaving its content unloaded.
-
-        Args:
-            blob_id: Id of the blob.
-
-        Raises:
-            BlobNotFound: No blob has this id.
-
-        Returns:
-            Blob with an empty content placeholder.
-        """
-        statement = self._select_metadata().where(BlobORM.id == blob_id)
-        row = (await self._session.execute(statement)).one_or_none()
-        if row is None:
-            raise BlobNotFound(blob_id)
-        return self._to_metadata(row)
+        statement = select(BlobORM).where(BlobORM.sha256 == sha256)
+        row = (await self._session.execute(statement)).scalar_one()
+        return row.to_domain()
 
     async def get(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob by id, content included.
+        """Load a blob by id.
 
         Args:
             blob_id: Id of the blob.

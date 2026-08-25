@@ -17,23 +17,34 @@ import hashlib
 import uuid
 from collections.abc import AsyncIterator
 
+from kitaru.server.application.interfaces.blob_data_store import BlobDataStore
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.resource_access import check_task_blob_read
-from kitaru.server.domain.blob import Blob, BlobTooLarge
+from kitaru.server.domain.blob import Blob, BlobStorageBackend, BlobTooLarge
 
 
 class BlobService:
     """Content-addressed blob storage."""
 
-    def __init__(self, repository: BlobRepository, max_size_bytes: int) -> None:
+    def __init__(
+        self,
+        repository: BlobRepository,
+        data_stores: dict[BlobStorageBackend, BlobDataStore],
+        backend: BlobStorageBackend,
+        max_size_bytes: int,
+    ) -> None:
         """Initialize the service.
 
         Args:
             repository: Blob repository.
+            data_stores: Content stores keyed by the backend they serve.
+            backend: Backend new uploads are written to.
             max_size_bytes: Upload size cap in bytes.
         """
         self._repository = repository
+        self._data_stores = data_stores
+        self._backend = backend
         self._max_size_bytes = max_size_bytes
 
     async def upload_blob(
@@ -45,8 +56,9 @@ class BlobService:
         """Upload a blob, deduping identical content by sha256.
 
         The content is hashed and buffered chunk by chunk, so the cap holds
-        the whole way through and the buffer is used directly for the insert
-        without a second read.
+        the whole way through and the buffer is used directly for the store
+        put without a second read. The put runs before the registry write,
+        so a failed request orphans content instead of dangling a ref.
 
         Args:
             content: Upload content, read in chunks.
@@ -68,12 +80,14 @@ class BlobService:
                 raise BlobTooLarge(self._max_size_bytes)
             hasher.update(chunk)
             buffer.extend(chunk)
+        sha256 = hasher.hexdigest()
+        await self._data_stores[self._backend].put(sha256, bytes(buffer))
         blob = Blob(
             owner_id=actor.account.id,
-            sha256=hasher.hexdigest(),
+            sha256=sha256,
             size=size,
             media_type=media_type,
-            data=bytes(buffer),
+            stored_in=self._backend,
         )
         return await self._repository.create(blob)
 
@@ -94,8 +108,10 @@ class BlobService:
         check_task_blob_read(blob_id, actor)
         return await self._repository.get(blob_id)
 
-    async def download_blob(self, blob_id: uuid.UUID, actor: AuthContext) -> Blob:
-        """Get a blob's content by id.
+    async def download_blob(
+        self, blob_id: uuid.UUID, actor: AuthContext
+    ) -> tuple[Blob, bytes]:
+        """Get a blob's metadata and content by id.
 
         Args:
             blob_id: Id of the blob.
@@ -104,12 +120,17 @@ class BlobService:
         Raises:
             BlobAccessDenied: A task principal holds no grant for the blob.
             BlobNotFound: No blob has this id.
+            RuntimeError: No data store is configured for the blob's backend.
 
         Returns:
-            Stored blob.
+            Stored blob and its content.
         """
         check_task_blob_read(blob_id, actor)
-        return await self._repository.get(blob_id)
+        blob = await self._repository.get(blob_id)
+        store = self._data_stores.get(blob.stored_in)
+        if store is None:
+            raise RuntimeError(f"No data store configured for backend {blob.stored_in}")
+        return blob, await store.get(blob.sha256)
 
     async def delete_blob(self, blob_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a blob.

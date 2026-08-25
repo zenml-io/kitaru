@@ -29,13 +29,12 @@ class BlobRepository(Protocol):
             blob: Blob to store.
 
         Returns:
-            Stored blob and whether this call created it. A dedup hit
-            returns the existing row with its content left unloaded.
+            Stored blob and whether this call created it.
         """
         ...
 
     async def get(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob by id, content included.
+        """Load a blob by id.
 
         Args:
             blob_id: Id of the blob.
@@ -45,20 +44,6 @@ class BlobRepository(Protocol):
 
         Returns:
             Stored blob.
-        """
-        ...
-
-    async def get_metadata(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob's metadata by id, leaving its content unloaded.
-
-        Args:
-            blob_id: Id of the blob.
-
-        Raises:
-            BlobNotFound: No blob has this id.
-
-        Returns:
-            Blob with an empty content placeholder.
         """
         ...
 

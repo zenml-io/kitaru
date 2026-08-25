@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SDK methods that call an endpoint supporting idempotency now take an `idempotency_key` argument, so callers can supply their own key instead of the per-request key the transport generates. Those endpoints declare an `Idempotency-Key` header parameter in the OpenAPI schema.
 - MCP tools that create a resource take an optional `idempotency_key` field, so a retried tool call whose response was lost returns the original result instead of acting twice.
 - CLI commands that create a single resource take `--idempotency-key`, so a retried invocation with the same key returns the original result instead of acting twice.
+- Blob content storage is now pluggable: `KITARU_SERVER_BLOB_STORAGE__BACKEND=s3` stores blob content in an S3 bucket instead of the database, configured through `KITARU_SERVER_BLOB_STORAGE__S3__*` variables.
 
 ### Changed
 

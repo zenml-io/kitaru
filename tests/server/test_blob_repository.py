@@ -34,7 +34,12 @@ from kitaru.server.adapters.db.repositories.task_repository import SQLTaskReposi
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
+from kitaru.server.domain.blob import (
+    Blob,
+    BlobInUse,
+    BlobNotFound,
+    BlobStorageBackend,
+)
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
@@ -53,7 +58,7 @@ def _blob(owner_id: uuid.UUID | None, content: bytes = b"content") -> Blob:
         sha256=hashlib.sha256(content).hexdigest(),
         size=len(content),
         media_type="text/plain",
-        data=content,
+        stored_in=BlobStorageBackend.DATABASE,
     )
 
 
@@ -78,7 +83,7 @@ async def test_create_sets_timestamp(setup: Setup) -> None:
     assert blob.owner_id == owner_id
     assert blob.size == len(b"content")
     assert blob.media_type == "text/plain"
-    assert blob.data == b"content"
+    assert blob.stored_in == BlobStorageBackend.DATABASE
     assert blob.created is not None
 
 
@@ -103,7 +108,7 @@ async def test_create_dedup(setup: Setup) -> None:
 
 
 async def test_get(setup: Setup) -> None:
-    """Load a stored blob by id with its content."""
+    """Load a stored blob by id."""
     repository, owner_id = setup
     created, _ = await repository.create(_blob(owner_id))
     loaded = await repository.get(created.id)

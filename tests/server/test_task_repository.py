@@ -66,7 +66,7 @@ from kitaru.server.application.models.task import TaskFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
-from kitaru.server.domain.blob import Blob
+from kitaru.server.domain.blob import Blob, BlobStorageBackend
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.session import Session
@@ -121,7 +121,7 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
             sha256="1" * 64,
             size=4,
             media_type="text/x-python",
-            data=b"code",
+            stored_in=BlobStorageBackend.DATABASE,
         )
     )
     plugin = await SQLPluginRepository(session).create(
@@ -138,7 +138,7 @@ async def _seed_postgres(session: AsyncSession, engine: AsyncEngine) -> Setup:
             sha256="0" * 64,
             size=4,
             media_type="text/csv",
-            data=b"data",
+            stored_in=BlobStorageBackend.DATABASE,
         )
     )
     stored_session = await SQLSessionRepository(session, engine).create(

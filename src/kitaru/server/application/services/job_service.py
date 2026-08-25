@@ -324,7 +324,7 @@ class JobService:
         plugin_version = await resolve_plugin_version(
             plugin, command.version, self._plugins
         )
-        payload = await self._blobs.get_metadata(command.payload_blob_id)
+        payload = await self._blobs.get(command.payload_blob_id)
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
