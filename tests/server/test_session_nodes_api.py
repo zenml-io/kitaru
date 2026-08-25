@@ -73,7 +73,7 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    payload_offload = build_payload_offload_service()
+    payload_offload = build_payload_offload_service().service
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),

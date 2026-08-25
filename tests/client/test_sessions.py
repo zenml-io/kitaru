@@ -78,7 +78,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     session_repository = FakeSessionRepository()
     node_repository = FakeSessionNodeRepository()
-    payload_offload = build_payload_offload_service()
+    payload_offload = build_payload_offload_service().service
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),

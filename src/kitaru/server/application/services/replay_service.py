@@ -311,7 +311,7 @@ class ReplayService:
         )
         if node is None:
             return None
-        node = (await self._payload_offload.hydrate_nodes([node]))[0]
+        node = await self._payload_offload.hydrate_node(node)
         return ToolLookupResult(
             result=node.outputs, status=node.status, error=node.error
         )

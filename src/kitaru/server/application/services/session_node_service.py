@@ -189,10 +189,12 @@ class SessionNodeService:
             )
             for node in resolved
         ]
-        resolved = await self._payload_offload.offload_nodes(resolved, session.owner_id)
-        stored = await self._repository.upsert_batch(session_id, resolved)
+        offloaded = await self._payload_offload.offload_nodes(
+            resolved, session.owner_id
+        )
+        stored = await self._repository.upsert_batch(session_id, offloaded)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        return await self._payload_offload.hydrate_nodes(stored)
+        return self._payload_offload.restore_node_payloads(stored, resolved)
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext

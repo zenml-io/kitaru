@@ -414,14 +414,14 @@ def get_secret_service(
 
 
 def get_blob_data_stores(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
-    settings: Annotated[APISettings, Depends(get_app_settings)],
 ) -> dict[BlobStorageBackend, BlobDataStore]:
     """Return the blob content stores configured for the current process.
 
     Args:
+        request: Incoming request.
         session: Request-scoped database session.
-        settings: API settings for this process.
 
     Returns:
         Content stores keyed by the backend they serve.
@@ -429,10 +429,9 @@ def get_blob_data_stores(
     stores: dict[BlobStorageBackend, BlobDataStore] = {
         BlobStorageBackend.DATABASE: DatabaseBlobDataStore(session)
     }
-    if settings.BLOB_STORAGE.s3 is not None:
-        from kitaru.server.adapters.blobstore.s3 import S3BlobDataStore
-
-        stores[BlobStorageBackend.S3] = S3BlobDataStore(settings.BLOB_STORAGE.s3)
+    s3_store: BlobDataStore | None = request.app.state.s3_blob_data_store
+    if s3_store is not None:
+        stores[BlobStorageBackend.S3] = s3_store
     return stores
 
 

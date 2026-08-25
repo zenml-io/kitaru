@@ -48,9 +48,6 @@ from kitaru.server.application.models.session import (
     SessionFilter,
     SessionUpdate,
 )
-from kitaru.server.application.services.payload_offload_service import (
-    PayloadOffloadService,
-)
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
@@ -154,7 +151,7 @@ def service(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=replay_repository,
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
     )
 
 
@@ -520,7 +517,7 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
         analytics=analytics,
     )
     started_at = datetime.now(UTC)
@@ -572,7 +569,7 @@ async def test_update_session_non_status_update_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
         analytics=analytics,
     )
     created = await service.create_session(
@@ -596,7 +593,7 @@ async def test_update_session_already_terminal_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
         analytics=analytics,
     )
     created = await create_session(
@@ -625,7 +622,7 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
         analytics=analytics,
     )
     created = await service.create_session(
@@ -661,7 +658,7 @@ async def test_create_session_in_progress_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
         analytics=analytics,
     )
     await service.create_session(
@@ -1237,22 +1234,15 @@ def _service_with_threshold(
     threshold_bytes: int,
 ) -> tuple[SessionService, FakeBlobRepository, FakeBlobDataStore]:
     """Build a session service backed by a payload offload service at a threshold."""
-    blob_repository = FakeBlobRepository()
-    data_store = FakeBlobDataStore()
-    payload_offload = PayloadOffloadService(
-        repository=blob_repository,
-        data_stores={BlobStorageBackend.DATABASE: data_store},
-        backend=BlobStorageBackend.DATABASE,
-        threshold_bytes=threshold_bytes,
-    )
+    payload_offload = build_payload_offload_service(threshold_bytes)
     service = SessionService(
         repository=repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
-        payload_offload=payload_offload,
+        payload_offload=payload_offload.service,
     )
-    return service, blob_repository, data_store
+    return service, payload_offload.blob_repository, payload_offload.blob_data_store
 
 
 async def test_create_session_offloads_over_threshold_inputs_and_outputs(

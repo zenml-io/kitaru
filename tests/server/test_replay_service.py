@@ -20,9 +20,8 @@ from typing import Any
 import pytest
 
 from conftest import (
-    FakeBlobDataStore,
-    FakeBlobRepository,
     ReplayServices,
+    build_payload_offload_service,
     build_replay_services,
     create_agent,
     create_agent_task,
@@ -64,7 +63,6 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
 from kitaru.server.domain.replay import (
@@ -902,15 +900,10 @@ async def test_tool_lookup_hydrates_an_offloaded_output(
     services: ReplayServices,
 ) -> None:
     """Return the original output for a tool call whose output was offloaded."""
-    blob_repository = FakeBlobRepository()
-    data_store = FakeBlobDataStore()
-    payload_offload = PayloadOffloadService(
-        repository=blob_repository,
-        data_stores={BlobStorageBackend.DATABASE: data_store},
-        backend=BlobStorageBackend.DATABASE,
-        threshold_bytes=1024,
-    )
-    service = _replay_service_with_payload_offload(services, payload_offload)
+    payload_offload = build_payload_offload_service(threshold_bytes=1024)
+    blob_repository = payload_offload.blob_repository
+    data_store = payload_offload.blob_data_store
+    service = _replay_service_with_payload_offload(services, payload_offload.service)
     agent_version = await _agent_version(services)
     baseline = await _session(services, agent_version)
     replay_id = await _replay_with_history_scope(

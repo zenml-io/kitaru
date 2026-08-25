@@ -3850,23 +3850,34 @@ async def create_blob(
 DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES = 20 * 1024
 
 
+class PayloadOffloadServiceFakes(NamedTuple):
+    """Payload offload service backed by fresh fake blob storage."""
+
+    service: PayloadOffloadService
+    blob_repository: FakeBlobRepository
+    blob_data_store: FakeBlobDataStore
+
+
 def build_payload_offload_service(
     threshold_bytes: int = DEFAULT_PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
-) -> PayloadOffloadService:
+) -> PayloadOffloadServiceFakes:
     """Build a payload offload service backed by fresh fake blob storage.
 
     Args:
         threshold_bytes: Serialized size above which a payload is offloaded.
 
     Returns:
-        Payload offload service bound to fresh fakes.
+        Payload offload service bound to fresh fakes, and the fakes themselves.
     """
-    return PayloadOffloadService(
-        repository=FakeBlobRepository(),
-        data_stores={BlobStorageBackend.DATABASE: FakeBlobDataStore()},
+    blob_repository = FakeBlobRepository()
+    blob_data_store = FakeBlobDataStore()
+    service = PayloadOffloadService(
+        repository=blob_repository,
+        data_stores={BlobStorageBackend.DATABASE: blob_data_store},
         backend=BlobStorageBackend.DATABASE,
         threshold_bytes=threshold_bytes,
     )
+    return PayloadOffloadServiceFakes(service, blob_repository, blob_data_store)
 
 
 class FakePluginRepository:
@@ -6324,7 +6335,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         transitions=transitions,
         policy=task_policy,
     )
-    payload_offload = build_payload_offload_service()
+    payload_offload = build_payload_offload_service().service
     experiment_service = ExperimentService(
         repository=experiments,
         plugin_repository=plugins,

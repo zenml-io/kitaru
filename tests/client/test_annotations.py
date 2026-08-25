@@ -95,7 +95,7 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(agent_repository),
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
     )
     app.dependency_overrides[get_investigation_service] = lambda: InvestigationService(
         repository=investigation_repository,

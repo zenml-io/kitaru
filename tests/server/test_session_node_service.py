@@ -81,7 +81,7 @@ def task_repository() -> FakeTaskRepository:
 @pytest.fixture
 def payload_offload() -> PayloadOffloadService:
     """Provide a payload offload service backed by fresh fake blob storage."""
-    return build_payload_offload_service()
+    return build_payload_offload_service().service
 
 
 @pytest.fixture
@@ -587,21 +587,14 @@ def _service_with_threshold(
     threshold_bytes: int,
 ) -> tuple[SessionNodeService, FakeBlobRepository, FakeBlobDataStore]:
     """Build a session node service backed by a payload offload service at threshold."""
-    blob_repository = FakeBlobRepository()
-    data_store = FakeBlobDataStore()
-    payload_offload = PayloadOffloadService(
-        repository=blob_repository,
-        data_stores={BlobStorageBackend.DATABASE: data_store},
-        backend=BlobStorageBackend.DATABASE,
-        threshold_bytes=threshold_bytes,
-    )
+    payload_offload = build_payload_offload_service(threshold_bytes)
     service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
-        payload_offload=payload_offload,
+        payload_offload=payload_offload.service,
     )
-    return service, blob_repository, data_store
+    return service, payload_offload.blob_repository, payload_offload.blob_data_store
 
 
 async def test_ingest_offloads_over_threshold_payloads(

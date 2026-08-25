@@ -22,6 +22,9 @@ from typing import Any, NamedTuple
 
 from kitaru.server.application.interfaces.blob_data_store import BlobDataStore
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
+from kitaru.server.application.services.blob_data_store_resolution import (
+    resolve_blob_data_store,
+)
 from kitaru.server.domain.blob import Blob, BlobStorageBackend
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import SessionNode
@@ -42,6 +45,14 @@ class _Offloaded(NamedTuple):
 
     value: Any
     blob_id: uuid.UUID | None
+
+
+class _Serialized(NamedTuple):
+    """Serialized outcome for one candidate."""
+
+    data: bytes | None
+    # None when the candidate's value stays inline.
+    sha256: str | None
 
 
 def _serialize(candidate: _Candidate) -> bytes | None:
@@ -131,21 +142,19 @@ class PayloadOffloadService:
         Returns:
             Per-candidate inline value or blob reference, in input order.
         """
-        serialized = [_serialize(candidate) for candidate in candidates]
-        offloaded_flags = [
-            data is not None
-            and (self._threshold_bytes == 0 or len(data) > self._threshold_bytes)
-            for data in serialized
-        ]
-        hashes = [
-            hashlib.sha256(data).hexdigest() if data is not None and offloaded else None
-            for data, offloaded in zip(serialized, offloaded_flags, strict=True)
-        ]
+        serialized: list[_Serialized] = []
+        for candidate in candidates:
+            data = _serialize(candidate)
+            offloaded = data is not None and (
+                self._threshold_bytes == 0 or len(data) > self._threshold_bytes
+            )
+            sha256 = hashlib.sha256(data).hexdigest() if offloaded else None
+            serialized.append(_Serialized(data, sha256))
 
         first_index_by_hash: dict[str, int] = {}
-        for index, sha256 in enumerate(hashes):
-            if sha256 is not None:
-                first_index_by_hash.setdefault(sha256, index)
+        for index, item in enumerate(serialized):
+            if item.sha256 is not None:
+                first_index_by_hash.setdefault(item.sha256, index)
 
         registry = await self._repository.get_many_by_sha256s(list(first_index_by_hash))
         missing_hashes = [
@@ -153,7 +162,7 @@ class PayloadOffloadService:
         ]
         data_by_hash: dict[str, bytes] = {}
         for sha256 in missing_hashes:
-            data = serialized[first_index_by_hash[sha256]]
+            data = serialized[first_index_by_hash[sha256]].data
             # Every hash in missing_hashes came from a candidate that
             # serialized to non-None bytes.
             assert data is not None
@@ -173,12 +182,9 @@ class PayloadOffloadService:
             registry[sha256] = blob
 
         results: list[_Offloaded] = []
-        for candidate, offloaded, sha256 in zip(
-            candidates, offloaded_flags, hashes, strict=True
-        ):
-            if offloaded:
-                assert sha256 is not None
-                results.append(_Offloaded(value=None, blob_id=registry[sha256].id))
+        for candidate, item in zip(candidates, serialized, strict=True):
+            if item.sha256 is not None:
+                results.append(_Offloaded(value=None, blob_id=registry[item.sha256].id))
             else:
                 results.append(_Offloaded(value=candidate.value, blob_id=None))
         return results
@@ -279,10 +285,7 @@ class PayloadOffloadService:
         registry = await self._repository.get_many(blob_ids)
         blobs = [registry[blob_id] for blob_id in blob_ids]
         for blob in blobs:
-            if blob.stored_in not in self._data_stores:
-                raise RuntimeError(
-                    f"No data store configured for backend {blob.stored_in}"
-                )
+            resolve_blob_data_store(self._data_stores, blob.stored_in)
 
         database_blobs = [
             b for b in blobs if b.stored_in is BlobStorageBackend.DATABASE
@@ -291,28 +294,23 @@ class PayloadOffloadService:
             b for b in blobs if b.stored_in is not BlobStorageBackend.DATABASE
         ]
 
-        async def _get_database_blobs_sequentially() -> list[bytes]:
-            # The database-backed store shares the request's AsyncSession,
-            # which rejects concurrent statement execution, so these gets
-            # run one at a time. Every other backend runs concurrently.
-            return [
-                await self._data_stores[blob.stored_in].get(blob.sha256)
-                for blob in database_blobs
-            ]
-
-        database_data, other_data = await asyncio.gather(
-            _get_database_blobs_sequentially(),
-            asyncio.gather(
-                *(
-                    self._data_stores[blob.stored_in].get(blob.sha256)
-                    for blob in other_blobs
-                )
-            ),
+        data_by_blob_id: dict[uuid.UUID, bytes] = {}
+        # The database-backed store shares the request's AsyncSession, which
+        # rejects concurrent statement execution, so these gets run one at a
+        # time. Every other backend runs concurrently.
+        for blob in database_blobs:
+            data_by_blob_id[blob.id] = await self._data_stores[blob.stored_in].get(
+                blob.sha256
+            )
+        other_data = await asyncio.gather(
+            *(
+                self._data_stores[blob.stored_in].get(blob.sha256)
+                for blob in other_blobs
+            )
         )
-        data_by_blob_id = {
-            blob.id: data
-            for blob, data in zip(database_blobs, database_data, strict=True)
-        } | {blob.id: data for blob, data in zip(other_blobs, other_data, strict=True)}
+        for blob, data in zip(other_blobs, other_data, strict=True):
+            data_by_blob_id[blob.id] = data
+
         return {blob.id: _deserialize(blob, data_by_blob_id[blob.id]) for blob in blobs}
 
     async def hydrate_sessions(self, sessions: list[Session]) -> list[Session]:
@@ -339,6 +337,14 @@ class PayloadOffloadService:
                 update["outputs_blob_id"] = None
             result.append(session.model_copy(update=update) if update else session)
         return result
+
+    async def hydrate_session(self, session: Session) -> Session:
+        """Resolve inputs and outputs refs of a session.
+
+        Returns:
+            Session with inputs and outputs filled and refs cleared.
+        """
+        return (await self.hydrate_sessions([session]))[0]
 
     async def hydrate_nodes(self, nodes: list[SessionNode]) -> list[SessionNode]:
         """Resolve reasoning, inputs, outputs, and attributes refs across nodes.
@@ -375,3 +381,59 @@ class PayloadOffloadService:
                 update["attributes_blob_id"] = None
             result.append(node.model_copy(update=update) if update else node)
         return result
+
+    async def hydrate_node(self, node: SessionNode) -> SessionNode:
+        """Resolve reasoning, inputs, outputs, and attributes refs of a node.
+
+        Returns:
+            Node with payloads filled and refs cleared.
+        """
+        return (await self.hydrate_nodes([node]))[0]
+
+    def restore_session_payloads(self, stored: Session, original: Session) -> Session:
+        """Copy a session's pre-offload inputs and outputs onto its stored row.
+
+        Args:
+            stored: Session row as persisted, refs pointing at the blobs
+                offload created.
+            original: Session before offload, holding the values in memory.
+
+        Returns:
+            Stored session with inputs and outputs restored and refs cleared.
+        """
+        return stored.model_copy(
+            update={
+                "inputs": original.inputs,
+                "inputs_blob_id": None,
+                "outputs": original.outputs,
+                "outputs_blob_id": None,
+            }
+        )
+
+    def restore_node_payloads(
+        self, stored: list[SessionNode], original: list[SessionNode]
+    ) -> list[SessionNode]:
+        """Copy nodes' pre-offload payloads onto their stored rows.
+
+        Args:
+            stored: Node rows as persisted, in the same order as original.
+            original: Nodes before offload, holding the values in memory.
+
+        Returns:
+            Stored nodes with payloads restored and refs cleared, in input order.
+        """
+        return [
+            row.model_copy(
+                update={
+                    "reasoning": orig.reasoning,
+                    "reasoning_blob_id": None,
+                    "inputs": orig.inputs,
+                    "inputs_blob_id": None,
+                    "outputs": orig.outputs,
+                    "outputs_blob_id": None,
+                    "attributes": orig.attributes,
+                    "attributes_blob_id": None,
+                }
+            )
+            for row, orig in zip(stored, original, strict=True)
+        ]

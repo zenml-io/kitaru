@@ -167,9 +167,9 @@ class SessionService:
             framework=command.framework,
             adapter_version=command.adapter_version,
         )
-        session = await self._payload_offload.offload_session(session)
-        stored = await self._repository.create(session)
-        stored = (await self._payload_offload.hydrate_sessions([stored]))[0]
+        offloaded = await self._payload_offload.offload_session(session)
+        stored = await self._repository.create(offloaded)
+        stored = self._payload_offload.restore_session_payloads(stored, session)
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -255,7 +255,7 @@ class SessionService:
         """
         session = await self._repository.get(session_id)
         check_task_session_read(session_id, session.task_id, actor)
-        return (await self._payload_offload.hydrate_sessions([session]))[0]
+        return await self._payload_offload.hydrate_session(session)
 
     async def get_baseline_session(
         self, session_id: uuid.UUID, actor: AuthContext
@@ -285,7 +285,7 @@ class SessionService:
         if replay is None:
             raise SessionBaselineNotFound(session_id)
         baseline = await self._repository.get(replay.baseline_session_id)
-        return (await self._payload_offload.hydrate_sessions([baseline]))[0]
+        return await self._payload_offload.hydrate_session(baseline)
 
     async def list_sessions(
         self, session_filter: SessionFilter, actor: AuthContext
@@ -372,7 +372,7 @@ class SessionService:
                 command.metadata if command.metadata is not None else {}
             )
         stored = await self._repository.update(session)
-        return (await self._payload_offload.hydrate_sessions([stored]))[0]
+        return await self._payload_offload.hydrate_session(stored)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

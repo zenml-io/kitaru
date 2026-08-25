@@ -80,7 +80,7 @@ class TaskAppFixture(NamedTuple):
 async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
     """Build an API client routed to the app with fake-backed services."""
     services = build_job_and_task_services()
-    payload_offload = build_payload_offload_service()
+    payload_offload = build_payload_offload_service().service
     node_service = SessionNodeService(
         repository=FakeSessionNodeRepository(),
         session_repository=services.sessions,

@@ -96,7 +96,7 @@ async def api_client(
         task_repository=FakeTaskRepository(),
         agent_version_repository=agent_versions,
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
     )
     evaluation_service = EvaluationService(
         repository=evaluation_repository, session_repository=session_repository

@@ -275,6 +275,10 @@ def create_app(settings: APISettings) -> FastAPI:
         app.state.database = database
         if settings.AUTH_SCHEME is AuthScheme.CONTROL_PLANE:
             app.state.control_plane_client = ControlPlaneClient(settings)
+        if settings.BLOB_STORAGE.s3 is not None:
+            from kitaru.server.adapters.blobstore.s3 import S3BlobDataStore
+
+            app.state.s3_blob_data_store = S3BlobDataStore(settings.BLOB_STORAGE.s3)
         async for session in database.get_async_session():
             server_id = await ensure_server_id(
                 SQLServerSettingsRepository(session), settings.SERVER_ID
@@ -337,6 +341,8 @@ def create_app(settings: APISettings) -> FastAPI:
     app.state.control_plane_client = None
     # Replaced with the persisted server id at startup.
     app.state.server_id = None
+    # Replaced with a live store at startup when S3 blob storage is configured.
+    app.state.s3_blob_data_store = None
     _register_domain_exception_handlers(app)
     _register_database_exception_handler(app)
     _register_pool_timeout_exception_handler(app)

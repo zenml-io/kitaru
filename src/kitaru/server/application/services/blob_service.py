@@ -20,6 +20,9 @@ from collections.abc import AsyncIterator
 from kitaru.server.application.interfaces.blob_data_store import BlobDataStore
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.services.blob_data_store_resolution import (
+    resolve_blob_data_store,
+)
 from kitaru.server.application.services.resource_access import check_task_blob_read
 from kitaru.server.domain.blob import Blob, BlobStorageBackend, BlobTooLarge
 
@@ -127,9 +130,7 @@ class BlobService:
         """
         check_task_blob_read(blob_id, actor)
         blob = await self._repository.get(blob_id)
-        store = self._data_stores.get(blob.stored_in)
-        if store is None:
-            raise RuntimeError(f"No data store configured for backend {blob.stored_in}")
+        store = resolve_blob_data_store(self._data_stores, blob.stored_in)
         return blob, await store.get(blob.sha256)
 
     async def delete_blob(self, blob_id: uuid.UUID, actor: AuthContext) -> None:

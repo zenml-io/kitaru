@@ -156,7 +156,7 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    payload_offload = build_payload_offload_service()
+    payload_offload = build_payload_offload_service().service
     session_service = SessionService(
         repository=session_repository,
         task_repository=task_repository,
@@ -892,7 +892,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
-        payload_offload=build_payload_offload_service(),
+        payload_offload=build_payload_offload_service().service,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     app.dependency_overrides[get_auth_session] = stub_auth_session
@@ -945,7 +945,7 @@ def _build_task_scoped_app(
         HTTP client routed to the app.
     """
     app = create_app(local_settings())
-    payload_offload = build_payload_offload_service()
+    payload_offload = build_payload_offload_service().service
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
         task_repository=task_repository,
