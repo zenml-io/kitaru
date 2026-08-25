@@ -37,8 +37,12 @@ class ReleaseUnit:
     distribution: str
     registry: str
     version_source: str
+    changelog: str
+    lock_source: str
     version: str
     default_catalog: bool
+    release_label: str
+    impact_paths: tuple[str, ...]
     tag_prefix: str
     required_checks: frozenset[str]
 
@@ -55,8 +59,12 @@ class ReleaseUnit:
             "distribution": self.distribution,
             "registry": self.registry,
             "version_source": self.version_source,
+            "changelog": self.changelog,
+            "lock_source": self.lock_source,
             "version": self.version,
             "default_catalog": self.default_catalog,
+            "release_label": self.release_label,
+            "impact_paths": list(self.impact_paths),
             "tag_prefix": self.tag_prefix,
             "tag": self.tag,
             "required_checks": sorted(self.required_checks),
@@ -372,6 +380,7 @@ def load_inventory(
     units: list[ReleaseUnit] = []
     seen_slugs: set[str] = set()
     seen_distributions: set[str] = set()
+    seen_release_labels: set[str] = set()
     seen_tag_prefixes: set[str] = set()
     for raw_unit in raw_units:
         if not isinstance(raw_unit, dict):
@@ -417,6 +426,38 @@ def load_inventory(
                 resolved_project, project_metadata, context
             )
 
+        changelog = _get_string(raw_unit, "changelog", context)
+        changelog_path = _resolve_repo_path(root, changelog, context)
+        if not changelog_path.is_file():
+            raise ReleaseInventoryError(f"{context}: changelog does not exist")
+
+        lock_source = _get_string(raw_unit, "lock-source", context)
+        lock_path = _resolve_repo_path(root, lock_source, context)
+        if not lock_path.is_file():
+            raise ReleaseInventoryError(f"{context}: lock source does not exist")
+
+        release_label = _get_string(raw_unit, "release-label", context)
+        valid_release_label = (
+            release_label == "requires:core"
+            if slug == "kitaru"
+            else release_label.startswith("requires:plugin:")
+        )
+        if not valid_release_label:
+            raise ReleaseInventoryError(
+                f"{context}: invalid release label {release_label}"
+            )
+        if release_label in seen_release_labels:
+            raise ReleaseInventoryError(f"duplicate release label: {release_label}")
+        seen_release_labels.add(release_label)
+        impact_paths = tuple(_get_string_list(raw_unit, "impact-paths", context))
+        if not impact_paths:
+            raise ReleaseInventoryError(f"{context}: impact-paths must not be empty")
+        for impact_path in impact_paths:
+            if impact_path.startswith("/") or ".." in Path(impact_path).parts:
+                raise ReleaseInventoryError(
+                    f"{context}: impact path must be repository-relative"
+                )
+
         default_catalog = raw_unit.get("default-catalog")
         if not isinstance(default_catalog, bool):
             raise ReleaseInventoryError(
@@ -440,8 +481,12 @@ def load_inventory(
                 distribution=distribution,
                 registry=registry,
                 version_source=version_source,
+                changelog=changelog,
+                lock_source=lock_source,
                 version=version,
                 default_catalog=default_catalog,
+                release_label=release_label,
+                impact_paths=impact_paths,
                 tag_prefix=tag_prefix,
                 required_checks=common_checks | unit_checks,
             )

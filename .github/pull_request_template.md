@@ -4,6 +4,15 @@
 ## Why?
 
 
+## Release context
+
+<!--
+Add links or notes for frontend, plugins, skills, ZenML docs, website,
+examples, or other work that must happen with or after a release. The
+requires:* labels are the release signal; this section supplies useful detail.
+-->
+
+
 ## Reviewer Notes
 
 <!--

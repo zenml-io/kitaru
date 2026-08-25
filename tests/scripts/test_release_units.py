@@ -49,8 +49,11 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
 def release_repo(tmp_path: Path) -> Path:
     for relative_path in (
         "pyproject.toml",
+        "CHANGELOG.md",
+        "uv.lock",
         "release/release-units.toml",
         "plugins/default-requirements.txt",
+        "plugins/uv.lock",
         "src/kitaru/server/api/bootstrap.py",
     ):
         source = REPO_ROOT / relative_path
@@ -59,7 +62,7 @@ def release_repo(tmp_path: Path) -> Path:
         shutil.copyfile(source, destination)
 
     for project in (REPO_ROOT / "plugins" / "packages").iterdir():
-        for filename in ("pyproject.toml", "README.md"):
+        for filename in ("pyproject.toml", "README.md", "CHANGELOG.md"):
             source = project / filename
             relative_path = source.relative_to(REPO_ROOT)
             destination = tmp_path / relative_path
@@ -79,6 +82,10 @@ def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     assert all(unit.registry == "pypi" for unit in inventory.units)
     assert all(unit.path != "docs" for unit in inventory.units)
     assert all(not unit.path.startswith("packages/") for unit in inventory.units)
+    assert all((REPO_ROOT / unit.changelog).is_file() for unit in inventory.units)
+    assert all((REPO_ROOT / unit.lock_source).is_file() for unit in inventory.units)
+    assert len({unit.release_label for unit in inventory.units}) == len(inventory.units)
+    assert all(unit.impact_paths for unit in inventory.units)
 
 
 def test_inventory_versions_and_tags_match_project_manifests() -> None:
