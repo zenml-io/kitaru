@@ -3,6 +3,7 @@ extend-exclude = [
     "*.json",
     "*.js",
     "*.ipynb",
+    "examples/python/pydantic_ai_ticket_resolver/traces/*.jsonl",
     "uv.lock",
     "docs/pnpm-lock.yaml",
     "docs/.source/",

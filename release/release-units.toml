@@ -8,7 +8,7 @@ common = [
     "typos",
     "typecheck",
     "audit",
-    "Public template against current Kitaru",
+    "Quickstart example end to end",
     "docker-smoke",
     "plugin-tests",
     "test (py311-base)",

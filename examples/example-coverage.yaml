@@ -13,17 +13,54 @@ schema:
     - not_applicable
   cost_classes: [none, low, medium, high]
 examples:
+  - id: pydantic-ai-ticket-resolver
+    path: examples/python/pydantic_ai_ticket_resolver
+    public_docs:
+      - docs/book/getting-started/quickstart.md
+      - docs/book/tutorials/returns-agent/README.md
+      - docs/book/adapters/pydantic-ai.md
+    owner_area: quickstart Python returns agent walkthrough from imported evidence
+      through replayed experiment
+    coverage:
+      deterministic_pytest:
+        status: covered
+        test_file: examples/python/pydantic_ai_ticket_resolver/tests/test_e2e.py
+        notes: Exercises the packaged PydanticAI adapter and Langfuse importer through
+          the provider-free API, evaluator, cohort, and replay workflow with PostgreSQL.
+      local_smoke:
+        status: covered
+        command: uv run --project examples/python/pydantic_ai_ticket_resolver python
+          examples/python/pydantic_ai_ticket_resolver/scripts/run_ci_e2e.py
+        requires_server: true
+        timeout_seconds: 600
+        notes: The quickstart example CI job builds current Kitaru and plugin wheels
+          before running this complete standalone validation.
+      live_provider:
+        status: manual_only
+        provider: openai
+        required_env: [OPENAI_API_KEY, KITARU_API_URL]
+        timeout_seconds: 900
+        cost_class: low
+        command: uv run --project examples/python/pydantic_ai_ticket_resolver --directory
+          examples/python/pydantic_ai_ticket_resolver python -m returns_agent.agent
+        waiver:
+          reason: The optional agent run calls a paid OpenAI model and records a new
+            session.
+          reviewer_action: Run the documented provider path manually when provider
+            behavior or the live walkthrough changes.
+    release_policy:
+      required_when_changed: true
+      waiver_allowed: true
   - id: mastra-support-triage
     path: examples/typescript/mastra_support_triage
-    public_docs:
-      - docs/book/adapters/mastra.md
-      - packages/mastra/README.md
+    public_docs: [docs/book/adapters/mastra.md, packages/mastra/README.md]
     owner_area: TypeScript Mastra recording, worker replay, tool history, and evaluation
     coverage:
       deterministic_pytest:
         status: covered
         test_file: tests/typescript/test_mastra_adapter.py
-        notes: Compiles and runs the real Mastra agent through a local API and worker with a deterministic model.
+        notes: Compiles and runs the real Mastra agent through a local API and worker
+          with a deterministic model.
       local_smoke:
         status: not_applicable
         notes: The provider-free path is the worker-backed deterministic pytest above.
@@ -35,24 +72,28 @@ examples:
         cost_class: low
         command: uv run python -m examples.typescript.mastra_support_triage.demo
         waiver:
-          reason: The documented live path calls a paid OpenAI model and writes sessions to a selected Kitaru server.
-          reviewer_action: Run the command manually after changes to the real-provider path and inspect the baseline and replay sessions.
+          reason: The documented live path calls a paid OpenAI model and writes sessions
+            to a selected Kitaru server.
+          reviewer_action: Run the command manually after changes to the real-provider
+            path and inspect the baseline and replay sessions.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
   - id: vercel-ai-support-triage
     path: examples/typescript/vercel_ai_support_triage
-    public_docs:
-      - docs/book/adapters/vercel-ai.md
-    owner_area: TypeScript Vercel AI SDK recording, worker replay, tool history, and evaluation
+    public_docs: [docs/book/adapters/vercel-ai.md]
+    owner_area: TypeScript Vercel AI SDK recording, worker replay, tool history, and
+      evaluation
     coverage:
       deterministic_pytest:
         status: covered
         test_file: tests/typescript/test_vercel_ai_adapter.py
-        notes: Compiles and runs the real AI SDK agent through a local API and worker with a deterministic model.
+        notes: Compiles and runs the real AI SDK agent through a local API and worker
+          with a deterministic model.
       local_smoke:
         status: not_applicable
-        notes: The provider-free path is the worker-backed deterministic pytest above; the README also documents an optional compiled-artifact smoke command.
+        notes: The provider-free path is the worker-backed deterministic pytest above;
+          the README also documents an optional compiled-artifact smoke command.
       live_provider:
         status: manual_only
         provider: openai
@@ -61,8 +102,10 @@ examples:
         cost_class: low
         command: uv run python -m examples.typescript.vercel_ai_support_triage.demo
         waiver:
-          reason: The documented live path calls a paid OpenAI model and writes sessions to a selected Kitaru server.
-          reviewer_action: Run the command manually after changes to the real-provider path and inspect the baseline and replay sessions.
+          reason: The documented live path calls a paid OpenAI model and writes sessions
+            to a selected Kitaru server.
+          reviewer_action: Run the command manually after changes to the real-provider
+            path and inspect the baseline and replay sessions.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
@@ -72,54 +115,65 @@ examples:
       - docs/book/adapters/vercel-ai.md
       - packages/core/README.md
       - packages/vercel-ai/README.md
-    owner_area: standalone TypeScript returns-agent walkthrough from recording through replayed experiment
+    owner_area: standalone TypeScript returns agent walkthrough from recording through
+      replayed experiment
     coverage:
       deterministic_pytest:
         status: covered
         test_file: examples/typescript/vercel_ai_ticket_resolver/test/test_e2e.py
-        notes: Exercises the provider-free API, evaluator, cohort, and replay workflow with PostgreSQL.
+        notes: Exercises the provider-free API, evaluator, cohort, and replay workflow
+          with PostgreSQL.
       local_smoke:
         status: covered
-        command: cd examples/typescript/vercel_ai_ticket_resolver && pnpm build && pnpm test && pnpm test:evaluator && pnpm typecheck && pnpm lint && pnpm test:e2e
+        command: cd examples/typescript/vercel_ai_ticket_resolver && pnpm build &&
+          pnpm test && pnpm test:evaluator && pnpm typecheck && pnpm lint && pnpm
+          test:e2e
         requires_server: true
         timeout_seconds: 600
-        notes: The TypeScript ticket resolver CI job runs this complete standalone validation.
+        notes: The TypeScript ticket resolver CI job runs this complete standalone
+          validation.
       live_provider:
         status: manual_only
         provider: openai
         required_env: [OPENAI_API_KEY, KITARU_API_URL, KITARU_AGENT_ID]
         timeout_seconds: 900
         cost_class: low
-        command: cd examples/typescript/vercel_ai_ticket_resolver && pnpm baseline --provider openai --fresh
+        command: cd examples/typescript/vercel_ai_ticket_resolver && pnpm baseline
+          --provider openai --fresh
         waiver:
-          reason: The optional live baseline makes paid model calls and records a new evidence set.
-          reviewer_action: Run the documented provider path manually when provider behavior or the live walkthrough changes.
+          reason: The optional live baseline makes paid model calls and records a
+            new evidence set.
+          reviewer_action: Run the documented provider path manually when provider
+            behavior or the live walkthrough changes.
     release_policy:
       required_when_changed: true
       waiver_allowed: true
   - id: openai-agents-v2
     path: examples/python/openai_agents_v2/agent.py
-    public_docs:
-      - examples/README.md
-      - docs/book/adapters/openai-agents.md
+    public_docs: [examples/README.md, docs/book/adapters/openai-agents.md]
     owner_area: separately packaged OpenAI Agents SDK v2 adapter
     coverage:
       deterministic_pytest:
         status: covered
         test_file: plugins/tests/adapters/openai_agents/test_runner.py
-        notes: covers native results, identity, forwarding, and synchronous execution without provider calls
+        notes: covers native results, identity, forwarding, and synchronous execution
+          without provider calls
       local_smoke:
         status: help_only
-        command: uv run --project plugins python -m examples.python.openai_agents_v2.agent --help
+        command: uv run --project plugins python -m examples.python.openai_agents_v2.agent
+          --help
         requires_server: false
         timeout_seconds: 30
       live_provider:
         status: manual_only
         waiver:
-          reason: The example calls a real OpenAI model and records to a connected Kitaru server.
-          reviewer_action: Run the documented command with disposable credentials and inspect the completed session and child nodes.
+          reason: The example calls a real OpenAI model and records to a connected
+            Kitaru server.
+          reviewer_action: Run the documented command with disposable credentials
+            and inspect the completed session and child nodes.
         provider: openai
-        command: uv run --project plugins python -m examples.python.openai_agents_v2.agent "Use the order lookup tool for ORD-1007"
+        command: uv run --project plugins python -m examples.python.openai_agents_v2.agent
+          "Use the order lookup tool for ORD-1007"
         weekly_workflow: false
         local_release_smoke: false
         manual_command_available: true
@@ -140,7 +194,8 @@ examples:
       deterministic_pytest:
         status: covered
         test_file: plugins/tests/adapters/langgraph/test_compatibility.py
-        notes: exercises the provider-free StateGraph through the kitaru-langgraph runner
+        notes: exercises the provider-free StateGraph through the kitaru-langgraph
+          runner
       local_smoke:
         status: covered
         command: uv run --project plugins python -m examples.python.langgraph_v2

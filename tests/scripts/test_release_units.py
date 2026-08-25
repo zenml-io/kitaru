@@ -502,33 +502,36 @@ def test_ci_plugin_matrix_is_loaded_from_the_release_inventory() -> None:
     assert "          - braintrust-importer\n" not in workflow
 
 
-def test_ci_public_template_job_enforces_the_canonical_walkthrough() -> None:
+def test_ci_quickstart_example_job_enforces_the_walkthrough() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    assert "\n  canonical-example:\n" not in workflow
+    assert "\n  quickstart-example:\n" in workflow
     lint_job = workflow.split("\n  lint:\n", maxsplit=1)[1].split(
         "\n  typescript:\n", maxsplit=1
     )[0]
-    template_job = workflow.split("\n  public-template-contract:\n", maxsplit=1)[
-        1
-    ].split("\n  links:\n", maxsplit=1)[0]
+    example_job = workflow.split("\n  quickstart-example:\n", maxsplit=1)[1].split(
+        "\n  links:\n", maxsplit=1
+    )[0]
 
     assert "scripts/audit-example-coverage.py" in lint_job
-    assert "name: Public template against current Kitaru" in template_job
-    assert "repository: zenml-io/kitaru-template" in template_job
-    assert "Install current Kitaru artifacts into template" in template_job
-    assert "plugins/candidate-wheels/kitaru-*.whl" in template_job
-    assert "plugins/candidate-wheels/kitaru_pydantic_ai-*.whl" in template_job
-    assert "plugins/candidate-wheels/kitaru_langfuse_importer-*.whl" in template_job
-    assert "tests/test_contract.py" in template_job
-    assert "tests/test_repository_contract.py" in template_job
-    assert "uv run --no-sync python scripts/run_ci_e2e.py" in template_job
+    assert "name: Quickstart example end to end" in example_job
+    assert "repository: zenml-io/kitaru-template" not in workflow
+    assert (
+        "working-directory: examples/python/pydantic_ai_ticket_resolver" in example_job
+    )
+    assert "Install current Kitaru artifacts into quickstart example" in example_job
+    assert "plugins/candidate-wheels/kitaru-*.whl" in example_job
+    assert "plugins/candidate-wheels/kitaru_pydantic_ai-*.whl" in example_job
+    assert "plugins/candidate-wheels/kitaru_langfuse_importer-*.whl" in example_job
+    assert "tests/test_contract.py" in example_job
+    assert "tests/test_repository_contract.py" in example_job
+    assert "uv run --no-sync python scripts/run_ci_e2e.py" in example_job
 
 
 def test_each_unit_exposes_its_exact_release_critical_checks() -> None:
     inventory = load_inventory()
 
-    assert "Public template against current Kitaru" in inventory.common_checks
-    assert "Canonical example end to end" not in inventory.common_checks
+    assert "Quickstart example end to end" in inventory.common_checks
+    assert "Public template against current Kitaru" not in inventory.common_checks
     for unit in inventory.units:
         assert inventory.common_checks <= unit.required_checks
         if unit.slug == "kitaru":

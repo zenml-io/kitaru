@@ -24,7 +24,7 @@
 
 ## Guides
 
-- [Complete returns-agent tutorial](tutorials/returns-agent/README.md)
+- [Complete returns agent tutorial](tutorials/returns-agent/README.md)
   - [1. Observe the recorded behavior](tutorials/returns-agent/observe.md)
   - [2. Judge the selected behavior](tutorials/returns-agent/judge.md)
   - [3. Define one behavior to test](tutorials/returns-agent/define.md)

@@ -10,7 +10,7 @@ Replay re-executes a recorded [session](../concepts/agents-and-sessions.md) to p
 - **Debug a failure.** A production run went wrong. Replay it unchanged and you have the failure on your desk, reproducible without touching production.
 - **Test a change.** You want to swap the model, tighten the prompt, or ship the code in your working tree. Fork the run with that one change and read what it did.
 
-This guide assumes you prepared the public [`kitaru-template`](https://github.com/zenml-io/kitaru-template) and completed the setup and Define phases of the [returns-agent tutorial](../tutorials/returns-agent/README.md): a registered agent with a run command, a registered [evaluator](../concepts/evaluators.md), and a [worker](../concepts/workers.md) running in the agent's environment.
+This guide assumes you prepared the [PydanticAI returns agent example](https://github.com/zenml-io/kitaru/tree/main/examples/python/pydantic_ai_ticket_resolver) and completed the setup and Define phases of the [returns agent tutorial](../tutorials/returns-agent/README.md): a registered agent with a run command, a registered [evaluator](../concepts/evaluators.md), and a [worker](../concepts/workers.md) running in the agent's environment.
 
 ## Create the one-off replay from the CLI
 

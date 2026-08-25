@@ -161,7 +161,7 @@ It does not support streaming, workflows, subagents, MCP tools, provider-native 
 
 ## Runnable example
 
-The [Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/develop/examples/typescript/mastra_support_triage) records a real Mastra agent, runs the compiled Node command through a job-scoped Kitaru worker, then replays it with prompt, instruction, model-setting, and history-policy overrides. Its side-effecting `queueRefundReview` tool is answered from history during replay, so the example's append-only outbox remains unchanged.
+The [Mastra support-triage example](https://github.com/zenml-io/kitaru/tree/main/examples/typescript/mastra_support_triage) records a real Mastra agent, runs the compiled Node command through a job-scoped Kitaru worker, then replays it with prompt, instruction, model-setting, and history-policy overrides. Its side-effecting `queueRefundReview` tool is answered from history during replay, so the example's append-only outbox remains unchanged.
 
 Use Node 22 and a running Kitaru API backed by PostgreSQL:
 

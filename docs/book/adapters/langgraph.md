@@ -75,7 +75,7 @@ uv sync --project plugins --all-packages
 uv run --project plugins python -m examples.python.langgraph_v2
 ```
 
-The local command needs an existing `KITARU_AGENT_ID` or `KITARU_AGENT_VERSION_ID` and a configured Kitaru v2 connection. It does not need a model-provider key or replay setup. See the example [README](https://github.com/zenml-io/kitaru/tree/develop/examples/python/langgraph_v2) for the full setup.
+The local command needs an existing `KITARU_AGENT_ID` or `KITARU_AGENT_VERSION_ID` and a configured Kitaru v2 connection. It does not need a model-provider key or replay setup. See the example [README](https://github.com/zenml-io/kitaru/tree/main/examples/python/langgraph_v2) for the full setup.
 
 ## Apply live model-request overrides
 
@@ -162,6 +162,6 @@ If your integration depends on v1 streaming, checkpoint strategies, synthetic ch
 
 ## Next steps
 
-- Run the [provider-free recording example](https://github.com/zenml-io/kitaru/tree/develop/examples/python/langgraph_v2).
+- Run the [provider-free recording example](https://github.com/zenml-io/kitaru/tree/main/examples/python/langgraph_v2).
 - Compare other integration boundaries in the [adapters overview](README.md).
 - Read the [LangGraph overview](https://docs.langchain.com/oss/python/langgraph/overview) and [interrupt documentation](https://docs.langchain.com/oss/python/langgraph/interrupts).

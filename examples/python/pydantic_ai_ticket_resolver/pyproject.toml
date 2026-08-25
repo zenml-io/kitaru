@@ -1,0 +1,41 @@
+[project]
+name = "kitaru-quickstart-example"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "kitaru[cli,mcp,server,worker]>=0.22.2",
+    "kitaru-langfuse-importer>=0.1.1",
+    "kitaru-pydantic-ai[openai]>=0.1.0",
+    "langfuse>=4.14,<5",
+]
+
+[tool.uv]
+package = false
+exclude-newer = "3 days"
+
+[tool.uv.exclude-newer-package]
+kitaru = false
+kitaru-braintrust-importer = false
+kitaru-evaluator = false
+kitaru-jsonl-importer = false
+kitaru-langfuse-importer = false
+kitaru-langgraph = false
+kitaru-langsmith-importer = false
+kitaru-openai-agents = false
+kitaru-pydantic-ai = false
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.11",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 88
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]
