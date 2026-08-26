@@ -14,6 +14,11 @@ from email.policy import default
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
+if __package__:
+    from scripts.release_units import default_requirements, load_inventory
+else:
+    from release_units import default_requirements, load_inventory
+
 _SUBPROCESS_TIMEOUT_SECONDS = 300
 _SCRUBBED_ENVIRONMENT_VARIABLES = {
     "CONDA_DEFAULT_ENV",
@@ -131,23 +136,6 @@ def _artifact_import_module(project: Path) -> str | None:
     if not isinstance(value, str) or not value:
         raise SmokeFailure(f"Invalid artifact import module in {pyproject}")
     return value
-
-
-def _read_default_requirements(path: Path) -> dict[str, str]:
-    """Map normalized distribution names to exact default requirements."""
-    requirements: dict[str, str] = {}
-    for line in path.read_text().splitlines():
-        value = line.strip()
-        if not value:
-            continue
-        name, separator, version = value.partition("==")
-        if not separator or not name or not version:
-            raise SmokeFailure(f"Default plugin requirement is not exact: {value!r}")
-        canonical_name = _canonicalize_name(name)
-        if canonical_name in requirements:
-            raise SmokeFailure(f"Duplicate default plugin requirement: {name!r}")
-        requirements[canonical_name] = value
-    return requirements
 
 
 def _resolve_projects(repository: Path, selected: list[Path]) -> list[Path]:
@@ -433,9 +421,7 @@ def main() -> int:
     repository = Path(__file__).resolve().parents[1]
     try:
         projects = _resolve_projects(repository, arguments.package)
-        defaults = _read_default_requirements(
-            repository / "plugins" / "default-requirements.txt"
-        )
+        defaults = default_requirements(load_inventory(repository))
         with tempfile.TemporaryDirectory(
             prefix="kitaru-plugin-artifacts-"
         ) as directory:
@@ -467,7 +453,7 @@ def main() -> int:
                     )
                 if requirement is not None and requirement != f"{name}=={version}":
                     raise SmokeFailure(
-                        f"{name}=={version} is not pinned in default-requirements.txt"
+                        f"{name}=={version} does not match the release inventory"
                     )
                 wheel = _build_wheel(
                     uv, repository, project, candidate_directory, environment

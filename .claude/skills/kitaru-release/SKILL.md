@@ -1,6 +1,6 @@
 ---
 name: kitaru-release
-description: Prepare or execute Kitaru core and plugin releases, including Kitaru UI publication in the frontend monorepo, version and changelog updates, frontend declarations, default plugin pins, validation, release tags, artifact verification, and recovery. Use when a user asks to prepare, cut, publish, verify, or recover a Kitaru, Kitaru UI, or Kitaru plugin release.
+description: Discover dependencies and prepare or execute Kitaru core and plugin releases, including version proposals, Kitaru UI selection, release PRs, ordered tag commands, artifact verification, and recovery. Use when a user asks what a release depends on or wants to prepare, cut, publish, verify, or recover a Kitaru, Kitaru UI, or Kitaru plugin release.
 ---
 
 # Release Kitaru
@@ -21,12 +21,33 @@ Do not create a tag, dispatch a publishing workflow, approve an environment, or 
 Ask only for choices that cannot be derived from the repository and registries.
 
 1. **Core:** Release `kitaru`, the selected UI, public images, the managed image, and Helm from one core tag.
-2. **Plugin only:** Release one selected Python plugin distribution. Do not release the UI or core.
-3. **Coordinated:** Release changed plugins first. Then prepare and release core with the new exact default pins.
+2. **One plugin:** Release one selected Python plugin distribution. Do not release the UI or core.
+3. **All plugins:** Inspect and prepare every plugin release unit independently.
+4. **Coordinated:** Release core with its selected UI, then publish plugins that depend on that core version.
 
 There is no separate bundle tag. The core tag publishes the Python package and deployables in one workflow.
 
 Confirm the selected distributions, versions, frontend tag, publication order, and release commit before editing.
+
+## Discover release impact
+
+Fetch current remote state and load the release inventory:
+
+```bash
+git fetch origin --prune --tags
+uv run --no-project --with packaging==26.2 \
+  python scripts/release_units.py list --format json
+```
+
+For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as indirect follow-ups, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label.
+
+For one plugin, start at that plugin's previous tag. For all plugins, calculate a separate range for every plugin release unit. `requires:plugins` means every unit is expected; report a unit with no implementation change as a red flag and require an explanation in the release PR.
+
+For core, collect requirements for frontend, plugins, skills, ZenML docs, website, examples, and additional context from source PRs. Read linked repositories with `gh` or existing local checkouts. Do not write to them.
+
+Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record work that the Kitaru diff cannot show. Repository state decides what can be released.
+
+Propose explicit versions and changelog entries after discovery. Check PyPI versions and Git tags before proposing a version, and never reuse a published version. Get the user's acceptance before editing release metadata.
 
 ## Apply version rules
 
@@ -37,6 +58,8 @@ Confirm the selected distributions, versions, frontend tag, publication order, a
 - Never reuse a published version or move a published tag.
 - Increment the RC number for another candidate of the same target.
 - Remove the RC suffix to accept a candidate without changing `X.Y.Z`.
+
+For pre-1.0 plugins, use a patch when the public API and observable output stay compatible for existing supported inputs. Use a minor for new capabilities or breaking behavior. Importer output includes session grouping, IDs, node structure, field mappings, normalized values, and incomplete or failed trace handling.
 
 ## Release or select the frontend
 
@@ -91,7 +114,7 @@ ui-tag = "<kitaru-ui-tag>"
 
 5. Run `uv lock`. Keep unrelated `exclude-newer` timestamp churn out of the diff.
 6. Run `uv run python scripts/generate_openapi.py` and commit `openapi/openapi.json`.
-7. If a default plugin pin changes, update `plugins/default-requirements.txt` and every matching server catalog entry.
+7. If a default plugin version changes, update every matching server catalog requirement and display version. The release inventory validates these values against the package manifest.
 
 Read default membership from `release/release-units.toml`. Do not copy a fixed plugin count or a retired plugin name into the skill.
 
@@ -113,6 +136,45 @@ uv version --project plugins --package <distribution> <version> --no-sync
 5. Leave every unselected package unchanged.
 
 If the plugin becomes a new core default, publish the plugin before the core release. Then prepare a new core version with its exact pin.
+
+For a coordinated API change, the release PR can contain future core and plugin versions together. Publish the core first, then publish plugins whose dependency requires that new core version. A default pin may reference the queued plugin version; do not tag core until the repository's pending-default behavior is available and verified.
+
+## Patch an existing plugin release line
+
+Use the unit's maintenance branch from `release/release-units.toml`, named `release/<plugin>/<major.minor>`. Confirm the branch exists and the requested version is the next unused patch version. The plugin workflow accepts a tag whose commit belongs to `develop` or that exact maintenance branch.
+
+When the same bug exists on `develop`, merge the implementation there first. Then cherry-pick only its implementation commit onto a fix branch based on the maintenance line:
+
+```bash
+git fetch origin --prune --tags
+git switch --track origin/release/langfuse/0.4
+git switch -c fix/langfuse-0.4.1
+git cherry-pick <implementation-commit>
+```
+
+When the bug only affects a superseded line, create the fix branch from that maintenance line and implement the fix there. Forward-port it only if the same bug exists on `develop`.
+
+On the fix branch:
+
+1. Bump only the selected plugin to the patch version.
+2. Update its changelog and `plugins/uv.lock`.
+3. For a default-catalog plugin, update matching bootstrap requirements and display versions only when that maintenance line uses the patched version.
+4. Run the selected plugin's focused tests, release inventory validation, and artifact smoke.
+5. Open the PR against the maintenance branch, not `develop`.
+
+After the maintenance PR merges, resolve its exact merge commit and prepare the namespaced tag command. Do not push the tag without explicit authorization:
+
+```bash
+PATCH_SHA="$(gh pr view <patch-pr> \
+  --repo zenml-io/kitaru \
+  --json mergeCommit \
+  --jq '.mergeCommit.oid')"
+git tag -a python/kitaru-langfuse-importer/v0.4.1 "$PATCH_SHA" \
+  -m python/kitaru-langfuse-importer/v0.4.1
+git push origin python/kitaru-langfuse-importer/v0.4.1
+```
+
+Leave a newer package version and default-catalog declaration on `develop` unchanged when patching a superseded line.
 
 ## Validate the preparation
 
@@ -150,13 +212,27 @@ Commit only the release files. Push the branch and open a draft PR to `develop`.
 Include:
 
 - release shape and versions
+- source PRs included for each release unit
 - frontend tag and asset status for core
 - dependency and default-pin decisions
+- plugin coverage and explanations for missing units in an all-plugin release
+- linked skills, ZenML docs, website, examples, and other follow-ups
 - validations run
-- publication order
+- exact post-merge tag and follow-up order
 - `## Reviewer Notes` with a concrete review path
 
 Stop after the PR unless the user explicitly asks to publish.
+
+After the PR merges, resolve its exact merge commit and write tag commands against that SHA:
+
+```bash
+RELEASE_SHA="$(gh pr view <release-pr> \
+  --repo zenml-io/kitaru \
+  --json mergeCommit \
+  --jq '.mergeCommit.oid')"
+```
+
+For a coordinated release, order the hand-off as frontend tag and bundle, core tag and publication, dependent plugin tags and publication, then linked skills, docs, website, examples, and other follow-ups. Do not execute these commands during preparation.
 
 ## Rehearse before publication
 
@@ -193,6 +269,8 @@ git push origin "$TAG"
 
 Approve the package's PyPI environment when required. Verify the wheel, source distribution, hashes, and immutable GitHub Release.
 
+For a stable release, the workflow creates or fast-forwards the unit's maintenance branch after the GitHub Release exists. A maintenance-line patch uses the exact reviewed maintenance-branch commit prepared above instead of a `develop` commit.
+
 ## Publish core and deployables
 
 Before tagging, verify the selected frontend release and required plugin versions exist.
@@ -215,10 +293,24 @@ The tag starts `.github/workflows/release.yml`. The workflow:
 5. publishes the Helm chart
 6. moves public Docker `latest` aliases only for a stable release
 7. creates the immutable GitHub Release
+8. creates or fast-forwards the stable maintenance branch
 
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.
 
 Verify each published surface independently. Do not infer one surface from another.
+
+The workflow does not update `main`. After the newest stable core release succeeds, tell the release owner to move `main` to the immutable core tag without creating a merge commit:
+
+```bash
+git fetch origin main --tags
+TAG="python/kitaru/v<python-version>"
+RELEASE_SHA="$(git rev-list -n 1 "$TAG")"
+git merge-base --is-ancestor origin/main "$RELEASE_SHA"
+gh api --method PATCH repos/zenml-io/kitaru/git/refs/heads/main \
+  -f sha="$RELEASE_SHA" -F force=false
+```
+
+The release owner runs this command manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
 
 ## Recover a failed release
 

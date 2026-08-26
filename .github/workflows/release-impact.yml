@@ -1,0 +1,48 @@
+---
+name: Release impact
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+      - ready_for_review
+      - converted_to_draft
+permissions:
+  contents: read
+concurrency:
+  group: release-impact-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Collect changed files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: git diff --name-only --diff-filter=ACMR "$BASE_SHA" "$HEAD_SHA" > "$RUNNER_TEMP/changed-files.txt"
+      - name: Report release impact
+        env:
+          PR_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: |-
+          mapfile -t labels < <(jq -r '.[]' <<<"$PR_LABELS")
+          args=()
+          for label in "${labels[@]}"; do
+            args+=(--label "$label")
+          done
+          uv run --no-project --with packaging==26.2 \
+            python scripts/release_impact.py \
+            --changed-files "$RUNNER_TEMP/changed-files.txt" \
+            "${args[@]}"

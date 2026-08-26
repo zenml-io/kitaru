@@ -4,6 +4,16 @@
 ## Why?
 
 
+## Release context
+
+<!--
+Add links or notes for frontend, plugins, skills, ZenML docs, website,
+examples, or other indirect work that must happen with or after a release.
+CI derives directly changed core and plugin release units from the diff. Add
+requires:* labels only for follow-up work that the Kitaru diff cannot show.
+-->
+
+
 ## Reviewer Notes
 
 <!--

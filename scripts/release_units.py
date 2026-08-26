@@ -19,6 +19,9 @@ PACKAGE_TAG_PATTERN = re.compile(
     r"python/(?P<distribution>[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)/v(?P<version>[^/]+)"
 )
 SLUG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+MAINTENANCE_BRANCH_PREFIX_PATTERN = re.compile(
+    r"release/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/"
+)
 REQUIRED_PLUGIN_PROJECT_URLS = frozenset(
     {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
 )
@@ -37,15 +40,26 @@ class ReleaseUnit:
     distribution: str
     registry: str
     version_source: str
+    changelog: str
+    lock_source: str
     version: str
     default_catalog: bool
+    release_label: str
+    impact_paths: tuple[str, ...]
     tag_prefix: str
+    maintenance_branch_prefix: str
     required_checks: frozenset[str]
 
     @property
     def tag(self) -> str:
         """Build the immutable package tag for the current manifest version."""
         return f"{self.tag_prefix}{self.version}"
+
+    @property
+    def maintenance_branch(self) -> str:
+        """Build the stable major-minor maintenance branch for this version."""
+        version = Version(self.version)
+        return f"{self.maintenance_branch_prefix}{version.major}.{version.minor}"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the unit using the stable public field names."""
@@ -55,10 +69,16 @@ class ReleaseUnit:
             "distribution": self.distribution,
             "registry": self.registry,
             "version_source": self.version_source,
+            "changelog": self.changelog,
+            "lock_source": self.lock_source,
             "version": self.version,
             "default_catalog": self.default_catalog,
+            "release_label": self.release_label,
+            "impact_paths": list(self.impact_paths),
             "tag_prefix": self.tag_prefix,
             "tag": self.tag,
+            "maintenance_branch_prefix": self.maintenance_branch_prefix,
+            "maintenance_branch": self.maintenance_branch,
             "required_checks": sorted(self.required_checks),
         }
 
@@ -244,28 +264,9 @@ def _parse_requirement(value: str, context: str) -> Requirement:
         ) from error
 
 
-def _load_default_requirements(repo_root: Path) -> dict[str, str]:
-    requirements_path = repo_root / "plugins" / "default-requirements.txt"
-    requirements: dict[str, str] = {}
-    try:
-        lines = requirements_path.read_text().splitlines()
-    except FileNotFoundError as error:
-        raise ReleaseInventoryError(
-            "missing plugins/default-requirements.txt"
-        ) from error
-    for line in lines:
-        value = line.strip()
-        if not value or value.startswith("#"):
-            continue
-        requirement = _parse_requirement(value, "plugins/default-requirements.txt")
-        name = canonicalize_name(requirement.name)
-        if name in requirements:
-            raise ReleaseInventoryError(f"duplicate default requirement: {name}")
-        requirements[name] = str(requirement.specifier)
-    return requirements
-
-
-def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
+def _load_bootstrap_requirements(
+    repo_root: Path,
+) -> dict[str, set[tuple[str, str]]]:
     bootstrap_path = repo_root / "src" / "kitaru" / "server" / "api" / "bootstrap.py"
     try:
         module = ast.parse(bootstrap_path.read_text(), filename=str(bootstrap_path))
@@ -276,7 +277,7 @@ def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
             f"invalid server plugin catalog: {error}"
         ) from error
 
-    requirements: set[str] = set()
+    requirements: dict[str, set[tuple[str, str]]] = {}
     for node in ast.walk(module):
         if not (
             isinstance(node, ast.Call)
@@ -301,7 +302,24 @@ def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
         requirement = _parse_requirement(
             requirement_value.value, "server plugin catalog"
         )
-        requirements.add(canonicalize_name(requirement.name))
+        display_version_keywords = [
+            keyword for keyword in node.keywords if keyword.arg == "display_version"
+        ]
+        if len(display_version_keywords) != 1:
+            raise ReleaseInventoryError(
+                "server plugin catalog entries must declare one display version"
+            )
+        display_version_value = display_version_keywords[0].value
+        if not isinstance(display_version_value, ast.Constant) or not isinstance(
+            display_version_value.value, str
+        ):
+            raise ReleaseInventoryError(
+                "server plugin catalog display versions must be string literals"
+            )
+        name = str(canonicalize_name(requirement.name))
+        requirements.setdefault(name, set()).add(
+            (str(requirement.specifier), display_version_value.value)
+        )
     return requirements
 
 
@@ -323,27 +341,32 @@ def _validate_plugin_coverage(repo_root: Path, units: tuple[ReleaseUnit, ...]) -
 
 def _validate_default_catalog(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
     inventory_defaults = {
-        canonicalize_name(unit.distribution) for unit in units if unit.default_catalog
+        str(canonicalize_name(unit.distribution)): unit
+        for unit in units
+        if unit.default_catalog
     }
-    requirement_specs = _load_default_requirements(repo_root)
-    requirement_defaults = set(requirement_specs)
     bootstrap_defaults = _load_bootstrap_requirements(repo_root)
-    if requirement_defaults != bootstrap_defaults:
-        raise ReleaseInventoryError(
-            "server default catalog does not match plugins/default-requirements.txt"
-        )
-    if inventory_defaults != requirement_defaults:
+    if set(inventory_defaults) != set(bootstrap_defaults):
         raise ReleaseInventoryError("default catalog does not match inventory")
 
-    units_by_name: dict[str, ReleaseUnit] = {
-        str(canonicalize_name(unit.distribution)): unit for unit in units
-    }
-    for name, specifier in requirement_specs.items():
-        expected = f"=={units_by_name[name].version}"
-        if specifier != expected:
+    for name, unit in inventory_defaults.items():
+        expected = {(f"=={unit.version}", unit.version)}
+        if bootstrap_defaults[name] != expected:
             raise ReleaseInventoryError(
-                f"{name}: default requirement {specifier} does not match {expected}"
+                f"{name}: server default requirement and display version "
+                f"must match {unit.version}"
             )
+
+
+def default_requirements(inventory: ReleaseInventory) -> dict[str, str]:
+    """Return exact requirements for packages in the server default catalog."""
+    return {
+        str(canonicalize_name(unit.distribution)): (
+            f"{unit.distribution}=={unit.version}"
+        )
+        for unit in inventory.plugin_units
+        if unit.default_catalog
+    }
 
 
 def load_inventory(
@@ -372,7 +395,9 @@ def load_inventory(
     units: list[ReleaseUnit] = []
     seen_slugs: set[str] = set()
     seen_distributions: set[str] = set()
+    seen_release_labels: set[str] = set()
     seen_tag_prefixes: set[str] = set()
+    seen_maintenance_branch_prefixes: set[str] = set()
     for raw_unit in raw_units:
         if not isinstance(raw_unit, dict):
             raise ReleaseInventoryError("each release unit must be a table")
@@ -417,6 +442,38 @@ def load_inventory(
                 resolved_project, project_metadata, context
             )
 
+        changelog = _get_string(raw_unit, "changelog", context)
+        changelog_path = _resolve_repo_path(root, changelog, context)
+        if not changelog_path.is_file():
+            raise ReleaseInventoryError(f"{context}: changelog does not exist")
+
+        lock_source = _get_string(raw_unit, "lock-source", context)
+        lock_path = _resolve_repo_path(root, lock_source, context)
+        if not lock_path.is_file():
+            raise ReleaseInventoryError(f"{context}: lock source does not exist")
+
+        release_label = _get_string(raw_unit, "release-label", context)
+        valid_release_label = (
+            release_label == "requires:core"
+            if slug == "kitaru"
+            else release_label.startswith("requires:plugin:")
+        )
+        if not valid_release_label:
+            raise ReleaseInventoryError(
+                f"{context}: invalid release label {release_label}"
+            )
+        if release_label in seen_release_labels:
+            raise ReleaseInventoryError(f"duplicate release label: {release_label}")
+        seen_release_labels.add(release_label)
+        impact_paths = tuple(_get_string_list(raw_unit, "impact-paths", context))
+        if not impact_paths:
+            raise ReleaseInventoryError(f"{context}: impact-paths must not be empty")
+        for impact_path in impact_paths:
+            if impact_path.startswith("/") or ".." in Path(impact_path).parts:
+                raise ReleaseInventoryError(
+                    f"{context}: impact path must be repository-relative"
+                )
+
         default_catalog = raw_unit.get("default-catalog")
         if not isinstance(default_catalog, bool):
             raise ReleaseInventoryError(
@@ -432,6 +489,23 @@ def load_inventory(
             raise ReleaseInventoryError(f"duplicate tag prefix: {tag_prefix}")
         seen_tag_prefixes.add(tag_prefix)
 
+        maintenance_branch_prefix = _get_string(
+            raw_unit, "maintenance-branch-prefix", context
+        )
+        if (
+            MAINTENANCE_BRANCH_PREFIX_PATTERN.fullmatch(maintenance_branch_prefix)
+            is None
+        ):
+            raise ReleaseInventoryError(
+                f"{context}: invalid maintenance branch prefix "
+                f"{maintenance_branch_prefix}"
+            )
+        if maintenance_branch_prefix in seen_maintenance_branch_prefixes:
+            raise ReleaseInventoryError(
+                f"duplicate maintenance branch prefix: {maintenance_branch_prefix}"
+            )
+        seen_maintenance_branch_prefixes.add(maintenance_branch_prefix)
+
         unit_checks = frozenset(_get_string_list(raw_unit, "checks", context))
         units.append(
             ReleaseUnit(
@@ -440,9 +514,14 @@ def load_inventory(
                 distribution=distribution,
                 registry=registry,
                 version_source=version_source,
+                changelog=changelog,
+                lock_source=lock_source,
                 version=version,
                 default_catalog=default_catalog,
+                release_label=release_label,
+                impact_paths=impact_paths,
                 tag_prefix=tag_prefix,
+                maintenance_branch_prefix=maintenance_branch_prefix,
                 required_checks=common_checks | unit_checks,
             )
         )

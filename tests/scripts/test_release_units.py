@@ -10,6 +10,7 @@ from packaging.version import Version
 from scripts.release_units import (
     ReleaseInventoryError,
     build_plugin_matrix,
+    default_requirements,
     format_inventory,
     load_inventory,
     parse_package_tag,
@@ -49,8 +50,10 @@ EXPECTED_DEFAULT_DISTRIBUTIONS = {
 def release_repo(tmp_path: Path) -> Path:
     for relative_path in (
         "pyproject.toml",
+        "CHANGELOG.md",
+        "uv.lock",
         "release/release-units.toml",
-        "plugins/default-requirements.txt",
+        "plugins/uv.lock",
         "src/kitaru/server/api/bootstrap.py",
     ):
         source = REPO_ROOT / relative_path
@@ -59,7 +62,7 @@ def release_repo(tmp_path: Path) -> Path:
         shutil.copyfile(source, destination)
 
     for project in (REPO_ROOT / "plugins" / "packages").iterdir():
-        for filename in ("pyproject.toml", "README.md"):
+        for filename in ("pyproject.toml", "README.md", "CHANGELOG.md"):
             source = project / filename
             relative_path = source.relative_to(REPO_ROOT)
             destination = tmp_path / relative_path
@@ -79,6 +82,25 @@ def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     assert all(unit.registry == "pypi" for unit in inventory.units)
     assert all(unit.path != "docs" for unit in inventory.units)
     assert all(not unit.path.startswith("packages/") for unit in inventory.units)
+    assert all((REPO_ROOT / unit.changelog).is_file() for unit in inventory.units)
+    assert all((REPO_ROOT / unit.lock_source).is_file() for unit in inventory.units)
+    assert len({unit.release_label for unit in inventory.units}) == len(inventory.units)
+    assert len({unit.maintenance_branch for unit in inventory.units}) == len(
+        inventory.units
+    )
+    assert all(unit.impact_paths for unit in inventory.units)
+
+
+def test_default_requirements_are_derived_from_release_units() -> None:
+    assert set(default_requirements(load_inventory()).values()) == {
+        "kitaru-braintrust-importer==0.1.0",
+        "kitaru-evaluator==0.1.2",
+        "kitaru-jsonl-importer==0.1.0",
+        "kitaru-langfuse-importer==0.1.1",
+        "kitaru-langsmith-importer==0.1.0",
+        "kitaru-logfire-importer==0.1.1",
+        "kitaru-phoenix-importer==0.1.0",
+    }
 
 
 def test_inventory_versions_and_tags_match_project_manifests() -> None:
@@ -86,6 +108,8 @@ def test_inventory_versions_and_tags_match_project_manifests() -> None:
 
     for unit in inventory.units:
         assert unit.tag == f"python/{unit.distribution}/v{unit.version}"
+        version = Version(unit.version)
+        assert unit.maintenance_branch.endswith(f"/{version.major}.{version.minor}")
         if Version(unit.version).local is not None:
             with pytest.raises(ReleaseInventoryError, match="local segment"):
                 parse_package_tag(unit.tag, inventory)
@@ -137,7 +161,6 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     assert "python/kitaru/v*" in workflow
     assert "bundle/kitaru/v*" not in workflow
     assert "publish-deployables:" in workflow
-    assert "plugins/default-requirements.txt" not in workflow
     assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
     assert "gh release upload" not in workflow
     assert "create-release:" in workflow
@@ -284,6 +307,23 @@ def test_inventory_rejects_duplicate_unit_identity(release_repo: Path) -> None:
         load_inventory(release_repo)
 
 
+def test_inventory_rejects_an_invalid_maintenance_branch_prefix(
+    release_repo: Path,
+) -> None:
+    inventory_path = release_repo / "release" / "release-units.toml"
+    inventory_path.write_text(
+        inventory_path.read_text().replace(
+            'maintenance-branch-prefix = "release/langfuse/"',
+            'maintenance-branch-prefix = "../langfuse/"',
+        )
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError, match="invalid maintenance branch prefix"
+    ):
+        load_inventory(release_repo)
+
+
 def test_inventory_rejects_an_unlisted_plugin_project(release_repo: Path) -> None:
     manifest = release_repo / "plugins" / "packages" / "unlisted" / "pyproject.toml"
     manifest.parent.mkdir(parents=True)
@@ -382,6 +422,29 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
         load_inventory(release_repo)
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            'requirement="kitaru-langfuse-importer==0.1.1"',
+            'requirement="kitaru-langfuse-importer==0.1.0"',
+        ),
+        ('display_version="0.1.1"', 'display_version="0.1.0"'),
+    ],
+)
+def test_inventory_rejects_stale_server_default_versions(
+    release_repo: Path, old: str, new: str
+) -> None:
+    bootstrap = release_repo / "src" / "kitaru" / "server" / "api" / "bootstrap.py"
+    bootstrap.write_text(bootstrap.read_text().replace(old, new, 1))
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match=r"server default requirement and display version must match 0\.1\.1",
+    ):
+        load_inventory(release_repo)
+
+
 def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     inventory = load_inventory()
     text_output = format_inventory(inventory)
@@ -418,6 +481,41 @@ def test_plugin_release_workflow_resolves_plugin_tags_from_the_inventory() -> No
     assert "scripts/release_ui.py --version" not in workflow
     assert "uv version" not in workflow
     assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
+
+
+def test_python_release_workflows_accept_develop_and_maintenance_sources() -> None:
+    workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml")
+    ]
+
+    for workflow in workflows:
+        build_job = workflow.split("\n  publish-python:\n", maxsplit=1)[0]
+        assert "git fetch origin develop" in build_job
+        assert 'git merge-base --is-ancestor "$release_sha" origin/develop' in build_job
+        assert "origin/$MAINTENANCE_BRANCH" in build_job
+        assert "git fetch origin main" not in build_job
+
+
+def test_stable_python_releases_advance_maintenance_branches() -> None:
+    core = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    plugins = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+
+    assert "  advance-maintenance-branch:\n" in core
+    assert "  advance-maintenance-branch:\n" in plugins
+    for workflow in (core, plugins):
+        assert "needs.build.outputs.is-prerelease == 'false'" in workflow
+        assert 'ref="refs/heads/$MAINTENANCE_BRANCH"' in workflow
+        assert "-F force=false" in workflow
+        assert "needs: [build, create-release]" in workflow
+
+
+def test_core_release_workflow_leaves_main_promotion_to_the_release_owner() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    branch_job = workflow.split("\n  advance-maintenance-branch:\n", maxsplit=1)[1]
+
+    assert "git fetch origin main" not in branch_job
+    assert "git/refs/heads/main" not in branch_job
 
 
 def test_plugin_release_workflow_validates_wheel_metadata_before_publish() -> None:

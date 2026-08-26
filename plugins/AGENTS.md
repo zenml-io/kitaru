@@ -14,8 +14,7 @@ Read `plugins/DEVELOPMENT.md` before you change package metadata, default defini
 ## Required updates
 
 - Update the selected package version with `uv version --project plugins --package DISTRIBUTION VERSION --no-sync`.
-- Update the released distribution pin in `plugins/default-requirements.txt`.
-- For a default importer or evaluator, update the same requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`.
+- For a default importer or evaluator, update the requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. The release inventory validates both against the package version.
 - Keep adapter distributions out of the server catalog.
 - Run plugin workspace commands with `--project plugins`; the root workspace contains only Kitaru.
 - Commit the resulting `plugins/uv.lock` change.

@@ -24,13 +24,13 @@ Use representative provider exports as fixtures. Cover malformed records, missin
 
 ## Package, register, and version
 
-An importer distribution lives under `plugins/packages/<slug>-importer/`, with its source, `pyproject.toml`, changelog, and focused tests under `plugins/tests/importers/`. Export `parse` through the package `__all__`. Add the package to `plugins/README.md`, `release/release-units.toml`, the exact inventory in `tests/scripts/test_release_units.py`, and `plugins/uv.lock`. A non-default package also declares `tool.kitaru.artifact.import-module` so artifact smoke can import it without a default requirement.
+An importer distribution lives under `plugins/packages/<slug>-importer/`, with its source, `pyproject.toml`, changelog, and focused tests under `plugins/tests/importers/`. Export `parse` through the package `__all__`. Add the package to `plugins/README.md`, `release/release-units.toml`, the exact inventory in `tests/scripts/test_release_units.py`, and `plugins/uv.lock`. A non-default package also declares `tool.kitaru.artifact.import-module` so artifact smoke can import it without a default-catalog entry.
 
 Use `kitaru importer scaffold` and `kitaru importer test` for bounded local scripts. Register an in-progress self-contained implementation with `kitaru importer register ... --script ... --entrypoint ...`. Use an exact package requirement when validation must cover wheel installation. Registration creates remote state, is not idempotent, and needs an explicit server plus a worker that can resolve the source. Do not run it without authorization. The package's PyPI version and Kitaru's server-assigned importer version are separate: use `kitaru importer version register` for each new immutable registered implementation, and never mutate the behavior behind an existing version.
 
 A default importer additionally needs:
 
-- an exact requirement in `plugins/default-requirements.txt`
+- `default-catalog = true` in `release/release-units.toml`
 - a matching `DEFAULT_PLUGIN_DEFINITIONS` entry in `src/kitaru/server/api/bootstrap.py`
 - catalog coverage in `tests/server/test_default_plugins.py`
 

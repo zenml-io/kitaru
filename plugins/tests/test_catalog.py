@@ -13,7 +13,9 @@
 #  permissions and limitations under the License.
 """Tests for default plugin package contracts."""
 
-from pathlib import Path
+from importlib.metadata import version
+
+from packaging.requirements import Requirement
 
 from kitaru.server.api.bootstrap import DEFAULT_PLUGIN_DEFINITIONS
 from kitaru.source_refs import parse_source_ref
@@ -25,7 +27,6 @@ def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     definitions = DEFAULT_PLUGIN_DEFINITIONS
     names = [definition.name for definition in definitions]
     entrypoints = [definition.entrypoint for definition in definitions]
-    requirements = [definition.requirement for definition in definitions]
 
     assert all(name.startswith("kitaru/") for name in names)
     assert len(names) == len(set(names))
@@ -33,8 +34,8 @@ def test_catalog_names_and_entrypoints_are_unique_and_loadable() -> None:
     for entrypoint in entrypoints:
         module, attribute = parse_source_ref(entrypoint)
         assert callable(load_source_ref(f"{module}:{attribute}", "Plugin"))
-    requirements_file = Path(__file__).parents[1] / "default-requirements.txt"
-    bundled_requirements = {
-        line for line in requirements_file.read_text().splitlines() if line
-    }
-    assert set(requirements) == bundled_requirements
+    for definition in definitions:
+        requirement = Requirement(definition.requirement)
+        package_version = version(requirement.name)
+        assert str(requirement.specifier) == f"=={package_version}"
+        assert definition.display_version == package_version

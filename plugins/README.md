@@ -33,4 +33,4 @@ Run the main package gate from the repository root:
 just plugin-artifact-smoke
 ```
 
-`default-requirements.txt` pins every independently released plugin distribution that is bundled with Kitaru. The server catalog remains limited to importers and evaluators; adapter distributions are installed directly by agent projects and are not registered as server plugins. A provider-specific release updates one importer pin. An evaluator release updates the shared `kitaru-evaluator` pin.
+`release/release-units.toml` marks distributions that belong to the default server catalog. Release validation derives their exact requirements from the package manifests and checks the runtime definitions in `src/kitaru/server/api/bootstrap.py`. Adapter distributions are installed directly by agent projects and are not registered as server plugins.

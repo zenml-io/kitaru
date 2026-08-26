@@ -23,8 +23,22 @@ path = "."
 distribution = "kitaru"
 registry = "pypi"
 version-source = "pyproject.toml"
+changelog = "CHANGELOG.md"
+lock-source = "uv.lock"
 default-catalog = false
+release-label = "requires:core"
+impact-paths = [
+    "pyproject.toml",
+    "CHANGELOG.md",
+    "uv.lock",
+    "src/kitaru/**",
+    "openapi/**",
+    "releases/python/kitaru/**",
+    "docker/**",
+    "helm/**",
+]
 tag-prefix = "python/kitaru/v"
+maintenance-branch-prefix = "release/kitaru/"
 checks = [
     "cli-artifact-contract",
     "mcp-wheel-contract",
@@ -44,8 +58,13 @@ path = "plugins/packages/braintrust-importer"
 distribution = "kitaru-braintrust-importer"
 registry = "pypi"
 version-source = "plugins/packages/braintrust-importer/pyproject.toml"
+changelog = "plugins/packages/braintrust-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:braintrust"
+impact-paths = ["plugins/packages/braintrust-importer/**"]
 tag-prefix = "python/kitaru-braintrust-importer/v"
+maintenance-branch-prefix = "release/braintrust/"
 checks = ["plugin package (braintrust-importer)"]
 
 [[units]]
@@ -54,8 +73,13 @@ path = "plugins/packages/evaluator"
 distribution = "kitaru-evaluator"
 registry = "pypi"
 version-source = "plugins/packages/evaluator/pyproject.toml"
+changelog = "plugins/packages/evaluator/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:evaluator"
+impact-paths = ["plugins/packages/evaluator/**"]
 tag-prefix = "python/kitaru-evaluator/v"
+maintenance-branch-prefix = "release/evaluator/"
 checks = ["plugin package (evaluator)"]
 
 [[units]]
@@ -64,8 +88,13 @@ path = "plugins/packages/jsonl-importer"
 distribution = "kitaru-jsonl-importer"
 registry = "pypi"
 version-source = "plugins/packages/jsonl-importer/pyproject.toml"
+changelog = "plugins/packages/jsonl-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:jsonl"
+impact-paths = ["plugins/packages/jsonl-importer/**"]
 tag-prefix = "python/kitaru-jsonl-importer/v"
+maintenance-branch-prefix = "release/jsonl/"
 checks = ["plugin package (jsonl-importer)"]
 
 [[units]]
@@ -74,8 +103,13 @@ path = "plugins/packages/langfuse-importer"
 distribution = "kitaru-langfuse-importer"
 registry = "pypi"
 version-source = "plugins/packages/langfuse-importer/pyproject.toml"
+changelog = "plugins/packages/langfuse-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:langfuse"
+impact-paths = ["plugins/packages/langfuse-importer/**"]
 tag-prefix = "python/kitaru-langfuse-importer/v"
+maintenance-branch-prefix = "release/langfuse/"
 checks = ["plugin package (langfuse-importer)"]
 
 [[units]]
@@ -84,8 +118,13 @@ path = "plugins/packages/langgraph"
 distribution = "kitaru-langgraph"
 registry = "pypi"
 version-source = "plugins/packages/langgraph/pyproject.toml"
+changelog = "plugins/packages/langgraph/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = false
+release-label = "requires:plugin:langgraph"
+impact-paths = ["plugins/packages/langgraph/**"]
 tag-prefix = "python/kitaru-langgraph/v"
+maintenance-branch-prefix = "release/langgraph/"
 checks = ["plugin package (langgraph)"]
 
 [[units]]
@@ -94,8 +133,13 @@ path = "plugins/packages/logfire-importer"
 distribution = "kitaru-logfire-importer"
 registry = "pypi"
 version-source = "plugins/packages/logfire-importer/pyproject.toml"
+changelog = "plugins/packages/logfire-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:logfire"
+impact-paths = ["plugins/packages/logfire-importer/**"]
 tag-prefix = "python/kitaru-logfire-importer/v"
+maintenance-branch-prefix = "release/logfire/"
 checks = ["plugin package (logfire-importer)"]
 
 [[units]]
@@ -104,8 +148,13 @@ path = "plugins/packages/langsmith-importer"
 distribution = "kitaru-langsmith-importer"
 registry = "pypi"
 version-source = "plugins/packages/langsmith-importer/pyproject.toml"
+changelog = "plugins/packages/langsmith-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:langsmith"
+impact-paths = ["plugins/packages/langsmith-importer/**"]
 tag-prefix = "python/kitaru-langsmith-importer/v"
+maintenance-branch-prefix = "release/langsmith/"
 checks = ["plugin package (langsmith-importer)"]
 
 [[units]]
@@ -114,8 +163,13 @@ path = "plugins/packages/openai-agents"
 distribution = "kitaru-openai-agents"
 registry = "pypi"
 version-source = "plugins/packages/openai-agents/pyproject.toml"
+changelog = "plugins/packages/openai-agents/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = false
+release-label = "requires:plugin:openai-agents"
+impact-paths = ["plugins/packages/openai-agents/**"]
 tag-prefix = "python/kitaru-openai-agents/v"
+maintenance-branch-prefix = "release/openai-agents/"
 checks = ["plugin package (openai-agents)"]
 
 [[units]]
@@ -124,8 +178,13 @@ path = "plugins/packages/phoenix-importer"
 distribution = "kitaru-phoenix-importer"
 registry = "pypi"
 version-source = "plugins/packages/phoenix-importer/pyproject.toml"
+changelog = "plugins/packages/phoenix-importer/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = true
+release-label = "requires:plugin:phoenix"
+impact-paths = ["plugins/packages/phoenix-importer/**"]
 tag-prefix = "python/kitaru-phoenix-importer/v"
+maintenance-branch-prefix = "release/phoenix/"
 checks = ["plugin package (phoenix-importer)"]
 
 [[units]]
@@ -134,6 +193,11 @@ path = "plugins/packages/pydantic-ai"
 distribution = "kitaru-pydantic-ai"
 registry = "pypi"
 version-source = "plugins/packages/pydantic-ai/pyproject.toml"
+changelog = "plugins/packages/pydantic-ai/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
 default-catalog = false
+release-label = "requires:plugin:pydantic-ai"
+impact-paths = ["plugins/packages/pydantic-ai/**"]
 tag-prefix = "python/kitaru-pydantic-ai/v"
+maintenance-branch-prefix = "release/pydantic-ai/"
 checks = ["plugin package (pydantic-ai)"]
