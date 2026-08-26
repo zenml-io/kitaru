@@ -182,7 +182,8 @@ The CLI uploads only the selected file. Keep the script self-contained because s
 Built-in names use the reserved `kitaru/` prefix. Use an unreserved alias for manual registration:
 
 ```bash
-LANGFUSE_REQUIREMENT="$(rg '^kitaru-langfuse-importer==' plugins/default-requirements.txt)"
+LANGFUSE_VERSION="$(uv version --project plugins --package kitaru-langfuse-importer --short)"
+LANGFUSE_REQUIREMENT="kitaru-langfuse-importer==$LANGFUSE_VERSION"
 
 uv run --no-sync kitaru importer register local-langfuse-wheel \
   --server "$KITARU_API_URL" \
@@ -275,20 +276,18 @@ The examples below release `kitaru-langfuse-importer` as version `0.2.0`.
 uv version --project plugins --package kitaru-langfuse-importer 0.2.0 --no-sync
 ```
 
-2. Change the matching line in `plugins/default-requirements.txt` to the new exact version.
-3. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. Skip this catalog step for an adapter distribution.
-4. Add or update focused tests.
-5. Verify that no unrelated plugin package version changed.
+2. For an importer or evaluator in the default catalog, change the matching requirement and display version in `DEFAULT_PLUGIN_DEFINITIONS`. The release inventory derives the expected requirement from the package version. Skip this catalog step for an adapter distribution.
+3. Add or update focused tests.
+4. Verify that no unrelated plugin package version changed.
 
 ```bash
 git diff -- \
   plugins/packages/langfuse-importer/pyproject.toml \
-  plugins/default-requirements.txt \
   plugins/uv.lock \
   src/kitaru/server/api/bootstrap.py
 ```
 
-6. Run the release gates.
+5. Run the release gates.
 
 ```bash
 uv sync --project plugins --frozen --all-packages
@@ -301,8 +300,8 @@ uv run --no-sync python scripts/smoke_plugin_artifacts.py \
 just plugin-artifact-smoke
 ```
 
-7. Run the candidate server procedure when the change affects default definitions, package installation, registration, or task execution.
-8. Commit the version, pins, plugin lockfile, implementation, and tests in the same pull request.
+6. Run the candidate server procedure when the change affects default definitions, package installation, registration, or task execution.
+7. Commit the version, server default definitions, plugin lockfile, implementation, and tests in the same pull request.
 
 ## Configure the first PyPI release
 

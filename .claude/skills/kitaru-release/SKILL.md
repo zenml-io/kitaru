@@ -114,7 +114,7 @@ ui-tag = "<kitaru-ui-tag>"
 
 5. Run `uv lock`. Keep unrelated `exclude-newer` timestamp churn out of the diff.
 6. Run `uv run python scripts/generate_openapi.py` and commit `openapi/openapi.json`.
-7. If a default plugin pin changes, update `plugins/default-requirements.txt` and every matching server catalog entry.
+7. If a default plugin version changes, update every matching server catalog requirement and display version. The release inventory validates these values against the package manifest.
 
 Read default membership from `release/release-units.toml`. Do not copy a fixed plugin count or a retired plugin name into the skill.
 
@@ -138,6 +138,43 @@ uv version --project plugins --package <distribution> <version> --no-sync
 If the plugin becomes a new core default, publish the plugin before the core release. Then prepare a new core version with its exact pin.
 
 For a coordinated API change, the release PR can contain future core and plugin versions together. Publish the core first, then publish plugins whose dependency requires that new core version. A default pin may reference the queued plugin version; do not tag core until the repository's pending-default behavior is available and verified.
+
+## Patch an existing plugin release line
+
+Use a maintenance branch named `release/<plugin>/<major.minor>`. Confirm the branch exists, the requested version is the next unused patch version, and `.github/workflows/release-plugins.yml` accepts tags from that maintenance line. If the workflow still requires `develop` or `main` ancestry, stop and report that the maintenance-line release automation is not ready.
+
+When the same bug exists on `develop`, merge the implementation there first. Then cherry-pick only its implementation commit onto a fix branch based on the maintenance line:
+
+```bash
+git fetch origin --prune --tags
+git switch --track origin/release/langfuse/0.4
+git switch -c fix/langfuse-0.4.1
+git cherry-pick <implementation-commit>
+```
+
+When the bug only affects a superseded line, create the fix branch from that maintenance line and implement the fix there. Forward-port it only if the same bug exists on `develop`.
+
+On the fix branch:
+
+1. Bump only the selected plugin to the patch version.
+2. Update its changelog and `plugins/uv.lock`.
+3. For a default-catalog plugin, update matching bootstrap requirements and display versions only when that maintenance line uses the patched version.
+4. Run the selected plugin's focused tests, release inventory validation, and artifact smoke.
+5. Open the PR against the maintenance branch, not `develop`.
+
+After the maintenance PR merges, resolve its exact merge commit and prepare the namespaced tag command. Do not push the tag without explicit authorization:
+
+```bash
+PATCH_SHA="$(gh pr view <patch-pr> \
+  --repo zenml-io/kitaru \
+  --json mergeCommit \
+  --jq '.mergeCommit.oid')"
+git tag -a python/kitaru-langfuse-importer/v0.4.1 "$PATCH_SHA" \
+  -m python/kitaru-langfuse-importer/v0.4.1
+git push origin python/kitaru-langfuse-importer/v0.4.1
+```
+
+Leave a newer package version and default-catalog declaration on `develop` unchanged when patching a superseded line.
 
 ## Validate the preparation
 

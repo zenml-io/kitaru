@@ -34,7 +34,6 @@ impact-paths = [
     "src/kitaru/**",
     "openapi/**",
     "releases/python/kitaru/**",
-    "plugins/default-requirements.txt",
     "docker/**",
     "helm/**",
 ]

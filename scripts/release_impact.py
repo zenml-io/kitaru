@@ -5,7 +5,10 @@ import json
 import sys
 from pathlib import Path
 
-from scripts.release_units import ReleaseInventory, load_inventory
+if __package__:
+    from scripts.release_units import ReleaseInventory, load_inventory
+else:
+    from release_units import ReleaseInventory, load_inventory
 
 NO_RELEASE_LABEL = "requires:none"
 ALL_PLUGINS_LABEL = "requires:plugins"

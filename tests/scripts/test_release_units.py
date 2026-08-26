@@ -10,6 +10,7 @@ from packaging.version import Version
 from scripts.release_units import (
     ReleaseInventoryError,
     build_plugin_matrix,
+    default_requirements,
     format_inventory,
     load_inventory,
     parse_package_tag,
@@ -52,7 +53,6 @@ def release_repo(tmp_path: Path) -> Path:
         "CHANGELOG.md",
         "uv.lock",
         "release/release-units.toml",
-        "plugins/default-requirements.txt",
         "plugins/uv.lock",
         "src/kitaru/server/api/bootstrap.py",
     ):
@@ -86,6 +86,18 @@ def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     assert all((REPO_ROOT / unit.lock_source).is_file() for unit in inventory.units)
     assert len({unit.release_label for unit in inventory.units}) == len(inventory.units)
     assert all(unit.impact_paths for unit in inventory.units)
+
+
+def test_default_requirements_are_derived_from_release_units() -> None:
+    assert set(default_requirements(load_inventory()).values()) == {
+        "kitaru-braintrust-importer==0.1.0",
+        "kitaru-evaluator==0.1.2",
+        "kitaru-jsonl-importer==0.1.0",
+        "kitaru-langfuse-importer==0.1.1",
+        "kitaru-langsmith-importer==0.1.0",
+        "kitaru-logfire-importer==0.1.1",
+        "kitaru-phoenix-importer==0.1.0",
+    }
 
 
 def test_inventory_versions_and_tags_match_project_manifests() -> None:
@@ -144,7 +156,6 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     assert "python/kitaru/v*" in workflow
     assert "bundle/kitaru/v*" not in workflow
     assert "publish-deployables:" in workflow
-    assert "plugins/default-requirements.txt" not in workflow
     assert 'bundle_version="${BASH_REMATCH[1]}-rc.${BASH_REMATCH[2]}"' in workflow
     assert "gh release upload" not in workflow
     assert "create-release:" in workflow
@@ -385,6 +396,29 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
 
     with pytest.raises(
         ReleaseInventoryError, match="default catalog does not match inventory"
+    ):
+        load_inventory(release_repo)
+
+
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        (
+            'requirement="kitaru-langfuse-importer==0.1.1"',
+            'requirement="kitaru-langfuse-importer==0.1.0"',
+        ),
+        ('display_version="0.1.1"', 'display_version="0.1.0"'),
+    ],
+)
+def test_inventory_rejects_stale_server_default_versions(
+    release_repo: Path, old: str, new: str
+) -> None:
+    bootstrap = release_repo / "src" / "kitaru" / "server" / "api" / "bootstrap.py"
+    bootstrap.write_text(bootstrap.read_text().replace(old, new, 1))
+
+    with pytest.raises(
+        ReleaseInventoryError,
+        match=r"server default requirement and display version must match 0\.1\.1",
     ):
         load_inventory(release_repo)
 

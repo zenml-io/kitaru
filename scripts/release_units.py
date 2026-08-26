@@ -252,28 +252,9 @@ def _parse_requirement(value: str, context: str) -> Requirement:
         ) from error
 
 
-def _load_default_requirements(repo_root: Path) -> dict[str, str]:
-    requirements_path = repo_root / "plugins" / "default-requirements.txt"
-    requirements: dict[str, str] = {}
-    try:
-        lines = requirements_path.read_text().splitlines()
-    except FileNotFoundError as error:
-        raise ReleaseInventoryError(
-            "missing plugins/default-requirements.txt"
-        ) from error
-    for line in lines:
-        value = line.strip()
-        if not value or value.startswith("#"):
-            continue
-        requirement = _parse_requirement(value, "plugins/default-requirements.txt")
-        name = canonicalize_name(requirement.name)
-        if name in requirements:
-            raise ReleaseInventoryError(f"duplicate default requirement: {name}")
-        requirements[name] = str(requirement.specifier)
-    return requirements
-
-
-def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
+def _load_bootstrap_requirements(
+    repo_root: Path,
+) -> dict[str, set[tuple[str, str]]]:
     bootstrap_path = repo_root / "src" / "kitaru" / "server" / "api" / "bootstrap.py"
     try:
         module = ast.parse(bootstrap_path.read_text(), filename=str(bootstrap_path))
@@ -284,7 +265,7 @@ def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
             f"invalid server plugin catalog: {error}"
         ) from error
 
-    requirements: set[str] = set()
+    requirements: dict[str, set[tuple[str, str]]] = {}
     for node in ast.walk(module):
         if not (
             isinstance(node, ast.Call)
@@ -309,7 +290,24 @@ def _load_bootstrap_requirements(repo_root: Path) -> set[str]:
         requirement = _parse_requirement(
             requirement_value.value, "server plugin catalog"
         )
-        requirements.add(canonicalize_name(requirement.name))
+        display_version_keywords = [
+            keyword for keyword in node.keywords if keyword.arg == "display_version"
+        ]
+        if len(display_version_keywords) != 1:
+            raise ReleaseInventoryError(
+                "server plugin catalog entries must declare one display version"
+            )
+        display_version_value = display_version_keywords[0].value
+        if not isinstance(display_version_value, ast.Constant) or not isinstance(
+            display_version_value.value, str
+        ):
+            raise ReleaseInventoryError(
+                "server plugin catalog display versions must be string literals"
+            )
+        name = str(canonicalize_name(requirement.name))
+        requirements.setdefault(name, set()).add(
+            (str(requirement.specifier), display_version_value.value)
+        )
     return requirements
 
 
@@ -331,27 +329,32 @@ def _validate_plugin_coverage(repo_root: Path, units: tuple[ReleaseUnit, ...]) -
 
 def _validate_default_catalog(repo_root: Path, units: tuple[ReleaseUnit, ...]) -> None:
     inventory_defaults = {
-        canonicalize_name(unit.distribution) for unit in units if unit.default_catalog
+        str(canonicalize_name(unit.distribution)): unit
+        for unit in units
+        if unit.default_catalog
     }
-    requirement_specs = _load_default_requirements(repo_root)
-    requirement_defaults = set(requirement_specs)
     bootstrap_defaults = _load_bootstrap_requirements(repo_root)
-    if requirement_defaults != bootstrap_defaults:
-        raise ReleaseInventoryError(
-            "server default catalog does not match plugins/default-requirements.txt"
-        )
-    if inventory_defaults != requirement_defaults:
+    if set(inventory_defaults) != set(bootstrap_defaults):
         raise ReleaseInventoryError("default catalog does not match inventory")
 
-    units_by_name: dict[str, ReleaseUnit] = {
-        str(canonicalize_name(unit.distribution)): unit for unit in units
-    }
-    for name, specifier in requirement_specs.items():
-        expected = f"=={units_by_name[name].version}"
-        if specifier != expected:
+    for name, unit in inventory_defaults.items():
+        expected = {(f"=={unit.version}", unit.version)}
+        if bootstrap_defaults[name] != expected:
             raise ReleaseInventoryError(
-                f"{name}: default requirement {specifier} does not match {expected}"
+                f"{name}: server default requirement and display version "
+                f"must match {unit.version}"
             )
+
+
+def default_requirements(inventory: ReleaseInventory) -> dict[str, str]:
+    """Return exact requirements for packages in the server default catalog."""
+    return {
+        str(canonicalize_name(unit.distribution)): (
+            f"{unit.distribution}=={unit.version}"
+        )
+        for unit in inventory.plugin_units
+        if unit.default_catalog
+    }
 
 
 def load_inventory(

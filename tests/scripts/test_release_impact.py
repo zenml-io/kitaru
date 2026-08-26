@@ -1,3 +1,5 @@
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -80,3 +82,26 @@ def test_allows_requires_none_for_non_release_paths(inventory) -> None:
         )
         == set()
     )
+
+
+def test_release_impact_cli_runs_as_a_script(tmp_path: Path) -> None:
+    changed_files = tmp_path / "changed-files.txt"
+    changed_files.write_text("src/kitaru/client.py\n")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(REPO_ROOT / "scripts" / "release_impact.py"),
+            "--changed-files",
+            str(changed_files),
+            "--label",
+            "requires:core",
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "Inferred labels: requires:core" in result.stdout

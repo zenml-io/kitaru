@@ -32,7 +32,7 @@ For a new Python adapter, inspect the current package inventory and update only 
 - `plugins/pyproject.toml` only when the adapter must be a workspace development dependency or source
 - `release/release-units.toml` for an independently released distribution
 
-Python adapters are installed directly by agent projects. Never add one to `plugins/default-requirements.txt` or `DEFAULT_PLUGIN_DEFINITIONS`.
+Python adapters are installed directly by agent projects. Keep `default-catalog = false` in `release/release-units.toml` and do not add them to `DEFAULT_PLUGIN_DEFINITIONS`.
 
 For a new TypeScript adapter, add a separate package instead of framework-specific code in `packages/core/`. Inspect the root workspace scripts, lockstep version rules, packaging smoke, and `.github/workflows/release-typescript.yml`; do not assume a newly added package is automatically built or published.
 
