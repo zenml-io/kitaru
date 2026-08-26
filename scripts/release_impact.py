@@ -1,4 +1,4 @@
-"""Validate pull-request release signals against changed repository paths."""
+"""Report direct release units and validate declared release follow-ups."""
 
 import argparse
 import json
@@ -10,8 +10,19 @@ if __package__:
 else:
     from release_units import ReleaseInventory, load_inventory
 
-NO_RELEASE_LABEL = "requires:none"
 ALL_PLUGINS_LABEL = "requires:plugins"
+KNOWN_FOLLOWUP_LABELS = frozenset(
+    {
+        ALL_PLUGINS_LABEL,
+        "requires:plugins:importers",
+        "requires:plugins:adapters",
+        "requires:plugins:evaluators",
+        "requires:frontend",
+        "requires:skills",
+        "requires:zenml-docs",
+        "requires:website",
+    }
+)
 
 
 class ReleaseImpactError(ValueError):
@@ -43,14 +54,8 @@ def infer_release_labels(
 def validate_release_impact(
     labels: set[str], changed_files: list[str], inventory: ReleaseInventory
 ) -> set[str]:
-    """Validate PR labels and return the labels inferred from changed paths."""
+    """Validate follow-up labels and return units inferred from changed paths."""
     release_labels = {label for label in labels if label.startswith("requires:")}
-    if not release_labels:
-        raise ReleaseImpactError("add at least one requires:* label")
-    if NO_RELEASE_LABEL in release_labels and len(release_labels) != 1:
-        raise ReleaseImpactError(
-            "requires:none cannot be combined with other requires:* labels"
-        )
 
     known_plugin_labels = {unit.release_label for unit in inventory.plugin_units}
     unknown_plugin_labels = sorted(
@@ -63,22 +68,16 @@ def validate_release_impact(
             f"unknown plugin release label: {unknown_plugin_labels[0]}"
         )
 
+    known_release_labels = {
+        unit.release_label for unit in inventory.units
+    } | KNOWN_FOLLOWUP_LABELS
+    unknown_release_labels = sorted(release_labels - known_release_labels)
+    if unknown_release_labels:
+        raise ReleaseImpactError(
+            f"unknown release follow-up label: {unknown_release_labels[0]}"
+        )
+
     inferred = infer_release_labels(changed_files, inventory)
-    missing = sorted(
-        label
-        for label in inferred
-        if label not in release_labels
-        and not (label in known_plugin_labels and ALL_PLUGINS_LABEL in release_labels)
-    )
-    if missing:
-        raise ReleaseImpactError(
-            "changed paths require missing label(s): " + ", ".join(missing)
-        )
-    if inferred and NO_RELEASE_LABEL in release_labels:
-        raise ReleaseImpactError(
-            "requires:none conflicts with changed release surfaces: "
-            + ", ".join(sorted(inferred))
-        )
     return inferred
 
 
@@ -108,11 +107,26 @@ def main() -> int:
             print(f"error: {error}", file=sys.stderr)
         return 2
 
+    declared = {
+        label
+        for label in args.label
+        if label.startswith("requires:") and label not in inferred
+    }
     if args.format == "json":
-        print(json.dumps({"status": "valid", "inferred_labels": sorted(inferred)}))
+        print(
+            json.dumps(
+                {
+                    "status": "valid",
+                    "direct_release_units": sorted(inferred),
+                    "declared_followups": sorted(declared),
+                }
+            )
+        )
     else:
-        rendered = ", ".join(sorted(inferred)) or "none"
-        print(f"Release impact is valid. Inferred labels: {rendered}")
+        direct = ", ".join(sorted(inferred)) or "none"
+        followups = ", ".join(sorted(declared)) or "none"
+        print(f"Direct release units: {direct}")
+        print(f"Declared follow-ups: {followups}")
     return 0
 
 

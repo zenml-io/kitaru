@@ -30,9 +30,9 @@ def test_infers_core_and_named_plugin_from_paths(inventory) -> None:
     assert labels == {"requires:core", "requires:plugin:langfuse"}
 
 
-def test_accepts_matching_release_labels(inventory) -> None:
+def test_infers_direct_units_without_labels(inventory) -> None:
     inferred = validate_release_impact(
-        {"requires:core", "requires:plugin:langfuse", "requires:skills"},
+        set(),
         [
             "src/kitaru/client.py",
             "plugins/packages/langfuse-importer/src/importer.py",
@@ -43,40 +43,33 @@ def test_accepts_matching_release_labels(inventory) -> None:
     assert inferred == {"requires:core", "requires:plugin:langfuse"}
 
 
-def test_all_plugins_label_covers_changed_plugin_path(inventory) -> None:
-    validate_release_impact(
-        {"requires:plugins"},
-        ["plugins/packages/logfire-importer/src/importer.py"],
+def test_accepts_manual_followups(inventory) -> None:
+    inferred = validate_release_impact(
+        {"requires:frontend", "requires:plugins:adapters"},
+        ["src/kitaru/client.py"],
         inventory,
     )
 
+    assert inferred == {"requires:core"}
+
 
 @pytest.mark.parametrize(
-    ("labels", "message"),
+    "labels",
     [
-        (set(), "add at least one"),
-        ({"requires:none", "requires:skills"}, "cannot be combined"),
-        ({"requires:plugin:missing"}, "unknown plugin release label"),
+        {"requires:none"},
+        {"requires:other"},
+        {"requires:plugin:missing"},
     ],
 )
-def test_rejects_invalid_label_sets(inventory, labels, message) -> None:
-    with pytest.raises(ReleaseImpactError, match=message):
+def test_rejects_unknown_release_labels(inventory, labels) -> None:
+    with pytest.raises(ReleaseImpactError, match=r"unknown .* label"):
         validate_release_impact(labels, [], inventory)
 
 
-def test_rejects_missing_inferred_label(inventory) -> None:
-    with pytest.raises(ReleaseImpactError, match="requires:core"):
-        validate_release_impact(
-            {"requires:skills"},
-            ["src/kitaru/client.py"],
-            inventory,
-        )
-
-
-def test_allows_requires_none_for_non_release_paths(inventory) -> None:
+def test_allows_no_labels_for_non_release_paths(inventory) -> None:
     assert (
         validate_release_impact(
-            {"requires:none"},
+            set(),
             [".github/workflows/release-impact.yml"],
             inventory,
         )
@@ -95,7 +88,7 @@ def test_release_impact_cli_runs_as_a_script(tmp_path: Path) -> None:
             "--changed-files",
             str(changed_files),
             "--label",
-            "requires:core",
+            "requires:skills",
         ],
         cwd=REPO_ROOT,
         capture_output=True,
@@ -104,4 +97,5 @@ def test_release_impact_cli_runs_as_a_script(tmp_path: Path) -> None:
     )
 
     assert result.returncode == 0, result.stderr
-    assert "Inferred labels: requires:core" in result.stdout
+    assert "Direct release units: requires:core" in result.stdout
+    assert "Declared follow-ups: requires:skills" in result.stdout

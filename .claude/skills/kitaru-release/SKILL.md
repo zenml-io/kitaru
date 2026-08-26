@@ -39,13 +39,13 @@ uv run --no-project --with packaging==26.2 \
   python scripts/release_units.py list --format json
 ```
 
-For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Read changed paths, `requires:*` labels, `Release context`, linked work, and existing changelog entries.
+For every selected unit, resolve its latest published tag. Compare that tag with `origin/develop` and inspect merged PRs in the range with `git log`, `git diff`, and `gh pr view`. Derive directly changed core and plugin units from `impact-paths` in `release/release-units.toml`. Read `requires:*` labels as indirect follow-ups, together with `Release context`, linked work, and existing changelog entries. A directly changed unit does not need a matching label.
 
 For one plugin, start at that plugin's previous tag. For all plugins, calculate a separate range for every plugin release unit. `requires:plugins` means every unit is expected; report a unit with no implementation change as a red flag and require an explanation in the release PR.
 
 For core, collect requirements for frontend, plugins, skills, ZenML docs, website, examples, and additional context from source PRs. Read linked repositories with `gh` or existing local checkouts. Do not write to them.
 
-Compare labels with the actual diff. Report missing, conflicting, or stale signals. Labels guide discovery; repository state decides what can be released.
+Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record work that the Kitaru diff cannot show. Repository state decides what can be released.
 
 Propose explicit versions and changelog entries after discovery. Check PyPI versions and Git tags before proposing a version, and never reuse a published version. Get the user's acceptance before editing release metadata.
 
