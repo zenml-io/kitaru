@@ -3618,6 +3618,19 @@
               "description": "Source system the session was imported from.",
               "title": "Imported From"
             },
+            "input_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from session inputs.",
+              "title": "Input Text Selector"
+            },
             "inputs": {
               "description": "Session inputs.",
               "title": "Inputs"
@@ -3654,6 +3667,19 @@
             "origin": {
               "$ref": "#/$defs/SessionOrigin",
               "description": "How the session came to exist."
+            },
+            "output_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from session outputs.",
+              "title": "Output Text Selector"
             },
             "outputs": {
               "description": "Session outputs.",

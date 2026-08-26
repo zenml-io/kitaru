@@ -38,6 +38,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Blob content storage is now pluggable: `KITARU_SERVER_BLOB_STORAGE__BACKEND=s3` stores blob content in an S3 bucket instead of the database, configured through `KITARU_SERVER_BLOB_STORAGE__S3__*` variables.
 - Session and node payload columns above `KITARU_SERVER_PAYLOAD_OFFLOAD_THRESHOLD_BYTES` (default 20KB) are now offloaded to blob storage at ingestion, deduplicated by content hash. Payloads remain inline JSON in the API responses that carry them, the server hydrates offloaded payloads back on read.
 
+- Sessions carry optional `input_text_selector` and `output_text_selector` RFC 6901 JSON Pointers selecting display text from their payloads, mirroring the node selectors. Set them on create, and change the output selector together with a status transition on update.
+
 ### Changed
 
 - Updated the bundled frontend to `kitaru-ui-v0.2.3`.

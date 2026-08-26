@@ -130,6 +130,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
+    input_text_selector: Mapped[str | None] = mapped_column(Text)
+    output_text_selector: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
@@ -187,6 +189,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.origin = session.origin.value
         self.status = session.status.value
         self.name = session.name
+        self.input_text_selector = session.input_text_selector
+        self.output_text_selector = session.output_text_selector
         self.inputs = inputs
         self.inputs_blob_id = inputs_blob_id
         self.outputs = outputs
@@ -252,6 +256,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,
+            input_text_selector=self.input_text_selector,
+            output_text_selector=self.output_text_selector,
             inputs=payload_from_columns(
                 self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
             )

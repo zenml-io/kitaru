@@ -46,6 +46,8 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
         origin=body.origin,
         status=body.status,
         name=body.name,
+        input_text_selector=body.input_text_selector,
+        output_text_selector=body.output_text_selector,
         inputs=body.inputs,
         outputs=body.outputs,
         error=body.error,
@@ -108,6 +110,8 @@ def session_to_detail_response(session: Session) -> SessionDetailResponse:
     """
     return SessionDetailResponse(
         **dict(session_to_response(session)),
+        input_text_selector=session.input_text_selector,
+        output_text_selector=session.output_text_selector,
         inputs=session.inputs.value if session.inputs is not None else None,
         outputs=session.outputs.value if session.outputs is not None else None,
     )
@@ -146,6 +150,7 @@ def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
     for field in (
         "status",
         "outputs",
+        "output_text_selector",
         "error",
         "ended_at",
         "name",

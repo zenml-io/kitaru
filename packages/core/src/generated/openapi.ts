@@ -6893,6 +6893,11 @@ export interface components {
              */
             imported_from?: string | null;
             /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session inputs.
+             */
+            input_text_selector?: string | null;
+            /**
              * Inputs
              * @description Session inputs.
              */
@@ -6911,6 +6916,11 @@ export interface components {
             name?: string | null;
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
+            /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session outputs.
+             */
+            output_text_selector?: string | null;
             /**
              * Outputs
              * @description Session outputs.
@@ -6988,6 +6998,11 @@ export interface components {
              */
             imported_from?: string | null;
             /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session inputs.
+             */
+            input_text_selector?: string | null;
+            /**
              * Inputs
              * @description Session inputs.
              */
@@ -7016,6 +7031,11 @@ export interface components {
             number: number;
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
+            /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session outputs.
+             */
+            output_text_selector?: string | null;
             /**
              * Outputs
              * @description Session outputs.
@@ -7565,6 +7585,11 @@ export interface components {
              * @description New session name.
              */
             name?: string | null;
+            /**
+             * Output Text Selector
+             * @description New output text selector.
+             */
+            output_text_selector?: string | null;
             /**
              * Outputs
              * @description New session outputs.

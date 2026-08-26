@@ -258,7 +258,13 @@ async def test_get_session(client: httpx.AsyncClient) -> None:
     created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
-    assert response.json() == {**created, "inputs": {"prompt": "hi"}, "outputs": None}
+    assert response.json() == {
+        **created,
+        "input_text_selector": None,
+        "output_text_selector": None,
+        "inputs": {"prompt": "hi"},
+        "outputs": None,
+    }
 
 
 async def test_get_session_not_found(client: httpx.AsyncClient) -> None:
@@ -654,6 +660,52 @@ async def test_update_session_omitted_outputs_unchanged(
     assert response.json()["name"] == "renamed"
     fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
     assert fetched["outputs"] == {"answer": 42}
+
+
+async def test_session_text_selectors(client: httpx.AsyncClient) -> None:
+    """Store the text selectors at create and change the output one at finish."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                input_text_selector="/prompt", output_text_selector="/answer"
+            ),
+        )
+    ).json()
+    assert "input_text_selector" not in created
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["input_text_selector"] == "/prompt"
+    assert fetched["output_text_selector"] == "/answer"
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={
+            "status": "completed",
+            "outputs": {"text": "hello"},
+            "output_text_selector": "/text",
+        },
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["output_text_selector"] == "/text"
+    assert fetched["input_text_selector"] == "/prompt"
+
+
+async def test_update_session_omitted_output_selector_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Leave the output text selector unchanged when the update omits it."""
+    created = (
+        await client.post(
+            "/api/v1/sessions", json=_session_body(output_text_selector="/answer")
+        )
+    ).json()
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={"status": "completed", "outputs": {"answer": "hello"}},
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["output_text_selector"] == "/answer"
 
 
 async def test_update_session_rejects_system_prompt(

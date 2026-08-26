@@ -111,6 +111,8 @@ class ImportedSession(BaseModel):
 
     status: SessionStatus
     name: str | None = None
+    input_text_selector: str | None = None
+    output_text_selector: str | None = None
     inputs: Any
     outputs: Any
     error: str | None = None
@@ -184,6 +186,8 @@ def session_request(
         origin=SessionOrigin.IMPORTED,
         status=parsed.status,
         name=parsed.name,
+        input_text_selector=parsed.input_text_selector,
+        output_text_selector=parsed.output_text_selector,
         inputs=parsed.inputs,
         outputs=parsed.outputs,
         error=parsed.error,

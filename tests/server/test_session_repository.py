@@ -732,6 +732,7 @@ async def test_update(setup: Setup) -> None:
     created.finish(
         status=SessionStatus.COMPLETED,
         outputs=Payload.from_json({"a": 1}),
+        output_text_selector=None,
         error=None,
         ended_at=None,
     )

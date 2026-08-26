@@ -287,6 +287,8 @@ async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
     body = response.json()
     assert body["session"] == {
         **created,
+        "input_text_selector": None,
+        "output_text_selector": None,
         "inputs": {"prompt": "hi"},
         "outputs": None,
     }

@@ -156,6 +156,8 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
+            input_text_selector=command.input_text_selector,
+            output_text_selector=command.output_text_selector,
             inputs=Payload.from_json(command.inputs)
             if command.inputs is not None
             else None,
@@ -321,12 +323,12 @@ class SessionService:
     ) -> Session:
         """Partially update a session.
 
-        ``outputs``, ``error``, and ``ended_at`` only ever change together
-        with a status transition, applied through ``Session.finish``. When
-        the command sets none of ``status``, ``outputs``, ``error``, or
-        ``ended_at``, the session's current status carries through as a
-        no-op transition, which leaves those fields untouched. A task
-        principal writes only a session it owns.
+        ``outputs``, ``output_text_selector``, ``error``, and ``ended_at``
+        only ever change together with a status transition, applied through
+        ``Session.finish``. When the command sets none of them and no
+        ``status``, the session's current status carries through as a no-op
+        transition, which leaves those fields untouched. A task principal
+        writes only a session it owns.
 
         Args:
             session_id: Id of the session.
@@ -348,7 +350,7 @@ class SessionService:
         await check_task_attempt(actor, self._tasks)
         session.check_update()
         fields = command.model_fields_set
-        if {"status", "outputs", "error", "ended_at"} & fields:
+        if {"status", "outputs", "output_text_selector", "error", "ended_at"} & fields:
             target_status = session.status
             if "status" in fields:
                 if command.status is None:
@@ -362,6 +364,9 @@ class SessionService:
             session.finish(
                 status=target_status,
                 outputs=new_outputs if "outputs" in fields else session.outputs,
+                output_text_selector=command.output_text_selector
+                if "output_text_selector" in fields
+                else session.output_text_selector,
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )

@@ -77,6 +77,8 @@ class SessionCreate(FrozenModel):
     origin: SessionOrigin
     status: SessionStatus | None = None
     name: str | None = None
+    input_text_selector: str | None = None
+    output_text_selector: str | None = None
     inputs: Any = None
     outputs: Any = None
     error: str | None = None
@@ -94,6 +96,7 @@ class SessionUpdate(FrozenModel):
 
     status: SessionStatus | None = None
     outputs: Any = None
+    output_text_selector: str | None = None
     error: str | None = None
     ended_at: datetime | None = None
     name: str | None = None

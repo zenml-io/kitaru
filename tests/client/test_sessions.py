@@ -148,7 +148,17 @@ async def test_get(api_client: KitaruAPIClient) -> None:
         )
     )
     loaded = await api_client.sessions.get(created.id)
-    assert loaded.model_dump(exclude={"inputs", "outputs"}) == created.model_dump()
+    assert (
+        loaded.model_dump(
+            exclude={
+                "inputs",
+                "outputs",
+                "input_text_selector",
+                "output_text_selector",
+            }
+        )
+        == created.model_dump()
+    )
 
 
 async def test_get_not_found(api_client: KitaruAPIClient) -> None:
