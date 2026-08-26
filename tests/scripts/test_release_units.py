@@ -85,6 +85,9 @@ def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     assert all((REPO_ROOT / unit.changelog).is_file() for unit in inventory.units)
     assert all((REPO_ROOT / unit.lock_source).is_file() for unit in inventory.units)
     assert len({unit.release_label for unit in inventory.units}) == len(inventory.units)
+    assert len({unit.maintenance_branch for unit in inventory.units}) == len(
+        inventory.units
+    )
     assert all(unit.impact_paths for unit in inventory.units)
 
 
@@ -105,6 +108,8 @@ def test_inventory_versions_and_tags_match_project_manifests() -> None:
 
     for unit in inventory.units:
         assert unit.tag == f"python/{unit.distribution}/v{unit.version}"
+        version = Version(unit.version)
+        assert unit.maintenance_branch.endswith(f"/{version.major}.{version.minor}")
         if Version(unit.version).local is not None:
             with pytest.raises(ReleaseInventoryError, match="local segment"):
                 parse_package_tag(unit.tag, inventory)
@@ -302,6 +307,23 @@ def test_inventory_rejects_duplicate_unit_identity(release_repo: Path) -> None:
         load_inventory(release_repo)
 
 
+def test_inventory_rejects_an_invalid_maintenance_branch_prefix(
+    release_repo: Path,
+) -> None:
+    inventory_path = release_repo / "release" / "release-units.toml"
+    inventory_path.write_text(
+        inventory_path.read_text().replace(
+            'maintenance-branch-prefix = "release/langfuse/"',
+            'maintenance-branch-prefix = "../langfuse/"',
+        )
+    )
+
+    with pytest.raises(
+        ReleaseInventoryError, match="invalid maintenance branch prefix"
+    ):
+        load_inventory(release_repo)
+
+
 def test_inventory_rejects_an_unlisted_plugin_project(release_repo: Path) -> None:
     manifest = release_repo / "plugins" / "packages" / "unlisted" / "pyproject.toml"
     manifest.parent.mkdir(parents=True)
@@ -459,6 +481,41 @@ def test_plugin_release_workflow_resolves_plugin_tags_from_the_inventory() -> No
     assert "scripts/release_ui.py --version" not in workflow
     assert "uv version" not in workflow
     assert "name: pypi-${{ needs.build.outputs.distribution }}" in workflow
+
+
+def test_python_release_workflows_accept_develop_and_maintenance_sources() -> None:
+    workflows = [
+        (REPO_ROOT / ".github" / "workflows" / name).read_text()
+        for name in ("release.yml", "release-plugins.yml")
+    ]
+
+    for workflow in workflows:
+        build_job = workflow.split("\n  publish-python:\n", maxsplit=1)[0]
+        assert "git fetch origin develop" in build_job
+        assert 'git merge-base --is-ancestor "$release_sha" origin/develop' in build_job
+        assert "origin/$MAINTENANCE_BRANCH" in build_job
+        assert "git fetch origin main" not in build_job
+
+
+def test_stable_python_releases_advance_maintenance_branches() -> None:
+    core = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    plugins = (REPO_ROOT / ".github" / "workflows" / "release-plugins.yml").read_text()
+
+    assert "  advance-maintenance-branch:\n" in core
+    assert "  advance-maintenance-branch:\n" in plugins
+    for workflow in (core, plugins):
+        assert "needs.build.outputs.is-prerelease == 'false'" in workflow
+        assert 'ref="refs/heads/$MAINTENANCE_BRANCH"' in workflow
+        assert "-F force=false" in workflow
+        assert "needs: [build, create-release]" in workflow
+
+
+def test_core_release_workflow_leaves_main_promotion_to_the_release_owner() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    branch_job = workflow.split("\n  advance-maintenance-branch:\n", maxsplit=1)[1]
+
+    assert "git fetch origin main" not in branch_job
+    assert "git/refs/heads/main" not in branch_job
 
 
 def test_plugin_release_workflow_validates_wheel_metadata_before_publish() -> None:

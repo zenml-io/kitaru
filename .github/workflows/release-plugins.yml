@@ -21,6 +21,7 @@ jobs:
     outputs:
       distribution: ${{ steps.metadata.outputs.distribution }}
       is-prerelease: ${{ steps.metadata.outputs.is-prerelease }}
+      maintenance-branch: ${{ steps.metadata.outputs.maintenance-branch }}
       package-tag: ${{ steps.metadata.outputs.package-tag }}
       version: ${{ steps.metadata.outputs.version }}
     steps:
@@ -47,6 +48,7 @@ jobs:
           fi
           unit=$(uv run --no-project --with packaging==26.2 python scripts/release_units.py resolve --tag "$package_tag" --format json)
           distribution=$(jq -r '.unit.distribution' <<<"$unit")
+          maintenance_branch=$(jq -r '.unit.maintenance_branch' <<<"$unit")
           project_dir=$(jq -r '.unit.path' <<<"$unit")
           version=$(jq -r '.unit.version' <<<"$unit")
           is_prerelease=false
@@ -60,6 +62,7 @@ jobs:
           {
             printf 'DISTRIBUTION=%s\n' "$distribution"
             printf 'IS_PRERELEASE=%s\n' "$is_prerelease"
+            printf 'MAINTENANCE_BRANCH=%s\n' "$maintenance_branch"
             printf 'PACKAGE_TAG=%s\n' "$package_tag"
             printf 'PROJECT_DIR=%s\n' "$project_dir"
             printf 'VERSION=%s\n' "$version"
@@ -67,18 +70,26 @@ jobs:
           {
             printf 'distribution=%s\n' "$distribution"
             printf 'is-prerelease=%s\n' "$is_prerelease"
+            printf 'maintenance-branch=%s\n' "$maintenance_branch"
             printf 'package-tag=%s\n' "$package_tag"
             printf 'version=%s\n' "$version"
           } >> "$GITHUB_OUTPUT"
       - name: Validate release source
         run: |
           set -euo pipefail
-          git fetch origin main
+          git fetch origin develop
           release_sha=$(git rev-parse HEAD)
-          if ! git merge-base --is-ancestor "$release_sha" origin/main; then
-            echo "::error::$PACKAGE_TAG points to $release_sha, which is not on main."
-            exit 1
+          if git merge-base --is-ancestor "$release_sha" origin/develop; then
+            exit 0
           fi
+          if git ls-remote --exit-code --heads origin "$MAINTENANCE_BRANCH" >/dev/null; then
+            git fetch origin "refs/heads/$MAINTENANCE_BRANCH:refs/remotes/origin/$MAINTENANCE_BRANCH"
+            if git merge-base --is-ancestor "$release_sha" "origin/$MAINTENANCE_BRANCH"; then
+              exit 0
+            fi
+          fi
+          echo "::error::$PACKAGE_TAG points to $release_sha, which is on neither develop nor $MAINTENANCE_BRANCH."
+          exit 1
       - name: Build plugin
         run: uv build --project "$PROJECT_DIR" --out-dir package-dist
       - name: Validate distribution metadata
@@ -171,3 +182,40 @@ jobs:
             "${latest[@]}" \
             --title "$DISTRIBUTION $VERSION" \
             --generate-notes
+  advance-maintenance-branch:
+    if: >-
+      github.event_name == 'push' &&
+      needs.build.outputs.is-prerelease == 'false'
+    needs: [build, create-release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Advance stable maintenance branch
+        env:
+          GH_REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+          MAINTENANCE_BRANCH: ${{ needs.build.outputs.maintenance-branch }}
+        run: |-
+          set -euo pipefail
+          release_sha=$(git rev-parse HEAD)
+          if git ls-remote --exit-code --heads origin "$MAINTENANCE_BRANCH" >/dev/null; then
+            git fetch origin "refs/heads/$MAINTENANCE_BRANCH:refs/remotes/origin/$MAINTENANCE_BRANCH"
+            if git merge-base --is-ancestor "origin/$MAINTENANCE_BRANCH" "$release_sha"; then
+              gh api --method PATCH "repos/$GH_REPO/git/refs/heads/$MAINTENANCE_BRANCH" \
+                -f sha="$release_sha" -F force=false >/dev/null
+            elif git merge-base --is-ancestor "$release_sha" "origin/$MAINTENANCE_BRANCH"; then
+              echo "$MAINTENANCE_BRANCH is already ahead of this release; leaving it unchanged."
+            else
+              echo "::error::$MAINTENANCE_BRANCH cannot advance to $release_sha without diverging."
+              exit 1
+            fi
+          else
+            gh api --method POST "repos/$GH_REPO/git/refs" \
+              -f ref="refs/heads/$MAINTENANCE_BRANCH" \
+              -f sha="$release_sha" >/dev/null
+          fi

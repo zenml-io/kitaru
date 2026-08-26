@@ -141,7 +141,7 @@ For a coordinated API change, the release PR can contain future core and plugin 
 
 ## Patch an existing plugin release line
 
-Use a maintenance branch named `release/<plugin>/<major.minor>`. Confirm the branch exists, the requested version is the next unused patch version, and `.github/workflows/release-plugins.yml` accepts tags from that maintenance line. If the workflow still requires `develop` or `main` ancestry, stop and report that the maintenance-line release automation is not ready.
+Use the unit's maintenance branch from `release/release-units.toml`, named `release/<plugin>/<major.minor>`. Confirm the branch exists and the requested version is the next unused patch version. The plugin workflow accepts a tag whose commit belongs to `develop` or that exact maintenance branch.
 
 When the same bug exists on `develop`, merge the implementation there first. Then cherry-pick only its implementation commit onto a fix branch based on the maintenance line:
 
@@ -269,6 +269,8 @@ git push origin "$TAG"
 
 Approve the package's PyPI environment when required. Verify the wheel, source distribution, hashes, and immutable GitHub Release.
 
+For a stable release, the workflow creates or fast-forwards the unit's maintenance branch after the GitHub Release exists. A maintenance-line patch uses the exact reviewed maintenance-branch commit prepared above instead of a `develop` commit.
+
 ## Publish core and deployables
 
 Before tagging, verify the selected frontend release and required plugin versions exist.
@@ -291,10 +293,24 @@ The tag starts `.github/workflows/release.yml`. The workflow:
 5. publishes the Helm chart
 6. moves public Docker `latest` aliases only for a stable release
 7. creates the immutable GitHub Release
+8. creates or fast-forwards the stable maintenance branch
 
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.
 
 Verify each published surface independently. Do not infer one surface from another.
+
+The workflow does not update `main`. After the newest stable core release succeeds, tell the release owner to move `main` to the immutable core tag without creating a merge commit:
+
+```bash
+git fetch origin main --tags
+TAG="python/kitaru/v<python-version>"
+RELEASE_SHA="$(git rev-list -n 1 "$TAG")"
+git merge-base --is-ancestor origin/main "$RELEASE_SHA"
+gh api --method PATCH repos/zenml-io/kitaru/git/refs/heads/main \
+  -f sha="$RELEASE_SHA" -F force=false
+```
+
+The release owner runs this command manually. Do not execute it on their behalf. The fast-forward updates `main` to the tagged commit without a merge commit and triggers the existing docs workflow. Skip this step for prereleases and older maintenance-line core releases.
 
 ## Recover a failed release
 

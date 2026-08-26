@@ -38,6 +38,7 @@ impact-paths = [
     "helm/**",
 ]
 tag-prefix = "python/kitaru/v"
+maintenance-branch-prefix = "release/kitaru/"
 checks = [
     "cli-artifact-contract",
     "mcp-wheel-contract",
@@ -63,6 +64,7 @@ default-catalog = true
 release-label = "requires:plugin:braintrust"
 impact-paths = ["plugins/packages/braintrust-importer/**"]
 tag-prefix = "python/kitaru-braintrust-importer/v"
+maintenance-branch-prefix = "release/braintrust/"
 checks = ["plugin package (braintrust-importer)"]
 
 [[units]]
@@ -77,6 +79,7 @@ default-catalog = true
 release-label = "requires:plugin:evaluator"
 impact-paths = ["plugins/packages/evaluator/**"]
 tag-prefix = "python/kitaru-evaluator/v"
+maintenance-branch-prefix = "release/evaluator/"
 checks = ["plugin package (evaluator)"]
 
 [[units]]
@@ -91,6 +94,7 @@ default-catalog = true
 release-label = "requires:plugin:jsonl"
 impact-paths = ["plugins/packages/jsonl-importer/**"]
 tag-prefix = "python/kitaru-jsonl-importer/v"
+maintenance-branch-prefix = "release/jsonl/"
 checks = ["plugin package (jsonl-importer)"]
 
 [[units]]
@@ -105,6 +109,7 @@ default-catalog = true
 release-label = "requires:plugin:langfuse"
 impact-paths = ["plugins/packages/langfuse-importer/**"]
 tag-prefix = "python/kitaru-langfuse-importer/v"
+maintenance-branch-prefix = "release/langfuse/"
 checks = ["plugin package (langfuse-importer)"]
 
 [[units]]
@@ -119,6 +124,7 @@ default-catalog = false
 release-label = "requires:plugin:langgraph"
 impact-paths = ["plugins/packages/langgraph/**"]
 tag-prefix = "python/kitaru-langgraph/v"
+maintenance-branch-prefix = "release/langgraph/"
 checks = ["plugin package (langgraph)"]
 
 [[units]]
@@ -133,6 +139,7 @@ default-catalog = true
 release-label = "requires:plugin:logfire"
 impact-paths = ["plugins/packages/logfire-importer/**"]
 tag-prefix = "python/kitaru-logfire-importer/v"
+maintenance-branch-prefix = "release/logfire/"
 checks = ["plugin package (logfire-importer)"]
 
 [[units]]
@@ -147,6 +154,7 @@ default-catalog = true
 release-label = "requires:plugin:langsmith"
 impact-paths = ["plugins/packages/langsmith-importer/**"]
 tag-prefix = "python/kitaru-langsmith-importer/v"
+maintenance-branch-prefix = "release/langsmith/"
 checks = ["plugin package (langsmith-importer)"]
 
 [[units]]
@@ -161,6 +169,7 @@ default-catalog = false
 release-label = "requires:plugin:openai-agents"
 impact-paths = ["plugins/packages/openai-agents/**"]
 tag-prefix = "python/kitaru-openai-agents/v"
+maintenance-branch-prefix = "release/openai-agents/"
 checks = ["plugin package (openai-agents)"]
 
 [[units]]
@@ -175,6 +184,7 @@ default-catalog = true
 release-label = "requires:plugin:phoenix"
 impact-paths = ["plugins/packages/phoenix-importer/**"]
 tag-prefix = "python/kitaru-phoenix-importer/v"
+maintenance-branch-prefix = "release/phoenix/"
 checks = ["plugin package (phoenix-importer)"]
 
 [[units]]
@@ -189,4 +199,5 @@ default-catalog = false
 release-label = "requires:plugin:pydantic-ai"
 impact-paths = ["plugins/packages/pydantic-ai/**"]
 tag-prefix = "python/kitaru-pydantic-ai/v"
+maintenance-branch-prefix = "release/pydantic-ai/"
 checks = ["plugin package (pydantic-ai)"]

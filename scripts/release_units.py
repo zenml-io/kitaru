@@ -19,6 +19,9 @@ PACKAGE_TAG_PATTERN = re.compile(
     r"python/(?P<distribution>[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?)/v(?P<version>[^/]+)"
 )
 SLUG_PATTERN = re.compile(r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?")
+MAINTENANCE_BRANCH_PREFIX_PATTERN = re.compile(
+    r"release/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?/"
+)
 REQUIRED_PLUGIN_PROJECT_URLS = frozenset(
     {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
 )
@@ -44,12 +47,19 @@ class ReleaseUnit:
     release_label: str
     impact_paths: tuple[str, ...]
     tag_prefix: str
+    maintenance_branch_prefix: str
     required_checks: frozenset[str]
 
     @property
     def tag(self) -> str:
         """Build the immutable package tag for the current manifest version."""
         return f"{self.tag_prefix}{self.version}"
+
+    @property
+    def maintenance_branch(self) -> str:
+        """Build the stable major-minor maintenance branch for this version."""
+        version = Version(self.version)
+        return f"{self.maintenance_branch_prefix}{version.major}.{version.minor}"
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize the unit using the stable public field names."""
@@ -67,6 +77,8 @@ class ReleaseUnit:
             "impact_paths": list(self.impact_paths),
             "tag_prefix": self.tag_prefix,
             "tag": self.tag,
+            "maintenance_branch_prefix": self.maintenance_branch_prefix,
+            "maintenance_branch": self.maintenance_branch,
             "required_checks": sorted(self.required_checks),
         }
 
@@ -385,6 +397,7 @@ def load_inventory(
     seen_distributions: set[str] = set()
     seen_release_labels: set[str] = set()
     seen_tag_prefixes: set[str] = set()
+    seen_maintenance_branch_prefixes: set[str] = set()
     for raw_unit in raw_units:
         if not isinstance(raw_unit, dict):
             raise ReleaseInventoryError("each release unit must be a table")
@@ -476,6 +489,23 @@ def load_inventory(
             raise ReleaseInventoryError(f"duplicate tag prefix: {tag_prefix}")
         seen_tag_prefixes.add(tag_prefix)
 
+        maintenance_branch_prefix = _get_string(
+            raw_unit, "maintenance-branch-prefix", context
+        )
+        if (
+            MAINTENANCE_BRANCH_PREFIX_PATTERN.fullmatch(maintenance_branch_prefix)
+            is None
+        ):
+            raise ReleaseInventoryError(
+                f"{context}: invalid maintenance branch prefix "
+                f"{maintenance_branch_prefix}"
+            )
+        if maintenance_branch_prefix in seen_maintenance_branch_prefixes:
+            raise ReleaseInventoryError(
+                f"duplicate maintenance branch prefix: {maintenance_branch_prefix}"
+            )
+        seen_maintenance_branch_prefixes.add(maintenance_branch_prefix)
+
         unit_checks = frozenset(_get_string_list(raw_unit, "checks", context))
         units.append(
             ReleaseUnit(
@@ -491,6 +521,7 @@ def load_inventory(
                 release_label=release_label,
                 impact_paths=impact_paths,
                 tag_prefix=tag_prefix,
+                maintenance_branch_prefix=maintenance_branch_prefix,
                 required_checks=common_checks | unit_checks,
             )
         )
