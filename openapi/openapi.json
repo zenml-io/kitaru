@@ -15265,7 +15265,7 @@
         ]
       },
       "patch": {
-        "description": "Update a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the update moves a terminal session back to in_progress, and\n422 on invalid input, including an attempt to clear the status.\n\nArgs:\n    session_id: Id of the session.\n    body: Session update request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
+        "description": "Update a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is no longer in progress, and 422 on invalid\ninput, including an attempt to clear the status.\n\nArgs:\n    session_id: Id of the session.\n    body: Session update request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
         "operationId": "update_session_api_v1_sessions__session_id__patch",
         "parameters": [
           {

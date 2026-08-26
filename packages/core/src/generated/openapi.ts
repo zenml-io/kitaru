@@ -2671,8 +2671,8 @@ export interface paths {
          * @description Update a session.
          *
          *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     409 when the update moves a terminal session back to in_progress, and
-         *     422 on invalid input, including an attempt to clear the status.
+         *     409 when the session is no longer in progress, and 422 on invalid
+         *     input, including an attempt to clear the status.
          *
          *     Args:
          *         session_id: Id of the session.
