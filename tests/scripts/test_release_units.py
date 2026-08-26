@@ -14,6 +14,7 @@ from scripts.release_units import (
     format_inventory,
     load_inventory,
     parse_package_tag,
+    prepare_core_development_reset,
     propose_core_version,
     validate_canonical_version,
     validate_version,
@@ -175,6 +176,67 @@ def test_core_version_proposal_requires_a_stable_semantic_version(
         propose_core_version(version, [])
 
 
+def test_core_development_reset_updates_only_release_state(
+    release_repo: Path,
+) -> None:
+    release_version = "0.22.3"
+    development_version = f"{release_version}+dev"
+    project = release_repo / "pyproject.toml"
+    changelog = release_repo / "CHANGELOG.md"
+    root_lock = release_repo / "uv.lock"
+    plugin_lock = release_repo / "plugins" / "uv.lock"
+
+    for path in (project, root_lock, plugin_lock):
+        path.write_text(path.read_text().replace("0.23.0", release_version))
+    changelog.write_text(
+        changelog.read_text().replace("## [0.23.0]", f"## [{release_version}]")
+    )
+
+    assert (
+        prepare_core_development_reset(release_version, release_repo)
+        == development_version
+    )
+    assert f'version = "{development_version}"' in project.read_text()
+    assert (
+        f'name = "kitaru"\nversion = "{development_version}"\n'
+        'source = { editable = "." }' in root_lock.read_text()
+    )
+    assert (
+        f'name = "kitaru"\nversion = "{development_version}"\n'
+        'source = { editable = "../" }' in plugin_lock.read_text()
+    )
+    assert changelog.read_text().index("## [Unreleased]") < changelog.read_text().index(
+        f"## [{release_version}]"
+    )
+
+
+@pytest.mark.parametrize("version", ["0.23.0rc1", "0.23.0+dev", "1.0.post1"])
+def test_core_development_reset_requires_a_stable_release(
+    release_repo: Path, version: str
+) -> None:
+    with pytest.raises(ReleaseInventoryError, match=r"stable X\.Y\.Z"):
+        prepare_core_development_reset(version, release_repo)
+
+
+def test_core_development_reset_fails_before_partial_writes(
+    release_repo: Path,
+) -> None:
+    project = release_repo / "pyproject.toml"
+    original_project = project.read_text()
+    changelog = release_repo / "CHANGELOG.md"
+    release_heading = "## [0.23.0]"
+    changelog.write_text(
+        changelog.read_text().replace(
+            release_heading, f"## [Unreleased]\n\n{release_heading}", 1
+        )
+    )
+
+    with pytest.raises(ReleaseInventoryError, match="already contains"):
+        prepare_core_development_reset("0.23.0", release_repo)
+
+    assert project.read_text() == original_project
+
+
 def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
     plugin_workflow = (
@@ -195,6 +257,23 @@ def test_core_release_publishes_deployables_without_waiting_for_plugins() -> Non
     assert "promote-latest:" in workflow
     assert "publish-deployables:" not in plugin_workflow
     assert "!python/kitaru/**" in plugin_workflow
+
+
+def test_stable_core_release_creates_a_draft_development_reset_pr() -> None:
+    workflow = (REPO_ROOT / ".github" / "workflows" / "release.yml").read_text()
+    reset_job = workflow.split("\n  create-development-reset-pr:\n", maxsplit=1)[1]
+
+    assert "github.event_name == 'push'" in reset_job
+    assert "needs.build.outputs.is-prerelease == 'false'" in reset_job
+    assert "needs: [build, create-release, advance-maintenance-branch]" in reset_job
+    assert "secrets.RELEASE_GIT_TOKEN" in reset_job
+    assert "prepare-core-development-reset" in reset_job
+    assert "uv lock --check" in reset_job
+    assert "uv lock --project plugins --check" in reset_job
+    assert "--base develop" in reset_job
+    assert "--draft" in reset_job
+    assert "main` contains release commit" in reset_job
+    assert "git add pyproject.toml uv.lock plugins/uv.lock CHANGELOG.md" in reset_job
 
 
 def test_managed_image_failure_does_not_block_the_release() -> None:

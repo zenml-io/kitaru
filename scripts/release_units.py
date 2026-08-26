@@ -172,6 +172,83 @@ def propose_core_version(latest_version: str, labels: Iterable[str]) -> str:
     return f"{major}.{minor}.{patch + 1}"
 
 
+def prepare_core_development_reset(
+    release_version: str, repo_root: Path = REPO_ROOT
+) -> str:
+    """Prepare the deterministic post-release core development reset."""
+    version = Version(validate_canonical_version(release_version))
+    if (
+        len(version.release) != 3
+        or version.epoch != 0
+        or version.is_prerelease
+        or version.is_devrelease
+        or version.post is not None
+        or version.local is not None
+    ):
+        raise ReleaseInventoryError(
+            f"development reset requires a stable X.Y.Z core version: {release_version}"
+        )
+
+    development_version = f"{release_version}+dev"
+    paths = {
+        "project": repo_root / "pyproject.toml",
+        "changelog": repo_root / "CHANGELOG.md",
+        "root lock": repo_root / "uv.lock",
+        "plugin lock": repo_root / "plugins" / "uv.lock",
+    }
+    try:
+        documents = {name: path.read_text() for name, path in paths.items()}
+    except FileNotFoundError as error:
+        raise ReleaseInventoryError(
+            f"missing release file: {error.filename}"
+        ) from error
+
+    replacements = {
+        "project": (
+            f'version = "{release_version}"',
+            f'version = "{development_version}"',
+        ),
+        "root lock": (
+            f'name = "kitaru"\nversion = "{release_version}"\n'
+            'source = { editable = "." }',
+            f'name = "kitaru"\nversion = "{development_version}"\n'
+            'source = { editable = "." }',
+        ),
+        "plugin lock": (
+            f'name = "kitaru"\nversion = "{release_version}"\n'
+            'source = { editable = "../" }',
+            f'name = "kitaru"\nversion = "{development_version}"\n'
+            'source = { editable = "../" }',
+        ),
+    }
+    updated = dict(documents)
+    for name, (current, replacement) in replacements.items():
+        if documents[name].count(current) != 1:
+            raise ReleaseInventoryError(
+                f"{name} must contain exactly one core {release_version} entry"
+            )
+        updated[name] = documents[name].replace(current, replacement, 1)
+
+    unreleased_heading = "## [Unreleased]"
+    release_heading = f"## [{release_version}]"
+    if documents["changelog"].count(release_heading) != 1:
+        raise ReleaseInventoryError(
+            f"changelog must contain exactly one {release_heading} heading"
+        )
+    current_release_offset = documents["changelog"].index(release_heading)
+    if unreleased_heading in documents["changelog"][:current_release_offset]:
+        raise ReleaseInventoryError(
+            "changelog already contains an Unreleased section above the release"
+        )
+    updated["changelog"] = documents["changelog"].replace(
+        release_heading, f"{unreleased_heading}\n\n{release_heading}", 1
+    )
+
+    for name, path in paths.items():
+        path.write_text(updated[name])
+    return development_version
+
+
 def _read_toml(path: Path) -> dict[str, Any]:
     try:
         return tomllib.loads(path.read_text())
@@ -664,6 +741,12 @@ def _parse_args() -> argparse.Namespace:
     propose_parser.add_argument("--label", action="append", default=[])
     propose_parser.add_argument("--candidate")
     propose_parser.add_argument("--format", choices=("text", "json"), default="text")
+
+    reset_parser = subparsers.add_parser(
+        "prepare-core-development-reset",
+        help="Prepare the post-release core development reset.",
+    )
+    reset_parser.add_argument("--release-version", required=True)
     return parser.parse_args()
 
 
@@ -726,6 +809,8 @@ def main() -> int:
                 if args.format == "json"
                 else proposed_version
             )
+        elif args.command == "prepare-core-development-reset":
+            output = prepare_core_development_reset(args.release_version)
         else:
             output = (
                 json.dumps(

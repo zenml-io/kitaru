@@ -307,6 +307,9 @@ The tag starts `.github/workflows/release.yml`. The workflow:
 5. publishes the Helm chart
 6. moves public Docker `latest` aliases only for a stable release
 7. creates the immutable GitHub Release
+8. creates a draft post-release PR that restores `## [Unreleased]`, sets core to `<version>+dev`, and updates both lockfiles
+
+For a stable release, fast-forward `main` to the tagged release commit before merging the generated development-reset PR. The reset PR must leave `main` at the clean release version and change only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, and `CHANGELOG.md` on `develop`.
 8. creates or fast-forwards the stable maintenance branch
 
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.
