@@ -14,6 +14,7 @@ from scripts.release_units import (
     format_inventory,
     load_inventory,
     parse_package_tag,
+    propose_core_version,
     validate_canonical_version,
     validate_version,
 )
@@ -149,6 +150,29 @@ def test_noncanonical_manifest_versions_are_rejected() -> None:
 def test_local_package_tags_are_rejected_for_pypi() -> None:
     with pytest.raises(ReleaseInventoryError, match="local segment"):
         parse_package_tag("python/kitaru/v0.22.2+dev", load_inventory())
+
+
+@pytest.mark.parametrize(
+    ("latest_version", "labels", "expected"),
+    [
+        ("0.22.2", [], "0.22.3"),
+        ("0.22.2", ["Breaking Change"], "0.23.0"),
+        ("1.4.2", ["enhancement"], "1.4.3"),
+        ("1.4.2", ["Breaking Change"], "2.0.0"),
+    ],
+)
+def test_core_version_proposal_follows_release_labels(
+    latest_version: str, labels: list[str], expected: str
+) -> None:
+    assert propose_core_version(latest_version, labels) == expected
+
+
+@pytest.mark.parametrize("version", ["0.22", "0.23.0rc1", "0.23.0.dev1", "0.22.3+dev"])
+def test_core_version_proposal_requires_a_stable_semantic_version(
+    version: str,
+) -> None:
+    with pytest.raises(ReleaseInventoryError, match="latest stable core version"):
+        propose_core_version(version, [])
 
 
 def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
@@ -648,6 +672,16 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
         (["validate"], "Validated 11 release units."),
+        (
+            [
+                "propose-core-version",
+                "--latest-version",
+                "0.22.2",
+                "--label",
+                "Breaking Change",
+            ],
+            "0.23.0",
+        ),
     ],
 )
 def test_cli_text_commands_succeed(
@@ -667,6 +701,18 @@ def test_cli_text_commands_succeed(
         (["matrix"], "matrix"),
         (["resolve", "--unit", "kitaru", "--format", "json"], "unit"),
         (["validate", "--format", "json"], "status"),
+        (
+            [
+                "propose-core-version",
+                "--latest-version",
+                "0.22.2",
+                "--label",
+                "Breaking Change",
+                "--format",
+                "json",
+            ],
+            "proposed_version",
+        ),
     ],
 )
 def test_cli_json_commands_succeed(arguments: list[str], expected_key: str) -> None:
@@ -695,6 +741,21 @@ def test_cli_refuses_to_release_a_local_version_tag() -> None:
 
     assert result.returncode == 2
     assert "local segment" in result.stderr
+
+
+def test_cli_rejects_a_candidate_that_ignores_breaking_change_labels() -> None:
+    result = _run_cli(
+        "propose-core-version",
+        "--latest-version",
+        "0.22.2",
+        "--label",
+        "Breaking Change",
+        "--candidate",
+        "0.22.3",
+    )
+
+    assert result.returncode == 2
+    assert "does not match required version 0.23.0" in result.stderr
 
 
 def test_cli_json_errors_are_structured() -> None:

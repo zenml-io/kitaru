@@ -6,6 +6,7 @@ import json
 import re
 import sys
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ MAINTENANCE_BRANCH_PREFIX_PATTERN = re.compile(
 REQUIRED_PLUGIN_PROJECT_URLS = frozenset(
     {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
 )
+BREAKING_CHANGE_LABEL = "Breaking Change"
 
 
 class ReleaseInventoryError(ValueError):
@@ -143,6 +145,31 @@ def validate_version(value: str) -> str:
             f"version must be canonical PEP 440: {value} normalizes to {canonical}"
         )
     return canonical
+
+
+def propose_core_version(latest_version: str, labels: Iterable[str]) -> str:
+    """Propose the next stable core version from merged change labels."""
+    latest = Version(validate_canonical_version(latest_version))
+    label_set = set(labels)
+    if (
+        len(latest.release) != 3
+        or latest.epoch != 0
+        or latest.is_prerelease
+        or latest.is_devrelease
+        or latest.post is not None
+        or latest.local is not None
+    ):
+        raise ReleaseInventoryError(
+            "latest stable core version must use X.Y.Z without pre, dev, post, "
+            f"epoch, or local segments: {latest_version}"
+        )
+
+    major, minor, patch = latest.release
+    if BREAKING_CHANGE_LABEL in label_set:
+        if major == 0:
+            return f"0.{minor + 1}.0"
+        return f"{major + 1}.0.0"
+    return f"{major}.{minor}.{patch + 1}"
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -628,6 +655,15 @@ def _parse_args() -> argparse.Namespace:
         "validate", help="Validate the inventory and repository manifests."
     )
     validate_parser.add_argument("--format", choices=("text", "json"), default="text")
+
+    propose_parser = subparsers.add_parser(
+        "propose-core-version",
+        help="Propose or validate the next stable core version.",
+    )
+    propose_parser.add_argument("--latest-version", required=True)
+    propose_parser.add_argument("--label", action="append", default=[])
+    propose_parser.add_argument("--candidate")
+    propose_parser.add_argument("--format", choices=("text", "json"), default="text")
     return parser.parse_args()
 
 
@@ -667,6 +703,28 @@ def main() -> int:
                 )
                 if args.format == "json"
                 else format_units((unit,))
+            )
+        elif args.command == "propose-core-version":
+            proposed_version = propose_core_version(args.latest_version, args.label)
+            if args.candidate is not None:
+                candidate = validate_version(args.candidate)
+                if candidate != proposed_version:
+                    raise ReleaseInventoryError(
+                        f"candidate core version {candidate} does not match required "
+                        f"version {proposed_version}"
+                    )
+            output = (
+                json.dumps(
+                    {
+                        "schema_version": inventory.schema_version,
+                        "latest_version": args.latest_version,
+                        "proposed_version": proposed_version,
+                        "breaking_change": BREAKING_CHANGE_LABEL in args.label,
+                    },
+                    separators=(",", ":"),
+                )
+                if args.format == "json"
+                else proposed_version
             )
         else:
             output = (
