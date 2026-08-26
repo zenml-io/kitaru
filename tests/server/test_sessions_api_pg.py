@@ -311,7 +311,7 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
         )
         assert nodes_response.status_code == 200
         ingested = nodes_response.json()
-        assert ingested[0]["outputs"] == large_outputs
+        assert ingested[0]["outputs"] is None
 
         list_response = await client.get(
             f"/api/v1/sessions/{created['id']}/nodes",

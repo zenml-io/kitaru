@@ -219,7 +219,7 @@ class SessionNodeService:
         )
         stored = await self._repository.upsert_batch(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
-        return self._fill_payloads(stored, resolved)
+        return stored
 
     async def list_nodes(
         self, session_node_filter: SessionNodeFilter, actor: AuthContext
@@ -318,27 +318,3 @@ class SessionNodeService:
             nodes: Nodes to resolve, mutated in place.
         """
         await self._payload_store.resolve(_get_node_payloads(nodes))
-
-    def _fill_payloads(
-        self, stored: list[SessionNode], resolved: list[SessionNode]
-    ) -> list[SessionNode]:
-        """Fill stored nodes' payloads from their pre-storage in-memory values.
-
-        Args:
-            stored: Node rows as persisted, in the same order as resolved.
-            resolved: Nodes before storage, holding the payloads in memory.
-
-        Returns:
-            Stored nodes with payloads filled in, in input order.
-        """
-        return [
-            row.model_copy(
-                update={
-                    "reasoning": node.reasoning,
-                    "inputs": node.inputs,
-                    "outputs": node.outputs,
-                    "attributes": node.attributes,
-                }
-            )
-            for row, node in zip(stored, resolved, strict=True)
-        ]

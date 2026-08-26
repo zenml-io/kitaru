@@ -2799,8 +2799,8 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         Stored nodes in batch order, with inputs, outputs, and attributes
-         *         populated.
+         *         Stored nodes in batch order, with reasoning, inputs, outputs, and
+         *         attributes null.
          */
         post: operations["ingest_session_nodes_api_v1_sessions__session_id__nodes_post"];
         delete?: never;

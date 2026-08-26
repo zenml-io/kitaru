@@ -163,9 +163,16 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert items[0]["input_text_selector"] == "/q"
     assert items[0]["output_text_selector"] == "/answer"
     assert items[0]["system_prompt_selector"] == "/system"
-    assert items[0]["reasoning"] == "The greeting matches the request."
-    # Ingest responses populate payloads even without include_payloads.
-    assert items[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
+    # Ingest responses carry no payloads.
+    assert items[0]["reasoning"] is None
+    assert items[0]["inputs"] is None
+    listed = await client.get(
+        f"/api/v1/sessions/{session_id}/nodes",
+        params={"include_payloads": "true"},
+    )
+    stored = listed.json()["items"]
+    assert stored[0]["reasoning"] == "The greeting matches the request."
+    assert stored[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
 
 
 async def test_ingest_nodes_unresolved_parent_index(
