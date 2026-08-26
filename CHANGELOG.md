@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.23.0]
 
 ### Added
 
@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Changed
 
+- Updated the bundled frontend to `kitaru-ui-v0.2.3`.
 - `POST /api/v1/evaluations` requires every input session to belong to the same agent.
 - Every worker start now registers a new worker, worker names are labels and no longer need to be unique. Worker listings leave stale workers out unless `include_stale` is set. `kitaru worker get` takes a worker id, the name lookup it also accepted is gone.
 - Server analytics events now carry the reporting client in `client_version`, as the client name and the version it reported. Each client versions on its own series, so a bare version says nothing without the client that sent it.
