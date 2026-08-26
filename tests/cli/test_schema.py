@@ -113,6 +113,7 @@ def test_command_schema_contains_behavior_and_error_contracts() -> None:
         parameter["name"] == "--api-key-stdin" for parameter in login["parameters"]
     )
     assert any(parameter["name"] == "--upgrade" for parameter in login["parameters"])
+    assert any(parameter["name"] == "--port" for parameter in login["parameters"])
 
     [local_logs] = describe_schema(("local", "logs"))
     assert local_logs["streams"] is True

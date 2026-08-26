@@ -104,6 +104,7 @@ def test_route_manifest_is_registered() -> None:
         "/api/v1/tasks/{task_id}",
         "/api/v1/tasks/{task_id}/spec",
         "/api/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates",
+        "/api/v1/ui/sample-data",
         "/api/v1/ui/sessions",
         "/api/v1/ui/sessions/{session_id}",
         "/api/v1/users",

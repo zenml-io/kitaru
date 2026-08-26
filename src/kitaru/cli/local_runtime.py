@@ -27,21 +27,23 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
+from urllib.parse import urlsplit
 
 import httpx
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from kitaru.cli.output import CLIError
 from kitaru.client.config import (
     DIRECTORY_MODE,
     FILE_MODE,
     get_config_directory,
+    normalize_server_url,
     write_json_file,
 )
 
-LOCAL_SERVER_URL = "http://localhost:8000"
-LOCAL_DASHBOARD_URL = LOCAL_SERVER_URL
+DEFAULT_LOCAL_PORT = 8000
+LOCAL_PORT_ENV = "KITARU_LOCAL_PORT"
 LOCAL_PROJECT_NAME = "kitaru-local"
 LOCAL_IMAGE_ENV = "KITARU_LOCAL_IMAGE"
 POSTGRES_IMAGE = "postgres:16-alpine"
@@ -60,6 +62,12 @@ class LocalRuntimeState(BaseModel):
     schema_version: Literal[1] = 1
     project: Literal["kitaru-local"] = "kitaru-local"
     server_image: str
+    port: int = Field(default=DEFAULT_LOCAL_PORT, ge=1, le=65535)
+
+    @property
+    def server_url(self) -> str:
+        """Return the loopback URL exposed by this deployment."""
+        return _get_local_server_url(self.port)
 
 
 @dataclass(frozen=True, slots=True)
@@ -182,6 +190,7 @@ async def start_local_runtime(
     package_version: str,
     upgrade: bool,
     timeout: float,
+    port: int | None = None,
     progress: Callable[[str], None] | None = None,
     runner: DockerCommandRunner | None = None,
     paths: LocalRuntimePaths | None = None,
@@ -193,6 +202,9 @@ async def start_local_runtime(
     with _operation_lock(paths):
         await _validate_docker(runner)
         state = _read_state(paths.state)
+        resolved_port = _resolve_local_port(port, state)
+        server_url = _get_local_server_url(resolved_port)
+        port_changed = state is not None and state.port != resolved_port
         if upgrade and state is None:
             raise CLIError(
                 "invalid_configuration",
@@ -201,7 +213,6 @@ async def start_local_runtime(
             )
         if state is None:
             await _reject_unowned_resources(runner)
-            await asyncio.to_thread(_reject_occupied_port)
         elif state.server_image != image and not upgrade:
             raise CLIError(
                 "conflict",
@@ -214,12 +225,24 @@ async def start_local_runtime(
                 ),
                 details={"current_image": state.server_image, "requested_image": image},
             )
+        if state is None or port_changed:
+            await asyncio.to_thread(_reject_occupied_port, resolved_port)
         if state is None:
-            _write_runtime_files(paths, image=image, existing_state=None)
+            _write_runtime_files(paths, image=image, port=resolved_port)
             running = False
         else:
             running = await _is_running(runner, paths)
-        if running and not upgrade:
+        previous_environment = (
+            paths.environment.read_text(encoding="utf-8")
+            if state is not None and (state.server_image != image or port_changed)
+            else None
+        )
+        previous_state = (
+            paths.state.read_text(encoding="utf-8")
+            if previous_environment is not None
+            else None
+        )
+        if running and not upgrade and not port_changed:
             action = "reused"
         else:
             await _ensure_image(
@@ -236,17 +259,24 @@ async def start_local_runtime(
                 pull_if_missing=True,
                 progress=progress,
             )
-            if state is not None and state.server_image != image:
-                _write_runtime_files(paths, image=image, existing_state=state)
-            action = "upgraded" if upgrade else ("started" if state else "created")
+            if upgrade:
+                action = "upgraded"
+            elif port_changed:
+                action = "reconfigured"
+            elif state is None:
+                action = "created"
+            else:
+                action = "started"
+            compose_arguments = (
+                "up",
+                "-d",
+                "--pull",
+                "never",
+                "--remove-orphans",
+            )
             try:
-                compose_arguments = (
-                    "up",
-                    "-d",
-                    "--pull",
-                    "never",
-                    "--remove-orphans",
-                )
+                if state is not None and (state.server_image != image or port_changed):
+                    _write_runtime_files(paths, image=image, port=resolved_port)
                 if progress is None:
                     await _run_compose(
                         runner,
@@ -269,18 +299,31 @@ async def start_local_runtime(
                         timeout=max(timeout, 120),
                         failure_message="Docker Compose up failed.",
                     )
-                await _wait_for_health(max(timeout, 120))
+                await _wait_for_health(server_url, max(timeout, 120))
             except BaseException:
                 if state is None:
                     with contextlib.suppress(CLIError):
                         await _run_compose(runner, paths, "down", timeout=60)
+                elif previous_environment is not None and previous_state is not None:
+                    with contextlib.suppress(OSError):
+                        _write_private_text(paths.environment, previous_environment)
+                    with contextlib.suppress(OSError):
+                        _write_private_text(paths.state, previous_state)
+                    with contextlib.suppress(CLIError):
+                        await _run_compose(
+                            runner,
+                            paths,
+                            *compose_arguments,
+                            timeout=max(timeout, 120),
+                        )
                 raise
 
-        if running and not upgrade:
-            await _wait_for_health(max(timeout, 120))
+        if running and not upgrade and not port_changed:
+            await _wait_for_health(server_url, max(timeout, 120))
         return (
             {
-                "server_url": LOCAL_SERVER_URL,
+                "server_url": server_url,
+                "port": resolved_port,
                 "server_image": image,
                 "deployment": action,
                 "auth_scheme": "none",
@@ -319,7 +362,7 @@ async def stop_local_runtime(
             paths.environment.unlink(missing_ok=True)
             paths.compose.unlink(missing_ok=True)
             return {
-                "server_url": LOCAL_SERVER_URL,
+                "server_url": _get_local_server_url(DEFAULT_LOCAL_PORT),
                 "deployment": "deleted",
                 "data_deleted": True,
             }
@@ -334,20 +377,32 @@ async def stop_local_runtime(
             paths.compose.unlink(missing_ok=True)
             paths.state.unlink(missing_ok=True)
         return {
-            "server_url": LOCAL_SERVER_URL,
+            "server_url": state.server_url,
             "deployment": "deleted" if delete_volumes else "stopped",
             "data_deleted": delete_volumes,
         }
 
 
-def is_local_runtime_owned(paths: LocalRuntimePaths | None = None) -> bool:
+def is_local_runtime_url(
+    server_url: str, paths: LocalRuntimePaths | None = None
+) -> bool:
+    """Return whether a URL identifies the CLI-owned local deployment."""
+    normalized_server_url = normalize_server_url(server_url)
+    parsed_server_url = urlsplit(normalized_server_url)
+    if parsed_server_url.scheme != "http" or parsed_server_url.hostname != "localhost":
+        return False
+    state = _read_state((paths or get_local_runtime_paths()).state)
+    return state is not None and normalized_server_url == state.server_url
+
+
+def has_local_runtime_state(paths: LocalRuntimePaths | None = None) -> bool:
     """Return whether local deployment ownership state exists."""
-    return _read_state((paths or get_local_runtime_paths()).state) is not None
+    return (paths or get_local_runtime_paths()).state.exists()
 
 
-async def open_local_dashboard() -> bool:
+async def open_local_dashboard(server_url: str) -> bool:
     """Open the local dashboard in the default browser."""
-    return await asyncio.to_thread(webbrowser.open, LOCAL_DASHBOARD_URL)
+    return await asyncio.to_thread(webbrowser.open, server_url)
 
 
 async def get_local_logs(
@@ -445,6 +500,41 @@ def _format_image_version(version: Version) -> str:
     if local_separator:
         suffix_parts.append(f"local.{local_suffix}")
     return f"{image_base_version}-{'.'.join(suffix_parts)}"
+
+
+def _get_local_server_url(port: int) -> str:
+    """Build the loopback URL for a local host port."""
+    return f"http://localhost:{port}"
+
+
+def _resolve_local_port(
+    explicit_port: int | None, state: LocalRuntimeState | None
+) -> int:
+    """Resolve and validate the host port for the local deployment."""
+    if explicit_port is not None:
+        return _validate_local_port(explicit_port, configuration=False)
+    environment = os.environ.get(LOCAL_PORT_ENV)
+    if environment:
+        try:
+            port = int(environment)
+        except ValueError as error:
+            raise CLIError(
+                "invalid_configuration",
+                f"{LOCAL_PORT_ENV} must be an integer between 1 and 65535.",
+            ) from error
+        return _validate_local_port(port, configuration=True)
+    if state is not None:
+        return state.port
+    return DEFAULT_LOCAL_PORT
+
+
+def _validate_local_port(port: int, *, configuration: bool) -> int:
+    """Validate one local host port with source-appropriate errors."""
+    if 1 <= port <= 65535:
+        return port
+    kind = "invalid_configuration" if configuration else "invalid_arguments"
+    source = LOCAL_PORT_ENV if configuration else "--port"
+    raise CLIError(kind, f"{source} must be between 1 and 65535.")
 
 
 def _get_server_image(package_version: str) -> tuple[str, bool]:
@@ -584,15 +674,15 @@ async def _remove_labeled_resources(runner: DockerCommandRunner) -> dict[str, ob
     return {kind: sorted(values) for kind, values in found.items()}
 
 
-def _reject_occupied_port() -> None:
+def _reject_occupied_port(port: int) -> None:
     try:
-        with socket.create_connection(("127.0.0.1", 8000), timeout=0.25):
+        with socket.create_connection(("127.0.0.1", port), timeout=0.25):
             pass
     except OSError:
         return
     raise CLIError(
         "conflict",
-        "Port 8000 is already in use by a deployment Kitaru does not own.",
+        f"Port {port} is already in use by a deployment Kitaru does not own.",
         hint="Stop that service or use `kitaru login SERVER` to connect to it.",
     )
 
@@ -604,12 +694,12 @@ async def _is_running(runner: DockerCommandRunner, paths: LocalRuntimePaths) -> 
     return len(result.stdout.splitlines()) >= 2
 
 
-async def _wait_for_health(timeout: float) -> None:
+async def _wait_for_health(server_url: str, timeout: float) -> None:
     deadline = asyncio.get_running_loop().time() + max(timeout, 1)
     async with httpx.AsyncClient(timeout=min(timeout, 5)) as client:
         while True:
             try:
-                response = await client.get(f"{LOCAL_SERVER_URL}/health/live")
+                response = await client.get(f"{server_url}/health/live")
                 if response.is_success:
                     return
             except httpx.HTTPError:
@@ -650,7 +740,7 @@ def _write_runtime_files(
     paths: LocalRuntimePaths,
     *,
     image: str,
-    existing_state: LocalRuntimeState | None,
+    port: int,
 ) -> None:
     paths.directory.mkdir(parents=True, exist_ok=True, mode=DIRECTORY_MODE)
     os.chmod(paths.directory, DIRECTORY_MODE)
@@ -661,6 +751,7 @@ def _write_runtime_files(
     if not paths.environment.exists():
         values = {
             "KITARU_LOCAL_SERVER_IMAGE": image,
+            "KITARU_LOCAL_HOST_PORT": str(port),
             "KITARU_LOCAL_DB_PASSWORD": secrets.token_urlsafe(32),
             "KITARU_LOCAL_JWT_SIGNING_KEY": secrets.token_urlsafe(48),
             "KITARU_LOCAL_SECRET_ENCRYPTION_KEY": secrets.token_urlsafe(48),
@@ -669,16 +760,29 @@ def _write_runtime_files(
             paths.environment,
             "".join(f"{key}={value}\n" for key, value in values.items()),
         )
-    elif existing_state is not None and existing_state.server_image != image:
+    else:
         lines = paths.environment.read_text(encoding="utf-8").splitlines()
-        replaced = [
-            f"KITARU_LOCAL_SERVER_IMAGE={image}"
-            if line.startswith("KITARU_LOCAL_SERVER_IMAGE=")
-            else line
-            for line in lines
-        ]
+        updates = {
+            "KITARU_LOCAL_SERVER_IMAGE": image,
+            "KITARU_LOCAL_HOST_PORT": str(port),
+        }
+        replaced: list[str] = []
+        found: set[str] = set()
+        for line in lines:
+            key, separator, _ = line.partition("=")
+            if separator and key in updates:
+                replaced.append(f"{key}={updates[key]}")
+                found.add(key)
+            else:
+                replaced.append(line)
+        replaced.extend(
+            f"{key}={value}" for key, value in updates.items() if key not in found
+        )
         _write_private_text(paths.environment, "\n".join(replaced) + "\n")
-    write_json_file(paths.state, LocalRuntimeState(server_image=image).model_dump())
+    write_json_file(
+        paths.state,
+        LocalRuntimeState(server_image=image, port=port).model_dump(),
+    )
 
 
 def _write_private_text(path: Path, value: str) -> None:

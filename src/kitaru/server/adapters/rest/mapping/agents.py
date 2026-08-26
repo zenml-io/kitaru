@@ -14,12 +14,17 @@
 """Agent DTO conversions."""
 
 from kitaru.api_models.v1.agent import (
+    AgentCreateRequest,
     AgentListParams,
     AgentResponse,
     AgentUpdateRequest,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
-from kitaru.server.application.models.agent import AgentFilter, AgentUpdate
+from kitaru.server.application.models.agent import (
+    AgentCreate,
+    AgentFilter,
+    AgentUpdate,
+)
 from kitaru.server.domain.agent import Agent
 
 
@@ -62,6 +67,18 @@ def agent_list_params_to_filter(params: AgentListParams) -> AgentFilter:
         size=params.size,
         sort=params.sort,
     )
+
+
+def agent_create_to_command(body: AgentCreateRequest) -> AgentCreate:
+    """Convert an agent create request to its application command.
+
+    Args:
+        body: Agent create request.
+
+    Returns:
+        Create command.
+    """
+    return AgentCreate(name=body.name, description=body.description)
 
 
 def agent_update_to_command(body: AgentUpdateRequest) -> AgentUpdate:

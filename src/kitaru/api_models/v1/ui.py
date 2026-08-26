@@ -17,7 +17,7 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import FiniteFloat, ResponseModel
+from kitaru.api_models.v1.base import FiniteFloat, RequestModel, ResponseModel
 from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResponse
 from kitaru.api_models.v1.session import SessionResponse
 
@@ -93,3 +93,17 @@ class SessionWithEvaluationsResponse(ResponseModel):
     evaluations: list[EvaluationResponse] = Field(
         description="Every evaluation of the session, newest first."
     )
+
+
+class SampleDataCreateRequest(RequestModel):
+    """Sample data create request."""
+
+    agent_name: str | None = Field(
+        default=None, description="Agent name, None uses the sample data's agent name."
+    )
+
+
+class SampleDataResponse(ResponseModel):
+    """Sample data response."""
+
+    agent_id: uuid.UUID = Field(description="Agent the sample data was seeded under.")

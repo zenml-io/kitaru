@@ -138,6 +138,9 @@ from kitaru.server.application.services.job_service import JobService
 from kitaru.server.application.services.permission_service import PermissionService
 from kitaru.server.application.services.plugin_service import PluginService
 from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.sample_data_seeding import (
+    SampleDataSeeder,
+)
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.application.services.server_analytics import (
     ServerAnalytics,
@@ -866,6 +869,61 @@ def get_tag_service(
         Tag service bound to the SQL repository.
     """
     return TagService(repository=SQLTagRepository(session))
+
+
+def get_sample_data_seeder(
+    agent_service: Annotated[AgentService, Depends(get_agent_service)],
+    session_service: Annotated[SessionService, Depends(get_session_service)],
+    session_node_service: Annotated[
+        SessionNodeService, Depends(get_session_node_service)
+    ],
+    evaluation_service: Annotated[EvaluationService, Depends(get_evaluation_service)],
+    tag_service: Annotated[TagService, Depends(get_tag_service)],
+    cohort_service: Annotated[CohortService, Depends(get_cohort_service)],
+    cohort_version_service: Annotated[
+        CohortVersionService, Depends(get_cohort_version_service)
+    ],
+    blob_service: Annotated[BlobService, Depends(get_blob_service)],
+    evaluator_service: Annotated[PluginService, Depends(get_evaluator_service)],
+    experiment_service: Annotated[ExperimentService, Depends(get_experiment_service)],
+    investigation_service: Annotated[
+        InvestigationService, Depends(get_investigation_service)
+    ],
+    analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
+) -> SampleDataSeeder:
+    """Return a sample data seeder for the current request.
+
+    Args:
+        agent_service: Agent service.
+        session_service: Session service.
+        session_node_service: Session node service.
+        evaluation_service: Evaluation service.
+        tag_service: Tag service.
+        cohort_service: Cohort service.
+        cohort_version_service: Cohort version service.
+        blob_service: Blob service.
+        evaluator_service: Evaluator service.
+        experiment_service: Experiment service.
+        investigation_service: Investigation service.
+        analytics: Analytics tracker for the current request.
+
+    Returns:
+        Sample data seeder bound to the request's services.
+    """
+    return SampleDataSeeder(
+        agent_service=agent_service,
+        session_service=session_service,
+        session_node_service=session_node_service,
+        evaluation_service=evaluation_service,
+        tag_service=tag_service,
+        cohort_service=cohort_service,
+        cohort_version_service=cohort_version_service,
+        blob_service=blob_service,
+        evaluator_service=evaluator_service,
+        experiment_service=experiment_service,
+        investigation_service=investigation_service,
+        analytics=analytics,
+    )
 
 
 def get_worker_service(

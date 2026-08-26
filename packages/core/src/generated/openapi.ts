@@ -3121,6 +3121,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/ui/sample-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Sample Data
+         * @description Seed the sample agent and everything recorded under it.
+         *
+         *     Clients observe HTTP 201 on success and 409 when the agent name is
+         *     already registered.
+         *
+         *     Args:
+         *         seeder: Sample data seeder.
+         *         session: Request-scoped database session.
+         *         actor: Caller context.
+         *         body: Sample data create request, None uses the sample data's agent name.
+         *
+         *     Returns:
+         *         Agent the sample data was seeded under.
+         */
+        post: operations["create_sample_data_api_v1_ui_sample_data_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/ui/sessions": {
         parameters: {
             query?: never;
@@ -6521,6 +6553,29 @@ export interface components {
              * @description Working directory.
              */
             working_dir?: string | null;
+        };
+        /**
+         * SampleDataCreateRequest
+         * @description Sample data create request.
+         */
+        SampleDataCreateRequest: {
+            /**
+             * Agent Name
+             * @description Agent name, None uses the sample data's agent name.
+             */
+            agent_name?: string | null;
+        };
+        /**
+         * SampleDataResponse
+         * @description Sample data response.
+         */
+        SampleDataResponse: {
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the sample data was seeded under.
+             */
+            agent_id: string;
         };
         /**
          * ScriptPluginSource
@@ -12512,6 +12567,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["EvaluationAggregateResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_sample_data_api_v1_ui_sample_data_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["SampleDataCreateRequest"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SampleDataResponse"];
                 };
             };
             /** @description Validation Error */
