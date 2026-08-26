@@ -284,7 +284,7 @@ def test_release_wheel_install_fails_after_the_attempt_limit(
         ("kitaru-v0.21.0", "package tag"),
         ("python/unknown/v0.1.0", "unknown distribution"),
         ("python/kitaru/v0.22.0-rc.1", "canonical PEP 440"),
-        ("python/kitaru/v0.22.3", "does not match manifest version"),
+        ("python/kitaru/v0.22.4", "does not match manifest version"),
     ],
 )
 def test_invalid_or_mismatched_package_tags_are_rejected(

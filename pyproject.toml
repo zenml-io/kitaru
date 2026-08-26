@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.22.3+dev"
+version = "0.22.3"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
