@@ -267,6 +267,16 @@ async def test_get_session(client: httpx.AsyncClient) -> None:
     }
 
 
+async def test_list_sessions_include_payloads(client: httpx.AsyncClient) -> None:
+    """Include inputs and outputs in the list when requested."""
+    await client.post("/api/v1/sessions", json=_session_body())
+    response = await client.get("/api/v1/sessions", params={"include_payloads": "true"})
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items[0]["inputs"] == {"prompt": "hi"}
+    assert items[0]["outputs"] is None
+
+
 async def test_get_session_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.get(f"/api/v1/sessions/{uuid.uuid4()}")

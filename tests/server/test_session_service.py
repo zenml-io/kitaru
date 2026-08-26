@@ -362,6 +362,7 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
         SessionFilter(
             expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
         ),
+        include_payloads=False,
         actor=ACTOR,
     )
     assert next_cursor is None

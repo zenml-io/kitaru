@@ -2600,7 +2600,7 @@ export interface paths {
          *         params: Session list params.
          *
          *     Returns:
-         *         Page of sessions.
+         *         Page of sessions, with payloads when include_payloads is set.
          */
         get: operations["list_sessions_api_v1_sessions_get"];
         put?: never;
@@ -6280,6 +6280,19 @@ export interface components {
              * @description Items on this page.
              */
             items: components["schemas"]["SecretResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
+        /** Page[SessionDetailResponse] */
+        Page_SessionDetailResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["SessionDetailResponse"][];
             /**
              * Next Cursor
              * @description Cursor for the next page, null on the last page.
@@ -12088,6 +12101,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include inputs and outputs. */
+                include_payloads?: boolean;
             };
             header?: never;
             path?: never;
@@ -12101,7 +12116,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_SessionResponse_"];
+                    "application/json": components["schemas"]["Page_SessionDetailResponse_"] | components["schemas"]["Page_SessionResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -12830,6 +12845,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include inputs and outputs. */
+                include_payloads?: boolean;
             };
             header?: never;
             path?: never;

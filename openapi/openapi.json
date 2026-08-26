@@ -4846,6 +4846,36 @@
         "title": "Page[SecretResponse]",
         "type": "object"
       },
+      "Page_SessionDetailResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/SessionDetailResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[SessionDetailResponse]",
+        "type": "object"
+      },
       "Page_SessionNodeResponse_": {
         "properties": {
           "items": {
@@ -15333,7 +15363,7 @@
     },
     "/api/v1/sessions": {
       "get": {
-        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions.",
+        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
         "operationId": "list_sessions_api_v1_sessions_get",
         "parameters": [
           {
@@ -15407,6 +15437,18 @@
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
             }
+          },
+          {
+            "description": "Include inputs and outputs.",
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include inputs and outputs.",
+              "title": "Include Payloads",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -15414,7 +15456,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_SessionResponse_"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Page_SessionDetailResponse_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Page_SessionResponse_"
+                    }
+                  ],
+                  "title": "Response List Sessions Api V1 Sessions Get"
                 }
               }
             },
@@ -16694,6 +16744,18 @@
               ],
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
+            }
+          },
+          {
+            "description": "Include inputs and outputs.",
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include inputs and outputs.",
+              "title": "Include Payloads",
+              "type": "boolean"
             }
           }
         ],

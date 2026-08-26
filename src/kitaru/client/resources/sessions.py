@@ -166,7 +166,7 @@ class SessionsResource:
     async def list(
         self,
         params: SessionListParams | None = None,
-    ) -> Page[SessionResponse]:
+    ) -> Page[SessionResponse] | Page[SessionDetailResponse]:
         """List sessions.
 
         Args:
@@ -176,7 +176,7 @@ class SessionsResource:
             APIError: The request failed.
 
         Returns:
-            Page of sessions.
+            Page of sessions, with payloads when include_payloads is set.
         """
         params = params or SessionListParams()
         response = await self._client.request(
@@ -184,6 +184,8 @@ class SessionsResource:
             "/api/v1/sessions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
+        if params.include_payloads:
+            return Page[SessionDetailResponse].model_validate(response.json())
         return Page[SessionResponse].model_validate(response.json())
 
     async def iter(

@@ -43,7 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Changed
 
 - Updated the bundled frontend to `kitaru-ui-v0.2.3`.
-- Session list, create, and update responses no longer carry `inputs` and `outputs`. `GET /api/v1/sessions/{session_id}`, `GET /api/v1/sessions/{session_id}/full`, and `GET /api/v1/ui/sessions/{session_id}` return the new `SessionDetailResponse`, which still carries them. The Python and TypeScript SDKs type `sessions.get` accordingly.
+- Session list, create, and update responses no longer carry `inputs` and `outputs`. `GET /api/v1/sessions` includes them when `include_payloads` is set. `GET /api/v1/sessions/{session_id}`, `GET /api/v1/sessions/{session_id}/full`, and `GET /api/v1/ui/sessions/{session_id}` return the new `SessionDetailResponse`, which still carries them. The Python and TypeScript SDKs type `sessions.get` and `sessions.list` accordingly.
 - `POST /api/v1/sessions/{session_id}/nodes` no longer echoes the ingested payloads: `reasoning`, `inputs`, `outputs`, and `attributes` are null in its response, matching a node list without `include_payloads`.
 - `POST /api/v1/evaluations` requires every input session to belong to the same agent.
 - Every worker start now registers a new worker, worker names are labels and no longer need to be unique. Worker listings leave stale workers out unless `include_stale` is set. `kitaru worker get` takes a worker id, the name lookup it also accepted is gone.

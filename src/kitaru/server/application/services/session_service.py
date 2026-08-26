@@ -307,21 +307,36 @@ class SessionService:
         return baseline
 
     async def list_sessions(
-        self, session_filter: SessionFilter, actor: AuthContext
+        self,
+        session_filter: SessionFilter,
+        include_payloads: bool,
+        actor: AuthContext,
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
-        The sessions are read without their inputs and outputs.
-
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read and resolve the inputs and
+                outputs.
             actor: Caller context.
 
         Returns:
             Page of matching sessions and the next cursor.
         """
         _ = actor
-        return await self._repository.query(session_filter, include_payloads=False)
+        sessions, next_cursor = await self._repository.query(
+            session_filter, include_payloads=include_payloads
+        )
+        if include_payloads:
+            await self._payload_store.resolve(
+                [
+                    p
+                    for session in sessions
+                    for p in (session.inputs, session.outputs)
+                    if p is not None
+                ]
+            )
+        return sessions, next_cursor
 
     async def update_session(
         self, session_id: uuid.UUID, command: SessionUpdate, actor: AuthContext

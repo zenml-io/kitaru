@@ -1,10 +1,10 @@
 import type { QueryParameters } from "../query.js";
 import { jsonBody, type KitaruTransport } from "../transport.js";
 import type {
-  ListParams,
   Page,
   SessionCreateRequest,
   SessionDetailResponse,
+  SessionListParams,
   SessionNodeBatchRequest,
   SessionNodeListParams,
   SessionNodeResponse,
@@ -27,7 +27,15 @@ import {
 
 const RETRYABLE_UPSERT_STATUSES = new Set([502, 503, 504]);
 const validateSessionPage = createPageValidator(validateSession);
+const validateSessionDetailPage = createPageValidator(validateSessionDetail);
 const validateNodePage = createPageValidator<SessionNodeResponse>(validateNode);
+
+function encodeSessionListParams(params: SessionListParams): QueryParameters {
+  return {
+    ...encodeListParams(params),
+    include_payloads: params.includePayloads,
+  };
+}
 
 function encodeNodeListParams(params: SessionNodeListParams): QueryParameters {
   return {
@@ -96,20 +104,41 @@ export class SessionsResource {
   }
 
   async list(
-    params: ListParams = {},
+    params?: SessionListParams & { includePayloads?: false },
+    options?: ResourceRequestOptions,
+  ): Promise<Page<SessionResponse>>;
+  async list(
+    params: SessionListParams & { includePayloads: true },
+    options?: ResourceRequestOptions,
+  ): Promise<Page<SessionDetailResponse>>;
+  async list(
+    params?: SessionListParams,
+    options?: ResourceRequestOptions,
+  ): Promise<Page<SessionResponse> | Page<SessionDetailResponse>>;
+  async list(
+    params: SessionListParams = {},
     options: ResourceRequestOptions = {},
-  ): Promise<Page<SessionResponse>> {
+  ): Promise<Page<SessionResponse> | Page<SessionDetailResponse>> {
+    if (params.includePayloads) {
+      return this.#transport.request({
+        method: "GET",
+        path: "/api/v1/sessions",
+        query: encodeSessionListParams(params),
+        signal: options.signal,
+        validate: validateSessionDetailPage,
+      });
+    }
     return this.#transport.request({
       method: "GET",
       path: "/api/v1/sessions",
-      query: encodeListParams(params),
+      query: encodeSessionListParams(params),
       signal: options.signal,
       validate: validateSessionPage,
     });
   }
 
   iter(
-    params: ListParams = {},
+    params: SessionListParams = {},
     options: ResourceRequestOptions = {},
   ): AsyncIterable<SessionResponse> {
     return iteratePages(params, (pageParams) => this.list(pageParams, options));

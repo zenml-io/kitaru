@@ -128,6 +128,14 @@ export interface InvestigationSessionListParams {
   size?: number;
 }
 
+export interface SessionListParams {
+  cursor?: string | null;
+  size?: number;
+  sort?: string;
+  filter?: Filter | null;
+  includePayloads?: boolean;
+}
+
 export interface SessionNodeListParams {
   cursor?: string | null;
   size?: number;

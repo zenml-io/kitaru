@@ -303,6 +303,11 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
         listed = (await client.get("/api/v1/sessions")).json()["items"]
         assert listed[0] == created
 
+        listed_with_payloads = (
+            await client.get("/api/v1/sessions", params={"include_payloads": "true"})
+        ).json()["items"]
+        assert listed_with_payloads[0]["inputs"] == large_inputs
+
         large_outputs = {"result": "y" * 1000}
         nodes_response = await client.post(
             f"/api/v1/sessions/{created['id']}/nodes",

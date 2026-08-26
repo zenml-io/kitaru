@@ -140,6 +140,11 @@ class SessionEvaluationsRequest(RequestModel):
 class SessionListParams(FilterableListParams):
     """Session list params."""
 
+    include_payloads: bool = Field(
+        default=False,
+        description="Include inputs and outputs.",
+    )
+
 
 class SessionResponse(OwnedResponseModel):
     """Session response."""

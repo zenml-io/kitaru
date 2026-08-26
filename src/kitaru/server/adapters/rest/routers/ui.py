@@ -184,7 +184,7 @@ async def list_sessions_with_evaluations(
     """
     session_filter = session_list_params_to_filter(params)
     sessions, next_cursor = await session_service.list_sessions(
-        session_filter, actor=actor
+        session_filter, include_payloads=False, actor=actor
     )
     evaluations = await _load_session_evaluations(
         evaluation_service, [session.id for session in sessions], actor

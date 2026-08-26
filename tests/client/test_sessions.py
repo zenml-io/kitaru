@@ -33,6 +33,7 @@ from conftest import (
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionListParams,
     SessionOrigin,
     SessionResponse,
@@ -195,6 +196,27 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
         )
     ]
     assert len(collected) == 3
+
+
+async def test_list_include_payloads(api_client: KitaruAPIClient) -> None:
+    """List sessions with their payloads through the SDK."""
+    agent_id = uuid.uuid4()
+    await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            inputs={"q": "hi"},
+            outputs=None,
+            metadata={},
+        )
+    )
+    agent_filter = FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+    page = await api_client.sessions.list(
+        SessionListParams(filter=agent_filter, include_payloads=True)
+    )
+    assert isinstance(page.items[0], SessionDetailResponse)
+    assert page.items[0].inputs == {"q": "hi"}
+    assert page.items[0].outputs is None
 
 
 async def test_list_with_filter_expression(api_client: KitaruAPIClient) -> None:

@@ -101,7 +101,7 @@ async def list_sessions(
     service: Annotated[SessionService, Depends(get_session_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     params: Annotated[SessionListParams, Query()],
-) -> Page[SessionResponse]:
+) -> Page[SessionDetailResponse] | Page[SessionResponse]:
     """List sessions.
 
     Clients observe HTTP 200 on success and 422 on invalid pagination
@@ -113,10 +113,17 @@ async def list_sessions(
         params: Session list params.
 
     Returns:
-        Page of sessions.
+        Page of sessions, with payloads when include_payloads is set.
     """
     session_filter = session_list_params_to_filter(params)
-    sessions, next_cursor = await service.list_sessions(session_filter, actor=actor)
+    sessions, next_cursor = await service.list_sessions(
+        session_filter, include_payloads=params.include_payloads, actor=actor
+    )
+    if params.include_payloads:
+        return Page[SessionDetailResponse](
+            items=[session_to_detail_response(session) for session in sessions],
+            next_cursor=next_cursor,
+        )
     return Page[SessionResponse](
         items=[session_to_response(session) for session in sessions],
         next_cursor=next_cursor,
