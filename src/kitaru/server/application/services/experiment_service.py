@@ -417,6 +417,8 @@ class ExperimentService:
             ValidationError: The cohort version has no sessions, belongs to
                 a cohort of another agent, or the resolved agent version has
                 no run spec.
+            SessionNotEvaluatable: ``evaluate_baselines`` is set and a
+                cohort version session is in progress.
             AgentVersionNotFound: No agent version has the given id.
             AgentVersionAgentMismatch: The agent version belongs to another
                 agent.

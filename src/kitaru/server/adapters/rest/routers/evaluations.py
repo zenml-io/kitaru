@@ -54,8 +54,8 @@ async def create_evaluations(
     """Score every input session with every evaluator, as one job.
 
     Clients observe HTTP 201 on success, 404 when an evaluator or version
-    does not exist, and 422 when the pair count exceeds the cap or an input
-    session does not exist.
+    does not exist, 409 when an input session is not finished, and 422 when
+    the pair count exceeds the cap or an input session does not exist.
 
     Args:
         body: Evaluation batch create request.

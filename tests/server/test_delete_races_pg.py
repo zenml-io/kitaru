@@ -501,7 +501,9 @@ async def test_annotation_delete_race() -> None:
     settings = db_settings(DB_POOL_SIZE=RACERS + 10, DB_MAX_OVERFLOW=20)
     async with lifespan_client(settings) as client:
         agent_id, version_id = await _agent_version(client)
-        session_id = await _baseline_session(client, agent_id, version_id)
+        session_id = await _baseline_session(
+            client, agent_id, version_id, status="in_progress"
+        )
         node_id = await _session_node(client, session_id)
         annotation_id = await _annotation(client, session_id, node_id)
         url = f"/api/v1/annotations/{annotation_id}"

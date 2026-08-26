@@ -359,6 +359,7 @@ class JobService:
             ValidationError: The pair count exceeds the cap, an input
                 session does not exist, the input sessions do not all belong
                 to one agent, or a config is scoped to another agent.
+            SessionNotEvaluatable: An input session is in progress.
             PluginNotFound: A config names an unknown evaluator.
             PluginVersionNotFound: A config names an unknown version.
 
@@ -373,8 +374,10 @@ class JobService:
             )
         stored = await self._sessions.get_many(command.input_session_ids)
         for session_id in command.input_session_ids:
-            if session_id not in stored:
+            session = stored.get(session_id)
+            if session is None:
                 raise ValidationError(f"Session {session_id} was not found")
+            session.check_evaluate()
         agent_ids = {session.agent_id for session in stored.values()}
         if len(agent_ids) > 1:
             raise ValidationError("Input sessions must belong to a single agent")

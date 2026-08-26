@@ -481,7 +481,9 @@ async def test_list_sessions_filters_by_has_evaluation(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions by whether they have a stored evaluation."""
-    scored = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    scored = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     unscored = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
         f"/api/v1/sessions/{scored['id']}/evaluations",
@@ -511,7 +513,9 @@ async def test_list_sessions_filters_by_has_evaluation(
 
 async def test_merge_session_evaluations(client: httpx.AsyncClient) -> None:
     """Merge manual evaluations into a session."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     response = await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={
@@ -534,7 +538,9 @@ async def test_merge_session_evaluations_carries_passed(
     client: httpx.AsyncClient,
 ) -> None:
     """Merge the optional pass flag, leaving it null when omitted."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     response = await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={
@@ -553,7 +559,9 @@ async def test_merge_session_evaluations_overwrites_matching_name(
     client: httpx.AsyncClient,
 ) -> None:
     """Resending a name overwrites its score, value, and data type."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     first = (
         await client.post(
             f"/api/v1/sessions/{created['id']}/evaluations",
@@ -571,6 +579,18 @@ async def test_merge_session_evaluations_overwrites_matching_name(
     assert second[0]["score"] is None
 
 
+async def test_merge_session_evaluations_rejects_in_progress_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 409 when the session is not finished."""
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    response = await client.post(
+        f"/api/v1/sessions/{created['id']}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
+    )
+    assert response.status_code == 409
+
+
 async def test_merge_session_evaluations_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(
@@ -584,7 +604,9 @@ async def test_merge_session_evaluations_rejects_duplicate_name(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 422 when the request names the same evaluation twice."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     response = await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={

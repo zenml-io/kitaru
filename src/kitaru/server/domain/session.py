@@ -165,6 +165,18 @@ class SessionStatusCannotBeCleared(ValidationError):
         super().__init__(f"Session {session_id} status cannot be cleared")
 
 
+class SessionNotEvaluatable(ConflictError):
+    """Raised when a session does not currently accept evaluations."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session.
+        """
+        super().__init__(f"Session {session_id} does not accept evaluations")
+
+
 class SessionNotIngestable(ConflictError):
     """Raised when a session does not currently accept node ingestion."""
 
@@ -315,6 +327,15 @@ class Session(DomainModel):
         """
         if self.status != SessionStatus.IN_PROGRESS:
             raise SessionNotUpdatable(self.id)
+
+    def check_evaluate(self) -> None:
+        """Require the session to currently accept evaluations.
+
+        Raises:
+            SessionNotEvaluatable: The session is in progress.
+        """
+        if self.status == SessionStatus.IN_PROGRESS:
+            raise SessionNotEvaluatable(self.id)
 
     def check_node_ingest(self) -> None:
         """Require the session to currently accept node ingestion.

@@ -11398,7 +11398,7 @@
         ]
       },
       "post": {
-        "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, and 422 when the pair count exceeds the cap or an input\nsession does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, 409 when an input session is not finished, and 422 when\nthe pair count exceeds the cap or an input session does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_evaluations_api_v1_evaluations_post",
         "parameters": [
           {
@@ -12692,7 +12692,7 @@
     },
     "/api/v1/experiments/{experiment_id}/runs": {
       "post": {
-        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, and 422\nwhen the cohort version has no sessions, the cohort version or agent\nversion belongs to another agent, or the resolved agent version has no\nrun spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
+        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, 409 when\nevaluate_baselines is set and a cohort version session is not finished,\nand 422 when the cohort version has no sessions, the cohort version or\nagent version belongs to another agent, or the resolved agent version\nhas no run spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
         "operationId": "start_run_api_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {
@@ -14344,7 +14344,7 @@
         ]
       },
       "post": {
-        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, and\n422 when the baseline session carries no agent version and none was\ngiven, the resolved agent version has no run spec, the tool policy uses\ncohort-version-scoped history, or an evaluator version repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
+        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, 409\nwhen evaluate_baselines is set and the baseline session is not\nfinished, and 422 when the baseline session carries no agent version\nand none was given, the resolved agent version has no run spec, the\ntool policy uses cohort-version-scoped history, or an evaluator\nversion repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
         "operationId": "create_replay_api_v1_replays_post",
         "parameters": [
           {
@@ -15319,7 +15319,7 @@
     },
     "/api/v1/sessions/{session_id}/evaluations": {
       "post": {
-        "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\nand 422 when the request names the same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
+        "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is not finished, and 422 when the request names\nthe same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
         "operationId": "merge_session_evaluations_api_v1_sessions__session_id__evaluations_post",
         "parameters": [
           {

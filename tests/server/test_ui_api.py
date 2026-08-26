@@ -185,7 +185,9 @@ def _session_body(**overrides: object) -> dict[str, object]:
 
 async def test_list_sessions_with_evaluations(client: httpx.AsyncClient) -> None:
     """List sessions with each session's evaluations attached."""
-    scored = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    scored = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     unscored = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
         f"/api/v1/sessions/{scored['id']}/evaluations",
@@ -210,7 +212,11 @@ async def test_list_sessions_with_evaluations_walks_pages(
 ) -> None:
     """Walk every page of sessions with evaluations without duplicates or gaps."""
     sessions = [
-        (await client.post("/api/v1/sessions", json=_session_body())).json()
+        (
+            await client.post(
+                "/api/v1/sessions", json=_session_body(status="completed")
+            )
+        ).json()
         for _ in range(3)
     ]
     names = ["accuracy", "relevance", "coherence"]
@@ -263,7 +269,9 @@ async def test_list_sessions_with_evaluations_applies_filter(
 
 async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
     """Get a session with its evaluations attached."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={

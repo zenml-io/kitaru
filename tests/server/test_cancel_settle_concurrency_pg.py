@@ -66,7 +66,7 @@ async def _agent_version(client: httpx.AsyncClient) -> tuple[str, str]:
 
 
 async def _baseline_session(
-    client: httpx.AsyncClient, agent_id: str, version_id: str
+    client: httpx.AsyncClient, agent_id: str, version_id: str, status: str = "completed"
 ) -> str:
     """Create a recorded session to replay.
 
@@ -80,6 +80,7 @@ async def _baseline_session(
                 "agent_id": agent_id,
                 "agent_version_id": version_id,
                 "origin": "recorded",
+                "status": status,
                 "inputs": {"q": "hi"},
                 "outputs": None,
             },

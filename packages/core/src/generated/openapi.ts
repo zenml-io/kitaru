@@ -1073,8 +1073,8 @@ export interface paths {
          * @description Score every input session with every evaluator, as one job.
          *
          *     Clients observe HTTP 201 on success, 404 when an evaluator or version
-         *     does not exist, and 422 when the pair count exceeds the cap or an input
-         *     session does not exist.
+         *     does not exist, 409 when an input session is not finished, and 422 when
+         *     the pair count exceeds the cap or an input session does not exist.
          *
          *     Args:
          *         body: Evaluation batch create request.
@@ -1581,10 +1581,11 @@ export interface paths {
          * @description Start an experiment run, fanning out one replay per cohort version session.
          *
          *     Clients observe HTTP 201 on success, 404 when the experiment, the
-         *     cohort version, or the resolved agent version does not exist, and 422
-         *     when the cohort version has no sessions, the cohort version or agent
-         *     version belongs to another agent, or the resolved agent version has no
-         *     run spec.
+         *     cohort version, or the resolved agent version does not exist, 409 when
+         *     evaluate_baselines is set and a cohort version session is not finished,
+         *     and 422 when the cohort version has no sessions, the cohort version or
+         *     agent version belongs to another agent, or the resolved agent version
+         *     has no run spec.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2277,10 +2278,12 @@ export interface paths {
          * @description Create a standalone replay of a recorded or imported session.
          *
          *     Clients observe HTTP 201 on success, 404 when the baseline session or
-         *     the resolved agent version or an evaluator config does not exist, and
-         *     422 when the baseline session carries no agent version and none was
-         *     given, the resolved agent version has no run spec, the tool policy uses
-         *     cohort-version-scoped history, or an evaluator version repeats.
+         *     the resolved agent version or an evaluator config does not exist, 409
+         *     when evaluate_baselines is set and the baseline session is not
+         *     finished, and 422 when the baseline session carries no agent version
+         *     and none was given, the resolved agent version has no run spec, the
+         *     tool policy uses cohort-version-scoped history, or an evaluator
+         *     version repeats.
          *
          *     Args:
          *         body: Replay create request.
@@ -2701,7 +2704,8 @@ export interface paths {
          *
          *     A resent name overwrites its score, value, data type, and explanation.
          *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     and 422 when the request names the same evaluation twice.
+         *     409 when the session is not finished, and 422 when the request names
+         *     the same evaluation twice.
          *
          *     Args:
          *         session_id: Id of the session to merge evaluations into.
