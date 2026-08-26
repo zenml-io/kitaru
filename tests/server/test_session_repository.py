@@ -406,7 +406,7 @@ async def test_get(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    loaded = await repository.get(created.id)
+    loaded = await repository.get(created.id, include_payloads=True)
     assert loaded == created
 
 
@@ -415,7 +415,7 @@ async def test_get_not_found(setup: Setup) -> None:
     repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
-        await repository.get(missing_id)
+        await repository.get(missing_id, include_payloads=True)
 
 
 async def test_get_exclusive(setup: Setup) -> None:
@@ -429,7 +429,7 @@ async def test_get_exclusive(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    loaded = await repository.get(created.id, exclusive=True)
+    loaded = await repository.get(created.id, exclusive=True, include_payloads=True)
     assert loaded == created
 
 
@@ -745,7 +745,7 @@ async def test_update(setup: Setup) -> None:
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
-    loaded = await repository.get(created.id)
+    loaded = await repository.get(created.id, include_payloads=True)
     assert loaded == updated
 
 
@@ -803,7 +803,7 @@ async def test_delete(setup: Setup) -> None:
     )
     await repository.delete(created.id)
     with pytest.raises(SessionNotFound):
-        await repository.get(created.id)
+        await repository.get(created.id, include_payloads=True)
 
 
 async def test_delete_not_found(setup: Setup) -> None:
@@ -960,7 +960,7 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
         created.id,
         SessionRollups(cost=Decimal("0.50"), tool_call_count=1),
     )
-    loaded = await repository.get(created.id)
+    loaded = await repository.get(created.id, include_payloads=True)
     assert loaded.cost == Decimal("2.00")
     assert loaded.tokens is not None
     assert loaded.tokens.input_tokens == 10

@@ -161,7 +161,7 @@ async def test_ingest_insert_assigns_ids_and_rollups(
     assert stored[1].parent_id == stored[0].id
     assert stored[1].cache_key is not None
 
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.cost == Decimal("1.50")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 10
@@ -305,7 +305,7 @@ async def test_ingest_replace_updates_rollup_delta(
         [_llm_node(0, cost=Decimal("4.00"), tokens=TokenUsage(input_tokens=30))],
         actor=ACTOR,
     )
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.cost == Decimal("4.00")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 30
@@ -331,7 +331,7 @@ async def test_ingest_replace_changing_node_type_updates_call_counts(
         ],
         actor=ACTOR,
     )
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.llm_call_count == 0
     assert session.tool_call_count == 0
 
@@ -344,9 +344,9 @@ async def test_ingest_retry_identical_batch_nets_zero_delta(
     """Net a zero rollup delta when an identical batch is retried."""
     batch = [_llm_node(0, cost=Decimal("2.00"), tokens=TokenUsage(input_tokens=5))]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    before = await session_repository.get(session_id)
+    before = await session_repository.get(session_id, include_payloads=True)
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    after = await session_repository.get(session_id)
+    after = await session_repository.get(session_id, include_payloads=True)
     assert after.cost == before.cost
     assert after.tokens == before.tokens
     assert after.llm_call_count == before.llm_call_count

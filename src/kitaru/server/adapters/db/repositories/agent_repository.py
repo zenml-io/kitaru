@@ -14,10 +14,12 @@
 """SQL agent repository."""
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime
+from typing import Any
 
 from sqlalchemy import CursorResult, select, update
+from sqlalchemy.orm import InstrumentedAttribute, defer
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
@@ -53,13 +55,19 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         """
         return AgentNotFound(entity_id)
 
-    async def _get_row(self, entity_id: uuid.UUID, exclusive: bool = False) -> AgentORM:
+    async def _get_row(
+        self,
+        entity_id: uuid.UUID,
+        exclusive: bool = False,
+        deferred_columns: Sequence[InstrumentedAttribute[Any]] = (),
+    ) -> AgentORM:
         """Load a row by id, skipping rows marked deleted.
 
         Args:
             entity_id: Id of the row.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
+            deferred_columns: Columns to leave out of the select.
 
         Raises:
             AgentNotFound: No agent has this id.
@@ -70,6 +78,10 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         statement = select(AgentORM).where(
             AgentORM.id == entity_id, AgentORM.deleted_at.is_(None)
         )
+        if deferred_columns:
+            statement = statement.options(
+                *(defer(column) for column in deferred_columns)
+            )
         if exclusive:
             statement = statement.with_for_update()
         row = await self._session.scalar(statement)

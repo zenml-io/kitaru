@@ -161,7 +161,9 @@ class ReplayService:
         Returns:
             Created replay, paired with its config.
         """
-        baseline = await self._sessions.get(command.baseline_session_id)
+        baseline = await self._sessions.get(
+            command.baseline_session_id, include_payloads=True
+        )
         agent_version_id = command.agent_version_id
         if agent_version_id is None:
             if baseline.agent_version_id is None:
@@ -365,7 +367,9 @@ class ReplayService:
                 replay.baseline_session_id, cache_key
             )
         if scope is HistoryScope.AGENT:
-            baseline = await self._sessions.get(replay.baseline_session_id)
+            baseline = await self._sessions.get(
+                replay.baseline_session_id, include_payloads=False
+            )
             return await self._session_nodes.find_latest_by_cache_key_in_agent(
                 baseline.agent_id, cache_key
             )

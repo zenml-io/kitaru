@@ -140,7 +140,10 @@ class SessionService:
             task.check_attempt(actor.principal.attempt)
             if (
                 isinstance(task, AgentTask)
-                and await self._repository.get_by_task_id(task.id) is not None
+                and await self._repository.get_by_task_id(
+                    task.id, include_payloads=False
+                )
+                is not None
             ):
                 raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
@@ -261,7 +264,7 @@ class SessionService:
         Returns:
             Stored session.
         """
-        session = await self._repository.get(session_id)
+        session = await self._repository.get(session_id, include_payloads=True)
         check_task_session_read(session_id, session.task_id, actor)
         await self._payload_store.resolve(
             [p for p in (session.inputs, session.outputs) if p is not None]
@@ -290,12 +293,14 @@ class SessionService:
         Returns:
             Baseline session the replay ran against.
         """
-        session = await self._repository.get(session_id)
+        session = await self._repository.get(session_id, include_payloads=False)
         check_task_session_read(session_id, session.task_id, actor)
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
-        baseline = await self._repository.get(replay.baseline_session_id)
+        baseline = await self._repository.get(
+            replay.baseline_session_id, include_payloads=True
+        )
         await self._payload_store.resolve(
             [p for p in (baseline.inputs, baseline.outputs) if p is not None]
         )
@@ -345,7 +350,11 @@ class SessionService:
         Returns:
             Updated session.
         """
-        session = await self._repository.get(session_id, exclusive=True)
+        # The update below writes every column back, so the payloads are
+        # loaded here.
+        session = await self._repository.get(
+            session_id, include_payloads=True, exclusive=True
+        )
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_update()

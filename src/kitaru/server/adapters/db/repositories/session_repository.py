@@ -241,11 +241,15 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         await self._add(row, constraints)
         return row.to_domain(include_payloads=True)
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    async def get(
+        self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
 
@@ -255,26 +259,40 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Stored session.
         """
-        row = await self._get_row(session_id, exclusive=exclusive)
-        return row.to_domain(include_payloads=True)
+        row = await self._get_row(
+            session_id,
+            exclusive=exclusive,
+            deferred_columns=() if include_payloads else PAYLOAD_COLUMNS,
+        )
+        return row.to_domain(include_payloads=include_payloads)
 
     async def get_by_task_id(
-        self, task_id: uuid.UUID, exclusive: bool = False
+        self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
     ) -> Session | None:
         """Load the session a task produced, if any.
 
         Args:
             task_id: Id of the producing task.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Lock the row for update.
 
         Returns:
             Stored session, or ``None`` when no session links the task.
         """
         statement = select(SessionORM).where(SessionORM.task_id == task_id)
+        if not include_payloads:
+            statement = statement.options(
+                *(defer(column) for column in PAYLOAD_COLUMNS)
+            )
         if exclusive:
             statement = statement.with_for_update()
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain(include_payloads=True) if row is not None else None
+        return (
+            row.to_domain(include_payloads=include_payloads)
+            if row is not None
+            else None
+        )
 
     async def query(
         self, session_filter: SessionFilter, include_payloads: bool
@@ -309,19 +327,24 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         ], next_cursor
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID]
+        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
         Args:
             session_ids: Ids of the sessions to load.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Stored sessions keyed by id.
         """
-        rows = await self._load_by_ids(list(session_ids))
+        rows = await self._load_by_ids(
+            list(session_ids),
+            deferred_columns=() if include_payloads else PAYLOAD_COLUMNS,
+        )
         return {
-            session_id: row.to_domain(include_payloads=True)
+            session_id: row.to_domain(include_payloads=include_payloads)
             for session_id, row in rows.items()
         }
 

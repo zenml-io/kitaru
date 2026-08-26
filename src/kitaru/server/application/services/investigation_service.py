@@ -79,7 +79,9 @@ class InvestigationService:
         """
         if len(session_ids) != len(set(session_ids)):
             raise ValidationError("Investigation session list contains duplicate ids")
-        sessions_by_id = await self._sessions.get_many(session_ids)
+        sessions_by_id = await self._sessions.get_many(
+            session_ids, include_payloads=False
+        )
         for session_id in session_ids:
             session = sessions_by_id.get(session_id)
             if session is None:

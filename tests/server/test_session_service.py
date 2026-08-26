@@ -794,7 +794,7 @@ async def test_create_session_rejects_a_stale_task_attempt(
             SessionCreate(origin=SessionOrigin.RECORDED),
             actor=stale_actor,
         )
-    assert await repository.get_by_task_id(task.id) is None
+    assert await repository.get_by_task_id(task.id, include_payloads=True) is None
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id, attempt=task.attempt),
@@ -817,7 +817,7 @@ async def test_create_session_links_the_session_to_its_agent_task(
         actor=_task_principal(task.id),
     )
     assert session.task_id == task.id
-    linked = await repository.get_by_task_id(task.id)
+    linked = await repository.get_by_task_id(task.id, include_payloads=True)
     assert linked is not None
     assert linked.id == session.id
 
@@ -1286,7 +1286,7 @@ async def test_create_session_under_threshold_stays_inline(
         ),
         actor=ACTOR,
     )
-    raw = await repository.get(session.id)
+    raw = await repository.get(session.id, include_payloads=True)
     assert raw.inputs is not None
     assert raw.inputs.value == {"a": 1}
     assert raw.inputs.blob_id is None
@@ -1345,7 +1345,7 @@ async def test_update_session_offloads_new_outputs_above_threshold(
     assert updated.outputs.value == outputs
     assert updated.outputs.blob_id is not None
 
-    raw = await repository.get(created.id)
+    raw = await repository.get(created.id, include_payloads=True)
     assert raw.outputs is not None
     assert raw.outputs.blob_id is not None
 

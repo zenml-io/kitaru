@@ -24,6 +24,7 @@ from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
+from kitaru.server.adapters.db.orm.orm_utils import payload_from_columns
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import (
     SESSION_NODE_SESSION_ID_FOREIGN_KEY,
@@ -32,6 +33,7 @@ from kitaru.server.adapters.db.orm.session_node import (
 from kitaru.server.adapters.db.pagination import paginate_by_index
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.session_node import SessionNode
 
@@ -44,6 +46,23 @@ PAYLOAD_COLUMNS = (
     SessionNodeORM.outputs,
     SessionNodeORM.attributes,
 )
+
+# Tool lookups replay only the stored result, so every payload column
+# except outputs stays unread.
+TOOL_LOOKUP_DEFERRED_COLUMNS = (
+    SessionNodeORM.reasoning,
+    SessionNodeORM.inputs,
+    SessionNodeORM.attributes,
+)
+
+
+def _lookup_row_to_domain(row: SessionNodeORM) -> SessionNode:
+    """Build a domain node from a lookup row, reading only the outputs columns."""
+    node = row.to_domain(include_payloads=False)
+    node.outputs = payload_from_columns(
+        row.outputs, row.outputs_blob_id, media_type=PayloadMediaType.JSON
+    )
+    return node
 
 
 class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
@@ -206,9 +225,15 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Highest-id matching node, or ``None`` on a miss.
         """
-        statement = statement.order_by(SessionNodeORM.id.desc()).limit(1)
+        statement = (
+            statement.options(
+                *(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS)
+            )
+            .order_by(SessionNodeORM.id.desc())
+            .limit(1)
+        )
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain(include_payloads=True) if row is not None else None
+        return _lookup_row_to_domain(row) if row is not None else None
 
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
@@ -253,12 +278,13 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 SessionNodeORM.cache_key == cache_key,
                 SessionNodeORM.status.in_(FINISHED_NODE_STATUSES),
             )
+            .options(*(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS))
             .order_by(SessionNodeORM.index)
             .offset(occurrence)
             .limit(1)
         )
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain(include_payloads=True) if row is not None else None
+        return _lookup_row_to_domain(row) if row is not None else None
 
     async def find_latest_by_cache_key_in_agent(
         self, agent_id: uuid.UUID, cache_key: str

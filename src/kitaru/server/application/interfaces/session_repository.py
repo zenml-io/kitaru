@@ -59,11 +59,15 @@ class SessionRepository(Protocol):
         """
         ...
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    async def get(
+        self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
 
@@ -76,12 +80,14 @@ class SessionRepository(Protocol):
         ...
 
     async def get_by_task_id(
-        self, task_id: uuid.UUID, exclusive: bool = False
+        self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
     ) -> Session | None:
         """Load the session a task produced, if any.
 
         Args:
             task_id: Id of the producing task.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Lock the row for update.
 
         Returns:
@@ -108,12 +114,14 @@ class SessionRepository(Protocol):
         ...
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID]
+        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
         Args:
             session_ids: Ids of the sessions to load.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Stored sessions keyed by id.
@@ -122,6 +130,9 @@ class SessionRepository(Protocol):
 
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
+
+        Every field of the session is written back, so the session must
+        have been loaded with payloads.
 
         Args:
             session: Session with modified fields.

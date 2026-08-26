@@ -122,7 +122,9 @@ class SessionNodeService:
         # concurrent batches for one index would both insert and collide on
         # the (session, index) key. The lock also stabilizes the pre-image
         # the rollup deltas are computed against.
-        session = await self._sessions.get(session_id, exclusive=True)
+        session = await self._sessions.get(
+            session_id, include_payloads=False, exclusive=True
+        )
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_node_ingest()
@@ -243,7 +245,9 @@ class SessionNodeService:
             Page of matching nodes and the next cursor.
         """
         if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_node_filter.session_id)
+            session = await self._sessions.get(
+                session_node_filter.session_id, include_payloads=False
+            )
             check_task_session_read(session.id, session.task_id, actor)
         nodes, next_cursor = await self._repository.query(session_node_filter)
         if session_node_filter.include_payloads:
@@ -274,7 +278,7 @@ class SessionNodeService:
             Every node of the session.
         """
         if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_id)
+            session = await self._sessions.get(session_id, include_payloads=False)
             check_task_session_read(session_id, session.task_id, actor)
         nodes = await self._repository.list_all(session_id, include_payloads)
         if include_payloads:
@@ -307,7 +311,7 @@ class SessionNodeService:
             Each requested node id mapped to its index, missing ids omitted.
         """
         if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_id)
+            session = await self._sessions.get(session_id, include_payloads=False)
             check_task_session_read(session_id, session.task_id, actor)
         return await self._repository.get_indexes_by_ids(session_id, node_ids)
 

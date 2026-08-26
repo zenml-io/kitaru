@@ -2459,11 +2459,30 @@ class FakeSessionRepository:
         self._sessions[stored.id] = stored
         return stored.model_copy()
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    @staticmethod
+    def _copy(session: Session, include_payloads: bool) -> Session:
+        """Copy a stored session, dropping payloads unless requested.
+
+        Args:
+            session: Stored session.
+            include_payloads: Whether to keep the inputs and outputs.
+
+        Returns:
+            Copied session.
+        """
+        if include_payloads:
+            return session.model_copy()
+        return session.model_copy(update={"inputs": None, "outputs": None})
+
+    async def get(
+        self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Ignored, the fake has no concurrent callers to lock
                 against.
 
@@ -2477,15 +2496,17 @@ class FakeSessionRepository:
         session = self._sessions.get(session_id)
         if session is None:
             raise SessionNotFound(session_id)
-        return session.model_copy()
+        return self._copy(session, include_payloads)
 
     async def get_by_task_id(
-        self, task_id: uuid.UUID, exclusive: bool = False
+        self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
     ) -> Session | None:
         """Load the session a task produced, if any.
 
         Args:
             task_id: Id of the producing task.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Ignored, the fake has no concurrent callers to lock
                 against.
 
@@ -2495,7 +2516,7 @@ class FakeSessionRepository:
         _ = exclusive
         for session in self._sessions.values():
             if session.task_id == task_id:
-                return session.model_copy()
+                return self._copy(session, include_payloads)
         return None
 
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
@@ -2620,18 +2641,20 @@ class FakeSessionRepository:
         return self._evaluations.has_evaluation(session.id) == expected
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID]
+        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
         Args:
             session_ids: Ids of the sessions to load.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Stored sessions keyed by id.
         """
         return {
-            session_id: self._sessions[session_id].model_copy()
+            session_id: self._copy(self._sessions[session_id], include_payloads)
             for session_id in session_ids
             if session_id in self._sessions
         }
