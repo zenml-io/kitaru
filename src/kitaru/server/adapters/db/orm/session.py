@@ -40,8 +40,11 @@ from kitaru.server.adapters.db.orm.base import (
 from kitaru.server.adapters.db.orm.orm_utils import (
     foreign_key_name,
     index_name,
+    payload_from_columns,
+    split_payload,
     unique_constraint_name,
 )
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import Session
 
 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -54,6 +57,8 @@ SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
 SESSION_TASK_ID_FOREIGN_KEY = foreign_key_name("session", ["task_id"])
+SESSION_INPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["inputs_blob_id"])
+SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["outputs_blob_id"])
 SESSION_AGENT_ID_ID_INDEX = index_name("session", ["agent_id", "id"])
 SESSION_AGENT_VERSION_ID_ID_INDEX = index_name("session", ["agent_version_id", "id"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
@@ -104,6 +109,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ondelete="SET NULL",
             use_alter=True,
         ),
+        ForeignKeyConstraint(
+            ["inputs_blob_id"], ["blob.id"], name=SESSION_INPUTS_BLOB_ID_FOREIGN_KEY
+        ),
+        ForeignKeyConstraint(
+            ["outputs_blob_id"], ["blob.id"], name=SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY
+        ),
         Index(SESSION_AGENT_ID_ID_INDEX, "agent_id", "id"),
         Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),
         Index(SESSION_STATUS_INDEX, "status"),
@@ -120,7 +131,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    outputs_blob_id: Mapped[uuid.UUID | None]
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -141,46 +154,60 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     def from_domain(cls, session: Session) -> "SessionORM":
         """Build a row from a domain session.
 
-        The token usage is flattened into the token columns, all null when
-        the session carries no token usage.
-
         Args:
             session: Session to store.
 
         Returns:
             Row without timestamps set.
         """
+        row = cls(id=session.id)
+        row.apply_domain(session)
+        return row
+
+    def apply_domain(self, session: Session) -> None:
+        """Copy every mutable field of a domain session onto this row.
+
+        A payload with a blob ref writes the ref column and leaves the
+        inline column null, an inline-only payload writes the inline column
+        and leaves the ref column null, and ``None`` writes null to both. The
+        token usage is flattened into the token columns, all null when the
+        session carries no token usage.
+
+        Args:
+            session: Session carrying the desired field values.
+        """
         tokens = session.tokens
-        return cls(
-            id=session.id,
-            owner_id=session.owner_id,
-            agent_id=session.agent_id,
-            number=session.number,
-            agent_version_id=session.agent_version_id,
-            task_id=session.task_id,
-            origin=session.origin.value,
-            status=session.status.value,
-            name=session.name,
-            inputs=session.inputs,
-            outputs=session.outputs,
-            error=session.error,
-            started_at=session.started_at,
-            ended_at=session.ended_at,
-            external_id=session.external_id,
-            metadata_=session.metadata,
-            imported_from=session.imported_from,
-            framework=session.framework,
-            adapter_version=session.adapter_version,
-            cost=session.cost,
-            input_tokens=tokens.input_tokens if tokens is not None else None,
-            output_tokens=tokens.output_tokens if tokens is not None else None,
-            cached_input_tokens=(
-                tokens.cached_input_tokens if tokens is not None else None
-            ),
-            reasoning_tokens=tokens.reasoning_tokens if tokens is not None else None,
-            llm_call_count=session.llm_call_count,
-            tool_call_count=session.tool_call_count,
+        inputs, inputs_blob_id = split_payload(session.inputs)
+        outputs, outputs_blob_id = split_payload(session.outputs)
+        self.owner_id = session.owner_id
+        self.agent_id = session.agent_id
+        self.number = session.number
+        self.agent_version_id = session.agent_version_id
+        self.task_id = session.task_id
+        self.origin = session.origin.value
+        self.status = session.status.value
+        self.name = session.name
+        self.inputs = inputs
+        self.inputs_blob_id = inputs_blob_id
+        self.outputs = outputs
+        self.outputs_blob_id = outputs_blob_id
+        self.error = session.error
+        self.started_at = session.started_at
+        self.ended_at = session.ended_at
+        self.external_id = session.external_id
+        self.metadata_ = session.metadata
+        self.imported_from = session.imported_from
+        self.framework = session.framework
+        self.adapter_version = session.adapter_version
+        self.cost = session.cost
+        self.input_tokens = tokens.input_tokens if tokens is not None else None
+        self.output_tokens = tokens.output_tokens if tokens is not None else None
+        self.cached_input_tokens = (
+            tokens.cached_input_tokens if tokens is not None else None
         )
+        self.reasoning_tokens = tokens.reasoning_tokens if tokens is not None else None
+        self.llm_call_count = session.llm_call_count
+        self.tool_call_count = session.tool_call_count
 
     def to_domain(self) -> Session:
         """Build a domain session from this row.
@@ -220,8 +247,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,
-            inputs=self.inputs,
-            outputs=self.outputs,
+            inputs=payload_from_columns(
+                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
+            ),
+            outputs=payload_from_columns(
+                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
+            ),
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

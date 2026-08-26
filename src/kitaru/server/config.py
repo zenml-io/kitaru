@@ -21,6 +21,8 @@ from typing import Self
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from kitaru.server.blob_storage_settings import BlobStorageSettings
+
 
 class DatabaseSSLMode(StrEnum):
     """PostgreSQL SSL connection mode."""
@@ -48,6 +50,7 @@ class Settings(BaseSettings):
         env_prefix="KITARU_SERVER_",
         env_file=".env",
         env_file_encoding="utf-8",
+        env_nested_delimiter="__",
         extra="ignore",
     )
 
@@ -56,6 +59,8 @@ class Settings(BaseSettings):
 
     WORKER_LIVENESS_TIMEOUT_SECONDS: int = 60
     MAX_BLOB_SIZE_BYTES: int = 100 * 1024 * 1024
+    BLOB_STORAGE: BlobStorageSettings = BlobStorageSettings()
+    PAYLOAD_OFFLOAD_THRESHOLD_BYTES: int = 20 * 1024
 
     LIST_QUERY_TIMEOUT_SECONDS: int = 10
 

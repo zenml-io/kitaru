@@ -29,6 +29,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
+    build_payload_store,
     override_idempotency,
 )
 from kitaru.api_models.v1.agent import AgentCreateRequest, AgentResponse
@@ -178,16 +179,19 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     session_repository = FakeSessionRepository()
     node_repository = FakeSessionNodeRepository()
     agent_service = AgentService(repository=agent_repository)
+    payload_store = build_payload_store().store
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(agent_repository),
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=FakeTaskRepository(),
+        payload_store=payload_store,
     )
     app.dependency_overrides[get_agent_service] = lambda: agent_service
     app.dependency_overrides[get_session_service] = lambda: session_service

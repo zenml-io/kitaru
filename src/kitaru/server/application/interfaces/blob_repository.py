@@ -14,6 +14,7 @@
 """Blob repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from typing import Protocol
 
 from kitaru.server.domain.blob import Blob
@@ -29,13 +30,12 @@ class BlobRepository(Protocol):
             blob: Blob to store.
 
         Returns:
-            Stored blob and whether this call created it. A dedup hit
-            returns the existing row with its content left unloaded.
+            Stored blob and whether this call created it.
         """
         ...
 
     async def get(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob by id, content included.
+        """Load a blob by id.
 
         Args:
             blob_id: Id of the blob.
@@ -48,17 +48,28 @@ class BlobRepository(Protocol):
         """
         ...
 
-    async def get_metadata(self, blob_id: uuid.UUID) -> Blob:
-        """Load a blob's metadata by id, leaving its content unloaded.
+    async def get_many(self, blob_ids: Sequence[uuid.UUID]) -> dict[uuid.UUID, Blob]:
+        """Bulk-load blobs by id, keyed by id, missing ids omitted.
 
         Args:
-            blob_id: Id of the blob.
-
-        Raises:
-            BlobNotFound: No blob has this id.
+            blob_ids: Ids of the blobs to load.
 
         Returns:
-            Blob with an empty content placeholder.
+            Stored blobs keyed by id.
+        """
+        ...
+
+    async def get_many_by_sha256s(
+        self, sha256s: Sequence[str]
+    ) -> dict[tuple[str, str], Blob]:
+        """Bulk-load blobs by content hash, keyed by (sha256, media_type).
+
+        Args:
+            sha256s: Content hashes to look up.
+
+        Returns:
+            Stored blobs keyed by (sha256, media_type), hashes with no
+            matching row omitted.
         """
         ...
 
@@ -70,6 +81,7 @@ class BlobRepository(Protocol):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version.
+            BlobInUse: The blob is referenced by a plugin version, a
+                session, or a session node.
         """
         ...

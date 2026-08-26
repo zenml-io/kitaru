@@ -55,6 +55,30 @@ db_max_overflow: {{ .Kitaru.database.maxOverflow | quote }}
 db_pool_timeout_seconds: {{ .Kitaru.database.poolTimeoutSeconds | quote }}
 {{- end }}
 
+{{- if eq .Kitaru.blobStorage.backend "s3" }}
+blob_storage__backend: {{ .Kitaru.blobStorage.backend | quote }}
+{{- with .Kitaru.blobStorage.s3 }}
+{{- if .bucket }}
+blob_storage__s3__bucket: {{ .bucket | quote }}
+{{- end }}
+{{- if .prefix }}
+blob_storage__s3__prefix: {{ .prefix | quote }}
+{{- end }}
+{{- if .region }}
+blob_storage__s3__region: {{ .region | quote }}
+{{- end }}
+{{- if .endpointURL }}
+blob_storage__s3__endpoint_url: {{ .endpointURL | quote }}
+{{- end }}
+{{- if .accessKeyID }}
+blob_storage__s3__access_key_id: {{ .accessKeyID | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- if .Kitaru.payloadOffloadThresholdBytes }}
+payload_offload_threshold_bytes: {{ .Kitaru.payloadOffloadThresholdBytes | quote }}
+{{- end }}
+
 {{- if .Kitaru.pro.enabled }}
 auth_scheme: control_plane
 control_plane_api_url: "{{ .Kitaru.pro.apiURL }}"
@@ -189,6 +213,9 @@ db_pwd: {{ .Kitaru.database.password | quote }}
 {{- end }}
 {{- if and (not .Kitaru.pro.enabled) (eq .Kitaru.auth.authScheme "local") .Kitaru.auth.defaultAccount.password (not .Kitaru.auth.defaultAccount.passwordSecretRef) }}
 default_account_password: {{ .Kitaru.auth.defaultAccount.password | quote }}
+{{- end }}
+{{- if and (eq .Kitaru.blobStorage.backend "s3") .Kitaru.blobStorage.s3.secretAccessKey }}
+blob_storage__s3__secret_access_key: {{ .Kitaru.blobStorage.s3.secretAccessKey | quote }}
 {{- end }}
 {{- end }}
 

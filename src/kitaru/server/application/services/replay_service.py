@@ -41,6 +41,7 @@ from kitaru.server.application.models.replay import (
     ReplayWithDetails,
     ToolLookupResult,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
@@ -77,6 +78,7 @@ class ReplayService:
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -93,6 +95,8 @@ class ReplayService:
                 lookup.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            payload_store: Payload store, for the baseline session's inputs
+                and the tool lookup's node output.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
@@ -104,6 +108,7 @@ class ReplayService:
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def _bundle(self, replays: list[Replay]) -> list[ReplayWithDetails]:
@@ -187,6 +192,7 @@ class ReplayService:
             replay_repository=self._repository,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            payload_store=self._payload_store,
         )
         if self._analytics is not None:
             self._analytics.track(
@@ -303,8 +309,12 @@ class ReplayService:
         )
         if node is None:
             return None
+        if node.outputs is not None:
+            await self._payload_store.resolve([node.outputs])
         return ToolLookupResult(
-            result=node.outputs, status=node.status, error=node.error
+            result=node.outputs.value if node.outputs is not None else None,
+            status=node.status,
+            error=node.error,
         )
 
     async def _check_task_access(self, replay: Replay, actor: AuthContext) -> None:

@@ -31,6 +31,7 @@ from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.auth import AuthContext
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.domain.job import Job
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
@@ -50,6 +51,7 @@ async def create_replay_pipelines(
     replay_repository: ReplayRepository,
     job_repository: JobRepository,
     task_repository: TaskRepository,
+    payload_store: PayloadStore,
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
@@ -69,12 +71,16 @@ async def create_replay_pipelines(
         replay_repository: Replay repository.
         job_repository: Job repository.
         task_repository: Task repository.
+        payload_store: Payload store, for the baseline sessions' inputs.
 
     Returns:
         Created replays, in baseline order.
     """
     if not baselines:
         return []
+    await payload_store.resolve(
+        [baseline.inputs for baseline in baselines if baseline.inputs is not None]
+    )
     jobs = [Job(owner_id=actor.account.id, kind=JobKind.REPLAY) for _ in baselines]
     replays = [
         Replay(
@@ -98,7 +104,7 @@ async def create_replay_pipelines(
             AgentTask(
                 job_id=job.id,
                 agent_version_id=agent_version_id,
-                inputs=baseline.inputs,
+                inputs=baseline.inputs.value if baseline.inputs is not None else None,
                 labels={AGENT_VERSION_LABEL: str(agent_version_id)},
                 on_failure=TaskOnFailure.ABORT,
             )

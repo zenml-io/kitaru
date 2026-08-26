@@ -30,6 +30,7 @@ from kitaru.server.application.models.session import (
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.resource_access import (
@@ -38,6 +39,7 @@ from kitaru.server.application.services.resource_access import (
     check_task_session_write,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
     Session,
     SessionAgentMismatch,
@@ -64,6 +66,7 @@ class SessionService:
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
         replay_repository: ReplayRepository,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -74,12 +77,15 @@ class SessionService:
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
             replay_repository: Replay repository, for the baseline lookup.
+            payload_store: Payload store, for inputs and outputs offload and
+                resolve.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
         self._replays = replay_repository
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def create_session(
@@ -150,8 +156,12 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
-            inputs=command.inputs,
-            outputs=command.outputs,
+            inputs=Payload.from_json(command.inputs)
+            if command.inputs is not None
+            else None,
+            outputs=Payload.from_json(command.outputs)
+            if command.outputs is not None
+            else None,
             error=command.error,
             started_at=command.started_at,
             ended_at=command.ended_at,
@@ -161,7 +171,14 @@ class SessionService:
             framework=command.framework,
             adapter_version=command.adapter_version,
         )
+        await self._payload_store.offload(
+            [p for p in (session.inputs, session.outputs) if p is not None],
+            session.owner_id,
+        )
         stored = await self._repository.create(session)
+        stored = stored.model_copy(
+            update={"inputs": session.inputs, "outputs": session.outputs}
+        )
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -247,6 +264,9 @@ class SessionService:
         """
         session = await self._repository.get(session_id)
         check_task_session_read(session_id, session.task_id, actor)
+        await self._payload_store.resolve(
+            [p for p in (session.inputs, session.outputs) if p is not None]
+        )
         return session
 
     async def get_baseline_session(
@@ -276,7 +296,11 @@ class SessionService:
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
-        return await self._repository.get(replay.baseline_session_id)
+        baseline = await self._repository.get(replay.baseline_session_id)
+        await self._payload_store.resolve(
+            [p for p in (baseline.inputs, baseline.outputs) if p is not None]
+        )
+        return baseline
 
     async def list_sessions(
         self, session_filter: SessionFilter, actor: AuthContext
@@ -291,7 +315,16 @@ class SessionService:
             Page of matching sessions and the next cursor.
         """
         _ = actor
-        return await self._repository.query(session_filter)
+        sessions, next_cursor = await self._repository.query(session_filter)
+        await self._payload_store.resolve(
+            [
+                p
+                for session in sessions
+                for p in (session.inputs, session.outputs)
+                if p is not None
+            ]
+        )
+        return sessions, next_cursor
 
     async def update_session(
         self, session_id: uuid.UUID, command: SessionUpdate, actor: AuthContext
@@ -332,12 +365,19 @@ class SessionService:
                 if command.status is None:
                     raise SessionStatusCannotBeCleared(session_id)
                 target_status = command.status
+            new_outputs = (
+                Payload.from_json(command.outputs)
+                if command.outputs is not None
+                else None
+            )
             session.finish(
                 status=target_status,
-                outputs=command.outputs if "outputs" in fields else session.outputs,
+                outputs=new_outputs if "outputs" in fields else session.outputs,
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
+            if "outputs" in fields and session.outputs is not None:
+                await self._payload_store.offload([session.outputs], session.owner_id)
             if (
                 self._analytics is not None
                 and previous_status == SessionStatus.IN_PROGRESS
@@ -354,7 +394,16 @@ class SessionService:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}
             )
-        return await self._repository.update(session)
+        stored = await self._repository.update(session)
+        # The untouched inputs ref, and outputs when this update did not
+        # carry a new value, still need a round trip to the blob store.
+        to_resolve = [session.inputs]
+        if "outputs" not in fields:
+            to_resolve.append(session.outputs)
+        await self._payload_store.resolve([p for p in to_resolve if p is not None])
+        return stored.model_copy(
+            update={"inputs": session.inputs, "outputs": session.outputs}
+        )
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

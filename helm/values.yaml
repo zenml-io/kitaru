@@ -306,6 +306,44 @@ server:
     # Maximum number of seconds to wait for a connection before timing out.
     poolTimeoutSeconds: 30
 
+  # Blob storage backend configuration.
+  blobStorage:
+    # The blob storage backend to use. Use one of:
+    #
+    # database - Store blob content in the PostgreSQL database.
+    # s3 - Store blob content in an S3 bucket.
+    backend: database
+
+    # Settings for the s3 backend. Only used when backend is set to s3.
+    s3:
+      # The name of the S3 bucket used to store blobs.
+      bucket:
+
+      # The prefix under which blobs are stored in the bucket.
+      prefix: blobs
+
+      # The AWS region of the bucket. If not set, the region is resolved from
+      # the provider's ambient configuration.
+      region:
+
+      # A custom S3-compatible endpoint URL. Leave unset to use AWS S3.
+      endpointURL:
+
+      # The access key id used to authenticate with the S3 backend. If not
+      # set together with secretAccessKey, credentials are resolved from the
+      # provider's ambient chain (IRSA, instance profile, etc).
+      accessKeyID:
+
+      # The secret access key used to authenticate with the S3 backend. For
+      # production deployments, consider referencing an existing Kubernetes
+      # secret through server.environmentSecretKeyRefs instead of setting
+      # this value directly.
+      secretAccessKey:
+
+  # The size in bytes above which payload content is moved out of the
+  # database into blob storage instead of stored inline.
+  payloadOffloadThresholdBytes: 20480
+
   # Logging settings for the Kitaru server container.
   logging:
     # Set the logging verbosity.

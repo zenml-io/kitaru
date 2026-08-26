@@ -323,33 +323,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             Stored session with the updated timestamp renewed.
         """
         row = await self._get_row(session.id)
-        tokens = session.tokens
-        row.owner_id = session.owner_id
-        row.agent_id = session.agent_id
-        row.agent_version_id = session.agent_version_id
-        row.task_id = session.task_id
-        row.origin = session.origin.value
-        row.status = session.status.value
-        row.name = session.name
-        row.inputs = session.inputs
-        row.outputs = session.outputs
-        row.error = session.error
-        row.started_at = session.started_at
-        row.ended_at = session.ended_at
-        row.external_id = session.external_id
-        row.metadata_ = session.metadata
-        row.imported_from = session.imported_from
-        row.framework = session.framework
-        row.adapter_version = session.adapter_version
-        row.cost = session.cost
-        row.input_tokens = tokens.input_tokens if tokens is not None else None
-        row.output_tokens = tokens.output_tokens if tokens is not None else None
-        row.cached_input_tokens = (
-            tokens.cached_input_tokens if tokens is not None else None
-        )
-        row.reasoning_tokens = tokens.reasoning_tokens if tokens is not None else None
-        row.llm_call_count = session.llm_call_count
-        row.tool_call_count = session.tool_call_count
+        row.apply_domain(session)
         await self._flush(
             {
                 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (

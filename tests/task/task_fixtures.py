@@ -32,6 +32,7 @@ from conftest import (
     JobAndTaskServices,
     asgi_api_client,
     build_job_and_task_services,
+    build_payload_store,
     create_agent,
     create_blob,
     create_plugin,
@@ -79,16 +80,19 @@ class TaskAppFixture(NamedTuple):
 async def build_task_app() -> AsyncGenerator[TaskAppFixture, None]:
     """Build an API client routed to the app with fake-backed services."""
     services = build_job_and_task_services()
+    payload_store = build_payload_store().store
     node_service = SessionNodeService(
         repository=FakeSessionNodeRepository(),
         session_repository=services.sessions,
         task_repository=services.tasks,
+        payload_store=payload_store,
     )
     session_service = SessionService(
         repository=services.sessions,
         task_repository=services.tasks,
         agent_version_repository=services.agent_versions,
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     app = create_app(
         APISettings(

@@ -15,6 +15,7 @@
 
 import uuid
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import Field
 
@@ -26,6 +27,13 @@ from kitaru.server.domain.base import (
     PayloadTooLargeError,
 )
 from kitaru.server.domain.ids import uuid7
+
+
+class BlobStorageBackend(StrEnum):
+    """Blob storage backend."""
+
+    DATABASE = "database"
+    S3 = "s3"
 
 
 class BlobAccessDenied(ForbiddenError):
@@ -50,6 +58,18 @@ class BlobNotFound(NotFoundError):
             blob_id: Id of the missing blob.
         """
         super().__init__(f"Blob {blob_id} was not found")
+
+
+class BlobContentNotFound(NotFoundError):
+    """Raised when a blob content lookup does not resolve."""
+
+    def __init__(self, sha256: str) -> None:
+        """Initialize the error.
+
+        Args:
+            sha256: Content hash of the missing blob.
+        """
+        super().__init__(f"Blob content for sha256 {sha256} was not found")
 
 
 class BlobInUse(ConflictError):
@@ -84,5 +104,5 @@ class Blob(DomainModel):
     sha256: str
     size: int
     media_type: str
-    data: bytes
+    stored_in: BlobStorageBackend
     created: datetime | None = None

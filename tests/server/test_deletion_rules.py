@@ -60,6 +60,8 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("session", "agent_version_id"): "SET NULL",
     ("session", "owner_id"): None,
     ("session", "task_id"): "SET NULL",
+    ("session", "inputs_blob_id"): None,
+    ("session", "outputs_blob_id"): None,
     ("cohort_version_session", "cohort_version_id"): "CASCADE",
     ("cohort_version_session", "session_id"): None,
     ("replay", "baseline_session_id"): None,
@@ -69,6 +71,10 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("replay", "replay_config_id"): None,
     ("replay", "result_session_id"): None,
     ("session_node", "session_id"): "CASCADE",
+    ("session_node", "inputs_blob_id"): None,
+    ("session_node", "outputs_blob_id"): None,
+    ("session_node", "attributes_blob_id"): None,
+    ("session_node", "reasoning_blob_id"): None,
     # A task names its inputs by id and carries no constraint to them, so
     # agent_id, agent_version_id, input_session_id, payload_blob_id, and
     # plugin_version_id are absent here. Only the job a task belongs to and the

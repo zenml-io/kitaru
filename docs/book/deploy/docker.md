@@ -50,6 +50,7 @@ Operational knobs with sensible defaults; raise or lower them deliberately:
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `KITARU_SERVER_MAX_BLOB_SIZE_BYTES` | 100 MiB | Upload cap for trace exports and plugin code |
+| `KITARU_SERVER_PAYLOAD_OFFLOAD_THRESHOLD_BYTES` | 20 KiB | Session/node payload size above which it moves to blob storage |
 | `KITARU_SERVER_TASK_HEARTBEAT_TIMEOUT_SECONDS` | 60 | How long a silent worker holds a task before it's requeued |
 | `KITARU_SERVER_TASK_RETRY_LIMIT` | 3 | Attempts before a stale task is abandoned |
 | `KITARU_SERVER_EVALUATOR_TASK_TIMEOUT_SECONDS` | 300 | Per-evaluator process timeout |

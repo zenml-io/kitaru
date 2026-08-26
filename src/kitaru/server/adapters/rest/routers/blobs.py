@@ -124,9 +124,9 @@ async def download_blob(
     Returns:
         Raw blob content.
     """
-    blob = await service.download_blob(blob_id, actor=actor)
+    blob, data = await service.download_blob(blob_id, actor=actor)
     return Response(
-        content=blob.data,
+        content=data,
         media_type=blob.media_type,
         headers={
             "Content-Disposition": "attachment",
