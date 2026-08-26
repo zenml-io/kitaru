@@ -148,7 +148,7 @@ async def test_get(api_client: KitaruAPIClient) -> None:
         )
     )
     loaded = await api_client.sessions.get(created.id)
-    assert loaded == created
+    assert loaded.model_dump(exclude={"inputs", "outputs"}) == created.model_dump()
 
 
 async def test_get_not_found(api_client: KitaruAPIClient) -> None:
@@ -240,7 +240,8 @@ async def test_update(api_client: KitaruAPIClient) -> None:
         SessionUpdateRequest(status=SessionStatus.COMPLETED, outputs={"a": 1}),
     )
     assert updated.status == SessionStatus.COMPLETED
-    assert updated.outputs == {"a": 1}
+    fetched = await api_client.sessions.get(created.id)
+    assert fetched.outputs == {"a": 1}
 
 
 async def test_update_status_conflict(api_client: KitaruAPIClient) -> None:

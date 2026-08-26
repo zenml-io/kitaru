@@ -22,6 +22,7 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionEvaluationsRequest,
     SessionListParams,
     SessionResponse,
@@ -53,6 +54,7 @@ from kitaru.server.adapters.rest.mapping.session_nodes import (
 from kitaru.server.adapters.rest.mapping.sessions import (
     session_create_to_command,
     session_list_params_to_filter,
+    session_to_detail_response,
     session_to_response,
     session_update_to_command,
 )
@@ -126,7 +128,7 @@ async def get_session(
     session_id: uuid.UUID,
     service: Annotated[SessionService, Depends(get_session_service)],
     actor: Annotated[AuthContext, Depends(authorize_with_task)],
-) -> SessionResponse:
+) -> SessionDetailResponse:
     """Get a session by id.
 
     Clients observe HTTP 200 on success and 404 when no session has this
@@ -141,7 +143,7 @@ async def get_session(
         Stored session.
     """
     session = await service.get_session(session_id, actor=actor)
-    return session_to_response(session)
+    return session_to_detail_response(session)
 
 
 @router.patch("/{session_id}")
@@ -295,7 +297,7 @@ async def get_session_with_nodes(
         session_id, referenced_parent_ids(nodes), actor=actor
     )
     return SessionWithNodesResponse(
-        session=session_to_response(session),
+        session=session_to_detail_response(session),
         nodes=[
             session_node_to_response(node, index_by_id, include_payloads=True)
             for node in nodes

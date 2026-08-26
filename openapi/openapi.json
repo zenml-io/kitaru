@@ -6025,6 +6025,265 @@
         "title": "SessionCreateRequest",
         "type": "object"
       },
+      "SessionDetailResponse": {
+        "description": "Session detail response.",
+        "properties": {
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recording adapter version.",
+            "title": "Adapter Version"
+          },
+          "agent_id": {
+            "description": "Agent the session belongs to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version recorded for the session.",
+            "title": "Agent Version Id"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total cost.",
+            "title": "Cost"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the session ended.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error from a failed session.",
+            "title": "Error"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id from the source system.",
+            "title": "External Id"
+          },
+          "framework": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent framework used.",
+            "title": "Framework"
+          },
+          "id": {
+            "description": "Session id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
+          },
+          "inputs": {
+            "description": "Session inputs.",
+            "title": "Inputs"
+          },
+          "llm_call_count": {
+            "description": "Number of LLM call nodes.",
+            "title": "Llm Call Count",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session name.",
+            "title": "Name"
+          },
+          "number": {
+            "description": "Session number within the agent.",
+            "title": "Number",
+            "type": "integer"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SessionOrigin",
+            "description": "How the session came to exist."
+          },
+          "outputs": {
+            "description": "Session outputs.",
+            "title": "Outputs"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the session started.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Task the session was produced by.",
+            "title": "Task Id"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total token usage."
+          },
+          "tool_call_count": {
+            "description": "Number of tool call nodes.",
+            "title": "Tool Call Count",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "agent_id",
+          "number",
+          "origin",
+          "status",
+          "metadata",
+          "llm_call_count",
+          "tool_call_count",
+          "inputs",
+          "outputs"
+        ],
+        "title": "SessionDetailResponse",
+        "type": "object"
+      },
+      "SessionDetailWithEvaluationsResponse": {
+        "description": "Session detail with evaluations response.",
+        "properties": {
+          "evaluations": {
+            "description": "Every evaluation of the session, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationResponse"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionDetailResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "evaluations"
+        ],
+        "title": "SessionDetailWithEvaluationsResponse",
+        "type": "object"
+      },
       "SessionEvaluationsRequest": {
         "additionalProperties": false,
         "description": "Session evaluations request.",
@@ -6809,10 +7068,6 @@
             "description": "Source system the session was imported from.",
             "title": "Imported From"
           },
-          "inputs": {
-            "description": "Session inputs.",
-            "title": "Inputs"
-          },
           "llm_call_count": {
             "description": "Number of LLM call nodes.",
             "title": "Llm Call Count",
@@ -6844,10 +7099,6 @@
           "origin": {
             "$ref": "#/components/schemas/SessionOrigin",
             "description": "How the session came to exist."
-          },
-          "outputs": {
-            "description": "Session outputs.",
-            "title": "Outputs"
           },
           "owner_id": {
             "description": "Id of the owning account.",
@@ -6916,8 +7167,6 @@
           "number",
           "origin",
           "status",
-          "inputs",
-          "outputs",
           "metadata",
           "llm_call_count",
           "tool_call_count"
@@ -7077,7 +7326,7 @@
             "type": "array"
           },
           "session": {
-            "$ref": "#/components/schemas/SessionResponse",
+            "$ref": "#/components/schemas/SessionDetailResponse",
             "description": "Session."
           }
         },
@@ -15242,7 +15491,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
+                  "$ref": "#/components/schemas/SessionDetailResponse"
                 }
               }
             },
@@ -16437,7 +16686,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+                  "$ref": "#/components/schemas/SessionDetailWithEvaluationsResponse"
                 }
               }
             },

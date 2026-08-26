@@ -258,7 +258,7 @@ async def test_get_session(client: httpx.AsyncClient) -> None:
     created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
-    assert response.json() == created
+    assert response.json() == {**created, "inputs": {"prompt": "hi"}, "outputs": None}
 
 
 async def test_get_session_not_found(client: httpx.AsyncClient) -> None:
@@ -633,9 +633,9 @@ async def test_update_session_clears_outputs_with_explicit_null(
         json={"status": "completed", "outputs": None},
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["outputs"] is None
-    assert body["status"] == "completed"
+    assert response.json()["status"] == "completed"
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["outputs"] is None
 
 
 async def test_update_session_omitted_outputs_unchanged(
@@ -651,9 +651,9 @@ async def test_update_session_omitted_outputs_unchanged(
         f"/api/v1/sessions/{created['id']}", json={"name": "renamed"}
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["outputs"] == {"answer": 42}
-    assert body["name"] == "renamed"
+    assert response.json()["name"] == "renamed"
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["outputs"] == {"answer": 42}
 
 
 async def test_update_session_rejects_system_prompt(

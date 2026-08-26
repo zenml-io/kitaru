@@ -39,7 +39,11 @@ from kitaru.api_models.v1.replay_config import (
     ReplayOverride,
     ToolPolicy,
 )
-from kitaru.api_models.v1.session import SessionListParams, SessionResponse
+from kitaru.api_models.v1.session import (
+    SessionDetailResponse,
+    SessionListParams,
+    SessionResponse,
+)
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import KitaruClientError, NotFoundError
@@ -134,7 +138,7 @@ class KitaruClient:
         """
         return self._api_client.agents.iter()
 
-    async def get_session(self, session_id: uuid.UUID) -> SessionResponse:
+    async def get_session(self, session_id: uuid.UUID) -> SessionDetailResponse:
         """Get a session by id.
 
         Args:

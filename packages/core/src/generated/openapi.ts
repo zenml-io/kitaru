@@ -6925,6 +6925,147 @@ export interface components {
             status?: components["schemas"]["SessionStatus"] | null;
         };
         /**
+         * SessionDetailResponse
+         * @description Session detail response.
+         */
+        SessionDetailResponse: {
+            /**
+             * Adapter Version
+             * @description Recording adapter version.
+             */
+            adapter_version?: string | null;
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the session belongs to.
+             */
+            agent_id: string;
+            /**
+             * Agent Version Id
+             * @description Agent version recorded for the session.
+             */
+            agent_version_id?: string | null;
+            /**
+             * Cost
+             * @description Total cost.
+             */
+            cost?: string | null;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Ended At
+             * @description Time the session ended.
+             */
+            ended_at?: string | null;
+            /**
+             * Error
+             * @description Error from a failed session.
+             */
+            error?: string | null;
+            /**
+             * External Id
+             * @description Id from the source system.
+             */
+            external_id?: string | null;
+            /**
+             * Framework
+             * @description Agent framework used.
+             */
+            framework?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Session id.
+             */
+            id: string;
+            /**
+             * Imported From
+             * @description Source system the session was imported from.
+             */
+            imported_from?: string | null;
+            /**
+             * Inputs
+             * @description Session inputs.
+             */
+            inputs: unknown;
+            /**
+             * Llm Call Count
+             * @description Number of LLM call nodes.
+             */
+            llm_call_count: number;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Session name.
+             */
+            name?: string | null;
+            /**
+             * Number
+             * @description Session number within the agent.
+             */
+            number: number;
+            /** @description How the session came to exist. */
+            origin: components["schemas"]["SessionOrigin"];
+            /**
+             * Outputs
+             * @description Session outputs.
+             */
+            outputs: unknown;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Started At
+             * @description Time the session started.
+             */
+            started_at?: string | null;
+            status: components["schemas"]["SessionStatus"];
+            /**
+             * Task Id
+             * @description Task the session was produced by.
+             */
+            task_id?: string | null;
+            /** @description Total token usage. */
+            tokens?: components["schemas"]["TokenUsage"] | null;
+            /**
+             * Tool Call Count
+             * @description Number of tool call nodes.
+             */
+            tool_call_count: number;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * SessionDetailWithEvaluationsResponse
+         * @description Session detail with evaluations response.
+         */
+        SessionDetailWithEvaluationsResponse: {
+            /**
+             * Evaluations
+             * @description Every evaluation of the session, newest first.
+             */
+            evaluations: components["schemas"]["EvaluationResponse"][];
+            /** @description Session. */
+            session: components["schemas"]["SessionDetailResponse"];
+        };
+        /**
          * SessionEvaluationsRequest
          * @description Session evaluations request.
          */
@@ -7315,11 +7456,6 @@ export interface components {
              */
             imported_from?: string | null;
             /**
-             * Inputs
-             * @description Session inputs.
-             */
-            inputs: unknown;
-            /**
              * Llm Call Count
              * @description Number of LLM call nodes.
              */
@@ -7343,11 +7479,6 @@ export interface components {
             number: number;
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
-            /**
-             * Outputs
-             * @description Session outputs.
-             */
-            outputs: unknown;
             /**
              * Owner Id
              * Format: uuid
@@ -7466,7 +7597,7 @@ export interface components {
              */
             nodes: components["schemas"]["SessionNodeResponse"][];
             /** @description Session. */
-            session: components["schemas"]["SessionResponse"];
+            session: components["schemas"]["SessionDetailResponse"];
         };
         /**
          * StaticCase
@@ -12011,7 +12142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionResponse"];
+                    "application/json": components["schemas"]["SessionDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12718,7 +12849,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionWithEvaluationsResponse"];
+                    "application/json": components["schemas"]["SessionDetailWithEvaluationsResponse"];
                 };
             };
             /** @description Validation Error */

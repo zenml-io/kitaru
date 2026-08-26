@@ -32,6 +32,7 @@ from kitaru.api_models.v1.ui import (
     ReplayEvaluationValues,
     SampleDataCreateRequest,
     SampleDataResponse,
+    SessionDetailWithEvaluationsResponse,
     SessionWithEvaluationsResponse,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -46,6 +47,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.adapters.rest.mapping.evaluations import evaluation_to_response
 from kitaru.server.adapters.rest.mapping.sessions import (
     session_list_params_to_filter,
+    session_to_detail_response,
     session_to_response,
 )
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
@@ -208,7 +210,7 @@ async def get_session_with_evaluations(
     session_service: Annotated[SessionService, Depends(get_session_service)],
     evaluation_service: Annotated[EvaluationService, Depends(get_evaluation_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
-) -> SessionWithEvaluationsResponse:
+) -> SessionDetailWithEvaluationsResponse:
     """Get a session by id, with every evaluation of the session.
 
     Clients observe HTTP 200 on success and 404 when no session has this
@@ -227,8 +229,8 @@ async def get_session_with_evaluations(
     evaluations = await _load_session_evaluations(
         evaluation_service, [session.id], actor
     )
-    return SessionWithEvaluationsResponse(
-        session=session_to_response(session),
+    return SessionDetailWithEvaluationsResponse(
+        session=session_to_detail_response(session),
         evaluations=[evaluation_to_response(item) for item in evaluations[session.id]],
     )
 

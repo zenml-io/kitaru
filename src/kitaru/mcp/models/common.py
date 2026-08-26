@@ -25,7 +25,7 @@ from kitaru.api_models.v1.investigation import (
 )
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.replay import ReplayResponse
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.api_models.v1.tag import TagLinkResponse, TagResourceType, TagResponse
 from kitaru.api_models.v1.task import TaskResponse
@@ -129,7 +129,8 @@ class _MCPJob(JobResponse):
 
 
 ActivityItem = (
-    SessionResponse
+    SessionDetailResponse
+    | SessionResponse
     | ReplayResponse
     | EvaluationResponse
     | ExperimentRunResponse

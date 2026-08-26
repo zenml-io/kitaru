@@ -17,7 +17,7 @@ from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse
 from kitaru.api_models.v1.tag import TagResponse
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
@@ -88,13 +88,13 @@ class InvalidResponseClient:
         self.get_calls: list[uuid.UUID] = []
         self.sessions = SimpleNamespace(list=self._list_sessions, get=self._get)
 
-    async def _list_sessions(self, params: object) -> Page[SessionResponse]:
+    async def _list_sessions(self, params: object) -> Page[SessionDetailResponse]:
         self.list_calls.append(params)
         return Page(items=[], next_cursor=None)
 
-    async def _get(self, item_id: uuid.UUID) -> SessionResponse:
+    async def _get(self, item_id: uuid.UUID) -> SessionDetailResponse:
         self.get_calls.append(item_id)
-        return SessionResponse.model_validate({"id": str(item_id)})
+        return SessionDetailResponse.model_validate({"id": str(item_id)})
 
     async def close(self) -> None:
         self.closed += 1
@@ -113,11 +113,11 @@ class FakeClient:
             list_sessions=self._list_investigation_sessions
         )
 
-    async def _list_sessions(self, params: object) -> Page[SessionResponse]:
+    async def _list_sessions(self, params: object) -> Page[SessionDetailResponse]:
         self.list_calls.append(params)
         return Page(items=[_get_session()], next_cursor="opaque")
 
-    async def _get(self, _id: uuid.UUID) -> SessionResponse:
+    async def _get(self, _id: uuid.UUID) -> SessionDetailResponse:
         self.get_calls.append(_id)
         return _get_session(_id)
 
@@ -186,9 +186,9 @@ class RegistryClient:
         return Page(items=[], next_cursor=None)
 
 
-def _get_session(session_id: uuid.UUID | None = None) -> SessionResponse:
+def _get_session(session_id: uuid.UUID | None = None) -> SessionDetailResponse:
     now = datetime.now(UTC)
-    return SessionResponse(
+    return SessionDetailResponse(
         id=session_id or uuid.uuid4(),
         owner_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),

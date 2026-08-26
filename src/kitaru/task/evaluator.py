@@ -21,7 +21,7 @@ from typing import Any
 from pydantic import BaseModel
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.api_models.v1.task import EvaluationTaskDetails, ScriptPluginSpec
 from kitaru.client.api_client import KitaruAPIClient
@@ -47,7 +47,7 @@ class EvaluationError(Exception):
 class SessionView(BaseModel):
     """Session view."""
 
-    session: SessionResponse
+    session: SessionDetailResponse
     nodes: list[SessionNodeResponse]
 
 

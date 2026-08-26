@@ -1,6 +1,7 @@
 import type { HttpMethod } from "./transport.js";
 import type {
   ReplayResponse,
+  SessionDetailResponse,
   SessionNodeResponse,
   SessionResponse,
   TaskSpecResponse,
@@ -95,6 +96,15 @@ export function validateSession(
   requireId(value, "id", method, path, status);
   requireDiscriminator(value, "origin", SESSION_ORIGINS, method, path, status);
   requireDiscriminator(value, "status", SESSION_STATUSES, method, path, status);
+}
+
+export function validateSessionDetail(
+  value: unknown,
+  method: HttpMethod,
+  path: string,
+  status: number,
+): asserts value is SessionDetailResponse {
+  validateSession(value, method, path, status);
 }
 
 export function validateNode(

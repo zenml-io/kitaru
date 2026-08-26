@@ -82,6 +82,8 @@ export type ReplaySpec = ReplayResponse;
 export type ServerInfoResponse = components["schemas"]["ServerInfoResponse"];
 export type SessionCreateRequest =
   components["schemas"]["SessionCreateRequest"];
+export type SessionDetailResponse =
+  components["schemas"]["SessionDetailResponse"];
 export type SessionNodeBatchRequest =
   components["schemas"]["SessionNodeBatchRequest"];
 export type SessionNodeResponse = components["schemas"]["SessionNodeResponse"];

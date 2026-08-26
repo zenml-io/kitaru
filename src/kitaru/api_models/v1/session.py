@@ -141,8 +141,6 @@ class SessionResponse(OwnedResponseModel):
     origin: SessionOrigin = Field(description="How the session came to exist.")
     status: SessionStatus = Field(description="Session status.")
     name: str | None = Field(default=None, description="Session name.")
-    inputs: Any = Field(description="Session inputs.")
-    outputs: Any = Field(description="Session outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
     started_at: datetime | None = Field(
         default=None, description="Time the session started."
@@ -165,3 +163,10 @@ class SessionResponse(OwnedResponseModel):
     tokens: TokenUsage | None = Field(default=None, description="Total token usage.")
     llm_call_count: int = Field(description="Number of LLM call nodes.")
     tool_call_count: int = Field(description="Number of tool call nodes.")
+
+
+class SessionDetailResponse(SessionResponse):
+    """Session detail response."""
+
+    inputs: Any = Field(description="Session inputs.")
+    outputs: Any = Field(description="Session outputs.")

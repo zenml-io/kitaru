@@ -4,6 +4,7 @@ import type {
   ListParams,
   Page,
   SessionCreateRequest,
+  SessionDetailResponse,
   SessionNodeBatchRequest,
   SessionNodeListParams,
   SessionNodeResponse,
@@ -11,7 +12,12 @@ import type {
   SessionUpdateRequest,
   SessionWithNodesResponse,
 } from "../types.js";
-import { validateNode, validateNodes, validateSession } from "../validators.js";
+import {
+  validateNode,
+  validateNodes,
+  validateSession,
+  validateSessionDetail,
+} from "../validators.js";
 import { createPageValidator, validateSessionWithNodes } from "./internal.js";
 import {
   encodeListParams,
@@ -54,12 +60,12 @@ export class SessionsResource {
   async get(
     sessionId: string,
     options: ResourceRequestOptions = {},
-  ): Promise<SessionResponse> {
+  ): Promise<SessionDetailResponse> {
     return this.#transport.request({
       method: "GET",
       path: `/api/v1/sessions/${encodeURIComponent(sessionId)}`,
       signal: options.signal,
-      validate: validateSession,
+      validate: validateSessionDetail,
     });
   }
 

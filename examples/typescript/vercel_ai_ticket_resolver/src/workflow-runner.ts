@@ -22,7 +22,7 @@ import type {
   KitaruClient,
   KitaruEnvironmentVariables,
   ReplayResponse,
-  SessionResponse,
+  SessionDetailResponse,
 } from "@zenml-io/kitaru";
 import {
   createKitaruClient,
@@ -552,7 +552,7 @@ async function ensureAgentVersion(
 
 export function validateBaselineSession(
   value: Pick<
-    SessionResponse,
+    SessionDetailResponse,
     "agent_id" | "agent_version_id" | "id" | "inputs" | "status"
   >,
   expected: {
