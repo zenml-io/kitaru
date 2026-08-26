@@ -26,6 +26,7 @@ import pytest
 from agents import (
     Agent,
     AgentHooks,
+    FunctionTool,
     MaxTurnsExceeded,
     ModelResponse,
     RunConfig,
@@ -38,6 +39,7 @@ from agents import (
     RunState,
     Session,
     Usage,
+    UserError,
 )
 from agents.items import ToolCallItem, ToolCallOutputItem
 from openai.types.responses import ResponseFunctionToolCall
@@ -45,19 +47,28 @@ from packaging.version import Version
 
 import kitaru_openai_agents.recording as recording_module
 import kitaru_openai_agents.runner as runner_module
-from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
+from kitaru.api_models.v1.replay import (
+    ReplayResponse,
+    ReplayStatus,
+    ToolLookupMatch,
+    ToolLookupResponse,
+)
 from kitaru.api_models.v1.replay_config import (
+    HistoryConfig,
+    HistoryScope,
     PassthroughConfig,
     ReplayOverride,
     ToolPolicy,
+    ToolPolicyOnMiss,
 )
 from kitaru.api_models.v1.session import SessionStatus
-from kitaru.api_models.v1.session_node import NodeType
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import AgentTaskDetails
 from kitaru_openai_agents import (
     KitaruRecordingError,
     KitaruRunner,
     SessionObserver,
+    ToolPolicyError,
     UnsupportedInterruptionError,
 )
 
@@ -88,18 +99,27 @@ class _RunnerFakeTasks:
 
 
 class _RunnerFakeReplays:
+    def __init__(self, client: "_RunnerFakeClient") -> None:
+        self._client = client
+
     async def get(self, replay_id: uuid.UUID) -> Any:
         return _RunnerFakeClient.replay
+
+    async def tool_lookup(self, replay_id: uuid.UUID, request: Any) -> Any:
+        self._client.tool_lookups.append(request)
+        return _RunnerFakeClient.lookup_response
 
 
 class _RunnerFakeClient:
     instances: ClassVar[list["_RunnerFakeClient"]] = []
     replay: ClassVar[ReplayResponse]
+    lookup_response: ClassVar[ToolLookupResponse]
 
     def __init__(self) -> None:
         self.sessions = _RunnerFakeSessions()
         self.tasks = _RunnerFakeTasks()
-        self.replays = _RunnerFakeReplays()
+        self.replays = _RunnerFakeReplays(self)
+        self.tool_lookups: list[Any] = []
         self.closed = False
         type(self).instances.append(self)
 
@@ -111,10 +131,15 @@ class _RunnerFakeClient:
 def _patch_kitaru_client(monkeypatch: pytest.MonkeyPatch) -> None:
     _RunnerFakeClient.instances.clear()
     _RunnerFakeClient.replay = _replay()
+    _RunnerFakeClient.lookup_response = ToolLookupResponse(match=None)
     monkeypatch.setattr(recording_module, "KitaruAPIClient", _RunnerFakeClient)
 
 
-def _replay(*, override: ReplayOverride | None = None) -> ReplayResponse:
+def _replay(
+    *,
+    override: ReplayOverride | None = None,
+    tool_policy: ToolPolicy | None = None,
+) -> ReplayResponse:
     now = datetime.now(UTC)
     return ReplayResponse(
         id=uuid.uuid4(),
@@ -123,7 +148,7 @@ def _replay(*, override: ReplayOverride | None = None) -> ReplayResponse:
         baseline_session_id=uuid.uuid4(),
         result_session_id=None,
         override=override,
-        tool_policy=ToolPolicy(default=PassthroughConfig(), tools={}),
+        tool_policy=tool_policy or ToolPolicy(default=PassthroughConfig(), tools={}),
         evaluators=[],
         evaluate_baselines=False,
         status=ReplayStatus.PENDING,
@@ -266,6 +291,71 @@ async def test_run_returns_a_native_result_from_public_model(
 
     assert result.final_output == "deterministic result"
     assert result.last_agent is deterministic_agent
+
+
+async def test_runner_wraps_history_policy_errors_as_user_errors(
+    deterministic_model: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_calls: list[str] = []
+
+    async def invoke(_context: Any, arguments: str) -> str:
+        live_calls.append(arguments)
+        return "live result"
+
+    tool = FunctionTool(
+        name="weather",
+        description="Look up weather.",
+        params_json_schema={"type": "object", "properties": {}},
+        on_invoke_tool=invoke,
+    )
+    agent = Agent[None](name="test", model=deterministic_model, tools=[tool])
+    deterministic_model.get_response = AsyncMock(
+        return_value=ModelResponse(
+            output=[
+                ResponseFunctionToolCall(
+                    arguments='{"city":"Paris"}',
+                    call_id="call-1",
+                    name="weather",
+                    type="function_call",
+                    id="item-1",
+                    status="completed",
+                )
+            ],
+            usage=Usage(),
+            response_id="response-1",
+        )
+    )
+    _RunnerFakeClient.replay = _replay(
+        tool_policy=ToolPolicy(
+            default=PassthroughConfig(),
+            tools={
+                "weather": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            },
+        )
+    )
+    _RunnerFakeClient.lookup_response = ToolLookupResponse(
+        match=ToolLookupMatch(
+            status=NodeStatus.FAILED,
+            result=None,
+            error="recorded failure",
+        )
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(_RunnerFakeClient.replay.id))
+
+    with pytest.raises(UserError, match="recorded failure") as raised:
+        await KitaruRunner(agent_id=uuid.uuid4()).run(
+            agent,
+            "hello",
+            run_config=RunConfig(tracing_disabled=True),
+        )
+
+    assert isinstance(raised.value.__cause__, ToolPolicyError)
+    assert live_calls == []
+    assert _RunnerFakeClient.instances[0].tool_lookups[0].occurrence == 0
 
 
 async def test_native_agents_failure_records_partial_model_and_tool_evidence(

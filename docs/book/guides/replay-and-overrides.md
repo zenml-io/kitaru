@@ -34,6 +34,8 @@ Use `kitaru job get <job-id> --tasks` for task errors and `kitaru job cancel <jo
 
 {% hint style="warning" %} The SDK's automatic retries (timeouts, dropped connections, 5xx) are safe: they reuse the same idempotency key, so a retried create settles as at most one replay. Manually re-running `kitaru replay create` after an ambiguous failure is not, since each invocation mints its own key. Check `kitaru replay list` before retrying by hand, or the manual retry may create a duplicate replay and job. Omitting `--tool-policy` uses the server default and may execute live tools. {% endhint %}
 
+{% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
+
 ## The three-session discipline
 
 Every trustworthy comparison involves three sessions:

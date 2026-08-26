@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-openai-agents"
-version = "0.1.0"
+version = "0.2.0"
 description = "OpenAI Agents SDK recording adapter for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"
@@ -23,7 +23,7 @@ classifiers = [
 ]
 keywords = ["ai-agents", "kitaru", "openai-agents", "recording", "replay"]
 dependencies = [
-    "kitaru>=0.22.0",
+    "kitaru>=0.22.3",
     "openai-agents>=0.19.3,<0.20",
 ]
 

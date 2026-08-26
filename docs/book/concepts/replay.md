@@ -28,6 +28,8 @@ Creation returns immediately with the replay and its job. Use `kitaru job watch 
 
 {% hint style="warning" %} `kitaru replay create` is not idempotent. If the command fails after the server accepted it, retrying can create another replay and job. Run `kitaru replay list` and check for the first replay before retrying. Omitting `--tool-policy` uses the server default, which may execute live tools. {% endhint %}
 
+{% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
+
 ```python
 import asyncio
 from kitaru.client import KitaruAPIClient

@@ -97,12 +97,17 @@ Replay selection is worker-managed through `KITARU_REPLAY_ID`. `KitaruRunner.run
 
 For the selected replay, the adapter can replace the root input, starting-agent instructions, run-level model, and model settings without mutating the caller's objects.
 
-Direct `FunctionTool` replay supports two policies:
+Direct `FunctionTool` replay supports three named policies:
 
 - **Passthrough:** call the original tool. This is the default.
 - **Static:** return the recorded or configured static value without calling the original tool.
+- **History:** return a recorded result with matching canonical JSON arguments without calling the original tool.
 
-Static substitution must match one ordinary, direct, enabled, non-approval `FunctionTool` on the starting agent. Unsupported, ambiguous, duplicate, or unmatched tool policies fail before Kitaru creates a session or OpenAI calls the model. History, LLM, hosted, MCP, programmatic, agent-as-tool, handoff-target, and unknown tool substitutions are rejected.
+The default policy must remain passthrough, so configure history for each named tool you want to replay. A named static or history substitution must match one ordinary, direct, enabled, non-approval `FunctionTool` on the starting agent. Unsupported, ambiguous, duplicate, or unmatched tool policies fail before Kitaru creates a session or OpenAI calls the model. LLM, hosted, MCP, programmatic, agent-as-tool, handoff-target, and unknown tool substitutions are rejected.
+
+With baseline history scope, repeated calls with identical arguments consume matching recorded results in invocation order. Concurrent identical calls receive distinct occurrences, but the adapter does not promise that callback scheduling reproduces the model response's source order. Cohort-version and agent history scopes use the newest matching result for every call.
+
+Completed history matches replay their result, including `null`. A matched recorded failure raises `ToolPolicyError` inside the tool callback and does not execute the live tool. During a normal `KitaruRunner` run, the OpenAI Agents SDK exposes this as `agents.exceptions.UserError` with the `ToolPolicyError` in `__cause__`. History also fails closed when arguments are not strict canonical JSON, when a completed result contains Kitaru truncation metadata, when the target tool has an SDK timeout, or when the server predates the explicit match contract introduced in Kitaru 0.22.3. Sessions recorded by `kitaru-openai-agents` 0.1.x stored function arguments in a different shape and may not match calls made by 0.2.0; record a new baseline when you need history replay.
 
 ## Deliberate exclusions
 

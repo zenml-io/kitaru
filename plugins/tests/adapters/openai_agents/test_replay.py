@@ -32,9 +32,16 @@ from agents import (
     TResponseInputItem,
     tool_namespace,
 )
+from agents.items import ToolCallItem
 from agents.run_config import CallModelData, ModelInputData
+from openai.types.responses import ResponseFunctionToolCall
 
-from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
+from kitaru.api_models.v1.replay import (
+    ReplayResponse,
+    ReplayStatus,
+    ToolLookupMatch,
+    ToolLookupResponse,
+)
 from kitaru.api_models.v1.replay_config import (
     HistoryConfig,
     HistoryScope,
@@ -47,6 +54,10 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicy,
     ToolPolicyOnMiss,
 )
+from kitaru.api_models.v1.session_node import NodeStatus
+from kitaru.cache_keys import compute_tool_cache_key
+from kitaru.client import KitaruAPIClient
+from kitaru_openai_agents.recording import _capture_tool_input
 from kitaru_openai_agents.replay import (
     ToolPolicyError,
     ToolPolicyMissError,
@@ -111,6 +122,48 @@ def _static(
 
 async def _invoke(tool: FunctionTool, arguments: dict[str, Any]) -> Any:
     return await tool.on_invoke_tool(cast(Any, None), json.dumps(arguments))
+
+
+class _FakeReplays:
+    def __init__(
+        self,
+        responses: list[ToolLookupResponse],
+        *,
+        yield_before_response: bool = False,
+    ) -> None:
+        self.responses = responses
+        self.lookups: list[tuple[uuid.UUID, Any]] = []
+        self.yield_before_response = yield_before_response
+
+    async def tool_lookup(self, replay_id: uuid.UUID, request: Any) -> Any:
+        self.lookups.append((replay_id, request))
+        if self.yield_before_response:
+            await asyncio.sleep(0)
+        return self.responses.pop(0)
+
+
+class _FakeClient:
+    def __init__(
+        self,
+        responses: list[ToolLookupResponse],
+        *,
+        yield_before_response: bool = False,
+    ) -> None:
+        self.replays = _FakeReplays(
+            responses,
+            yield_before_response=yield_before_response,
+        )
+
+
+def _lookup_response(
+    result: Any = None,
+    *,
+    status: NodeStatus = NodeStatus.COMPLETED,
+    error: str | None = None,
+) -> ToolLookupResponse:
+    return ToolLookupResponse(
+        match=ToolLookupMatch(result=result, status=status, error=error)
+    )
 
 
 def test_preserves_native_string_and_validated_item_list() -> None:
@@ -393,15 +446,7 @@ def test_rejects_non_passthrough_default() -> None:
         )
 
 
-@pytest.mark.parametrize(
-    "policy",
-    [
-        HistoryConfig(scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL),
-        LLMConfig(model="model"),
-    ],
-    ids=["history", "llm"],
-)
-def test_rejects_unsupported_tool_policy(policy: Any) -> None:
+def test_rejects_unsupported_tool_policy() -> None:
     calls: list[str] = []
     agent = Agent[None](name="test", tools=[_function_tool(calls)])
 
@@ -410,10 +455,372 @@ def test_rejects_unsupported_tool_policy(policy: Any) -> None:
             agent,
             "input",
             None,
-            _replay(tools={"lookup": policy}),
+            _replay(tools={"lookup": LLMConfig(model="model")}),
         )
 
     assert calls == []
+
+
+async def test_history_hit_uses_canonical_arguments_and_skips_live_tool() -> None:
+    calls: list[str] = []
+    replay = _replay(
+        tools={
+            "lookup": HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.FAIL,
+            )
+        }
+    )
+    client = _FakeClient([_lookup_response({"weather": "sunny"})])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        replay,
+        client=cast(KitaruAPIClient, client),
+    )
+
+    result = await _invoke(
+        cast(FunctionTool, prepared.starting_agent.tools[0]),
+        {"units": "metric", "city": "Paris"},
+    )
+
+    assert result == {"weather": "sunny"}
+    assert calls == []
+    replay_id, request = client.replays.lookups[0]
+    assert replay_id == replay.id
+    assert request.tool_name == "lookup"
+    assert request.occurrence == 0
+    assert len(request.cache_key) == 64
+
+
+async def test_baseline_history_increments_occurrence_only_after_a_hit() -> None:
+    calls: list[str] = []
+    client = _FakeClient(
+        [
+            _lookup_response("first"),
+            _lookup_response("second"),
+            _lookup_response("third"),
+            ToolLookupResponse(match=None),
+            ToolLookupResponse(match=None),
+        ]
+    )
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.ERROR_RESULT,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+    tool = cast(FunctionTool, prepared.starting_agent.tools[0])
+
+    assert await _invoke(tool, {"city": "Paris"}) == "first"
+    assert await _invoke(tool, {"city": "Paris"}) == "second"
+    assert await _invoke(tool, {"city": "Paris"}) == "third"
+    assert await _invoke(tool, {"city": "Paris"}) == {
+        "error": "No history result for tool 'lookup'"
+    }
+    assert await _invoke(tool, {"city": "Paris"}) == {
+        "error": "No history result for tool 'lookup'"
+    }
+    assert [request.occurrence for _, request in client.replays.lookups] == [
+        0,
+        1,
+        2,
+        3,
+        3,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("on_miss", "expected", "raises"),
+    [
+        (ToolPolicyOnMiss.PASSTHROUGH, "real result", None),
+        (
+            ToolPolicyOnMiss.ERROR_RESULT,
+            {"error": "No history result for tool 'lookup'"},
+            None,
+        ),
+        (ToolPolicyOnMiss.FAIL, None, ToolPolicyMissError),
+    ],
+)
+async def test_history_miss_behavior(
+    on_miss: ToolPolicyOnMiss,
+    expected: Any,
+    raises: type[BaseException] | None,
+) -> None:
+    calls: list[str] = []
+    client = _FakeClient([ToolLookupResponse(match=None)])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.AGENT,
+                    on_miss=on_miss,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+    tool = cast(FunctionTool, prepared.starting_agent.tools[0])
+
+    if raises is not None:
+        with pytest.raises(raises, match="No history result"):
+            await _invoke(tool, {"city": "Paris"})
+    else:
+        assert await _invoke(tool, {"city": "Paris"}) == expected
+    assert client.replays.lookups[0][1].occurrence is None
+    assert len(calls) == (1 if on_miss is ToolPolicyOnMiss.PASSTHROUGH else 0)
+
+
+async def test_history_rejects_invalid_arguments_and_lossy_results(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str] = []
+    client = _FakeClient(
+        [_lookup_response({"_kitaru_truncated": {"reason": "max_depth"}})]
+    )
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+    tool = cast(FunctionTool, prepared.starting_agent.tools[0])
+
+    with pytest.raises(ToolPolicyError, match="Invalid JSON arguments"):
+        await tool.on_invoke_tool(cast(Any, None), "{")
+
+    def raise_recursion(_: str) -> Any:
+        raise RecursionError
+
+    with monkeypatch.context() as patch:
+        patch.setattr(
+            "kitaru_openai_agents.replay.parse_tool_arguments",
+            raise_recursion,
+        )
+        with pytest.raises(ToolPolicyError, match="Invalid JSON arguments"):
+            await tool.on_invoke_tool(cast(Any, None), "deep JSON")
+    with pytest.raises(ToolPolicyError, match="cannot be replayed safely"):
+        await _invoke(tool, {"city": "Paris"})
+    assert len(client.replays.lookups) == 1
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        {"_kitaru_truncated": False, "value": 1},
+        {"_kitaru_truncated": {"reason": "application_value"}},
+        {"_kitaru_truncated": {"reason": "max_depth", "source": "user"}},
+        {"_kitaru_unsupported_type": False},
+        {"_kitaru_unsupported_type": "application_value", "value": 1},
+    ],
+)
+async def test_history_accepts_user_fields_named_like_capture_metadata(
+    result: Any,
+) -> None:
+    client = _FakeClient([_lookup_response(result)])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool([])]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+
+    assert (
+        await _invoke(
+            cast(FunctionTool, prepared.starting_agent.tools[0]),
+            {"city": "Paris"},
+        )
+        == result
+    )
+
+
+async def test_concurrent_identical_history_calls_use_distinct_occurrences() -> None:
+    calls: list[str] = []
+    client = _FakeClient(
+        [
+            _lookup_response("first"),
+            _lookup_response("second"),
+        ],
+        yield_before_response=True,
+    )
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+    tool = cast(FunctionTool, prepared.starting_agent.tools[0])
+
+    assert await asyncio.gather(
+        _invoke(tool, {"city": "Paris"}),
+        _invoke(tool, {"city": "Paris"}),
+    ) == ["first", "second"]
+    assert [request.occurrence for _, request in client.replays.lookups] == [0, 1]
+
+
+async def test_recorded_tool_input_produces_the_replay_lookup_cache_key() -> None:
+    raw_call = ResponseFunctionToolCall(
+        arguments='{"units":"metric","city":"Paris"}',
+        call_id="call-1",
+        name="lookup",
+        type="function_call",
+        id="item-1",
+        status="completed",
+    )
+    recorded_input, _ = _capture_tool_input(
+        ToolCallItem(agent=Agent[None](name="test"), raw_item=raw_call)
+    )
+    client = _FakeClient([_lookup_response("recorded result")])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool([])]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.FAIL,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+
+    result = await _invoke(
+        cast(FunctionTool, prepared.starting_agent.tools[0]),
+        {"city": "Paris", "units": "metric"},
+    )
+
+    assert result == "recorded result"
+    assert client.replays.lookups[0][1].cache_key == compute_tool_cache_key(
+        "lookup", recorded_input
+    )
+
+
+async def test_history_replays_null_and_consumes_recorded_failures() -> None:
+    calls: list[str] = []
+    client = _FakeClient(
+        [
+            _lookup_response(None),
+            _lookup_response(
+                status=NodeStatus.FAILED,
+                error="recorded failure",
+            ),
+            _lookup_response("third"),
+        ]
+    )
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.BASELINE,
+                    on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+    tool = cast(FunctionTool, prepared.starting_agent.tools[0])
+
+    assert await _invoke(tool, {"city": "Paris"}) is None
+    with pytest.raises(ToolPolicyError, match="recorded failure"):
+        await _invoke(tool, {"city": "Paris"})
+    assert await _invoke(tool, {"city": "Paris"}) == "third"
+    assert [request.occurrence for _, request in client.replays.lookups] == [0, 1, 2]
+    assert calls == []
+
+
+async def test_history_rejects_legacy_lookup_response() -> None:
+    calls: list[str] = []
+    client = _FakeClient([ToolLookupResponse()])
+    prepared = prepare_replay(
+        Agent[None](name="test", tools=[_function_tool(calls)]),
+        "input",
+        None,
+        _replay(
+            tools={
+                "lookup": HistoryConfig(
+                    scope=HistoryScope.AGENT,
+                    on_miss=ToolPolicyOnMiss.PASSTHROUGH,
+                )
+            }
+        ),
+        client=cast(KitaruAPIClient, client),
+    )
+
+    with pytest.raises(ToolPolicyError, match="does not include 'match'"):
+        await _invoke(
+            cast(FunctionTool, prepared.starting_agent.tools[0]),
+            {"city": "Paris"},
+        )
+    assert calls == []
+
+
+def test_history_requires_client_and_rejects_tool_timeout() -> None:
+    policy = HistoryConfig(
+        scope=HistoryScope.BASELINE,
+        on_miss=ToolPolicyOnMiss.FAIL,
+    )
+    calls: list[str] = []
+    with pytest.raises(ToolPolicyError, match="requires a Kitaru client"):
+        prepare_replay(
+            Agent[None](name="test", tools=[_function_tool(calls)]),
+            "input",
+            None,
+            _replay(tools={"lookup": policy}),
+        )
+
+    with pytest.raises(ToolPolicyError, match="timeout"):
+        prepare_replay(
+            Agent[None](
+                name="test",
+                tools=[_function_tool(calls, timeout_seconds=1.0)],
+            ),
+            "input",
+            None,
+            _replay(tools={"lookup": policy}),
+            client=cast(KitaruAPIClient, _FakeClient([])),
+        )
 
 
 def test_rejects_unknown_and_duplicate_targets() -> None:

@@ -679,6 +679,7 @@ async def test_reconciles_tools_hosted_calls_and_handoffs_by_public_ids() -> Non
     ]
     tool = nodes[2]
     assert tool.external_id == "call-1"
+    assert tool.inputs == {"city": "Paris"}
     assert tool.outputs == {"forecast": "sunny"}
     assert nodes[3].external_id == "hosted-1"
     assert nodes[4].subagent_id == "target"
@@ -690,6 +691,94 @@ async def test_reconciles_tools_hosted_calls_and_handoffs_by_public_ids() -> Non
     for node in nodes[1:5]:
         assert node.started_at is None
         assert node.ended_at is None
+
+
+def test_records_user_fields_named_like_capture_metadata() -> None:
+    agent = Agent(name="source")
+    inputs, attributes = recording_module._capture_tool_input(
+        ToolCallItem(
+            agent=agent,
+            raw_item=ResponseFunctionToolCall(
+                arguments=(
+                    '{"_kitaru_truncated":false,'
+                    '"_kitaru_unsupported_type":"application_value",'
+                    '"value":1}'
+                ),
+                call_id="call-1",
+                name="lookup",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            ),
+        )
+    )
+
+    assert inputs == {
+        "_kitaru_truncated": False,
+        "_kitaru_unsupported_type": "application_value",
+        "value": 1,
+    }
+    assert attributes == {}
+
+
+def test_lone_surrogate_tool_argument_is_recorded_as_capture_loss() -> None:
+    agent = Agent(name="source")
+    inputs, attributes = recording_module._capture_tool_input(
+        ToolCallItem(
+            agent=agent,
+            raw_item=ResponseFunctionToolCall(
+                arguments=r'{"value":"\ud800"}',
+                call_id="call-1",
+                name="lookup",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            ),
+        )
+    )
+
+    assert inputs is None
+    assert attributes == {"kitaru.tool_arguments": "capture_loss"}
+
+
+def test_overflowed_tool_argument_is_recorded_as_capture_loss() -> None:
+    agent = Agent(name="source")
+    inputs, attributes = recording_module._capture_tool_input(
+        ToolCallItem(
+            agent=agent,
+            raw_item=ResponseFunctionToolCall(
+                arguments='{"value":1e400}',
+                call_id="call-1",
+                name="lookup",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            ),
+        )
+    )
+
+    assert inputs is None
+    assert attributes == {"kitaru.tool_arguments": "capture_loss"}
+
+
+def test_deeply_nested_tool_argument_is_recorded_as_capture_loss() -> None:
+    agent = Agent(name="source")
+    inputs, attributes = recording_module._capture_tool_input(
+        ToolCallItem(
+            agent=agent,
+            raw_item=ResponseFunctionToolCall(
+                arguments="[" * 5000 + "0" + "]" * 5000,
+                call_id="call-1",
+                name="lookup",
+                type="function_call",
+                id="item-1",
+                status="completed",
+            ),
+        )
+    )
+
+    assert inputs is None
+    assert attributes == {"kitaru.tool_arguments": "capture_loss"}
 
 
 async def test_same_name_tool_calls_match_outputs_and_parents_by_call_id() -> None:
