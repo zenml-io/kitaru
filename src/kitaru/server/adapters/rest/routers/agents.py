@@ -42,6 +42,7 @@ from kitaru.server.adapters.rest.mapping.agent_versions import (
     run_spec_to_domain,
 )
 from kitaru.server.adapters.rest.mapping.agents import (
+    agent_create_to_command,
     agent_list_params_to_filter,
     agent_to_response,
     agent_update_to_command,
@@ -76,9 +77,7 @@ async def create_agent(
     Returns:
         Created agent.
     """
-    agent = await service.create_agent(
-        name=body.name, description=body.description, actor=actor
-    )
+    agent = await service.create_agent(agent_create_to_command(body), actor)
     return agent_to_response(agent)
 
 

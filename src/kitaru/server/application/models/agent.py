@@ -31,6 +31,13 @@ class AgentFilter(ListFilter):
     }
 
 
+class AgentCreate(FrozenModel):
+    """Agent create command."""
+
+    name: str
+    description: str | None = None
+
+
 class AgentUpdate(FrozenModel):
     """Agent update command."""
 

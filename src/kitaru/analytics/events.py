@@ -36,6 +36,7 @@ class AnalyticsEvent(StrEnum):
     JOB_COMPLETED = "Job Completed"
     PLUGIN_VERSION_REGISTERED = "Plugin Version Registered"
     WORKER_REGISTERED = "Worker Registered"
+    SAMPLE_DATA_LOADED = "Sample Data Loaded"
     ACCOUNT_CREATED = "Account Created"
     USER_ENRICHED = "User Enriched"
 

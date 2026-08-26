@@ -17,8 +17,10 @@ import uuid
 from collections import Counter, defaultdict
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from kitaru.analytics.source import analytics_event_context
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
@@ -28,6 +30,8 @@ from kitaru.api_models.v1.ui import (
     EvaluationStats,
     EvaluationValue,
     ReplayEvaluationValues,
+    SampleDataCreateRequest,
+    SampleDataResponse,
     SessionWithEvaluationsResponse,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -35,6 +39,8 @@ from kitaru.server.adapters.rest.dependencies import (
     get_evaluation_service,
     get_experiment_run_service,
     get_replay_service,
+    get_sample_data_seeder,
+    get_session,
     get_session_service,
 )
 from kitaru.server.adapters.rest.mapping.evaluations import evaluation_to_response
@@ -54,6 +60,7 @@ from kitaru.server.application.services.experiment_run_service import (
     ExperimentRunService,
 )
 from kitaru.server.application.services.replay_service import ReplayService
+from kitaru.server.application.services.sample_data_seeding import SampleDataSeeder
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.filtering import MAX_FILTER_IN_VALUES, FilterCondition
@@ -327,3 +334,36 @@ async def list_experiment_run_evaluation_aggregates(
             )
         )
     return aggregates
+
+
+@router.post("/sample-data", status_code=status.HTTP_201_CREATED)
+async def create_sample_data(
+    seeder: Annotated[SampleDataSeeder, Depends(get_sample_data_seeder)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+    body: SampleDataCreateRequest | None = None,
+) -> SampleDataResponse:
+    """Seed the sample agent and everything recorded under it.
+
+    Clients observe HTTP 201 on success and 409 when the agent name is
+    already registered.
+
+    Args:
+        seeder: Sample data seeder.
+        session: Request-scoped database session.
+        actor: Caller context.
+        body: Sample data create request, None uses the sample data's agent name.
+
+    Returns:
+        Agent the sample data was seeded under.
+    """
+    with analytics_event_context(sample_data=True):
+        agent = await seeder.create_sample_agent(
+            body.agent_name if body is not None else None, actor
+        )
+        # Commit the agent ahead of the seed because session numbers are
+        # allocated on the agent row from a connection of their own, which
+        # cannot see an uncommitted agent.
+        await session.commit()
+        await seeder.seed(agent, actor)
+    return SampleDataResponse(agent_id=agent.id)

@@ -20,9 +20,9 @@ import httpx
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.analytics.source import (
-    AnalyticsAttribution,
     AnalyticsSource,
-    current_attribution,
+    EventContext,
+    current_event_context,
 )
 
 
@@ -98,11 +98,11 @@ async def test_messages_grouped_by_source() -> None:
     requests = record_requests(client)
 
     client.track(uuid.uuid4(), "Test event")
-    token = current_attribution.set(AnalyticsAttribution(source=AnalyticsSource.UI))
+    token = current_event_context.set(EventContext(source=AnalyticsSource.UI))
     try:
         client.track(uuid.uuid4(), "Test event")
     finally:
-        current_attribution.reset(token)
+        current_event_context.reset(token)
     await client.aclose()
 
     assert [request.headers["Source-Context"] for request in requests] == [

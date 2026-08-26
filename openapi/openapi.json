@@ -5413,6 +5413,42 @@
         "title": "RunSpec",
         "type": "object"
       },
+      "SampleDataCreateRequest": {
+        "additionalProperties": false,
+        "description": "Sample data create request.",
+        "properties": {
+          "agent_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent name, None uses the sample data's agent name.",
+            "title": "Agent Name"
+          }
+        },
+        "title": "SampleDataCreateRequest",
+        "type": "object"
+      },
+      "SampleDataResponse": {
+        "description": "Sample data response.",
+        "properties": {
+          "agent_id": {
+            "description": "Agent the sample data was seeded under.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "agent_id"
+        ],
+        "title": "SampleDataResponse",
+        "type": "object"
+      },
       "ScriptPluginSource": {
         "additionalProperties": false,
         "description": "Script plugin source.",
@@ -16179,6 +16215,55 @@
           }
         },
         "summary": "List Experiment Run Evaluation Aggregates",
+        "tags": [
+          "ui"
+        ]
+      }
+    },
+    "/api/v1/ui/sample-data": {
+      "post": {
+        "description": "Seed the sample agent and everything recorded under it.\n\nClients observe HTTP 201 on success and 409 when the agent name is\nalready registered.\n\nArgs:\n    seeder: Sample data seeder.\n    session: Request-scoped database session.\n    actor: Caller context.\n    body: Sample data create request, None uses the sample data's agent name.\n\nReturns:\n    Agent the sample data was seeded under.",
+        "operationId": "create_sample_data_api_v1_ui_sample_data_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/SampleDataCreateRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SampleDataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Sample Data",
         "tags": [
           "ui"
         ]
