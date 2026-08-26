@@ -55,7 +55,7 @@ class SessionRepository(Protocol):
                 version id.
 
         Returns:
-            Stored session with timestamps set.
+            Stored session with timestamps set, without payloads.
         """
         ...
 
@@ -131,8 +131,8 @@ class SessionRepository(Protocol):
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
 
-        Every field of the session is written back, so the session must
-        have been loaded with payloads.
+        The inputs are create-only and never written back. The outputs are
+        written back only when the session's outputs were changed.
 
         Args:
             session: Session with modified fields.
@@ -143,7 +143,8 @@ class SessionRepository(Protocol):
                 already registered.
 
         Returns:
-            Stored session with the updated timestamp renewed.
+            Stored session with the updated timestamp renewed, without
+            payloads.
         """
         ...
 

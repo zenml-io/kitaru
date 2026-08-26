@@ -350,10 +350,8 @@ class SessionService:
         Returns:
             Updated session.
         """
-        # The update below writes every column back, so the payloads are
-        # loaded here.
         session = await self._repository.get(
-            session_id, include_payloads=True, exclusive=True
+            session_id, include_payloads=False, exclusive=True
         )
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
@@ -365,21 +363,21 @@ class SessionService:
                 if command.status is None:
                     raise SessionStatusCannotBeCleared(session_id)
                 target_status = command.status
-            new_outputs = (
-                Payload.from_json(command.outputs)
-                if command.outputs is not None
-                else None
-            )
             session.finish(
                 status=target_status,
-                outputs=new_outputs if "outputs" in fields else session.outputs,
                 output_text_selector=command.output_text_selector
                 if "output_text_selector" in fields
                 else session.output_text_selector,
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
-            if "outputs" in fields and session.outputs is not None:
+            if "outputs" in fields:
+                session.set_outputs(
+                    Payload.from_json(command.outputs)
+                    if command.outputs is not None
+                    else None
+                )
+            if session.outputs_changed and session.outputs is not None:
                 await self._payload_store.offload([session.outputs], session.owner_id)
             if (
                 self._analytics is not None

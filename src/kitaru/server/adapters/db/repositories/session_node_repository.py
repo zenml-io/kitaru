@@ -24,7 +24,6 @@ from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
-from kitaru.server.adapters.db.orm.orm_utils import payload_from_columns
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.session_node import (
     SESSION_NODE_SESSION_ID_FOREIGN_KEY,
@@ -33,7 +32,6 @@ from kitaru.server.adapters.db.orm.session_node import (
 from kitaru.server.adapters.db.pagination import paginate_by_index
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
-from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.session_node import SessionNode
 
@@ -54,15 +52,6 @@ TOOL_LOOKUP_DEFERRED_COLUMNS = (
     SessionNodeORM.inputs,
     SessionNodeORM.attributes,
 )
-
-
-def _lookup_row_to_domain(row: SessionNodeORM) -> SessionNode:
-    """Build a domain node from a lookup row, reading only the outputs columns."""
-    node = row.to_domain(include_payloads=False)
-    node.outputs = payload_from_columns(
-        row.outputs, row.outputs_blob_id, media_type=PayloadMediaType.JSON
-    )
-    return node
 
 
 class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
@@ -86,18 +75,14 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         """
         if not indexes:
             return {}
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_id,
             SessionNodeORM.index.in_(indexes),
         )
-        if not include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
+        statement = statement.options(*(defer(column) for column in deferred))
         rows = (await self._session.scalars(statement)).all()
-        return {
-            row.index: row.to_domain(include_payloads=include_payloads) for row in rows
-        }
+        return {row.index: row.to_domain(deferred_columns=deferred) for row in rows}
 
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
@@ -116,7 +101,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             SessionNotFound: No session has this id.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         if not nodes:
             return []
@@ -137,7 +122,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         await self._flush(
             {SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(session_id)}
         )
-        return [row.to_domain(include_payloads=True) for row in stored_rows]
+        return [row.to_domain(deferred_columns=PAYLOAD_COLUMNS) for row in stored_rows]
 
     async def query(
         self, session_node_filter: SessionNodeFilter
@@ -150,23 +135,18 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Page of matching nodes and the next cursor.
         """
+        deferred = () if session_node_filter.include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_node_filter.session_id
         )
-        if not session_node_filter.include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
+        statement = statement.options(*(defer(column) for column in deferred))
         rows, next_cursor = await paginate_by_index(
             self._session,
             statement,
             session_node_filter,
             index_column=SessionNodeORM.index,
         )
-        return [
-            row.to_domain(include_payloads=session_node_filter.include_payloads)
-            for row in rows
-        ], next_cursor
+        return [row.to_domain(deferred_columns=deferred) for row in rows], next_cursor
 
     async def list_all(
         self, session_id: uuid.UUID, include_payloads: bool
@@ -181,17 +161,15 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Every node of the session.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = (
             select(SessionNodeORM)
             .where(SessionNodeORM.session_id == session_id)
             .order_by(SessionNodeORM.index)
+            .options(*(defer(column) for column in deferred))
         )
-        if not include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
         rows = (await self._session.scalars(statement)).all()
-        return [row.to_domain(include_payloads=include_payloads) for row in rows]
+        return [row.to_domain(deferred_columns=deferred) for row in rows]
 
     async def get_indexes_by_ids(
         self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
@@ -233,7 +211,11 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             .limit(1)
         )
         row = (await self._session.scalars(statement)).one_or_none()
-        return _lookup_row_to_domain(row) if row is not None else None
+        return (
+            row.to_domain(deferred_columns=TOOL_LOOKUP_DEFERRED_COLUMNS)
+            if row is not None
+            else None
+        )
 
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
@@ -284,7 +266,11 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             .limit(1)
         )
         row = (await self._session.scalars(statement)).one_or_none()
-        return _lookup_row_to_domain(row) if row is not None else None
+        return (
+            row.to_domain(deferred_columns=TOOL_LOOKUP_DEFERRED_COLUMNS)
+            if row is not None
+            else None
+        )
 
     async def find_latest_by_cache_key_in_agent(
         self, agent_id: uuid.UUID, cache_key: str

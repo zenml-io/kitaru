@@ -2451,13 +2451,13 @@ class FakeSessionRepository:
                 already registered.
 
         Returns:
-            Stored session with timestamps set.
+            Stored session with timestamps set, without payloads.
         """
         self._check_duplicate_external_id(session)
         now = datetime.now(UTC)
         stored = session.model_copy(update={"created": now, "updated": now})
         self._sessions[stored.id] = stored
-        return stored.model_copy()
+        return self._copy(stored, include_payloads=False)
 
     @staticmethod
     def _copy(session: Session, include_payloads: bool) -> Session:
@@ -2671,16 +2671,29 @@ class FakeSessionRepository:
                 already registered.
 
         Returns:
-            Stored session with the updated timestamp renewed.
+            Stored session with the updated timestamp renewed, without
+            payloads.
         """
         stored = self._sessions.get(session.id)
         if stored is None:
             raise SessionNotFound(session.id)
         self._check_duplicate_external_id(session)
         now = _renewed_timestamp(stored.updated)
-        updated = session.model_copy(update={"created": stored.created, "updated": now})
+        updated = session.model_copy(
+            update={
+                "created": stored.created,
+                "updated": now,
+                "inputs": stored.inputs,
+                "outputs": session.outputs
+                if session.outputs_changed
+                else stored.outputs,
+            }
+        )
+        # Rebuild to drop the outputs-changed mark, like a load from
+        # columns does.
+        updated = Session(**dict(updated))
         self._sessions[session.id] = updated
-        return updated.model_copy()
+        return self._copy(updated, include_payloads=False)
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.
@@ -2777,7 +2790,8 @@ async def create_session(
         value = values.get(field)
         if value is not None and not isinstance(value, Payload):
             values[field] = Payload.from_json(value)
-    return await repository.create(Session(**values))
+    stored = await repository.create(Session(**values))
+    return await repository.get(stored.id, include_payloads=True)
 
 
 def _paginate_fake_by_index(
@@ -2872,7 +2886,7 @@ class FakeSessionNodeRepository:
             nodes: Fully resolved nodes to store, in batch order.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         _ = session_id
         stored: list[SessionNode] = []
@@ -2885,7 +2899,16 @@ class FakeSessionNodeRepository:
             )
             row = node.model_copy(update={"created": created, "updated": updated})
             self._nodes[node.id] = row
-            stored.append(row.model_copy())
+            stored.append(
+                row.model_copy(
+                    update={
+                        "reasoning": None,
+                        "inputs": None,
+                        "outputs": None,
+                        "attributes": None,
+                    }
+                )
+            )
         return stored
 
     async def query(

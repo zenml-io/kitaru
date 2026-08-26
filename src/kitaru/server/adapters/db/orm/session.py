@@ -14,6 +14,7 @@
 """Session ORM table."""
 
 import uuid
+from collections.abc import Collection
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -29,7 +30,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.server.adapters.db.orm.base import (
@@ -164,23 +165,29 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """
         row = cls(id=session.id)
         row.apply_domain(session)
+        row.inputs, row.inputs_blob_id = split_payload(session.inputs)
+        if not session.outputs_changed:
+            row.outputs, row.outputs_blob_id = split_payload(session.outputs)
         return row
 
     def apply_domain(self, session: Session) -> None:
-        """Copy every mutable field of a domain session onto this row.
+        """Copy the mutable fields of a domain session onto this row.
 
-        A payload with a blob ref writes the ref column and leaves the
-        inline column null, an inline-only payload writes the inline column
-        and leaves the ref column null, and ``None`` writes null to both. The
-        token usage is flattened into the token columns, all null when the
-        session carries no token usage.
+        The inputs are create-only and never written here. The outputs are
+        written only when the session's outputs were changed, so a session
+        loaded without payloads writes none back. A payload with a blob ref
+        writes the ref column and leaves the inline column null, an
+        inline-only payload writes the inline column and leaves the ref
+        column null, and ``None`` writes null to both. The token usage is
+        flattened into the token columns, all null when the session carries
+        no token usage.
 
         Args:
             session: Session carrying the desired field values.
         """
         tokens = session.tokens
-        inputs, inputs_blob_id = split_payload(session.inputs)
-        outputs, outputs_blob_id = split_payload(session.outputs)
+        if session.outputs_changed:
+            self.outputs, self.outputs_blob_id = split_payload(session.outputs)
         self.owner_id = session.owner_id
         self.agent_id = session.agent_id
         self.number = session.number
@@ -191,10 +198,6 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.name = session.name
         self.input_text_selector = session.input_text_selector
         self.output_text_selector = session.output_text_selector
-        self.inputs = inputs
-        self.inputs_blob_id = inputs_blob_id
-        self.outputs = outputs
-        self.outputs_blob_id = outputs_blob_id
         self.error = session.error
         self.started_at = session.started_at
         self.ended_at = session.ended_at
@@ -213,20 +216,23 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.llm_call_count = session.llm_call_count
         self.tool_call_count = session.tool_call_count
 
-    def to_domain(self, include_payloads: bool) -> Session:
+    def to_domain(
+        self, deferred_columns: Collection[InstrumentedAttribute[Any]]
+    ) -> Session:
         """Build a domain session from this row.
 
         The token columns collapse back to ``None`` only when every one of
         them is null, matching a session that has never rolled up a node.
 
         Args:
-            include_payloads: Whether to read the inputs and outputs
-                columns. When ``False``, those columns are never touched,
-                so a deferred load never fires.
+            deferred_columns: Payload columns to leave unread and ``None``
+                on the session, so a column the load deferred never fires
+                a lazy load.
 
         Returns:
             Session with timestamps set.
         """
+        deferred = {column.key for column in deferred_columns}
         has_tokens = any(
             value is not None
             for value in (
@@ -261,12 +267,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             inputs=payload_from_columns(
                 self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
             )
-            if include_payloads
+            if "inputs" not in deferred
             else None,
             outputs=payload_from_columns(
                 self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
             )
-            if include_payloads
+            if "outputs" not in deferred
             else None,
             error=self.error,
             started_at=self.started_at,

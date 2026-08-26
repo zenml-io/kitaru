@@ -451,7 +451,7 @@ async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
             )
         ],
     )
-    replaced = await repository.upsert_batch(
+    await repository.upsert_batch(
         session_id,
         [
             _node(
@@ -464,12 +464,6 @@ async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
             )
         ],
     )
-    assert replaced[0].inputs is not None
-    assert replaced[0].inputs.value == {"q": "new"}
-    assert replaced[0].outputs is not None
-    assert replaced[0].outputs.value == {"a": "new"}
-    assert replaced[0].attributes is not None
-    assert replaced[0].attributes.value == {"k": 1}
 
     loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
     assert loaded[0].inputs is not None

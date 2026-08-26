@@ -462,10 +462,8 @@ class TaskService:
             return
         # The replay's link is written together with the session, so no
         # session means nothing to clear on the replay either.
-        # The update below writes every column back, so the payloads are
-        # loaded here.
         session = await self._sessions.get_by_task_id(
-            task.id, include_payloads=True, exclusive=True
+            task.id, include_payloads=False, exclusive=True
         )
         if session is None:
             return

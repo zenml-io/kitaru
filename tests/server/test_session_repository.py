@@ -731,22 +731,23 @@ async def test_update(setup: Setup) -> None:
     created.update_name("renamed")
     created.finish(
         status=SessionStatus.COMPLETED,
-        outputs=Payload.from_json({"a": 1}),
         output_text_selector=None,
         error=None,
         ended_at=None,
     )
+    created.set_outputs(Payload.from_json({"a": 1}))
     updated = await repository.update(created)
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.COMPLETED
-    assert updated.outputs is not None
-    assert updated.outputs.value == {"a": 1}
+    reloaded = await repository.get(created.id, include_payloads=True)
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == {"a": 1}
     assert updated.created == created.created
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
     loaded = await repository.get(created.id, include_payloads=True)
-    assert loaded == updated
+    assert updated == loaded.model_copy(update={"inputs": None, "outputs": None})
 
 
 async def test_update_not_found(setup: Setup) -> None:

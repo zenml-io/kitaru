@@ -225,7 +225,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 version id.
 
         Returns:
-            Stored session with timestamps set.
+            Stored session with timestamps set, without payloads.
         """
         row = SessionORM.from_domain(session)
         constraints: dict[str, Callable[[], DomainError]] = {
@@ -239,7 +239,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 AgentVersionNotFound(agent_version_id)
             )
         await self._add(row, constraints)
-        return row.to_domain(include_payloads=True)
+        return row.to_domain(deferred_columns=PAYLOAD_COLUMNS)
 
     async def get(
         self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -259,12 +259,11 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Stored session.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         row = await self._get_row(
-            session_id,
-            exclusive=exclusive,
-            deferred_columns=() if include_payloads else PAYLOAD_COLUMNS,
+            session_id, exclusive=exclusive, deferred_columns=deferred
         )
-        return row.to_domain(include_payloads=include_payloads)
+        return row.to_domain(deferred_columns=deferred)
 
     async def get_by_task_id(
         self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -280,19 +279,13 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Stored session, or ``None`` when no session links the task.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionORM).where(SessionORM.task_id == task_id)
-        if not include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
+        statement = statement.options(*(defer(column) for column in deferred))
         if exclusive:
             statement = statement.with_for_update()
         row = (await self._session.scalars(statement)).one_or_none()
-        return (
-            row.to_domain(include_payloads=include_payloads)
-            if row is not None
-            else None
-        )
+        return row.to_domain(deferred_columns=deferred) if row is not None else None
 
     async def query(
         self, session_filter: SessionFilter, include_payloads: bool
@@ -307,6 +300,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Page of matching sessions and the next cursor.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionORM)
         if session_filter.expression is not None:
             statement = statement.where(
@@ -314,17 +308,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                     session_filter.expression, SESSION_FILTER_BINDINGS
                 )
             )
-        if not include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
+        statement = statement.options(*(defer(column) for column in deferred))
 
         rows, next_cursor = await paginate(
             self._session, statement, session_filter, id_column=SessionORM.id
         )
-        return [
-            row.to_domain(include_payloads=include_payloads) for row in rows
-        ], next_cursor
+        return [row.to_domain(deferred_columns=deferred) for row in rows], next_cursor
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID], include_payloads: bool
@@ -339,12 +328,10 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Stored sessions keyed by id.
         """
-        rows = await self._load_by_ids(
-            list(session_ids),
-            deferred_columns=() if include_payloads else PAYLOAD_COLUMNS,
-        )
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
+        rows = await self._load_by_ids(list(session_ids), deferred_columns=deferred)
         return {
-            session_id: row.to_domain(include_payloads=include_payloads)
+            session_id: row.to_domain(deferred_columns=deferred)
             for session_id, row in rows.items()
         }
 
@@ -360,9 +347,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 already registered.
 
         Returns:
-            Stored session with the updated timestamp renewed.
+            Stored session with the updated timestamp renewed, without
+            payloads.
         """
-        row = await self._get_row(session.id)
+        # Defer the payload columns because apply_domain writes them without
+        # ever reading them, so the deferred load never fires.
+        row = await self._get_row(session.id, deferred_columns=PAYLOAD_COLUMNS)
         row.apply_domain(session)
         await self._flush(
             {
@@ -371,7 +361,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 )
             }
         )
-        return row.to_domain(include_payloads=True)
+        return row.to_domain(deferred_columns=PAYLOAD_COLUMNS)
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.

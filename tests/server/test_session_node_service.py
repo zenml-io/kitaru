@@ -622,21 +622,7 @@ async def test_ingest_offloads_over_threshold_payloads(
             attributes=attributes,
         )
     ]
-    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
-
-    # The service response carries the original values in memory.
-    assert stored[0].reasoning is not None
-    assert stored[0].reasoning.value == reasoning
-    assert stored[0].reasoning.blob_id is not None
-    assert stored[0].inputs is not None
-    assert stored[0].inputs.value == inputs
-    assert stored[0].inputs.blob_id is not None
-    assert stored[0].outputs is not None
-    assert stored[0].outputs.value == outputs
-    assert stored[0].outputs.blob_id is not None
-    assert stored[0].attributes is not None
-    assert stored[0].attributes.value == attributes
-    assert stored[0].attributes.blob_id is not None
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)

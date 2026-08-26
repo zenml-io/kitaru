@@ -116,7 +116,7 @@ class SessionNodeService:
                 index does not match a stored or batched node.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         # Node ids are minted for indexes this read does not find, so two
         # concurrent batches for one index would both insert and collide on

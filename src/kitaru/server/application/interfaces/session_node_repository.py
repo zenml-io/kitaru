@@ -56,7 +56,7 @@ class SessionNodeRepository(Protocol):
             SessionNotFound: No session has this id.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         ...
 
