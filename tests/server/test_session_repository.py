@@ -457,7 +457,8 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
     sessions, next_cursor = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="origin", op=FilterOp.EQ, value="recorded")
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is None
     assert [s.id for s in sessions] == [recorded.id]
@@ -467,7 +468,8 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
             expression=FilterCondition(
                 field="status", op=FilterOp.EQ, value="completed"
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is None
     assert len(sessions) == 1
@@ -508,7 +510,8 @@ async def test_query_filters_by_imported_from_and_external_id(setup: Setup) -> N
                     FilterCondition(field="external_id", op=FilterOp.EQ, value="run-2"),
                 )
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is None
     assert [s.id for s in sessions] == [target.id]
@@ -545,7 +548,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.GE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [late.id]
 
@@ -556,7 +560,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.LE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [early.id]
 
@@ -567,7 +572,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.GE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [late.id]
 
@@ -578,7 +584,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.LE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [early.id]
 
@@ -610,7 +617,8 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
             expression=FilterCondition(
                 field="cost", op=FilterOp.GE, value=Decimal("5.00")
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [pricey.id]
 
@@ -619,7 +627,8 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
             expression=FilterCondition(
                 field="cost", op=FilterOp.LE, value=Decimal("5.00")
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [cheap.id]
 
@@ -661,7 +670,8 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
             expression=FilterCondition(
                 field="has_evaluation", op=FilterOp.EQ, value=True
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [scored.id]
 
@@ -670,7 +680,8 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
             expression=FilterCondition(
                 field="has_evaluation", op=FilterOp.EQ, value=False
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [unscored.id]
 
@@ -695,7 +706,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
     cursor = None
     while True:
         sessions, next_cursor = await repository.query(
-            SessionFilter(cursor=cursor, size=2)
+            SessionFilter(cursor=cursor, size=2), include_payloads=True
         )
         collected.extend(sessions)
         if next_cursor is None:
@@ -997,7 +1008,8 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [tagged.id]
 
@@ -1052,7 +1064,8 @@ async def test_query_filters_by_tag_in_unions_names(setup: Setup) -> None:
             expression=FilterCondition(
                 field="tag", op=FilterOp.IN, value=["smoke-test", "regression"]
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert {s.id for s in sessions} == {smoke.id, regression.id}
 
@@ -1091,7 +1104,8 @@ async def test_query_filters_by_not_tag_returns_untagged(setup: Setup) -> None:
             expression=NotExpression(
                 operand=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [untagged.id]
 
@@ -1118,7 +1132,8 @@ async def test_query_filters_by_is_null_on_name(setup: Setup) -> None:
     )
 
     sessions, _ = await repository.query(
-        SessionFilter(expression=FilterCondition(field="name", op=FilterOp.IS_NULL))
+        SessionFilter(expression=FilterCondition(field="name", op=FilterOp.IS_NULL)),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [unnamed.id]
 
@@ -1155,7 +1170,8 @@ async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> Non
             expression=FilterCondition(
                 field="cohort_version_id", op=FilterOp.EQ, value=version.id
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in matched] == [member.id]
 
@@ -1268,7 +1284,8 @@ async def test_query_filters_by_experiment_run() -> None:
                 expression=FilterCondition(
                     field="experiment_run_id", op=FilterOp.EQ, value=run.id
                 )
-            )
+            ),
+            include_payloads=True,
         )
         assert [s.id for s in sessions] == [result.id]
 
@@ -1277,7 +1294,8 @@ async def test_query_filters_by_experiment_run() -> None:
                 expression=FilterCondition(
                     field="experiment_run_id", op=FilterOp.EQ, value=uuid.uuid4()
                 )
-            )
+            ),
+            include_payloads=True,
         )
         assert sessions == []
 
@@ -1288,7 +1306,8 @@ async def test_query_filters_by_experiment_run() -> None:
                         field="experiment_run_id", op=FilterOp.EQ, value=run.id
                     )
                 )
-            )
+            ),
+            include_payloads=True,
         )
         assert {s.id for s in sessions} == {
             baseline.id,
@@ -1335,7 +1354,8 @@ async def test_query_filters_by_and_expression(setup: Setup) -> None:
                     FilterCondition(field="status", op=FilterOp.EQ, value="completed"),
                 )
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [match.id]
 
@@ -1380,7 +1400,8 @@ async def test_query_filters_by_or_expression(setup: Setup) -> None:
                     ),
                 )
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert {s.id for s in sessions} == {by_status.id, by_imported_from.id}
 
@@ -1411,7 +1432,8 @@ async def test_query_filters_by_not_is_null_expression(setup: Setup) -> None:
             expression=NotExpression(
                 operand=FilterCondition(field="name", op=FilterOp.IS_NULL)
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [named.id]
 
@@ -1449,7 +1471,8 @@ async def test_query_filters_by_ne_excludes_null(setup: Setup) -> None:
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="name", op=FilterOp.NE, value="run-2")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [other_name.id]
 
@@ -1489,7 +1512,8 @@ async def test_query_filters_by_in_expression(setup: Setup) -> None:
             expression=FilterCondition(
                 field="status", op=FilterOp.IN, value=["completed", "failed"]
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert {s.id for s in sessions} == {completed.id, failed.id}
 
@@ -1545,21 +1569,24 @@ async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
             expression=FilterCondition(
                 field="name", op=FilterOp.STARTSWITH, value="web"
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [web_run.id]
 
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="name", op=FilterOp.ENDSWITH, value="run")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [web_run.id]
 
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="name", op=FilterOp.CONTAINS, value="0%_d")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [percent_run.id]
 
@@ -1599,7 +1626,8 @@ async def test_query_where_filter_persists_across_cursor(setup: Setup) -> None:
                 ),
                 cursor=cursor,
                 size=1,
-            )
+            ),
+            include_payloads=True,
         )
         collected.extend(sessions)
         if next_cursor is None:
@@ -1636,11 +1664,14 @@ async def test_query_cursor_expression_mismatch(setup: Setup) -> None:
                 field="status", op=FilterOp.EQ, value="completed"
             ),
             size=1,
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is not None
     with pytest.raises(ValidationError):
-        await repository.query(SessionFilter(cursor=next_cursor, size=1))
+        await repository.query(
+            SessionFilter(cursor=next_cursor, size=1), include_payloads=True
+        )
 
 
 async def test_query_applies_list_query_timeout() -> None:
@@ -1650,7 +1681,7 @@ async def test_query_applies_list_query_timeout() -> None:
     async with pg_session_with_engine() as (session, engine):
         session.info[LIST_QUERY_TIMEOUT_INFO_KEY] = 3
         repository = SQLSessionRepository(session, engine)
-        await repository.query(SessionFilter())
+        await repository.query(SessionFilter(), include_payloads=True)
         timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert timeout == "3s"
 
@@ -1661,7 +1692,7 @@ async def test_query_without_list_query_timeout() -> None:
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, engine):
         repository = SQLSessionRepository(session, engine)
-        await repository.query(SessionFilter())
+        await repository.query(SessionFilter(), include_payloads=True)
         timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert timeout == "0"
 

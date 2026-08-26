@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.orm import defer
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
@@ -114,6 +115,11 @@ def _compile_has_evaluation_condition(
     )
     return evaluation_exists.exists() if expected else ~evaluation_exists.exists()
 
+
+PAYLOAD_COLUMNS = (
+    SessionORM.inputs,
+    SessionORM.outputs,
+)
 
 SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": SessionORM.id,
@@ -233,7 +239,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 AgentVersionNotFound(agent_version_id)
             )
         await self._add(row, constraints)
-        return row.to_domain()
+        return row.to_domain(include_payloads=True)
 
     async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
         """Load a session by id.
@@ -250,7 +256,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             Stored session.
         """
         row = await self._get_row(session_id, exclusive=exclusive)
-        return row.to_domain()
+        return row.to_domain(include_payloads=True)
 
     async def get_by_task_id(
         self, task_id: uuid.UUID, exclusive: bool = False
@@ -268,15 +274,17 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         if exclusive:
             statement = statement.with_for_update()
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain() if row is not None else None
+        return row.to_domain(include_payloads=True) if row is not None else None
 
     async def query(
-        self, session_filter: SessionFilter
+        self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Page of matching sessions and the next cursor.
@@ -288,11 +296,17 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                     session_filter.expression, SESSION_FILTER_BINDINGS
                 )
             )
+        if not include_payloads:
+            statement = statement.options(
+                *(defer(column) for column in PAYLOAD_COLUMNS)
+            )
 
         rows, next_cursor = await paginate(
             self._session, statement, session_filter, id_column=SessionORM.id
         )
-        return [row.to_domain() for row in rows], next_cursor
+        return [
+            row.to_domain(include_payloads=include_payloads) for row in rows
+        ], next_cursor
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID]
@@ -306,7 +320,10 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
             Stored sessions keyed by id.
         """
         rows = await self._load_by_ids(list(session_ids))
-        return {session_id: row.to_domain() for session_id, row in rows.items()}
+        return {
+            session_id: row.to_domain(include_payloads=True)
+            for session_id, row in rows.items()
+        }
 
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
@@ -331,7 +348,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 )
             }
         )
-        return row.to_domain()
+        return row.to_domain(include_payloads=True)
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.

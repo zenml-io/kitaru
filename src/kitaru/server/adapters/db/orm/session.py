@@ -209,11 +209,16 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.llm_call_count = session.llm_call_count
         self.tool_call_count = session.tool_call_count
 
-    def to_domain(self) -> Session:
+    def to_domain(self, include_payloads: bool) -> Session:
         """Build a domain session from this row.
 
         The token columns collapse back to ``None`` only when every one of
         them is null, matching a session that has never rolled up a node.
+
+        Args:
+            include_payloads: Whether to read the inputs and outputs
+                columns. When ``False``, those columns are never touched,
+                so a deferred load never fires.
 
         Returns:
             Session with timestamps set.
@@ -249,10 +254,14 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             inputs=payload_from_columns(
                 self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
-            ),
+            )
+            if include_payloads
+            else None,
             outputs=payload_from_columns(
                 self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
-            ),
+            )
+            if include_payloads
+            else None,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

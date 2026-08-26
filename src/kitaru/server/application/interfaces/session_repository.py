@@ -90,7 +90,7 @@ class SessionRepository(Protocol):
         ...
 
     async def query(
-        self, session_filter: SessionFilter
+        self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
@@ -99,6 +99,8 @@ class SessionRepository(Protocol):
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Page of matching sessions and the next cursor.

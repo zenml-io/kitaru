@@ -64,7 +64,7 @@ async def test_sessions_persist_across_requests(
 
     response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
-    assert response.json() == created
+    assert response.json() == {**created, "inputs": {"prompt": "hi"}, "outputs": None}
 
     response = await client.get("/api/v1/sessions")
     assert response.status_code == 200
@@ -285,10 +285,8 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
                 json=_session_body(agent["id"], inputs=large_inputs, outputs=None),
             )
         ).json()
-        assert created["inputs"] == large_inputs
-
         detail = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
-        assert detail == created
+        assert detail == {**created, "inputs": large_inputs, "outputs": None}
 
         listed = (await client.get("/api/v1/sessions")).json()["items"]
         assert listed[0] == created

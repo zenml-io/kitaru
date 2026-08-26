@@ -176,9 +176,6 @@ class SessionService:
             session.owner_id,
         )
         stored = await self._repository.create(session)
-        stored = stored.model_copy(
-            update={"inputs": session.inputs, "outputs": session.outputs}
-        )
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -307,6 +304,8 @@ class SessionService:
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
+        The sessions are read without their inputs and outputs.
+
         Args:
             session_filter: Filter and pagination parameters.
             actor: Caller context.
@@ -315,16 +314,7 @@ class SessionService:
             Page of matching sessions and the next cursor.
         """
         _ = actor
-        sessions, next_cursor = await self._repository.query(session_filter)
-        await self._payload_store.resolve(
-            [
-                p
-                for session in sessions
-                for p in (session.inputs, session.outputs)
-                if p is not None
-            ]
-        )
-        return sessions, next_cursor
+        return await self._repository.query(session_filter, include_payloads=False)
 
     async def update_session(
         self, session_id: uuid.UUID, command: SessionUpdate, actor: AuthContext
@@ -392,16 +382,7 @@ class SessionService:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}
             )
-        stored = await self._repository.update(session)
-        # The untouched inputs ref, and outputs when this update did not
-        # carry a new value, still need a round trip to the blob store.
-        to_resolve = [session.inputs]
-        if "outputs" not in fields:
-            to_resolve.append(session.outputs)
-        await self._payload_store.resolve([p for p in to_resolve if p is not None])
-        return stored.model_copy(
-            update={"inputs": session.inputs, "outputs": session.outputs}
-        )
+        return await self._repository.update(session)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

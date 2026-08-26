@@ -2537,12 +2537,14 @@ class FakeSessionRepository:
         return set(self._cohort_versions._members.get(cohort_version_id, []))
 
     async def query(
-        self, session_filter: SessionFilter
+        self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Page of matching sessions and the next cursor.
@@ -2561,7 +2563,11 @@ class FakeSessionRepository:
                 if _evaluate_filter_expression(s, session_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(sessions, session_filter)
-        return [s.model_copy() for s in page], next_cursor
+        if include_payloads:
+            return [s.model_copy() for s in page], next_cursor
+        return [
+            s.model_copy(update={"inputs": None, "outputs": None}) for s in page
+        ], next_cursor
 
     def _evaluate_tag_condition(
         self, session: Session, condition: FilterCondition
