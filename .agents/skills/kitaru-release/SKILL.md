@@ -248,6 +248,8 @@ RELEASE_SHA="$(gh pr view <release-pr> \
 
 For a coordinated release, order the hand-off as frontend tag and bundle, core tag and publication, dependent plugin tags and publication, then linked skills, docs, website, examples, and other follow-ups. Do not execute these commands during preparation.
 
+Push every release tag in its own `git push origin <tag>` command. GitHub does not create push events when more than three tags are pushed at once, which leaves immutable tags without release workflow runs. Do not batch release tags into one push, even when several point to the same commit. After each push, confirm the matching workflow run exists before pushing the next tag.
+
 ## Rehearse before publication
 
 Manual dispatch builds and validates without publishing.
