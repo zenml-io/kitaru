@@ -53,6 +53,7 @@ def release_repo(tmp_path: Path) -> Path:
     for relative_path in (
         "pyproject.toml",
         "CHANGELOG.md",
+        "openapi/openapi.json",
         "uv.lock",
         "release/release-units.toml",
         "plugins/uv.lock",
@@ -183,10 +184,11 @@ def test_core_development_reset_updates_only_release_state(
     development_version = f"{release_version}+dev"
     project = release_repo / "pyproject.toml"
     changelog = release_repo / "CHANGELOG.md"
+    openapi = release_repo / "openapi" / "openapi.json"
     root_lock = release_repo / "uv.lock"
     plugin_lock = release_repo / "plugins" / "uv.lock"
 
-    for path in (project, root_lock, plugin_lock):
+    for path in (project, openapi, root_lock, plugin_lock):
         path.write_text(path.read_text().replace("0.23.0", release_version))
     changelog.write_text(
         changelog.read_text().replace("## [0.23.0]", f"## [{release_version}]")
@@ -197,6 +199,7 @@ def test_core_development_reset_updates_only_release_state(
         == development_version
     )
     assert f'version = "{development_version}"' in project.read_text()
+    assert f'"version": "{development_version}"' in openapi.read_text()
     assert (
         f'name = "kitaru"\nversion = "{development_version}"\n'
         'source = { editable = "." }' in root_lock.read_text()
@@ -273,7 +276,10 @@ def test_stable_core_release_creates_a_draft_development_reset_pr() -> None:
     assert "--base develop" in reset_job
     assert "--draft" in reset_job
     assert "main` contains release commit" in reset_job
-    assert "git add pyproject.toml uv.lock plugins/uv.lock CHANGELOG.md" in reset_job
+    assert (
+        "git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json "
+        "CHANGELOG.md" in reset_job
+    )
 
 
 def test_managed_image_failure_does_not_block_the_release() -> None:

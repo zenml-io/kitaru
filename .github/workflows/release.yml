@@ -426,7 +426,7 @@ jobs:
           git config user.name "kitaru-release[bot]"
           git config user.email "kitaru-release[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add pyproject.toml uv.lock plugins/uv.lock CHANGELOG.md
+          git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json CHANGELOG.md
           git commit -m "Start Kitaru $VERSION development"
           gh auth setup-git
           git push origin "HEAD:refs/heads/$branch"
@@ -440,7 +440,7 @@ jobs:
           set -euo pipefail
           branch="automation/kitaru-$VERSION-development"
           # shellcheck disable=SC2016  # Markdown backticks are intentional.
-          printf -v body '## Summary\n\n- set the core development version to `%s+dev`\n- restore the `Unreleased` changelog section\n- update both core lockfile entries\n\n## Merge order\n\nMerge this PR only after `main` contains release commit `%s`, so `main` remains at the clean `%s` release state.\n\n## Reviewer Notes\n\nConfirm the diff contains only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, and `CHANGELOG.md`. Verify `main` contains `%s` before marking this draft ready.\n' "$VERSION" "$RELEASE_SHA" "$VERSION" "$RELEASE_SHA"
+          printf -v body '## Summary\n\n- set the core development version to `%s+dev`\n- restore the `Unreleased` changelog section\n- update both core lockfile entries and generated OpenAPI version\n\n## Merge order\n\nMerge this PR only after `main` contains release commit `%s`, so `main` remains at the clean `%s` release state.\n\n## Reviewer Notes\n\nConfirm the diff contains only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, `openapi/openapi.json`, and `CHANGELOG.md`. Verify `main` contains `%s` before marking this draft ready.\n' "$VERSION" "$RELEASE_SHA" "$VERSION" "$RELEASE_SHA"
           gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --base develop \

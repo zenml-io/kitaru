@@ -193,6 +193,7 @@ def prepare_core_development_reset(
     paths = {
         "project": repo_root / "pyproject.toml",
         "changelog": repo_root / "CHANGELOG.md",
+        "OpenAPI": repo_root / "openapi" / "openapi.json",
         "root lock": repo_root / "uv.lock",
         "plugin lock": repo_root / "plugins" / "uv.lock",
     }
@@ -207,6 +208,12 @@ def prepare_core_development_reset(
         "project": (
             f'version = "{release_version}"',
             f'version = "{development_version}"',
+        ),
+        "OpenAPI": (
+            '"info": {\n    "title": "Kitaru",\n'
+            f'    "version": "{release_version}"\n  }}',
+            '"info": {\n    "title": "Kitaru",\n'
+            f'    "version": "{development_version}"\n  }}',
         ),
         "root lock": (
             f'name = "kitaru"\nversion = "{release_version}"\n'
