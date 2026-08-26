@@ -81,6 +81,7 @@ class BlobRepository(Protocol):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version.
+            BlobInUse: The blob is referenced by a plugin version, a
+                session, or a session node.
         """
         ...

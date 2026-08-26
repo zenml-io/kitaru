@@ -25,6 +25,16 @@ from kitaru.server.adapters.db.orm.blob import (
     BlobORM,
 )
 from kitaru.server.adapters.db.orm.plugin import PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY
+from kitaru.server.adapters.db.orm.session import (
+    SESSION_INPUTS_BLOB_ID_FOREIGN_KEY,
+    SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY,
+)
+from kitaru.server.adapters.db.orm.session_node import (
+    SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY,
+    SESSION_NODE_INPUTS_BLOB_ID_FOREIGN_KEY,
+    SESSION_NODE_OUTPUTS_BLOB_ID_FOREIGN_KEY,
+    SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
@@ -137,8 +147,18 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version.
+            BlobInUse: The blob is referenced by a plugin version, a
+                session, or a session node.
         """
         await self._delete_row(
-            blob_id, {PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id)}
+            blob_id,
+            {
+                PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                SESSION_INPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                SESSION_NODE_INPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                SESSION_NODE_OUTPUTS_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                SESSION_NODE_ATTRIBUTES_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+                SESSION_NODE_REASONING_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
+            },
         )

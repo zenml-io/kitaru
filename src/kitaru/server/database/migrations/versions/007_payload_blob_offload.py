@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Payload blob offload Alembic revision.
 
-Revision ID: 006_payload_blob_offload
-Revises: 005_evaluator_agent_scoping
+Revision ID: 007_payload_blob_offload
+Revises: 006_deletion_rules
 Create Date: 2026-08-25
 
 """
@@ -23,8 +23,8 @@ import sqlalchemy as sa
 from alembic import op
 
 # revision identifiers, used by Alembic.
-revision = "006_payload_blob_offload"
-down_revision = "005_evaluator_agent_scoping"
+revision = "007_payload_blob_offload"
+down_revision = "006_deletion_rules"
 branch_labels = None
 depends_on = None
 
