@@ -98,6 +98,15 @@ async def test_create_agent_duplicate_name(client: httpx.AsyncClient) -> None:
     assert response.json() == {"detail": "Agent name 'assistant' is already registered"}
 
 
+async def test_create_agent_reuses_deleted_name(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 201 for the name of a deleted agent."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+    response = await client.post("/api/v1/agents", json={"name": "assistant"})
+    assert response.status_code == 201
+
+
 async def test_create_agent_invalid_name(client: httpx.AsyncClient) -> None:
     """Observe HTTP 422 for an invalid agent name."""
     response = await client.post("/api/v1/agents", json={"name": "in valid"})
@@ -204,17 +213,51 @@ async def test_delete_agent_not_found(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_delete_agent_in_use(
-    client: httpx.AsyncClient, agent_repository: FakeAgentRepository
-) -> None:
-    """Observe HTTP 409 when the agent has versions."""
+async def test_delete_agent_twice_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 for a second delete of the same agent."""
     created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
-    await client.post(f"/api/v1/agents/{created['id']}/versions", json={})
     response = await client.delete(f"/api/v1/agents/{created['id']}")
-    assert response.status_code == 409
-    assert response.json() == {
-        "detail": f"Agent {created['id']} has versions and cannot be deleted"
-    }
+    assert response.status_code == 204
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 404
+
+
+async def test_deleted_agent_excluded_from_list(client: httpx.AsyncClient) -> None:
+    """Exclude a deleted agent from the listing."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    await client.post("/api/v1/agents", json={"name": "reviewer"})
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+
+    response = await client.get("/api/v1/agents")
+    assert response.status_code == 200
+    assert [item["name"] for item in response.json()["items"]] == ["reviewer"]
+
+
+async def test_update_deleted_agent_not_found(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when updating a deleted agent."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+    response = await client.patch(
+        f"/api/v1/agents/{created['id']}", json={"description": "x"}
+    )
+    assert response.status_code == 404
+
+
+async def test_delete_agent_retains_versions(client: httpx.AsyncClient) -> None:
+    """Keep an agent's versions readable after the agent is deleted."""
+    created = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    version = (
+        await client.post(f"/api/v1/agents/{created['id']}/versions", json={})
+    ).json()
+
+    response = await client.delete(f"/api/v1/agents/{created['id']}")
+    assert response.status_code == 204
+
+    response = await client.get(f"/api/v1/agent-versions/{version['id']}")
+    assert response.status_code == 200
+    assert response.json() == version
 
 
 async def test_create_agent_version(client: httpx.AsyncClient) -> None:
@@ -237,6 +280,15 @@ async def test_create_agent_version(client: httpx.AsyncClient) -> None:
 async def test_create_agent_version_missing_agent(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 when the agent does not exist."""
     response = await client.post(f"/api/v1/agents/{uuid.uuid4()}/versions", json={})
+    assert response.status_code == 404
+
+
+async def test_create_agent_version_deleted_agent(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 404 when the agent is deleted."""
+    agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
+    response = await client.delete(f"/api/v1/agents/{agent['id']}")
+    assert response.status_code == 204
+    response = await client.post(f"/api/v1/agents/{agent['id']}/versions", json={})
     assert response.status_code == 404
 
 

@@ -320,6 +320,7 @@ async def run_demo(
             )
         )
 
+    assert replay.job_id is not None
     await _run_job(
         replay.job_id,
         api_url=api_url,

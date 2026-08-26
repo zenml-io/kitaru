@@ -14,7 +14,7 @@
 """SQL session repository."""
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
@@ -34,27 +34,30 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.investigation_session import (
+    INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.orm.replay import (
     REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
     REPLAY_RESULT_SESSION_ID_FOREIGN_KEY,
     ReplayORM,
 )
 from kitaru.server.adapters.db.orm.session import (
-    SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+    SESSION_AGENT_ID_FOREIGN_KEY,
+    SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
+    SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
     SessionORM,
 )
-from kitaru.server.adapters.db.orm.task import TASK_INPUT_SESSION_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.agent import AgentNotFound
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.agent_version import AgentVersionNotFound
+from kitaru.server.domain.base import DomainError, NotFoundError
 from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
-    SessionInUseByReplay,
-    SessionInUseByTask,
     SessionNotFound,
     SessionRollups,
 )
@@ -191,7 +194,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         """
         statement = (
             update(AgentORM)
-            .where(AgentORM.id == agent_id)
+            .where(AgentORM.id == agent_id, AgentORM.deleted_at.is_(None))
             .values(latest_session_number=AgentORM.latest_session_number + 1)
             .returning(AgentORM.latest_session_number)
         )
@@ -211,19 +214,25 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Raises:
             DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
+            AgentNotFound: No agent has the session's agent id.
+            AgentVersionNotFound: No agent version has the session's agent
+                version id.
 
         Returns:
             Stored session with timestamps set.
         """
         row = SessionORM.from_domain(session)
-        await self._add(
-            row,
-            {
-                SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
-                    self._duplicate_external_id(session)
-                )
-            },
-        )
+        constraints: dict[str, Callable[[], DomainError]] = {
+            SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (
+                self._duplicate_external_id(session)
+            ),
+            SESSION_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(session.agent_id),
+        }
+        if (agent_version_id := session.agent_version_id) is not None:
+            constraints[SESSION_AGENT_VERSION_ID_FOREIGN_KEY] = lambda: (
+                AgentVersionNotFound(agent_version_id)
+            )
+        await self._add(row, constraints)
         return row.to_domain()
 
     async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
@@ -343,7 +352,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row.tool_call_count = session.tool_call_count
         await self._flush(
             {
-                SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT: lambda: (
+                SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT: lambda: (
                     self._duplicate_external_id(session)
                 )
             }
@@ -360,12 +369,8 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionInUse: The session belongs to a cohort version and
-                cannot be deleted.
-            SessionInUseByTask: The session is a task's input session and
-                cannot be deleted.
-            SessionInUseByReplay: The session is a replay's baseline or
-                result session and cannot be deleted.
+            SessionInUse: The session is referenced by a cohort version,
+                investigation, or replay and cannot be deleted.
         """
         await self._delete_row(
             session_id,
@@ -373,15 +378,13 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                TASK_INPUT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByTask(
+                INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(
+                REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(
                     session_id
                 ),
-                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUseByReplay(
-                    session_id
-                ),
+                REPLAY_RESULT_SESSION_ID_FOREIGN_KEY: lambda: SessionInUse(session_id),
             },
         )
 

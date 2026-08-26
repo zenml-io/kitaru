@@ -20,21 +20,29 @@ from collections.abc import AsyncGenerator
 import pytest
 
 from conftest import FakeBlobRepository, pg_session, postgres_available
+from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
+from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import (
+    PackagePluginSource,
     Plugin,
     PluginKind,
     ScriptPluginSource,
 )
+from kitaru.server.domain.task import ImportTask
 
 Setup = tuple[BlobRepository, uuid.UUID]
 
@@ -148,3 +156,46 @@ async def test_delete_in_use(setup: Setup) -> None:
 
     with pytest.raises(BlobInUse, match=f"Blob {blob.id} is in use"):
         await repository.delete(blob.id)
+
+
+async def test_delete_leaves_task_with_payload() -> None:
+    """Deleting a blob leaves the import task that names it as payload."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        blob_repository = SQLBlobRepository(session)
+        payload_blob, _ = await blob_repository.create(_blob(owner.id, b"payload"))
+        plugin_repository = SQLPluginRepository(session)
+        plugin = await plugin_repository.create(
+            Plugin(owner_id=owner.id, kind=PluginKind.IMPORTER, name="importer")
+        )
+        version = await plugin_repository.create_version(
+            plugin.id,
+            PackagePluginSource(
+                requirement="kitaru-importer==1.0.0", entrypoint="pkg:run"
+            ),
+            display_version=None,
+        )
+        job_repository = SQLJobRepository(session)
+        job = await job_repository.create(
+            Job(owner_id=owner.id, kind=JobKind.IMPORT, status=JobStatus.PENDING)
+        )
+        task_repository = SQLTaskRepository(session)
+        task = await task_repository.create(
+            ImportTask(
+                job_id=job.id,
+                plugin_version_id=version.id,
+                payload_blob_id=payload_blob.id,
+                agent_id=agent.id,
+            )
+        )
+
+        await blob_repository.delete(payload_blob.id)
+
+        stored = await task_repository.get(task.id)
+        assert isinstance(stored, ImportTask)
+        assert stored.payload_blob_id == payload_blob.id

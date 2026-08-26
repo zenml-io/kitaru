@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from typing import Any, Generic, NoReturn, TypeVar
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import InstrumentedAttribute, defer
@@ -132,6 +132,30 @@ class BaseSQLRepository(Generic[RowT]):
         except IntegrityError as exc:
             self._raise_translated(exc, constraints)
 
+    async def _add_all(
+        self,
+        rows: Sequence[UUIDPrimaryKeyMixin],
+        constraints: ConstraintErrors | None = None,
+    ) -> None:
+        """Add many rows and flush, translating constraint violations.
+
+        The rows are added inside the savepoint so a mapped violation leaves
+        the outer transaction free of their pending inserts.
+
+        Args:
+            rows: Rows to add.
+            constraints: Domain error factories keyed by constraint name.
+
+        Raises:
+            DomainError: A mapped constraint was violated.
+        """
+        try:
+            async with self._session.begin_nested():
+                self._session.add_all(rows)
+                await self._session.flush()
+        except IntegrityError as exc:
+            self._raise_translated(exc, constraints)
+
     async def _flush(self, constraints: ConstraintErrors | None = None) -> None:
         """Flush pending changes, translating constraint violations.
 
@@ -161,13 +185,19 @@ class BaseSQLRepository(Generic[RowT]):
             NotFoundError: No row has this id.
             DomainError: A mapped constraint was violated.
         """
-        row = await self._get_row(entity_id)
+        statement = (
+            delete(self.orm_class)
+            .where(self.orm_class.id == entity_id)
+            .execution_options(synchronize_session="fetch")
+        )
         try:
             async with self._session.begin_nested():
-                await self._session.delete(row)
-                await self._session.flush()
+                result = await self._session.execute(statement)
         except IntegrityError as exc:
             self._raise_translated(exc, constraints)
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise self._not_found(entity_id)
 
     def _raise_translated(
         self, exc: IntegrityError, constraints: ConstraintErrors | None

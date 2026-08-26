@@ -62,6 +62,7 @@ from kitaru.server.domain.session import (
     SessionAgentRequired,
     SessionAgentVersionMismatch,
     SessionBaselineNotFound,
+    SessionInUse,
     SessionNotFound,
     SessionStatusCannotBeCleared,
 )
@@ -128,9 +129,9 @@ def agent_version_repository(
 
 
 @pytest.fixture
-def replay_repository() -> FakeReplayRepository:
-    """Provide a fake replay repository."""
-    return FakeReplayRepository()
+def replay_repository(repository: FakeSessionRepository) -> FakeReplayRepository:
+    """Provide a fake replay repository sharing the session repository."""
+    return FakeReplayRepository(sessions=repository)
 
 
 @pytest.fixture
@@ -695,13 +696,35 @@ async def test_delete_session_not_found(service: SessionService) -> None:
         await service.delete_session(uuid.uuid4(), actor=ACTOR)
 
 
+async def test_delete_session_restricted_by_replay_baseline(
+    service: SessionService, replay_repository: FakeReplayRepository
+) -> None:
+    """Reject deleting a session that is a replay's baseline."""
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    await replay_repository.create(
+        Replay(
+            owner_id=ACTOR.account.id,
+            job_id=uuid.uuid4(),
+            replay_config_id=uuid.uuid4(),
+            baseline_session_id=created.id,
+        )
+    )
+
+    with pytest.raises(SessionInUse):
+        await service.delete_session(created.id, actor=ACTOR)
+
+
 async def test_create_session_duplicate_external_id_conflict(
     service: SessionService,
 ) -> None:
-    """Reject a duplicate imported_from and external id pair."""
+    """Reject a duplicate imported_from and external id pair under one agent."""
+    agent_id = uuid.uuid4()
     await service.create_session(
         SessionCreate(
-            agent_id=uuid.uuid4(),
+            agent_id=agent_id,
             origin=SessionOrigin.IMPORTED,
             imported_from="langsmith",
             external_id="run-1",
@@ -711,7 +734,7 @@ async def test_create_session_duplicate_external_id_conflict(
     with pytest.raises(Exception, match="already registered"):
         await service.create_session(
             SessionCreate(
-                agent_id=uuid.uuid4(),
+                agent_id=agent_id,
                 origin=SessionOrigin.IMPORTED,
                 imported_from="langsmith",
                 external_id="run-1",

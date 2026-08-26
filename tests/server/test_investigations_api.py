@@ -177,6 +177,24 @@ async def test_create_investigation_missing_agent(client: httpx.AsyncClient) -> 
     assert response.status_code == 404
 
 
+async def test_create_investigation_deleted_agent(
+    client: httpx.AsyncClient,
+    agent_repository: FakeAgentRepository,
+    agent_id: str,
+) -> None:
+    """Observe HTTP 404 when the agent is deleted."""
+    await agent_repository.mark_deleted(uuid.UUID(agent_id))
+    response = await client.post(
+        "/api/v1/investigations",
+        json={
+            "agent_id": agent_id,
+            "name": "investigation",
+            "sessions": [],
+        },
+    )
+    assert response.status_code == 404
+
+
 async def test_create_investigation_missing_session(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

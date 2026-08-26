@@ -143,9 +143,10 @@ async def delete_job(
     service: Annotated[JobService, Depends(get_job_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> None:
-    """Delete a job, cascading its tasks.
+    """Delete a settled job, cascading its tasks.
 
-    Clients observe HTTP 204 on success and 404 when no job has this id.
+    Clients observe HTTP 204 on success, 404 when no job has this id, and
+    409 when the job has not settled.
 
     Args:
         job_id: Id of the job.

@@ -18,7 +18,15 @@ from typing import Any
 
 import pytest
 
-from conftest import FakeAgentRepository, FakeCohortRepository, create_agent
+from conftest import (
+    FakeAgentRepository,
+    FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeExperimentRunRepository,
+    FakeSessionRepository,
+    create_agent,
+    create_experiment_run,
+)
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
@@ -32,7 +40,8 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.cohort import CohortNotFound, DuplicateCohortName
+from kitaru.server.domain.cohort import CohortInUse, CohortNotFound, DuplicateCohortName
+from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -269,6 +278,35 @@ async def test_delete_cohort_not_found(service: CohortService) -> None:
     """Raise for an unknown cohort id."""
     with pytest.raises(CohortNotFound):
         await service.delete_cohort(uuid.uuid4(), actor=ACTOR)
+
+
+async def test_delete_cohort_restricted_by_run(
+    cohort_repository: FakeCohortRepository, service: CohortService, agent_id: uuid.UUID
+) -> None:
+    """Reject deleting a cohort whose version an experiment run references."""
+    experiment_runs = FakeExperimentRunRepository()
+    cohort_versions = FakeCohortVersionRepository(
+        cohorts=cohort_repository,
+        sessions=FakeSessionRepository(),
+        experiment_runs=experiment_runs,
+    )
+    created = await service.create_cohort(
+        CohortCreate(name="cohort", agent_id=agent_id), actor=ACTOR
+    )
+    version = await cohort_versions.create(
+        CohortVersion(owner_id=ACTOR.account.id, cohort_id=created.id, session_count=0),
+        [],
+    )
+    await create_experiment_run(
+        experiment_runs,
+        ACTOR.account.id,
+        experiment_id=uuid.uuid4(),
+        cohort_version_id=version.id,
+        agent_version_id=uuid.uuid4(),
+    )
+
+    with pytest.raises(CohortInUse):
+        await service.delete_cohort(created.id, actor=ACTOR)
 
 
 async def test_create_cohort_tracks_cohort_created(

@@ -513,12 +513,13 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
 
 
 def _build_task_transitions(
-    session: AsyncSession, analytics: ServerAnalytics
+    session: AsyncSession, engine: AsyncEngine, analytics: ServerAnalytics
 ) -> TaskTransitions:
     """Build the request-scoped task transition dispatch.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -527,7 +528,7 @@ def _build_task_transitions(
     return TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
-        dispatcher=build_event_dispatcher(session, analytics),
+        dispatcher=build_event_dispatcher(session, engine, analytics),
         analytics=analytics,
         plugin_repository=SQLPluginRepository(session),
     )
@@ -558,7 +559,7 @@ def get_job_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
-        transitions=_build_task_transitions(session, analytics),
+        transitions=_build_task_transitions(session, engine, analytics),
         policy=get_task_policy(settings),
     )
 
@@ -599,7 +600,7 @@ def get_task_service(
         job_repository=SQLJobRepository(session),
         replay_repository=replay_repository,
         spec_builder=spec_builder,
-        transitions=_build_task_transitions(session, analytics),
+        transitions=_build_task_transitions(session, engine, analytics),
         policy=policy,
     )
 
@@ -650,6 +651,7 @@ def get_experiment_service(
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
+        transitions=_build_task_transitions(session, engine, analytics),
         analytics=analytics,
     )
 
@@ -685,12 +687,14 @@ def get_replay_service(
 
 def get_experiment_run_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentRunService:
     """Return an experiment run service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -700,7 +704,7 @@ def get_experiment_run_service(
         repository=SQLExperimentRunRepository(session),
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
-        transitions=_build_task_transitions(session, analytics),
+        transitions=_build_task_transitions(session, engine, analytics),
         analytics=analytics,
     )
 

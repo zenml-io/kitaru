@@ -19,30 +19,47 @@ from collections.abc import AsyncGenerator
 import pytest
 from pydantic import SecretStr
 
-from conftest import FakeSecretRepository, pg_session, postgres_available
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeSecretRepository,
+    pg_session,
+    postgres_available,
+)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
 from kitaru.server.adapters.db.repositories.secret_repository import (
     SQLSecretRepository,
+)
+from kitaru.server.application.interfaces.agent_version_repository import (
+    AgentVersionRepository,
 )
 from kitaru.server.application.interfaces.secret_repository import (
     SecretRepository,
 )
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.agent_version import AgentVersion, RunSpec
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
+    SecretInUse,
     SecretNotFound,
 )
 from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[SecretRepository, uuid.UUID, uuid.UUID]
+RestrictionSetup = tuple[SecretRepository, AgentVersionRepository, uuid.UUID, uuid.UUID]
 
 VALUES = {"username": SecretStr("svc"), "password": SecretStr("hunter2")}
 
@@ -346,6 +363,60 @@ async def test_delete_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(SecretNotFound, match=f"Secret {missing_id} was not found"):
         await repository.delete(missing_id)
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def restriction_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[RestrictionSetup, None]:
+    """Provide a secret repository and its collaborators.
+
+    Yields the repository wired to an agent version repository sharing its
+    backend, an owner id, and an agent id.
+    """
+    if request.param == "fake":
+        owner_id = uuid.uuid4()
+        agents = FakeAgentRepository()
+        agent = await agents.create(Agent(owner_id=owner_id, name="assistant"))
+        agent_versions = FakeAgentVersionRepository(agents)
+        secrets = FakeSecretRepository(agent_versions=agent_versions)
+        yield secrets, agent_versions, owner_id, agent.id
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents_repository = SQLAgentRepository(session)
+        agent = await agents_repository.create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        yield (
+            SQLSecretRepository(session, AesGcmCipher("test-encryption-key")),
+            SQLAgentVersionRepository(session),
+            owner.id,
+            agent.id,
+        )
+
+
+async def test_delete_restricted_by_agent_version(
+    restriction_setup: RestrictionSetup,
+) -> None:
+    """Reject deleting a secret referenced by an agent version's run spec."""
+    repository, agent_versions, owner_id, agent_id = restriction_setup
+    secret = await repository.create(
+        Secret(owner_id=owner_id, name="db", values=VALUES)
+    )
+    await agent_versions.create(
+        AgentVersion(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            run_spec=RunSpec(command="run.sh", secret_ids=[secret.id]),
+        )
+    )
+
+    with pytest.raises(SecretInUse):
+        await repository.delete(secret.id)
 
 
 async def test_values_encrypted_at_rest() -> None:

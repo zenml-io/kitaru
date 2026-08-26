@@ -122,6 +122,25 @@ async def get_replay(
     return replay_to_response(bundle.replay, bundle.config)
 
 
+@router.delete("/{replay_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_replay(
+    replay_id: uuid.UUID,
+    service: Annotated[ReplayService, Depends(get_replay_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> None:
+    """Delete a replay.
+
+    Clients observe HTTP 204 on success, 404 when no replay has this id, and
+    409 when the replay belongs to an experiment run.
+
+    Args:
+        replay_id: Id of the replay.
+        service: Replay service.
+        actor: Caller context.
+    """
+    await service.delete_replay(replay_id, actor=actor)
+
+
 @router.post("/{replay_id}/tool-lookup")
 async def tool_lookup(
     replay_id: uuid.UUID,

@@ -44,8 +44,8 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 )
 from kitaru.server.domain.session import Session
 
-SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "session", ["imported_from", "external_id"]
+SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "session", ["imported_from", "external_id", "agent_id"]
 )
 SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["agent_id", "number"]
@@ -72,7 +72,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "imported_from",
             "external_id",
-            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+            "agent_id",
+            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
         ),
         UniqueConstraint(
             "agent_id",
@@ -80,12 +81,16 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT,
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=SESSION_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=SESSION_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["agent_version_id"],
             ["agent_version.id"],
             name=SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
         ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=SESSION_OWNER_ID_FOREIGN_KEY

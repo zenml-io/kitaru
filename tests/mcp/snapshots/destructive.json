@@ -3406,10 +3406,18 @@
               "type": "string"
             },
             "job_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
               "description": "Job running the replay.",
-              "format": "uuid",
-              "title": "Job Id",
-              "type": "string"
+              "title": "Job Id"
             },
             "override": {
               "anyOf": [
@@ -3454,7 +3462,6 @@
             "created",
             "updated",
             "id",
-            "job_id",
             "baseline_session_id",
             "override",
             "tool_policy",

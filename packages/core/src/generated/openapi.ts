@@ -118,8 +118,8 @@ export interface paths {
          * Delete Agent Version
          * @description Delete an agent version.
          *
-         *     Clients observe HTTP 204 on success and 404 when no agent version has
-         *     this id.
+         *     Clients observe HTTP 204 on success, 404 when no agent version has
+         *     this id, and 409 when an experiment run references it.
          *
          *     Args:
          *         agent_version_id: Id of the agent version.
@@ -220,10 +220,12 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent
-         * @description Delete an agent.
+         * @description Delete an agent, hiding the agent and retaining its subtree.
          *
-         *     Clients observe HTTP 204 on success, 404 when no agent has this id, and
-         *     409 when the agent has versions.
+         *     The agent's stored sessions, versions, cohorts, experiments, and
+         *     investigations are retained and stay readable through their own routes.
+         *     Creating new ones for the agent returns HTTP 404. Clients observe HTTP
+         *     204 on success and 404 when no agent has this id.
          *
          *     Args:
          *         agent_id: Id of the agent.
@@ -791,7 +793,8 @@ export interface paths {
          * @description Delete a cohort.
          *
          *     Deleting a cohort cascades its versions. Clients observe HTTP 204 on
-         *     success and 404 when no cohort has this id.
+         *     success, 404 when no cohort has this id, and 409 when an experiment
+         *     run references one of its versions.
          *
          *     Args:
          *         cohort_id: Id of the cohort.
@@ -1378,7 +1381,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Experiment Run
-         * @description Delete an experiment run and its jobs.
+         * @description Delete an experiment run and its replays.
          *
          *     Clients observe HTTP 204 on success and 404 when no run has this id.
          *
@@ -2093,9 +2096,10 @@ export interface paths {
         post?: never;
         /**
          * Delete Job
-         * @description Delete a job, cascading its tasks.
+         * @description Delete a settled job, cascading its tasks.
          *
-         *     Clients observe HTTP 204 on success and 404 when no job has this id.
+         *     Clients observe HTTP 204 on success, 404 when no job has this id, and
+         *     409 when the job has not settled.
          *
          *     Args:
          *         job_id: Id of the job.
@@ -2318,7 +2322,19 @@ export interface paths {
         get: operations["get_replay_api_v1_replays__replay_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Replay
+         * @description Delete a replay.
+         *
+         *     Clients observe HTTP 204 on success, 404 when no replay has this id, and
+         *     409 when the replay belongs to an experiment run.
+         *
+         *     Args:
+         *         replay_id: Id of the replay.
+         *         service: Replay service.
+         *         actor: Caller context.
+         */
+        delete: operations["delete_replay_api_v1_replays__replay_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2435,8 +2451,8 @@ export interface paths {
          * Delete Secret
          * @description Delete a secret.
          *
-         *     Clients observe HTTP 204 on success and 404 when no secret has this
-         *     id.
+         *     Clients observe HTTP 204 on success, 404 when no secret has this id,
+         *     and 409 when an agent version references it.
          *
          *     Args:
          *         secret_id: Id of the secret.
@@ -2639,7 +2655,8 @@ export interface paths {
          * @description Delete a session.
          *
          *     Deleting a session cascades its nodes. Clients observe HTTP 204 on
-         *     success and 404 when no session has this id.
+         *     success, 404 when no session has this id, and 409 when the session is
+         *     referenced by a cohort version, investigation, or replay.
          *
          *     Args:
          *         session_id: Id of the session.
@@ -2891,8 +2908,9 @@ export interface paths {
          * Create Tag Link
          * @description Link a tag to a resource.
          *
-         *     Clients observe HTTP 201 on success, 404 when no tag has this id, 409
-         *     when the link is already registered, and 422 on invalid input.
+         *     Clients observe HTTP 201 on success, 404 when no tag or no resource of
+         *     the given type and id exists, 409 when the link is already registered,
+         *     and 422 on invalid input.
          *
          *     Args:
          *         tag_id: Id of the tag.
@@ -6493,10 +6511,9 @@ export interface components {
             id: string;
             /**
              * Job Id
-             * Format: uuid
              * @description Job running the replay.
              */
-            job_id: string;
+            job_id?: string | null;
             /** @description Override applied. */
             override: components["schemas"]["ReplayOverride"] | null;
             /**
@@ -11549,6 +11566,35 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ReplayResponse"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_replay_api_v1_replays__replay_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                replay_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

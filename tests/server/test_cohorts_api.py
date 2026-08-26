@@ -112,6 +112,19 @@ async def test_create_cohort_missing_agent(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
+async def test_create_cohort_deleted_agent(
+    client: httpx.AsyncClient,
+    agent_repository: FakeAgentRepository,
+    agent_id: str,
+) -> None:
+    """Observe HTTP 404 when the agent is deleted."""
+    await agent_repository.mark_deleted(uuid.UUID(agent_id))
+    response = await client.post(
+        "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+    )
+    assert response.status_code == 404
+
+
 async def test_create_cohort_duplicate_name(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:
@@ -122,6 +135,23 @@ async def test_create_cohort_duplicate_name(
     response = await client.post("/api/v1/cohorts", json=body)
     assert response.status_code == 409
     assert response.json() == {"detail": "Cohort name 'cohort' is already registered"}
+
+
+async def test_create_cohort_same_name_different_agent(
+    client: httpx.AsyncClient,
+    agent_repository: FakeAgentRepository,
+    agent_id: str,
+) -> None:
+    """Observe HTTP 201 for the same cohort name under another agent."""
+    other_agent = await create_agent(agent_repository, ACCOUNT.id, name="reviewer")
+    response = await client.post(
+        "/api/v1/cohorts", json={"name": "cohort", "agent_id": agent_id}
+    )
+    assert response.status_code == 201
+    response = await client.post(
+        "/api/v1/cohorts", json={"name": "cohort", "agent_id": str(other_agent.id)}
+    )
+    assert response.status_code == 201
 
 
 async def test_get_cohort(client: httpx.AsyncClient, agent_id: str) -> None:

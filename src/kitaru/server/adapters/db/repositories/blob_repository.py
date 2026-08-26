@@ -22,7 +22,6 @@ from sqlalchemy.exc import IntegrityError
 from kitaru.server.adapters.db.errors import violated_constraint
 from kitaru.server.adapters.db.orm.blob import BLOB_SHA256_UNIQUE_CONSTRAINT, BlobORM
 from kitaru.server.adapters.db.orm.plugin import PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY
-from kitaru.server.adapters.db.orm.task import TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
@@ -158,14 +157,8 @@ class SQLBlobRepository(BaseSQLRepository[BlobORM]):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version or an
-                import task.
+            BlobInUse: The blob is referenced by a plugin version.
         """
-        row = await self._get_row(blob_id)
-        await self._session.delete(row)
-        await self._flush(
-            {
-                PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
-                TASK_PAYLOAD_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id),
-            }
+        await self._delete_row(
+            blob_id, {PLUGIN_VERSION_BLOB_ID_FOREIGN_KEY: lambda: BlobInUse(blob_id)}
         )

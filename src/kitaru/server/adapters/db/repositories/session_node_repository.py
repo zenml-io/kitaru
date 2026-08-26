@@ -25,10 +25,14 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.session import SessionORM
-from kitaru.server.adapters.db.orm.session_node import SessionNodeORM
+from kitaru.server.adapters.db.orm.session_node import (
+    SESSION_NODE_SESSION_ID_FOREIGN_KEY,
+    SessionNodeORM,
+)
 from kitaru.server.adapters.db.pagination import paginate_by_index
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.session_node import SessionNodeFilter
+from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.domain.session_node import SessionNode
 
 RECORDED_HISTORY_ORIGINS = [SessionOrigin.RECORDED.value, SessionOrigin.IMPORTED.value]
@@ -89,10 +93,12 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             session_id: Id of the owning session.
             nodes: Fully resolved nodes to store, in batch order.
 
+        Raises:
+            SessionNotFound: No session has this id.
+
         Returns:
             Stored nodes in batch order.
         """
-        _ = session_id
         if not nodes:
             return []
         # Defer the payload columns because apply_domain replaces them below
@@ -109,7 +115,9 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             else:
                 row.apply_domain(node)
             stored_rows.append(row)
-        await self._flush()
+        await self._flush(
+            {SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(session_id)}
+        )
         return [row.to_domain(include_payloads=True) for row in stored_rows]
 
     async def query(

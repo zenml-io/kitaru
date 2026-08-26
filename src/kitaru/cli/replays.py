@@ -51,14 +51,17 @@ async def create_replay(
     replay = await client.replays.create(
         ReplayCreateRequest(**fields), idempotency_key=idempotency_key
     )
+    next_actions = []
+    if replay.job_id is not None:
+        next_actions += [
+            f"kitaru job watch {replay.job_id}",
+            f"kitaru job cancel {replay.job_id}",
+        ]
+    next_actions.append(f"kitaru replay get {replay.id}")
     return CommandResult(
         item=replay.model_dump(mode="json"),
         event="created",
-        next_actions=[
-            f"kitaru job watch {replay.job_id}",
-            f"kitaru job cancel {replay.job_id}",
-            f"kitaru replay get {replay.id}",
-        ],
+        next_actions=next_actions,
     )
 
 

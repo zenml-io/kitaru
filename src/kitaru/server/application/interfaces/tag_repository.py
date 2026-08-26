@@ -97,6 +97,15 @@ class TagRepository(Protocol):
 
         Raises:
             TagNotFound: No tag has the link's tag id.
+            SessionNotFound: No session has the link's resource id.
+            CohortNotFound: No cohort has the link's resource id.
+            CohortVersionIdNotFound: No cohort version has the link's
+                resource id.
+            AgentVersionNotFound: No agent version has the link's resource
+                id.
+            ExperimentNotFound: No experiment has the link's resource id.
+            ExperimentRunNotFound: No experiment run has the link's resource
+                id.
             DuplicateTagLink: The tag is already linked to the resource.
 
         Returns:

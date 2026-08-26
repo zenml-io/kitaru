@@ -5291,10 +5291,17 @@
             "type": "string"
           },
           "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Job running the replay.",
-            "format": "uuid",
-            "title": "Job Id",
-            "type": "string"
+            "title": "Job Id"
           },
           "override": {
             "anyOf": [
@@ -5338,7 +5345,6 @@
           "created",
           "updated",
           "id",
-          "job_id",
           "baseline_session_id",
           "override",
           "tool_policy",
@@ -8889,7 +8895,7 @@
     },
     "/api/v1/agent-versions/{agent_version_id}": {
       "delete": {
-        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
+        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success, 404 when no agent version has\nthis id, and 409 when an experiment run references it.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
         "operationId": "delete_agent_version_api_v1_agent_versions__agent_version_id__delete",
         "parameters": [
           {
@@ -9184,7 +9190,7 @@
     },
     "/api/v1/agents/{agent_id}": {
       "delete": {
-        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id, and\n409 when the agent has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
+        "description": "Delete an agent, hiding the agent and retaining its subtree.\n\nThe agent's stored sessions, versions, cohorts, experiments, and\ninvestigations are retained and stay readable through their own routes.\nCreating new ones for the agent returns HTTP 404. Clients observe HTTP\n204 on success and 404 when no agent has this id.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
         "operationId": "delete_agent_api_v1_agents__agent_id__delete",
         "parameters": [
           {
@@ -10625,7 +10631,7 @@
     },
     "/api/v1/cohorts/{cohort_id}": {
       "delete": {
-        "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess and 404 when no cohort has this id.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
+        "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess, 404 when no cohort has this id, and 409 when an experiment\nrun references one of its versions.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
         "operationId": "delete_cohort_api_v1_cohorts__cohort_id__delete",
         "parameters": [
           {
@@ -12152,7 +12158,7 @@
     },
     "/api/v1/experiment-runs/{experiment_run_id}": {
       "delete": {
-        "description": "Delete an experiment run and its jobs.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
+        "description": "Delete an experiment run and its replays.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
         "operationId": "delete_experiment_run_api_v1_experiment_runs__experiment_run_id__delete",
         "parameters": [
           {
@@ -13929,7 +13935,7 @@
     },
     "/api/v1/jobs/{job_id}": {
       "delete": {
-        "description": "Delete a job, cascading its tasks.\n\nClients observe HTTP 204 on success and 404 when no job has this id.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
+        "description": "Delete a settled job, cascading its tasks.\n\nClients observe HTTP 204 on success, 404 when no job has this id, and\n409 when the job has not settled.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
         "operationId": "delete_job_api_v1_jobs__job_id__delete",
         "parameters": [
           {
@@ -14397,6 +14403,41 @@
       }
     },
     "/api/v1/replays/{replay_id}": {
+      "delete": {
+        "description": "Delete a replay.\n\nClients observe HTTP 204 on success, 404 when no replay has this id, and\n409 when the replay belongs to an experiment run.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.",
+        "operationId": "delete_replay_api_v1_replays__replay_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Replay",
+        "tags": [
+          "replays"
+        ]
+      },
       "get": {
         "description": "Get a replay by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, and 404 when no replay has this id.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
         "operationId": "get_replay_api_v1_replays__replay_id__get",
@@ -14660,7 +14701,7 @@
     },
     "/api/v1/secrets/{secret_id}": {
       "delete": {
-        "description": "Delete a secret.\n\nClients observe HTTP 204 on success and 404 when no secret has this\nid.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
+        "description": "Delete a secret.\n\nClients observe HTTP 204 on success, 404 when no secret has this id,\nand 409 when an agent version references it.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
         "operationId": "delete_secret_api_v1_secrets__secret_id__delete",
         "parameters": [
           {
@@ -15147,7 +15188,7 @@
     },
     "/api/v1/sessions/{session_id}": {
       "delete": {
-        "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess, 404 when no session has this id, and 409 when the session is\nreferenced by a cohort version, investigation, or replay.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
         "operationId": "delete_session_api_v1_sessions__session_id__delete",
         "parameters": [
           {
@@ -15777,7 +15818,7 @@
     },
     "/api/v1/tags/{tag_id}/links": {
       "post": {
-        "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag has this id, 409\nwhen the link is already registered, and 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
+        "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag or no resource of\nthe given type and id exists, 409 when the link is already registered,\nand 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
         "operationId": "create_tag_link_api_v1_tags__tag_id__links_post",
         "parameters": [
           {

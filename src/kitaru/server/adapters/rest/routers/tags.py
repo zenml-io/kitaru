@@ -144,8 +144,9 @@ async def create_tag_link(
 ) -> TagLinkResponse:
     """Link a tag to a resource.
 
-    Clients observe HTTP 201 on success, 404 when no tag has this id, 409
-    when the link is already registered, and 422 on invalid input.
+    Clients observe HTTP 201 on success, 404 when no tag or no resource of
+    the given type and id exists, 409 when the link is already registered,
+    and 422 on invalid input.
 
     Args:
         tag_id: Id of the tag.

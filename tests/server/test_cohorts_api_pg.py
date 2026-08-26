@@ -76,6 +76,21 @@ async def test_duplicate_name_conflict(
     }
 
 
+async def test_same_name_different_agent(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Accept the same cohort name under another agent."""
+    other = (await client.post("/api/v1/agents", json={"name": "reviewer"})).json()
+    response = await client.post(
+        "/api/v1/cohorts", json={"name": "smoke-test", "agent_id": agent_id}
+    )
+    assert response.status_code == 201
+    response = await client.post(
+        "/api/v1/cohorts", json={"name": "smoke-test", "agent_id": other["id"]}
+    )
+    assert response.status_code == 201
+
+
 async def test_update_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

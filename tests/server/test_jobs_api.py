@@ -176,12 +176,23 @@ async def test_cancel_job_conflicts_when_already_settled(
 async def test_delete_job(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:
-    """Delete a job and observe HTTP 204."""
-    job = await create_job(services.jobs, ACCOUNT.id)
+    """Delete a settled job and observe HTTP 204."""
+    job = await create_job(services.jobs, ACCOUNT.id, status=JobStatus.COMPLETED)
     response = await client.delete(f"/api/v1/jobs/{job.id}")
     assert response.status_code == 204
     response = await client.get(f"/api/v1/jobs/{job.id}")
     assert response.status_code == 404
+
+
+async def test_delete_job_conflicts_when_not_settled(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 409 when deleting a job that has not settled."""
+    job = await create_job(services.jobs, ACCOUNT.id)
+    response = await client.delete(f"/api/v1/jobs/{job.id}")
+    assert response.status_code == 409
+    response = await client.get(f"/api/v1/jobs/{job.id}")
+    assert response.status_code == 200
 
 
 async def test_delete_job_not_found(client: httpx.AsyncClient) -> None:

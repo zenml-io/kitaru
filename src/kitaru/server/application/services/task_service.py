@@ -43,6 +43,7 @@ from kitaru.server.application.models.task import (
 from kitaru.server.application.services.resource_access import check_task_attempt
 from kitaru.server.application.services.task_spec import TaskSpecBuilder
 from kitaru.server.application.services.task_transitions import TaskTransitions
+from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.task import (
     AgentTask,
     IllegalTaskStatusTransition,
@@ -53,6 +54,7 @@ from kitaru.server.domain.task import (
     TaskResultTooLarge,
     TaskSpec,
     TaskUpdateRequiresStatus,
+    stale_abandon_error,
 )
 from kitaru.server.domain.worker import WorkerAccessDenied, WorkerCredentialRequired
 
@@ -97,6 +99,9 @@ class TaskService:
     ) -> list[ClaimedTask]:
         """Claim pending tasks matching the worker's scope.
 
+        A claimed task whose inputs no longer resolve is canceled and left out
+        of the batch.
+
         Args:
             max_tasks: Maximum number of tasks to claim.
             actor: Caller context.
@@ -125,10 +130,21 @@ class TaskService:
             await self._transitions.start_job(job_id)
         results: list[ClaimedTask] = []
         for task in claimed:
+            try:
+                spec = await self._spec_builder.build_spec(task)
+            except NotFoundError:
+                # A task names its inputs by id, so one of them can be deleted
+                # between the enqueue and this claim. The task is canceled and
+                # left out of the batch, which drains its job the same way any
+                # other terminal task does.
+                await self._transitions.apply_status(
+                    task, partial(Task.cancel, now=now)
+                )
+                continue
             results.append(
                 ClaimedTask(
                     task=task,
-                    spec=await self._spec_builder.build_spec(task),
+                    spec=spec,
                     job_owner_id=owners[task.job_id].owner_id,
                 )
             )
@@ -336,11 +352,10 @@ class TaskService:
             await self._unlink_result_session(task)
             await self._apply_status(task, Task.requeue)
         else:
-            error = (
-                f"Task stopped reporting after {task.attempt} attempts "
-                "and was abandoned"
+            await self._apply_status(
+                task,
+                partial(Task.abandon, error=stale_abandon_error(task.attempt), now=now),
             )
-            await self._apply_status(task, partial(Task.abandon, error=error, now=now))
 
     async def list_unpropagated_cancel_job_ids(self) -> list[uuid.UUID]:
         """Read the ids of canceling jobs whose live tasks still owe the stamp.
@@ -367,7 +382,6 @@ class TaskService:
             DBAPIError: Another transaction holds one of the task rows.
         """
         await self._transitions.request_jobs_cancel([job_id], nowait=True)
-        await self._transitions.settle_job_if_drained(job_id)
 
     async def _apply_status(
         self, task: Task, transition: Callable[[Task], None]

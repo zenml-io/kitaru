@@ -28,13 +28,19 @@ from kitaru.server.adapters.db.filtering import (
 from kitaru.server.adapters.db.orm.agent_version import AgentVersionORM
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.experiment_run import (
+    EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY,
+    EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY,
+    EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY,
     EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT,
     ExperimentRunORM,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment_run import ExperimentRunFilter
+from kitaru.server.domain.agent_version import AgentVersionNotFound
 from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.cohort_version import CohortVersionIdNotFound
+from kitaru.server.domain.experiment import ExperimentNotFound
 from kitaru.server.domain.experiment_run import (
     DuplicateExperimentRunNumber,
     ExperimentRun,
@@ -90,6 +96,11 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
         Raises:
             DuplicateExperimentRunNumber: The experiment already has a run
                 with this number.
+            ExperimentNotFound: No experiment has the run's experiment id.
+            CohortVersionIdNotFound: No cohort version has the run's cohort
+                version id.
+            AgentVersionNotFound: No agent version has the run's agent
+                version id.
 
         Returns:
             Stored experiment run with timestamps set.
@@ -100,7 +111,16 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
             {
                 EXPERIMENT_RUN_NUMBER_UNIQUE_CONSTRAINT: lambda: (
                     DuplicateExperimentRunNumber(run.experiment_id, run.number)
-                )
+                ),
+                EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY: lambda: ExperimentNotFound(
+                    run.experiment_id
+                ),
+                EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY: lambda: (
+                    CohortVersionIdNotFound(run.cohort_version_id)
+                ),
+                EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY: lambda: (
+                    AgentVersionNotFound(run.agent_version_id)
+                ),
             },
         )
         return row.to_domain()
@@ -205,3 +225,20 @@ class SQLExperimentRunRepository(BaseSQLRepository[ExperimentRunORM]):
             .exists()
         )
         return bool(await self._session.scalar(statement))
+
+    async def list_by_experiment(self, experiment_id: uuid.UUID) -> list[ExperimentRun]:
+        """Load every run of an experiment.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            Runs of the experiment, in creation order.
+        """
+        statement = (
+            select(ExperimentRunORM)
+            .where(ExperimentRunORM.experiment_id == experiment_id)
+            .order_by(ExperimentRunORM.id.asc())
+        )
+        rows = (await self._session.scalars(statement)).all()
+        return [row.to_domain() for row in rows]

@@ -70,7 +70,6 @@ class BlobRepository(Protocol):
 
         Raises:
             BlobNotFound: No blob has this id.
-            BlobInUse: The blob is referenced by a plugin version or an
-                import task.
+            BlobInUse: The blob is referenced by a plugin version.
         """
         ...

@@ -94,10 +94,10 @@ async def test_delete_cascades_versions(client: httpx.AsyncClient) -> None:
     assert response.status_code == 204
 
 
-async def test_agent_deletion_nulls_scoped_evaluator_agent_id(
+async def test_scoped_evaluator_keeps_agent_id_after_soft_delete(
     client: httpx.AsyncClient,
 ) -> None:
-    """Clear a scoped evaluator's agent id when its agent is deleted."""
+    """Keep a scoped evaluator's agent id when its agent is soft-deleted."""
     agent = (await client.post("/api/v1/agents", json={"name": "assistant"})).json()
     created = (
         await client.post(
@@ -108,9 +108,11 @@ async def test_agent_deletion_nulls_scoped_evaluator_agent_id(
     response = await client.delete(f"/api/v1/agents/{agent['id']}")
     assert response.status_code == 204
 
+    # The agent row is retained on a soft delete, so the SET NULL foreign key
+    # does not fire and the evaluator keeps its scope.
     response = await client.get(f"/api/v1/evaluators/{created['id']}")
     assert response.status_code == 200
-    assert response.json()["agent_id"] is None
+    assert response.json()["agent_id"] == agent["id"]
 
 
 async def test_create_unknown_agent_not_found(client: httpx.AsyncClient) -> None:

@@ -25,14 +25,24 @@ from kitaru.server.adapters.db.filtering import (
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.cohort import (
-    COHORT_NAME_UNIQUE_CONSTRAINT,
+    COHORT_AGENT_ID_FOREIGN_KEY,
+    COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT,
     CohortORM,
+)
+from kitaru.server.adapters.db.orm.experiment_run import (
+    EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.cohort import CohortFilter
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
-from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
+from kitaru.server.domain.cohort import (
+    Cohort,
+    CohortInUse,
+    CohortNotFound,
+    DuplicateCohortName,
+)
 
 COHORT_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": CohortORM.id,
@@ -66,6 +76,7 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
 
         Raises:
             DuplicateCohortName: The cohort name is already registered.
+            AgentNotFound: No agent has the cohort's agent id.
 
         Returns:
             Stored cohort with timestamps set.
@@ -73,7 +84,12 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         row = CohortORM.from_domain(cohort)
         await self._add(
             row,
-            {COHORT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(cohort.name)},
+            {
+                COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(
+                    cohort.name
+                ),
+                COHORT_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(cohort.agent_id),
+            },
         )
         return row.to_domain()
 
@@ -138,7 +154,11 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
         row.metadata_ = cohort.metadata
         row.latest_version = cohort.latest_version
         await self._flush(
-            {COHORT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(cohort.name)}
+            {
+                COHORT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateCohortName(
+                    cohort.name
+                )
+            }
         )
         return row.to_domain()
 
@@ -152,5 +172,13 @@ class SQLCohortRepository(BaseSQLRepository[CohortORM]):
 
         Raises:
             CohortNotFound: No cohort has this id.
+            CohortInUse: An experiment run references one of its versions.
         """
-        await self._delete_row(cohort_id)
+        await self._delete_row(
+            cohort_id,
+            {
+                EXPERIMENT_RUN_COHORT_VERSION_ID_FOREIGN_KEY: lambda: CohortInUse(
+                    cohort_id
+                )
+            },
+        )

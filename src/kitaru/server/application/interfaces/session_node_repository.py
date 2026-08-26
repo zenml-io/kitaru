@@ -52,6 +52,9 @@ class SessionNodeRepository(Protocol):
             session_id: Id of the owning session.
             nodes: Fully resolved nodes to store, in batch order.
 
+        Raises:
+            SessionNotFound: No session has this id.
+
         Returns:
             Stored nodes in batch order.
         """

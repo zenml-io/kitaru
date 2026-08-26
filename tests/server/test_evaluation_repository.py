@@ -81,7 +81,6 @@ from kitaru.server.domain.job import Job
 from kitaru.server.domain.plugin import (
     PackagePluginSource,
     Plugin,
-    PluginInUse,
     PluginKind,
 )
 from kitaru.server.domain.replay import Replay
@@ -496,10 +495,10 @@ async def test_denormalized_evaluator_name_and_version(
     assert items[0].evaluator_version == version.version
 
 
-async def test_evaluator_delete_restricted_by_stored_evaluation(
+async def test_evaluator_delete_nulls_stored_evaluation(
     plugin_setup: PluginSetup,
 ) -> None:
-    """Reject deleting an evaluator with a stored evaluation."""
+    """Deleting an evaluator nulls the evaluator version on a stored evaluation."""
     plugin_repository, evaluation_repository, owner_id, session_id = plugin_setup
     plugin = await plugin_repository.create(
         Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy-scorer")
@@ -507,7 +506,7 @@ async def test_evaluator_delete_restricted_by_stored_evaluation(
     version = await plugin_repository.create_version(
         plugin.id, SOURCE, display_version="v1"
     )
-    await evaluation_repository.merge_session_evaluations(
+    stored = await evaluation_repository.merge_session_evaluations(
         session_id,
         [
             _evaluation(
@@ -520,8 +519,10 @@ async def test_evaluator_delete_restricted_by_stored_evaluation(
         ],
     )
 
-    with pytest.raises(PluginInUse):
-        await plugin_repository.delete(plugin.id)
+    await plugin_repository.delete(plugin.id)
+
+    item = await evaluation_repository.get(stored[0].id)
+    assert item.evaluation.evaluator_version_id is None
 
 
 async def test_check_constraint_rejects_mismatched_columns() -> None:
@@ -542,6 +543,50 @@ async def test_check_constraint_rejects_mismatched_columns() -> None:
         session.add(bad_row)
         with pytest.raises(IntegrityError):
             await session.flush()
+
+
+async def test_survives_task_delete_with_null_task_id() -> None:
+    """An evaluation survives its producing task's delete, task_id nulled."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner_id, agent_id = await _create_owner_and_agent(session)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
+        plugins = SQLPluginRepository(session)
+        plugin = await plugins.create(
+            Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy")
+        )
+        plugin_version = await plugins.create_version(
+            plugin.id, SOURCE, display_version="v1"
+        )
+        jobs = SQLJobRepository(session)
+        job = await jobs.create(
+            Job(owner_id=owner_id, kind=JobKind.EVALUATION, status=JobStatus.PENDING)
+        )
+        tasks = SQLTaskRepository(session)
+        task = await tasks.create(
+            EvaluationTask(
+                job_id=job.id,
+                plugin_version_id=plugin_version.id,
+                input_session_id=session_id,
+            )
+        )
+        repository = SQLEvaluationRepository(session)
+        evaluation = _evaluation(
+            owner_id,
+            session_id,
+            "accuracy",
+            score=1.0,
+            evaluator_version_id=plugin_version.id,
+        )
+        [stored] = await repository.create_task_evaluations(
+            [evaluation.model_copy(update={"task_id": task.id})]
+        )
+
+        await jobs.delete(job.id)
+
+        item = await repository.get(stored.id)
+        assert item.evaluation.task_id is None
 
 
 async def test_query_filters_by_agent() -> None:

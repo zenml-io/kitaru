@@ -32,6 +32,11 @@ class ExperimentRunRepository(Protocol):
         Raises:
             DuplicateExperimentRunNumber: The experiment already has a run
                 with this number.
+            ExperimentNotFound: No experiment has the run's experiment id.
+            CohortVersionIdNotFound: No cohort version has the run's cohort
+                version id.
+            AgentVersionNotFound: No agent version has the run's agent
+                version id.
 
         Returns:
             Stored experiment run with timestamps set.
@@ -113,5 +118,16 @@ class ExperimentRunRepository(Protocol):
 
         Returns:
             Whether the experiment has any run.
+        """
+        ...
+
+    async def list_by_experiment(self, experiment_id: uuid.UUID) -> list[ExperimentRun]:
+        """Load every run of an experiment.
+
+        Args:
+            experiment_id: Id of the experiment.
+
+        Returns:
+            Runs of the experiment, in creation order.
         """
         ...

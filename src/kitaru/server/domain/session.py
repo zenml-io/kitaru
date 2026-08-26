@@ -36,13 +36,16 @@ from kitaru.server.domain.ids import uuid7
 class SessionNotFound(NotFoundError):
     """Raised when a session lookup does not resolve."""
 
-    def __init__(self, session_id: uuid.UUID) -> None:
+    def __init__(self, session_id: uuid.UUID | None = None) -> None:
         """Initialize the error.
 
         Args:
-            session_id: Id of the missing session.
+            session_id: Id of the missing session, None when unidentified.
         """
-        super().__init__(f"Session {session_id} was not found")
+        if session_id is None:
+            super().__init__("A referenced session was not found")
+        else:
+            super().__init__(f"Session {session_id} was not found")
 
 
 class SessionAccessDenied(ForbiddenError):
@@ -86,7 +89,7 @@ class DuplicateSessionExternalId(ConflictError):
 
 
 class SessionInUse(ConflictError):
-    """Raised when a session belongs to a cohort version and cannot be deleted."""
+    """Raised when a cohort version, investigation, or replay references a session."""
 
     def __init__(self, session_id: uuid.UUID) -> None:
         """Initialize the error.
@@ -95,32 +98,9 @@ class SessionInUse(ConflictError):
             session_id: Id of the session that cannot be deleted.
         """
         super().__init__(
-            f"Session {session_id} belongs to a cohort version and cannot be deleted"
+            f"Session {session_id} is referenced by a cohort version, "
+            "investigation, or replay and cannot be deleted"
         )
-
-
-class SessionInUseByTask(ConflictError):
-    """Raised when a session is referenced by a task and cannot be deleted."""
-
-    def __init__(self, session_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            session_id: Id of the session that cannot be deleted.
-        """
-        super().__init__(f"Session {session_id} is in use by a task")
-
-
-class SessionInUseByReplay(ConflictError):
-    """Raised when a session is referenced by a replay and cannot be deleted."""
-
-    def __init__(self, session_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            session_id: Id of the session that cannot be deleted.
-        """
-        super().__init__(f"Session {session_id} is in use by a replay")
 
 
 class SessionAgentVersionMismatch(ValidationError):

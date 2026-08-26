@@ -68,7 +68,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["owner_id"], ["account.id"], name=REPLAY_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
-            ["job_id"], ["job.id"], name=REPLAY_JOB_ID_FOREIGN_KEY, ondelete="CASCADE"
+            ["job_id"], ["job.id"], name=REPLAY_JOB_ID_FOREIGN_KEY, ondelete="SET NULL"
         ),
         ForeignKeyConstraint(
             ["experiment_run_id"],
@@ -103,7 +103,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     )
 
     owner_id: Mapped[uuid.UUID]
-    job_id: Mapped[uuid.UUID]
+    job_id: Mapped[uuid.UUID | None]
     experiment_run_id: Mapped[uuid.UUID | None]
     replay_config_id: Mapped[uuid.UUID]
     baseline_session_id: Mapped[uuid.UUID]

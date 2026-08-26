@@ -20,6 +20,8 @@ from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
+from kitaru.server.application.interfaces.session_repository import SessionRepository
+from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.task import EvaluationTask
 
@@ -28,6 +30,7 @@ async def record_task_evaluations(
     event: TaskTerminal,
     evaluation_repository: EvaluationRepository,
     job_repository: JobRepository,
+    session_repository: SessionRepository,
 ) -> None:
     """Write one evaluation row per result of a completed evaluator task.
 
@@ -39,6 +42,7 @@ async def record_task_evaluations(
         event: TaskTerminal event.
         evaluation_repository: Evaluation repository.
         job_repository: Job repository, for the owning job's owner id.
+        session_repository: Session repository, to lock the scored session.
     """
     task = event.task
     if not isinstance(task, EvaluationTask) or task.status is not TaskStatus.COMPLETED:
@@ -60,5 +64,19 @@ async def record_task_evaluations(
         )
         for result in (EvaluationResult.model_validate(entry) for entry in results)
     ]
-    if evaluations:
+    if not evaluations:
+        return
+    # Lock the scored session so a concurrent delete cannot land between this
+    # check and the insert. A deleted session cascade-removes its evaluation
+    # rows, so a vanished session leaves nothing to record.
+    try:
+        await session_repository.get(task.input_session_id, exclusive=True)
+    except NotFoundError:
+        return
+    # The evaluator can be deleted while its task runs, cascading its version
+    # away. The insert then references a missing evaluator version, which
+    # leaves nothing to record.
+    try:
         await evaluation_repository.create_task_evaluations(evaluations)
+    except NotFoundError:
+        return

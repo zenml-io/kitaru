@@ -50,6 +50,9 @@ class SessionRepository(Protocol):
         Raises:
             DuplicateSessionExternalId: The imported_from and external id pair is
                 already registered.
+            AgentNotFound: No agent has the session's agent id.
+            AgentVersionNotFound: No agent version has the session's agent
+                version id.
 
         Returns:
             Stored session with timestamps set.
@@ -141,10 +144,8 @@ class SessionRepository(Protocol):
 
         Raises:
             SessionNotFound: No session has this id.
-            SessionInUse: The session belongs to a cohort version and
-                cannot be deleted.
-            SessionInUseByTask: The session is a task's input or result
-                session and cannot be deleted.
+            SessionInUse: The session is referenced by a cohort version,
+                investigation, or replay and cannot be deleted.
         """
         ...
 

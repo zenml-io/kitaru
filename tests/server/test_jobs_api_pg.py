@@ -163,7 +163,7 @@ async def test_cancel_job_conflicts_once_settled(client: httpx.AsyncClient) -> N
 
 
 async def test_delete_job_cascades_its_tasks(client: httpx.AsyncClient) -> None:
-    """Deleting a job removes its tasks, no longer reachable by id."""
+    """Deleting a settled job removes its tasks, no longer reachable by id."""
     _, version_id = await _create_runnable_agent_version(client)
     job = (
         await client.post(
@@ -173,12 +173,31 @@ async def test_delete_job_cascades_its_tasks(client: httpx.AsyncClient) -> None:
     ).json()
     tasks = (await client.get(f"/api/v1/jobs/{job['id']}/tasks")).json()["items"]
     task_id = tasks[0]["id"]
+    await client.post(f"/api/v1/jobs/{job['id']}/cancel")
 
     response = await client.delete(f"/api/v1/jobs/{job['id']}")
     assert response.status_code == 204
 
     assert (await client.get(f"/api/v1/jobs/{job['id']}")).status_code == 404
     assert (await client.get(f"/api/v1/tasks/{task_id}")).status_code == 404
+
+
+async def test_delete_job_conflicts_when_not_settled(
+    client: httpx.AsyncClient,
+) -> None:
+    """Deleting a job that has not settled conflicts and leaves it stored."""
+    _, version_id = await _create_runnable_agent_version(client)
+    job = (
+        await client.post(
+            "/api/v1/session-runs",
+            json={"agent_version_id": version_id, "inputs": None},
+        )
+    ).json()
+
+    response = await client.delete(f"/api/v1/jobs/{job['id']}")
+    assert response.status_code == 409
+
+    assert (await client.get(f"/api/v1/jobs/{job['id']}")).status_code == 200
 
 
 async def test_heartbeat_reports_cancel_requested_tasks(

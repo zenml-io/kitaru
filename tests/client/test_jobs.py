@@ -140,8 +140,8 @@ async def test_cancel_conflicts_when_settled(
 async def test_delete(
     api_client: KitaruAPIClient, services: JobAndTaskServices
 ) -> None:
-    """Delete a job through the SDK."""
-    job = await create_job(services.jobs, ACCOUNT.id)
+    """Delete a settled job through the SDK."""
+    job = await create_job(services.jobs, ACCOUNT.id, status=JobStatus.COMPLETED)
     await api_client.jobs.delete(job.id)
     with pytest.raises(NotFoundError):
         await api_client.jobs.get(job.id)

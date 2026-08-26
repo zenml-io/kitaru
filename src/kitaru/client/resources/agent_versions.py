@@ -86,7 +86,7 @@ class AgentVersionsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing agent
-                version.
+                version and 409 when an experiment run references it.
         """
         await self._client.request(
             "DELETE", f"/api/v1/agent-versions/{agent_version_id}"

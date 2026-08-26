@@ -67,6 +67,18 @@ class JobAlreadySettled(ConflictError):
         super().__init__(f"Job {job_id} has already settled")
 
 
+class JobNotSettled(ConflictError):
+    """Raised when an operation requires a job that has settled."""
+
+    def __init__(self, job_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            job_id: Id of the unsettled job.
+        """
+        super().__init__(f"Job {job_id} has not settled")
+
+
 class Job(DomainModel):
     """Job."""
 

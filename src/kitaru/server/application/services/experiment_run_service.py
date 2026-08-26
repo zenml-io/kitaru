@@ -122,7 +122,7 @@ class ExperimentRunService:
         _ = actor
         await self._repository.get(experiment_run_id)
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
-        job_ids = [replay.job_id for replay in replays]
+        job_ids = [replay.job_id for replay in replays if replay.job_id is not None]
         return await self._jobs.query(
             JobFilter(
                 expression=job_filter.expression,
@@ -177,9 +177,12 @@ class ExperimentRunService:
         """
         _ = actor
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
-        job_ids = [replay.job_id for replay in replays if not replay.settled]
+        job_ids = [
+            replay.job_id
+            for replay in replays
+            if replay.job_id is not None and not replay.settled
+        ]
         await self._transitions.request_jobs_cancel(job_ids)
-        await self._transitions.settle_jobs_if_drained(job_ids)
         run = await self._repository.get(experiment_run_id)
         counts = await self._replays.count_by_status(experiment_run_id)
         return run, counts
@@ -187,10 +190,10 @@ class ExperimentRunService:
     async def delete_run(
         self, experiment_run_id: uuid.UUID, actor: AuthContext
     ) -> None:
-        """Delete an experiment run and its jobs.
+        """Delete an experiment run, requesting cancellation of its replays' jobs.
 
-        The job deletes cascade their tasks and replay rows, so the run
-        row's own delete has nothing left to cascade.
+        The run row's own delete cascades its replays, and the jobs that ran
+        them stay in place.
 
         Args:
             experiment_run_id: Id of the run.
@@ -202,5 +205,10 @@ class ExperimentRunService:
         _ = actor
         await self._repository.get(experiment_run_id)
         replays = await self._replays.list_by_experiment_run(experiment_run_id)
-        await self._jobs.delete_many([replay.job_id for replay in replays])
+        # Settle without publishing JobsSettled. Its subscribers lock the
+        # replay and run rows in the opposite order of the delete cascade.
+        await self._transitions.request_jobs_cancel(
+            [replay.job_id for replay in replays if replay.job_id is not None],
+            dispatch_settled=False,
+        )
         await self._repository.delete(experiment_run_id)

@@ -47,18 +47,6 @@ class DuplicateExperimentName(ConflictError):
         super().__init__(f"Experiment name '{name}' is already registered")
 
 
-class ExperimentInUse(ConflictError):
-    """Raised when an experiment has runs and cannot be deleted."""
-
-    def __init__(self, experiment_id: uuid.UUID) -> None:
-        """Initialize the error.
-
-        Args:
-            experiment_id: Id of the experiment.
-        """
-        super().__init__(f"Experiment {experiment_id} has runs and cannot be deleted")
-
-
 class ExperimentFrozen(ConflictError):
     """Raised when an experiment's replay config is touched while it has runs."""
 

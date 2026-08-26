@@ -36,6 +36,10 @@ class InvestigationRepository(Protocol):
             investigation: Investigation to store.
             sessions: Ordered investigation_session rows to link.
 
+        Raises:
+            AgentNotFound: No agent has the investigation's agent id.
+            SessionNotFound: No session has one of the linked session ids.
+
         Returns:
             Stored investigation with timestamps set.
         """

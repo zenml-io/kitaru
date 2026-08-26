@@ -75,6 +75,7 @@ class ExperimentRunORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["experiment_id"],
             ["experiment.id"],
             name=EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["cohort_version_id"],

@@ -110,7 +110,9 @@ class EvaluationService:
         Returns:
             Stored evaluations in request order.
         """
-        session = await self._sessions.get(session_id)
+        # Lock the session so a concurrent delete cannot land between this
+        # read and the merge insert, whose foreign key would otherwise fail.
+        session = await self._sessions.get(session_id, exclusive=True)
         check_task_session_read(session_id, session.task_id, actor)
         seen: set[str] = set()
         for command in commands:

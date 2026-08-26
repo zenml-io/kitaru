@@ -54,6 +54,18 @@ class DuplicateCohortName(ConflictError):
         super().__init__(f"Cohort name '{name}' is already registered")
 
 
+class CohortInUse(ConflictError):
+    """Raised when a cohort has a version referenced by an experiment run."""
+
+    def __init__(self, cohort_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            cohort_id: Id of the cohort in use.
+        """
+        super().__init__(f"Cohort {cohort_id} is in use by an experiment run")
+
+
 class Cohort(DomainModel):
     """Cohort."""
 

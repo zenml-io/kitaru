@@ -325,3 +325,47 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
         )
     ).json()
     assert miss["match"] is None
+
+
+async def test_delete_replay_removes_the_replay(client: httpx.AsyncClient) -> None:
+    """Deleting a standalone replay removes it, no longer reachable by id."""
+    _, _, baseline_id = await _setup_replayable_session(client)
+    await _register_evaluator(client)
+    replay = (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": baseline_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+
+    response = await client.delete(f"/api/v1/replays/{replay['id']}")
+    assert response.status_code == 204
+    assert (await client.get(f"/api/v1/replays/{replay['id']}")).status_code == 404
+
+
+async def test_delete_job_clears_the_replays_job_id(client: httpx.AsyncClient) -> None:
+    """Deleting a replay's job keeps the replay and nulls its job id."""
+    _, _, baseline_id = await _setup_replayable_session(client)
+    await _register_evaluator(client)
+    replay = (
+        await client.post(
+            "/api/v1/replays",
+            json={
+                "baseline_session_id": baseline_id,
+                "evaluators": [{"evaluator": "accuracy"}],
+            },
+        )
+    ).json()
+    job_id = replay["job_id"]
+    assert job_id is not None
+    await client.post(f"/api/v1/jobs/{job_id}/cancel")
+
+    response = await client.delete(f"/api/v1/jobs/{job_id}")
+    assert response.status_code == 204
+
+    kept = await client.get(f"/api/v1/replays/{replay['id']}")
+    assert kept.status_code == 200
+    assert kept.json()["job_id"] is None

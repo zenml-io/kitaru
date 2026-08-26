@@ -149,14 +149,17 @@ class AgentsResource:
         return AgentResponse.model_validate(response.json())
 
     async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent.
+        """Delete an agent, hiding the agent and retaining its subtree.
+
+        The agent's stored sessions, versions, cohorts, experiments, and
+        investigations are retained and stay readable through their own
+        resources. Creating new ones for the agent fails.
 
         Args:
             agent_id: Id of the agent.
 
         Raises:
-            APIError: The request failed, including 404 for a missing agent
-                and 409 when the agent has versions.
+            APIError: The request failed, including 404 for a missing agent.
         """
         await self._client.request("DELETE", f"/api/v1/agents/{agent_id}")
 

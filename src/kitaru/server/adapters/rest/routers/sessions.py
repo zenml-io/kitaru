@@ -180,7 +180,8 @@ async def delete_session(
     """Delete a session.
 
     Deleting a session cascades its nodes. Clients observe HTTP 204 on
-    success and 404 when no session has this id.
+    success, 404 when no session has this id, and 409 when the session is
+    referenced by a cohort version, investigation, or replay.
 
     Args:
         session_id: Id of the session.

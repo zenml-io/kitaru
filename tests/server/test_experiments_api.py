@@ -165,6 +165,31 @@ async def test_create_experiment_duplicate_name(
     assert response.json() == {"detail": "Experiment name 'exp1' is already registered"}
 
 
+async def test_create_experiment_same_name_different_agent(
+    client: httpx.AsyncClient, services: ReplayServices, agent_id: str
+) -> None:
+    """Observe HTTP 201 for the same experiment name under another agent."""
+    other_agent = await create_agent(services.agents, ACCOUNT.id, name="reviewer")
+    response = await client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "exp1",
+            "agent_id": agent_id,
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert response.status_code == 201
+    response = await client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "exp1",
+            "agent_id": str(other_agent.id),
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert response.status_code == 201
+
+
 async def test_create_experiment_requires_at_least_one_evaluator(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

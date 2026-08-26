@@ -234,7 +234,8 @@ class SessionsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                session.
+                session and 409 when the session is referenced by a
+                cohort version, investigation, or replay.
         """
         await self._client.request("DELETE", f"/api/v1/sessions/{session_id}")
 

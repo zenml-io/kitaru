@@ -52,7 +52,10 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "agent_id", "version", name=AGENT_VERSION_AGENT_ID_VERSION_UNIQUE_CONSTRAINT
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=AGENT_VERSION_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=AGENT_VERSION_OWNER_ID_FOREIGN_KEY

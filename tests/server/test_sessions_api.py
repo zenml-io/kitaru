@@ -208,6 +208,32 @@ async def test_create_session_duplicate_external_id(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 409 for a duplicated imported_from and external id pair."""
+    agent_id = str(uuid.uuid4())
+    await client.post(
+        "/api/v1/sessions",
+        json=_session_body(
+            agent_id=agent_id,
+            origin="imported",
+            imported_from="langsmith",
+            external_id="run-1",
+        ),
+    )
+    response = await client.post(
+        "/api/v1/sessions",
+        json=_session_body(
+            agent_id=agent_id,
+            origin="imported",
+            imported_from="langsmith",
+            external_id="run-1",
+        ),
+    )
+    assert response.status_code == 409
+
+
+async def test_create_session_same_external_id_different_agent(
+    client: httpx.AsyncClient,
+) -> None:
+    """Accept the same imported_from and external id pair under another agent."""
     await client.post(
         "/api/v1/sessions",
         json=_session_body(
@@ -220,7 +246,7 @@ async def test_create_session_duplicate_external_id(
             origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
-    assert response.status_code == 409
+    assert response.status_code == 201
 
 
 async def test_get_session(client: httpx.AsyncClient) -> None:
