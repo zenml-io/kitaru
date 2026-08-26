@@ -2174,3 +2174,151 @@ export function SkillProcedureFlowDiagram() {
     </DiagramFrame>
   );
 }
+
+// ============================================================
+// Returns agent tutorial diagrams
+// ============================================================
+
+function NumberedStep({
+  number,
+  title,
+  children,
+}: {
+  number: number;
+  title: string;
+  children: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "42px 1fr",
+        gap: 12,
+        alignItems: "center",
+      }}
+    >
+      <span
+        style={{
+          display: "grid",
+          placeItems: "center",
+          width: 38,
+          height: 38,
+          border: `1px solid ${toneBorder("accent")}`,
+          borderRadius: "50%",
+          background: "var(--color-fd-card)",
+          color: "var(--color-fd-primary)",
+          fontSize: 14,
+          fontWeight: 700,
+        }}
+      >
+        {number}
+      </span>
+      <Node title={title} subtitle={children} tone="muted" fullWidth />
+    </div>
+  );
+}
+
+export function ReturnsAgentOverviewDiagram() {
+  return (
+    <DiagramFrame>
+      <div style={{ ...col, gap: 12, minWidth: 640 }}>
+        <NumberedStep number={1} title="Read the ticket">
+          Identify a return, refund, delivery problem, or missing order.
+        </NumberedStep>
+        <NumberedStep number={2} title="Look up the order">
+          <code>lookup_order</code> returns the product, category, price,
+          delivery state, and earlier actions.
+        </NumberedStep>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 10,
+            marginLeft: 54,
+          }}
+        >
+          <Node
+            title="Delivery problem"
+            subtitle={
+              <>
+                <code>check_shipping</code> returns the carrier status.
+              </>
+            }
+            tone="info"
+            fullWidth
+          />
+          <Node
+            title="Return or refund"
+            subtitle={
+              <>
+                <code>get_return_policy</code> returns the category rules.
+              </>
+            }
+            tone="warn"
+            fullWidth
+          />
+        </div>
+        <NumberedStep number={3} title="Choose a resolution">
+          Select a refund, replacement, escalation, or rejection from the
+          evidence returned by the tools.
+        </NumberedStep>
+        <NumberedStep number={4} title="Act, then reply">
+          Run <code>issue_refund</code>, <code>create_replacement</code>, or{" "}
+          <code>escalate_to_human</code> when required, then return a structured
+          resolution and customer reply.
+        </NumberedStep>
+      </div>
+      <Caption>
+        The agent decides what to do, while its tool calls and results record
+        what it looked up and which action actually succeeded.
+      </Caption>
+    </DiagramFrame>
+  );
+}
+
+export function ReturnsTraceEvidenceDiagram() {
+  return (
+    <DiagramFrame compact>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          minWidth: 760,
+        }}
+      >
+        <Node
+          title="Customer ticket"
+          subtitle="The request the agent received"
+          tone="muted"
+          minWidth={140}
+        />
+        <HArrow />
+        <Node
+          title="Lookup evidence"
+          subtitle="Order, policy, or shipping results"
+          tone="info"
+          minWidth={165}
+        />
+        <HArrow />
+        <Node
+          title="Terminal action"
+          subtitle="Accepted, rejected, or not attempted"
+          tone="warn"
+          minWidth={165}
+        />
+        <HArrow />
+        <Node
+          title="Final resolution"
+          subtitle="Structured outcome and customer reply"
+          tone="success"
+          minWidth={170}
+        />
+      </div>
+      <Caption>
+        Read the complete sequence. A customer reply can claim an action
+        happened, but only the recorded tool result shows whether it succeeded.
+      </Caption>
+    </DiagramFrame>
+  );
+}

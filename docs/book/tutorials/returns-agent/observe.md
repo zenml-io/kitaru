@@ -15,6 +15,8 @@ The [PydanticAI returns agent setup](https://github.com/zenml-io/kitaru/tree/mai
 
 The setup also imported `traces/langfuse-traces.jsonl` under that exact version. One complete recorded run became a [session](../../concepts/agents-and-sessions.md); model calls, tool calls, tool results, and other events inside it became session nodes. Importing preserved the evidence and its source identity without calling the historical agent.
 
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/returns-trace-evidence.png" alt="A returns-agent trace runs from the customer ticket through lookup evidence and a terminal action to the final structured resolution."><figcaption>Read the complete sequence. The final reply records what the agent said; the tool result records whether its action succeeded.</figcaption></figure>
+
 Do not repeat registration or import here. If either `returns-resolver@1` or the ten `returns-baseline` sessions is missing, return to the example README and resolve that setup failure before continuing.
 
 ## Survey before judging
