@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Agent version run hooks Alembic revision.
 
-Revision ID: 008_agent_version_run_hooks
-Revises: 007_payload_blob_offload
+Revision ID: 009_agent_version_run_hooks
+Revises: 008_session_text_selectors
 Create Date: 2026-08-21
 
 """
@@ -24,8 +24,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "008_agent_version_run_hooks"
-down_revision = "007_payload_blob_offload"
+revision = "009_agent_version_run_hooks"
+down_revision = "008_session_text_selectors"
 branch_labels = None
 depends_on = None
 
