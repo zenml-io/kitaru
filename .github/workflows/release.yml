@@ -255,7 +255,7 @@ jobs:
         run: |
           echo "::warning::Managed image publication failed; continuing with the public release artifacts."
           echo "### Managed image publication failed" >> "$GITHUB_STEP_SUMMARY"
-          echo "The private ECR image is unavailable for this release. Public Docker Hub images and the Helm chart continue publishing." >> "$GITHUB_STEP_SUMMARY"
+          echo "The private ECR images are unavailable for this release. Public Docker Hub images and the Helm chart continue publishing." >> "$GITHUB_STEP_SUMMARY"
       - name: Configure AWS credentials for Helm
         uses: aws-actions/configure-aws-credentials@e6de054238d6b7531b4efff3b6587d9aade6a06c  # v6.2.3
         with:
