@@ -80,7 +80,11 @@ from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
-from kitaru.server.domain.hook import CommandHook, CopyWorkdirHook
+from kitaru.server.domain.hook import (
+    CopyWorkdirHook,
+    SetupCommandHook,
+    TeardownCommandHook,
+)
 from kitaru.server.domain.replay_config import (
     PassthroughConfig,
     ReplayConfig,
@@ -307,8 +311,8 @@ async def test_create_with_run_spec_hooks(setup: Setup) -> None:
     repository, owner_id, agent_id, _, _, _, _, _ = setup
     hooks = [
         CopyWorkdirHook(),
-        CommandHook(command="setup.sh", when="setup"),
-        CommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
+        SetupCommandHook(command="setup.sh"),
+        TeardownCommandHook(command="teardown.sh", on="always"),
     ]
     version = await repository.create(
         AgentVersion(
@@ -535,8 +539,8 @@ async def test_update_replaces_run_spec_hooks(setup: Setup) -> None:
         )
     )
     new_hooks = [
-        CommandHook(command="setup.sh", when="setup"),
-        CommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
+        SetupCommandHook(command="setup.sh"),
+        TeardownCommandHook(command="teardown.sh", on="always"),
     ]
     created.update_run_spec(RunSpec(command="run.sh", hooks=new_hooks))
     updated = await repository.update(created)

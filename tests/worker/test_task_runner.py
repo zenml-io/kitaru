@@ -31,7 +31,7 @@ from fakes import (
 )
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.hook import CommandHook, CopyWorkdirHook
+from kitaru.api_models.v1.hook import CopyWorkdirHook, TeardownCommandHook
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import PackagePluginSpec, TaskKind, TaskStatus
 from kitaru.client.exceptions import (
@@ -411,7 +411,7 @@ async def test_failing_teardown_command_fails_a_successful_task(
     spec = make_agent_spec(
         task.id,
         working_dir=str(working_dir),
-        hooks=[CommandHook(command="exit 3", when="teardown")],
+        hooks=[TeardownCommandHook(command="exit 3")],
     )
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     failed_task = running_task.model_copy(update={"status": TaskStatus.FAILED})
@@ -424,7 +424,7 @@ async def test_failing_teardown_command_fails_a_successful_task(
 
     _, request = client.tasks.update_calls[-1]
     assert request.status == TaskStatus.FAILED
-    assert "Hook command failed:" in request.error
+    assert "Hook teardown_command failed:" in request.error
 
 
 async def test_copy_workdir_hook_runs_the_process_in_the_copied_directory(

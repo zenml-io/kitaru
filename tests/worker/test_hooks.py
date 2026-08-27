@@ -21,17 +21,21 @@ from pathlib import Path
 import pytest
 
 from kitaru.api_models.v1.hook import (
-    CommandHook as CommandHookSpec,
-)
-from kitaru.api_models.v1.hook import (
     CopyWorkdirHook as CopyWorkdirHookSpec,
 )
+from kitaru.api_models.v1.hook import (
+    SetupCommandHook as SetupCommandHookSpec,
+)
 from kitaru.api_models.v1.hook import TaskHook
+from kitaru.api_models.v1.hook import (
+    TeardownCommandHook as TeardownCommandHookSpec,
+)
 from kitaru.worker.hooks import (
-    CommandHook,
     CopyWorkdirHook,
     HookContext,
     HookError,
+    SetupCommandHook,
+    TeardownCommandHook,
     build_hooks,
 )
 from kitaru.worker.process import TaskProcess
@@ -53,20 +57,27 @@ def _make_ctx(scratch_dir: Path, working_dir: str | None = None) -> HookContext:
     )
 
 
+def _make_workdir_ctx(tmp_path: Path) -> tuple[HookContext, Path]:
+    """Build a hook context whose process has a working directory."""
+    working_dir = tmp_path / "work"
+    working_dir.mkdir()
+    return _make_ctx(tmp_path, working_dir=str(working_dir)), working_dir
+
+
 def test_build_hooks_maps_each_spec_type_in_order() -> None:
     """Each spec type builds its implementation in declared order."""
     specs: list[TaskHook] = [
-        CommandHookSpec(command="setup.sh", when="setup"),
+        SetupCommandHookSpec(command="setup.sh"),
         CopyWorkdirHookSpec(),
-        CommandHookSpec(command="teardown.sh", when="teardown"),
+        TeardownCommandHookSpec(command="teardown.sh"),
     ]
 
     hooks = build_hooks(specs)
 
     assert [type(hook) for hook in hooks] == [
-        CommandHook,
+        SetupCommandHook,
         CopyWorkdirHook,
-        CommandHook,
+        TeardownCommandHook,
     ]
 
 
@@ -102,12 +113,10 @@ async def test_copy_workdir_without_a_working_dir_raises(tmp_path: Path) -> None
 
 async def test_setup_command_runs_in_the_working_dir(tmp_path: Path) -> None:
     """A setup command runs in the task process's working directory."""
-    working_dir = tmp_path / "work"
-    working_dir.mkdir()
-    ctx = _make_ctx(tmp_path, working_dir=str(working_dir))
-    spec = CommandHookSpec(command="touch marker.txt", when="setup")
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = SetupCommandHookSpec(command="touch marker.txt")
 
-    await CommandHook(spec).setup(ctx)
+    await SetupCommandHook(spec).setup(ctx)
 
     assert (working_dir / "marker.txt").exists()
 
@@ -122,10 +131,7 @@ async def test_setup_command_after_copy_workdir_runs_in_the_copy(
     scratch.mkdir()
     ctx = _make_ctx(scratch, working_dir=str(original))
     hooks = build_hooks(
-        [
-            CopyWorkdirHookSpec(),
-            CommandHookSpec(command="touch marker.txt", when="setup"),
-        ]
+        [CopyWorkdirHookSpec(), SetupCommandHookSpec(command="touch marker.txt")]
     )
 
     for hook in hooks:
@@ -140,44 +146,38 @@ async def test_failing_setup_command_raises_with_the_exit_code(
 ) -> None:
     """A setup command with a nonzero exit raises with the exit code."""
     ctx = _make_ctx(tmp_path, working_dir=str(tmp_path))
-    spec = CommandHookSpec(command="exit 3", when="setup")
+    spec = SetupCommandHookSpec(command="exit 3")
 
     with pytest.raises(HookError, match="exited with code 3"):
-        await CommandHook(spec).setup(ctx)
+        await SetupCommandHook(spec).setup(ctx)
 
 
 async def test_teardown_command_does_not_run_at_setup(tmp_path: Path) -> None:
-    """A teardown command runs nothing during setup."""
-    working_dir = tmp_path / "work"
-    working_dir.mkdir()
-    ctx = _make_ctx(tmp_path, working_dir=str(working_dir))
-    spec = CommandHookSpec(command="touch marker.txt", when="teardown")
+    """A teardown command hook runs nothing during setup."""
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = TeardownCommandHookSpec(command="touch marker.txt")
 
-    await CommandHook(spec).setup(ctx)
+    await TeardownCommandHook(spec).setup(ctx)
 
     assert not (working_dir / "marker.txt").exists()
 
 
 async def test_setup_command_does_not_run_at_teardown(tmp_path: Path) -> None:
-    """A setup command runs nothing during teardown."""
-    working_dir = tmp_path / "work"
-    working_dir.mkdir()
-    ctx = _make_ctx(tmp_path, working_dir=str(working_dir))
-    spec = CommandHookSpec(command="touch marker.txt", when="setup")
+    """A setup command hook runs nothing during teardown."""
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = SetupCommandHookSpec(command="touch marker.txt")
 
-    await CommandHook(spec).teardown(ctx, True)
+    await SetupCommandHook(spec).teardown(ctx, True)
 
     assert not (working_dir / "marker.txt").exists()
 
 
 async def test_teardown_command_runs_on_success(tmp_path: Path) -> None:
     """A teardown command runs after a successful task process."""
-    working_dir = tmp_path / "work"
-    working_dir.mkdir()
-    ctx = _make_ctx(tmp_path, working_dir=str(working_dir))
-    spec = CommandHookSpec(command="touch marker.txt", when="teardown")
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = TeardownCommandHookSpec(command="touch marker.txt")
 
-    await CommandHook(spec).teardown(ctx, True)
+    await TeardownCommandHook(spec).teardown(ctx, True)
 
     assert (working_dir / "marker.txt").exists()
 
@@ -186,27 +186,38 @@ async def test_teardown_command_skipped_on_failure_by_default(
     tmp_path: Path,
 ) -> None:
     """A failed task process runs no teardown command by default."""
-    working_dir = tmp_path / "work"
-    working_dir.mkdir()
-    ctx = _make_ctx(tmp_path, working_dir=str(working_dir))
-    spec = CommandHookSpec(command="touch marker.txt", when="teardown")
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = TeardownCommandHookSpec(command="touch marker.txt")
 
-    await CommandHook(spec).teardown(ctx, False)
+    await TeardownCommandHook(spec).teardown(ctx, False)
 
     assert not (working_dir / "marker.txt").exists()
 
 
-async def test_teardown_command_runs_on_failure_when_requested(
+async def test_teardown_command_on_failure_runs_only_on_failure(
     tmp_path: Path,
 ) -> None:
-    """A run_on_failure teardown command runs after a failed task process."""
-    working_dir = tmp_path / "work"
-    working_dir.mkdir()
-    ctx = _make_ctx(tmp_path, working_dir=str(working_dir))
-    spec = CommandHookSpec(
-        command="touch marker.txt", when="teardown", run_on_failure=True
-    )
+    """An on=failure teardown command runs after a failure and not a success."""
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = TeardownCommandHookSpec(command="touch marker.txt", on="failure")
 
-    await CommandHook(spec).teardown(ctx, False)
+    await TeardownCommandHook(spec).teardown(ctx, True)
+    assert not (working_dir / "marker.txt").exists()
 
+    await TeardownCommandHook(spec).teardown(ctx, False)
     assert (working_dir / "marker.txt").exists()
+
+
+async def test_teardown_command_on_always_runs_on_both_outcomes(
+    tmp_path: Path,
+) -> None:
+    """An on=always teardown command runs after either outcome."""
+    ctx, working_dir = _make_workdir_ctx(tmp_path)
+    spec = TeardownCommandHookSpec(command="touch success.txt", on="always")
+
+    await TeardownCommandHook(spec).teardown(ctx, True)
+    assert (working_dir / "success.txt").exists()
+
+    failure_spec = TeardownCommandHookSpec(command="touch failure.txt", on="always")
+    await TeardownCommandHook(failure_spec).teardown(ctx, False)
+    assert (working_dir / "failure.txt").exists()

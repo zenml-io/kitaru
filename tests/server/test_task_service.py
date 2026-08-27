@@ -64,7 +64,11 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
-from kitaru.server.domain.hook import CommandHook, CopyWorkdirHook
+from kitaru.server.domain.hook import (
+    CopyWorkdirHook,
+    SetupCommandHook,
+    TeardownCommandHook,
+)
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -823,8 +827,8 @@ async def test_agent_spec_carries_run_spec_hooks(
     agent = await create_agent(services.agents, ACTOR.account.id)
     hooks = [
         CopyWorkdirHook(),
-        CommandHook(command="setup.sh", when="setup"),
-        CommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
+        SetupCommandHook(command="setup.sh"),
+        TeardownCommandHook(command="teardown.sh", on="always"),
     ]
     version = await create_agent_version(
         services.agent_versions,

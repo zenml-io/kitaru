@@ -26,13 +26,22 @@ class CopyWorkdirHook(FrozenModel):
     type: Literal["copy_workdir"] = "copy_workdir"
 
 
-class CommandHook(FrozenModel):
-    """Command hook."""
+class SetupCommandHook(FrozenModel):
+    """Setup command hook."""
 
-    type: Literal["command"] = "command"
+    type: Literal["setup_command"] = "setup_command"
     command: str
-    when: Literal["setup", "teardown"]
-    run_on_failure: bool = False
 
 
-TaskHook = Annotated[CopyWorkdirHook | CommandHook, Field(discriminator="type")]
+class TeardownCommandHook(FrozenModel):
+    """Teardown command hook."""
+
+    type: Literal["teardown_command"] = "teardown_command"
+    command: str
+    on: Literal["success", "failure", "always"] = "success"
+
+
+TaskHook = Annotated[
+    CopyWorkdirHook | SetupCommandHook | TeardownCommandHook,
+    Field(discriminator="type"),
+]

@@ -1349,44 +1349,6 @@
         "title": "CohortVersionUpdateRequest",
         "type": "object"
       },
-      "CommandHook": {
-        "additionalProperties": false,
-        "description": "Command hook.",
-        "properties": {
-          "command": {
-            "description": "Shell command to run.",
-            "title": "Command",
-            "type": "string"
-          },
-          "run_on_failure": {
-            "default": false,
-            "description": "Whether a teardown command runs when the task process failed.",
-            "title": "Run On Failure",
-            "type": "boolean"
-          },
-          "type": {
-            "const": "command",
-            "default": "command",
-            "title": "Type",
-            "type": "string"
-          },
-          "when": {
-            "description": "Phase the command runs in.",
-            "enum": [
-              "setup",
-              "teardown"
-            ],
-            "title": "When",
-            "type": "string"
-          }
-        },
-        "required": [
-          "command",
-          "when"
-        ],
-        "title": "CommandHook",
-        "type": "object"
-      },
       "CopyWorkdirHook": {
         "additionalProperties": false,
         "description": "Copy workdir hook.",
@@ -5471,8 +5433,9 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "command": "#/components/schemas/CommandHook",
-                  "copy_workdir": "#/components/schemas/CopyWorkdirHook"
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "setup_command": "#/components/schemas/SetupCommandHook",
+                  "teardown_command": "#/components/schemas/TeardownCommandHook"
                 },
                 "propertyName": "type"
               },
@@ -5481,7 +5444,10 @@
                   "$ref": "#/components/schemas/CopyWorkdirHook"
                 },
                 {
-                  "$ref": "#/components/schemas/CommandHook"
+                  "$ref": "#/components/schemas/SetupCommandHook"
+                },
+                {
+                  "$ref": "#/components/schemas/TeardownCommandHook"
                 }
               ]
             },
@@ -7501,6 +7467,28 @@
         "title": "SessionWithNodesResponse",
         "type": "object"
       },
+      "SetupCommandHook": {
+        "additionalProperties": false,
+        "description": "Setup command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "type": {
+            "const": "setup_command",
+            "default": "setup_command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "SetupCommandHook",
+        "type": "object"
+      },
       "StaticCase": {
         "additionalProperties": false,
         "description": "Static tool call case.",
@@ -8086,8 +8074,9 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "command": "#/components/schemas/CommandHook",
-                  "copy_workdir": "#/components/schemas/CopyWorkdirHook"
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "setup_command": "#/components/schemas/SetupCommandHook",
+                  "teardown_command": "#/components/schemas/TeardownCommandHook"
                 },
                 "propertyName": "type"
               },
@@ -8096,7 +8085,10 @@
                   "$ref": "#/components/schemas/CopyWorkdirHook"
                 },
                 {
-                  "$ref": "#/components/schemas/CommandHook"
+                  "$ref": "#/components/schemas/SetupCommandHook"
+                },
+                {
+                  "$ref": "#/components/schemas/TeardownCommandHook"
                 }
               ]
             },
@@ -8230,6 +8222,39 @@
           "token"
         ],
         "title": "TaskWithSpec",
+        "type": "object"
+      },
+      "TeardownCommandHook": {
+        "additionalProperties": false,
+        "description": "Teardown command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "on": {
+            "default": "success",
+            "description": "Task process outcome the command runs on.",
+            "enum": [
+              "success",
+              "failure",
+              "always"
+            ],
+            "title": "On",
+            "type": "string"
+          },
+          "type": {
+            "const": "teardown_command",
+            "default": "teardown_command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "TeardownCommandHook",
         "type": "object"
       },
       "TokenErrorCode": {

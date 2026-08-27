@@ -26,16 +26,24 @@ class CopyWorkdirHook(DiscriminatedRequestModel):
     type: Literal["copy_workdir"] = Field(default="copy_workdir")
 
 
-class CommandHook(DiscriminatedRequestModel):
-    """Command hook."""
+class SetupCommandHook(DiscriminatedRequestModel):
+    """Setup command hook."""
 
-    type: Literal["command"] = Field(default="command")
+    type: Literal["setup_command"] = Field(default="setup_command")
     command: str = Field(description="Shell command to run.")
-    when: Literal["setup", "teardown"] = Field(description="Phase the command runs in.")
-    run_on_failure: bool = Field(
-        default=False,
-        description="Whether a teardown command runs when the task process failed.",
+
+
+class TeardownCommandHook(DiscriminatedRequestModel):
+    """Teardown command hook."""
+
+    type: Literal["teardown_command"] = Field(default="teardown_command")
+    command: str = Field(description="Shell command to run.")
+    on: Literal["success", "failure", "always"] = Field(
+        default="success", description="Task process outcome the command runs on."
     )
 
 
-TaskHook = Annotated[CopyWorkdirHook | CommandHook, Field(discriminator="type")]
+TaskHook = Annotated[
+    CopyWorkdirHook | SetupCommandHook | TeardownCommandHook,
+    Field(discriminator="type"),
+]

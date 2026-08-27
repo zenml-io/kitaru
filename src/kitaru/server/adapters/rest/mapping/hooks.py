@@ -14,18 +14,22 @@
 """Task hook DTO conversions."""
 
 from kitaru.api_models.v1.hook import (
-    CommandHook as WireCommandHook,
+    CopyWorkdirHook as WireCopyWorkdirHook,
 )
 from kitaru.api_models.v1.hook import (
-    CopyWorkdirHook as WireCopyWorkdirHook,
+    SetupCommandHook as WireSetupCommandHook,
 )
 from kitaru.api_models.v1.hook import (
     TaskHook as WireTaskHook,
 )
+from kitaru.api_models.v1.hook import (
+    TeardownCommandHook as WireTeardownCommandHook,
+)
 from kitaru.server.domain.hook import (
-    CommandHook,
     CopyWorkdirHook,
+    SetupCommandHook,
     TaskHook,
+    TeardownCommandHook,
 )
 
 
@@ -40,9 +44,9 @@ def hook_to_domain(hook: WireTaskHook) -> TaskHook:
     """
     if isinstance(hook, WireCopyWorkdirHook):
         return CopyWorkdirHook()
-    return CommandHook(
-        command=hook.command, when=hook.when, run_on_failure=hook.run_on_failure
-    )
+    if isinstance(hook, WireSetupCommandHook):
+        return SetupCommandHook(command=hook.command)
+    return TeardownCommandHook(command=hook.command, on=hook.on)
 
 
 def hook_to_response(hook: TaskHook) -> WireTaskHook:
@@ -56,6 +60,6 @@ def hook_to_response(hook: TaskHook) -> WireTaskHook:
     """
     if isinstance(hook, CopyWorkdirHook):
         return WireCopyWorkdirHook()
-    return WireCommandHook(
-        command=hook.command, when=hook.when, run_on_failure=hook.run_on_failure
-    )
+    if isinstance(hook, SetupCommandHook):
+        return WireSetupCommandHook(command=hook.command)
+    return WireTeardownCommandHook(command=hook.command, on=hook.on)

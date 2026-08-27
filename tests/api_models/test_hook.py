@@ -16,7 +16,11 @@
 import uuid
 
 from kitaru.api_models.v1.agent_version import RunSpec
-from kitaru.api_models.v1.hook import CommandHook, CopyWorkdirHook
+from kitaru.api_models.v1.hook import (
+    CopyWorkdirHook,
+    SetupCommandHook,
+    TeardownCommandHook,
+)
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
     TaskKind,
@@ -31,21 +35,18 @@ def test_run_spec_hooks_round_trip_json() -> None:
         command="run.sh",
         hooks=[
             CopyWorkdirHook(),
-            CommandHook(command="setup.sh", when="setup"),
-            CommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
+            SetupCommandHook(command="setup.sh"),
+            TeardownCommandHook(command="teardown.sh", on="always"),
         ],
     )
     restored = RunSpec.model_validate_json(spec.model_dump_json())
     assert restored == spec
     assert isinstance(restored.hooks[0], CopyWorkdirHook)
-    assert isinstance(restored.hooks[1], CommandHook)
+    assert isinstance(restored.hooks[1], SetupCommandHook)
     assert restored.hooks[1].command == "setup.sh"
-    assert restored.hooks[1].when == "setup"
-    assert restored.hooks[1].run_on_failure is False
-    assert isinstance(restored.hooks[2], CommandHook)
+    assert isinstance(restored.hooks[2], TeardownCommandHook)
     assert restored.hooks[2].command == "teardown.sh"
-    assert restored.hooks[2].when == "teardown"
-    assert restored.hooks[2].run_on_failure is True
+    assert restored.hooks[2].on == "always"
 
 
 def test_task_spec_response_hooks_round_trip_json() -> None:
@@ -59,12 +60,12 @@ def test_task_spec_response_hooks_round_trip_json() -> None:
         secret_env={},
         hooks=[
             CopyWorkdirHook(),
-            CommandHook(command="teardown.sh", when="teardown"),
+            TeardownCommandHook(command="teardown.sh"),
         ],
         details=AgentTaskDetails(inputs=None),
     )
     restored = TaskSpecResponse.model_validate_json(spec.model_dump_json())
     assert restored == spec
     assert isinstance(restored.hooks[0], CopyWorkdirHook)
-    assert isinstance(restored.hooks[1], CommandHook)
-    assert restored.hooks[1].run_on_failure is False
+    assert isinstance(restored.hooks[1], TeardownCommandHook)
+    assert restored.hooks[1].on == "success"

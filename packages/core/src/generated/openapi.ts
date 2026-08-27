@@ -4378,34 +4378,6 @@ export interface components {
             display_version?: string | null;
         };
         /**
-         * CommandHook
-         * @description Command hook.
-         */
-        CommandHook: {
-            /**
-             * Command
-             * @description Shell command to run.
-             */
-            command: string;
-            /**
-             * Run On Failure
-             * @description Whether a teardown command runs when the task process failed.
-             * @default false
-             */
-            run_on_failure: boolean;
-            /**
-             * @description discriminator enum property added by openapi-typescript
-             * @enum {string}
-             */
-            type: "command";
-            /**
-             * When
-             * @description Phase the command runs in.
-             * @enum {string}
-             */
-            when: "setup" | "teardown";
-        };
-        /**
          * CopyWorkdirHook
          * @description Copy workdir hook.
          */
@@ -6614,7 +6586,7 @@ export interface components {
              * Hooks
              * @description Hooks run around the task process.
              */
-            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["CommandHook"])[];
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
             /**
              * Secret Ids
              * @description Secrets merged into the process environment.
@@ -7682,6 +7654,22 @@ export interface components {
             session: components["schemas"]["SessionDetailResponse"];
         };
         /**
+         * SetupCommandHook
+         * @description Setup command hook.
+         */
+        SetupCommandHook: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "setup_command";
+        };
+        /**
          * StaticCase
          * @description Static tool call case.
          */
@@ -8028,7 +8016,7 @@ export interface components {
              * Hooks
              * @description Hooks run around the task process.
              */
-            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["CommandHook"])[];
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
             /** @description Kind of work the task runs. */
             kind: components["schemas"]["TaskKind"];
             /** @description Command to run, unset for evaluator and importer tasks. */
@@ -8091,6 +8079,29 @@ export interface components {
              * @description Bearer token scoped to this task and attempt.
              */
             token: string;
+        };
+        /**
+         * TeardownCommandHook
+         * @description Teardown command hook.
+         */
+        TeardownCommandHook: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * On
+             * @description Task process outcome the command runs on.
+             * @default success
+             * @enum {string}
+             */
+            on: "success" | "failure" | "always";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "teardown_command";
         };
         /**
          * TokenErrorCode

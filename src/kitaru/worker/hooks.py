@@ -20,12 +20,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kitaru.api_models.v1.hook import (
-    CommandHook as CommandHookSpec,
-)
-from kitaru.api_models.v1.hook import (
     CopyWorkdirHook as CopyWorkdirHookSpec,
 )
+from kitaru.api_models.v1.hook import (
+    SetupCommandHook as SetupCommandHookSpec,
+)
 from kitaru.api_models.v1.hook import TaskHook
+from kitaru.api_models.v1.hook import (
+    TeardownCommandHook as TeardownCommandHookSpec,
+)
 from kitaru.worker.process import TaskProcess, run_task_process
 
 # Bound on each command a hook runs.
@@ -94,10 +97,10 @@ class CopyWorkdirHook(Hook):
         ctx.process = ctx.process._replace(working_dir=str(dest))
 
 
-class CommandHook(Hook):
-    """Command hook."""
+class SetupCommandHook(Hook):
+    """Setup command hook."""
 
-    def __init__(self, spec: CommandHookSpec) -> None:
+    def __init__(self, spec: SetupCommandHookSpec) -> None:
         """Initialize the hook.
 
         Args:
@@ -106,7 +109,7 @@ class CommandHook(Hook):
         self._spec = spec
 
     async def setup(self, ctx: HookContext) -> None:
-        """Run a setup command before the task process starts.
+        """Run the command before the task process starts.
 
         Args:
             ctx: Hook context.
@@ -114,12 +117,22 @@ class CommandHook(Hook):
         Raises:
             HookError: The command did not exit successfully.
         """
-        if self._spec.when != "setup":
-            return
         await _run_command(ctx, self._spec.command)
 
+
+class TeardownCommandHook(Hook):
+    """Teardown command hook."""
+
+    def __init__(self, spec: TeardownCommandHookSpec) -> None:
+        """Initialize the hook.
+
+        Args:
+            spec: Hook spec.
+        """
+        self._spec = spec
+
     async def teardown(self, ctx: HookContext, success: bool) -> None:
-        """Run a teardown command after the task process exits.
+        """Run the command after the task process exits on a matching outcome.
 
         Args:
             ctx: Hook context.
@@ -128,9 +141,9 @@ class CommandHook(Hook):
         Raises:
             HookError: The command did not exit successfully.
         """
-        if self._spec.when != "teardown":
+        if success and self._spec.on == "failure":
             return
-        if not success and not self._spec.run_on_failure:
+        if not success and self._spec.on == "success":
             return
         await _run_command(ctx, self._spec.command)
 
@@ -148,8 +161,10 @@ def build_hooks(specs: list[TaskHook]) -> list[Hook]:
     for index, spec in enumerate(specs):
         if isinstance(spec, CopyWorkdirHookSpec):
             hooks.append(CopyWorkdirHook(index))
+        elif isinstance(spec, SetupCommandHookSpec):
+            hooks.append(SetupCommandHook(spec))
         else:
-            hooks.append(CommandHook(spec))
+            hooks.append(TeardownCommandHook(spec))
     return hooks
 
 
