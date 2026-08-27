@@ -1349,6 +1349,20 @@
         "title": "CohortVersionUpdateRequest",
         "type": "object"
       },
+      "CopyWorkdirHook": {
+        "additionalProperties": false,
+        "description": "Copy workdir hook.",
+        "properties": {
+          "type": {
+            "const": "copy_workdir",
+            "default": "copy_workdir",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "CopyWorkdirHook",
+        "type": "object"
+      },
       "DeviceAuthorizationResponse": {
         "description": "Device authorization response.",
         "properties": {
@@ -5414,6 +5428,32 @@
             "title": "Env",
             "type": "object"
           },
+          "hooks": {
+            "description": "Hooks run around the task process.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "setup_command": "#/components/schemas/SetupCommandHook",
+                  "teardown_command": "#/components/schemas/TeardownCommandHook"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CopyWorkdirHook"
+                },
+                {
+                  "$ref": "#/components/schemas/SetupCommandHook"
+                },
+                {
+                  "$ref": "#/components/schemas/TeardownCommandHook"
+                }
+              ]
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
           "secret_ids": {
             "description": "Secrets merged into the process environment.",
             "items": {
@@ -7427,6 +7467,28 @@
         "title": "SessionWithNodesResponse",
         "type": "object"
       },
+      "SetupCommandHook": {
+        "additionalProperties": false,
+        "description": "Setup command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "type": {
+            "const": "setup_command",
+            "default": "setup_command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "SetupCommandHook",
+        "type": "object"
+      },
       "StaticCase": {
         "additionalProperties": false,
         "description": "Static tool call case.",
@@ -8007,6 +8069,32 @@
             "title": "Env",
             "type": "object"
           },
+          "hooks": {
+            "description": "Hooks run around the task process.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "setup_command": "#/components/schemas/SetupCommandHook",
+                  "teardown_command": "#/components/schemas/TeardownCommandHook"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CopyWorkdirHook"
+                },
+                {
+                  "$ref": "#/components/schemas/SetupCommandHook"
+                },
+                {
+                  "$ref": "#/components/schemas/TeardownCommandHook"
+                }
+              ]
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
           "kind": {
             "$ref": "#/components/schemas/TaskKind",
             "description": "Kind of work the task runs."
@@ -8134,6 +8222,39 @@
           "token"
         ],
         "title": "TaskWithSpec",
+        "type": "object"
+      },
+      "TeardownCommandHook": {
+        "additionalProperties": false,
+        "description": "Teardown command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "on": {
+            "default": "success",
+            "description": "Task process outcome the command runs on.",
+            "enum": [
+              "success",
+              "failure",
+              "always"
+            ],
+            "title": "On",
+            "type": "string"
+          },
+          "type": {
+            "const": "teardown_command",
+            "default": "teardown_command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "TeardownCommandHook",
         "type": "object"
       },
       "TokenErrorCode": {

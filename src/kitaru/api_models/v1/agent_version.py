@@ -19,6 +19,7 @@ from pydantic import Field, PositiveInt
 
 from kitaru.api_models.v1.base import OwnedResponseModel, RequestModel
 from kitaru.api_models.v1.filter import FilterableListParams
+from kitaru.api_models.v1.hook import TaskHook
 
 
 class RunSpec(RequestModel):
@@ -31,6 +32,9 @@ class RunSpec(RequestModel):
     )
     secret_ids: list[uuid.UUID] = Field(
         default_factory=list, description="Secrets merged into the process environment."
+    )
+    hooks: list[TaskHook] = Field(
+        default_factory=list, description="Hooks run around the task process."
     )
     timeout_seconds: PositiveInt = Field(default=3600, description="Process timeout.")
 

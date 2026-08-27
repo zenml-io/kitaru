@@ -26,6 +26,7 @@ from kitaru.api_models.v1.agent_version import (
 )
 from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.adapters.rest.mapping.hooks import hook_to_domain, hook_to_response
 from kitaru.server.application.models.agent_version import (
     AgentVersionFilter,
     AgentVersionUpdate,
@@ -51,6 +52,7 @@ def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
         working_dir=run_spec.working_dir,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
+        hooks=[hook_to_domain(hook) for hook in run_spec.hooks],
         timeout_seconds=run_spec.timeout_seconds,
     )
 
@@ -69,6 +71,7 @@ def _run_spec_to_response(run_spec: RunSpec) -> WireRunSpec:
         working_dir=run_spec.working_dir,
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
+        hooks=[hook_to_response(hook) for hook in run_spec.hooks],
         timeout_seconds=run_spec.timeout_seconds,
     )
 

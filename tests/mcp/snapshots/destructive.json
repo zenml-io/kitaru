@@ -804,6 +804,20 @@
           "title": "CohortVersionResponse",
           "type": "object"
         },
+        "CopyWorkdirHook": {
+          "additionalProperties": false,
+          "description": "Copy workdir hook.",
+          "properties": {
+            "type": {
+              "const": "copy_workdir",
+              "default": "copy_workdir",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "CopyWorkdirHook",
+          "type": "object"
+        },
         "EvaluatorConfig": {
           "additionalProperties": false,
           "description": "Evaluator config.",
@@ -1601,6 +1615,32 @@
               "title": "Env",
               "type": "object"
             },
+            "hooks": {
+              "description": "Hooks run around the task process.",
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "copy_workdir": "#/$defs/CopyWorkdirHook",
+                    "setup_command": "#/$defs/SetupCommandHook",
+                    "teardown_command": "#/$defs/TeardownCommandHook"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/CopyWorkdirHook"
+                  },
+                  {
+                    "$ref": "#/$defs/SetupCommandHook"
+                  },
+                  {
+                    "$ref": "#/$defs/TeardownCommandHook"
+                  }
+                ]
+              },
+              "title": "Hooks",
+              "type": "array"
+            },
             "secret_ids": {
               "description": "Secrets merged into the process environment.",
               "items": {
@@ -1664,6 +1704,28 @@
             "entrypoint"
           ],
           "title": "ScriptPluginSource",
+          "type": "object"
+        },
+        "SetupCommandHook": {
+          "additionalProperties": false,
+          "description": "Setup command hook.",
+          "properties": {
+            "command": {
+              "description": "Shell command to run.",
+              "title": "Command",
+              "type": "string"
+            },
+            "type": {
+              "const": "setup_command",
+              "default": "setup_command",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "title": "SetupCommandHook",
           "type": "object"
         },
         "StaticCase": {
@@ -1788,6 +1850,39 @@
           ],
           "title": "TaskKind",
           "type": "string"
+        },
+        "TeardownCommandHook": {
+          "additionalProperties": false,
+          "description": "Teardown command hook.",
+          "properties": {
+            "command": {
+              "description": "Shell command to run.",
+              "title": "Command",
+              "type": "string"
+            },
+            "on": {
+              "default": "success",
+              "description": "Task process outcome the command runs on.",
+              "enum": [
+                "success",
+                "failure",
+                "always"
+              ],
+              "title": "On",
+              "type": "string"
+            },
+            "type": {
+              "const": "teardown_command",
+              "default": "teardown_command",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "title": "TeardownCommandHook",
+          "type": "object"
         },
         "ToolError": {
           "additionalProperties": false,

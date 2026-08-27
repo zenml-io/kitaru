@@ -64,6 +64,11 @@ from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import RunSpec
+from kitaru.server.domain.hook import (
+    CopyWorkdirHook,
+    SetupCommandHook,
+    TeardownCommandHook,
+)
 from kitaru.server.domain.plugin import Plugin, PluginKind, ScriptPluginSource
 from kitaru.server.domain.task import (
     AgentTask,
@@ -815,6 +820,29 @@ async def test_agent_spec_merges_secrets_in_order_with_later_wins(
     assert spec.run_spec.env == {"STATIC": "x"}
 
 
+async def test_agent_spec_carries_run_spec_hooks(
+    services: JobAndTaskServices,
+) -> None:
+    """An agent spec carries the hooks of its version's run spec."""
+    agent = await create_agent(services.agents, ACTOR.account.id)
+    hooks = [
+        CopyWorkdirHook(),
+        SetupCommandHook(command="setup.sh"),
+        TeardownCommandHook(command="teardown.sh", on="always"),
+    ]
+    version = await create_agent_version(
+        services.agent_versions,
+        agent_id=agent.id,
+        owner_id=ACTOR.account.id,
+        run_spec=RunSpec(command="run.sh", hooks=hooks, timeout_seconds=60),
+    )
+
+    job_id = await _pending_job(services)
+    task = await create_agent_task(services.tasks, job_id, agent_version_id=version.id)
+    spec = await services.task_service.get_spec(task.id, actor=ACTOR)
+    assert spec.hooks == hooks
+
+
 async def test_evaluation_spec_uses_the_evaluator_timeout_and_no_run(
     services: JobAndTaskServices,
 ) -> None:
@@ -842,6 +870,7 @@ async def test_evaluation_spec_uses_the_evaluator_timeout_and_no_run(
         spec.timeout_seconds == services.task_service._policy.evaluator_timeout_seconds
     )
     assert spec.run_spec is None
+    assert spec.hooks == []
     assert spec.details.kind.value == "evaluator"
 
 
@@ -878,6 +907,7 @@ async def test_import_spec_carries_the_payload_sha256_and_provider(
     assert (
         spec.timeout_seconds == services.task_service._policy.importer_timeout_seconds
     )
+    assert spec.hooks == []
     assert isinstance(spec.details, ImportTaskDetails)
     assert spec.details.provider == "acme"
     assert spec.details.payload.blob_id == payload.id

@@ -35,6 +35,7 @@ from kitaru.server.domain.base import (
     PayloadTooLargeError,
     ValidationError,
 )
+from kitaru.server.domain.hook import TaskHook
 from kitaru.server.domain.ids import uuid7
 
 __all__ = [
@@ -749,4 +750,5 @@ class TaskSpec(FrozenModel):
     run_spec: TaskRunSpec | None = None
     env: dict[str, str] = Field(default_factory=dict)
     secret_env: dict[str, str] = Field(default_factory=dict)
+    hooks: list[TaskHook] = Field(default_factory=list)
     details: TaskDetails

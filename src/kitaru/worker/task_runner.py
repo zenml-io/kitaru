@@ -24,6 +24,7 @@ from typing import Any
 import httpx
 
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
+from kitaru.api_models.v1.hook import TaskHook
 from kitaru.api_models.v1.session import SessionListParams, SessionStatus
 from kitaru.api_models.v1.task import (
     TaskKind,
@@ -41,6 +42,7 @@ from kitaru.client.exceptions import (
 )
 from kitaru.worker.context import ExecutionContext
 from kitaru.worker.handlers import HANDLERS
+from kitaru.worker.hooks import Hook, HookContext, build_hooks
 from kitaru.worker.process import run_task_process
 
 logger = logging.getLogger(__name__)
@@ -114,9 +116,24 @@ class TaskRunner:
             process = process._replace(
                 env={**process.env, "KITARU_TASK_RESULT_PATH": str(result_path)}
             )
-            result = await run_task_process(process, canceled)
+            hooks = build_hooks(spec.hooks)
+            hook_ctx = HookContext(
+                task_id=task.id,
+                scratch_dir=Path(work_dir),
+                canceled=canceled,
+                process=process,
+            )
+            error = await _run_hook_setups(hook_ctx, spec.hooks, hooks)
+            if error is not None:
+                return await self._fail(client, task, attempt, error)
+            result = await run_task_process(hook_ctx.process, canceled)
+            hook_error = await _run_hook_teardowns(
+                hook_ctx, spec.hooks, hooks, result.returncode == 0
+            )
 
             if result.returncode == 0:
+                if hook_error is not None:
+                    return await self._fail(client, task, attempt, hook_error)
                 return await self._succeed(
                     client, task, spec, attempt, label, result_path
                 )
@@ -448,6 +465,55 @@ class TaskRunner:
                 "Failed to update task %s to %s: %s", task_id, request.status, exc
             )
             return None
+
+
+async def _run_hook_setups(
+    ctx: HookContext, specs: list[TaskHook], hooks: list[Hook]
+) -> str | None:
+    """Run hook setups in order, tearing down the completed ones on failure.
+
+    Args:
+        ctx: Hook context.
+        specs: Hook specs in declared order.
+        hooks: Hook implementations in declared order.
+
+    Returns:
+        Error message of the failed setup, or None when every setup succeeded.
+    """
+    for index, (hook_spec, hook) in enumerate(zip(specs, hooks, strict=True)):
+        try:
+            await hook.setup(ctx)
+        except Exception as exc:
+            await _run_hook_teardowns(ctx, specs[:index], hooks[:index], False)
+            return f"Hook {hook_spec.type} failed: {exc}"
+    return None
+
+
+async def _run_hook_teardowns(
+    ctx: HookContext, specs: list[TaskHook], hooks: list[Hook], success: bool
+) -> str | None:
+    """Run hook teardowns in reverse declared order.
+
+    Args:
+        ctx: Hook context.
+        specs: Hook specs in declared order.
+        hooks: Hook implementations in declared order.
+        success: Whether the task process exited with code 0.
+
+    Returns:
+        Error message of the first failed teardown when success is set, None
+        otherwise.
+    """
+    error: str | None = None
+    for hook_spec, hook in zip(reversed(specs), reversed(hooks), strict=True):
+        try:
+            await hook.teardown(ctx, success)
+        except Exception as exc:
+            if success and error is None:
+                error = f"Hook {hook_spec.type} failed: {exc}"
+            else:
+                logger.warning("Hook %s teardown failed: %s", hook_spec.type, exc)
+    return error
 
 
 def _read_diagnostic_result(result_path: Path) -> Any:

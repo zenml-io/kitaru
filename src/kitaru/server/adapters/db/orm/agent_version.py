@@ -14,7 +14,9 @@
 """Agent version ORM table."""
 
 import uuid
+from typing import Any
 
+from pydantic import TypeAdapter
 from sqlalchemy import ForeignKeyConstraint, Index, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -34,6 +36,9 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     RunSpec,
 )
+from kitaru.server.domain.hook import TaskHook
+
+_TASK_HOOKS_ADAPTER: TypeAdapter[list[TaskHook]] = TypeAdapter(list[TaskHook])
 
 AGENT_VERSION_AGENT_ID_VERSION_UNIQUE_CONSTRAINT = unique_constraint_name(
     "agent_version", ["agent_id", "version"]
@@ -71,6 +76,9 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     run_command: Mapped[str | None] = mapped_column(Text)
     run_working_dir: Mapped[str | None] = mapped_column(Text)
     run_env: Mapped[dict[str, str] | None] = mapped_column(JSONB(none_as_null=True))
+    run_hooks: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     run_timeout_seconds: Mapped[int | None]
     capabilities: Mapped[dict[str, list[str]]] = mapped_column(JSONB)
 
@@ -99,6 +107,11 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             run_command=run_spec.command if run_spec is not None else None,
             run_working_dir=run_spec.working_dir if run_spec is not None else None,
             run_env=run_spec.env if run_spec is not None else None,
+            run_hooks=(
+                [hook.model_dump(mode="json") for hook in run_spec.hooks]
+                if run_spec is not None
+                else None
+            ),
             run_timeout_seconds=(
                 run_spec.timeout_seconds if run_spec is not None else None
             ),
@@ -122,6 +135,11 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 working_dir=self.run_working_dir,
                 env=self.run_env if self.run_env is not None else {},
                 secret_ids=secret_ids,
+                hooks=(
+                    _TASK_HOOKS_ADAPTER.validate_python(self.run_hooks)
+                    if self.run_hooks is not None
+                    else []
+                ),
                 timeout_seconds=self.run_timeout_seconds,
             )
         return AgentVersion(

@@ -4378,6 +4378,17 @@ export interface components {
             display_version?: string | null;
         };
         /**
+         * CopyWorkdirHook
+         * @description Copy workdir hook.
+         */
+        CopyWorkdirHook: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "copy_workdir";
+        };
+        /**
          * DeviceAuthorizationResponse
          * @description Device authorization response.
          */
@@ -6572,6 +6583,11 @@ export interface components {
                 [key: string]: string;
             };
             /**
+             * Hooks
+             * @description Hooks run around the task process.
+             */
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
+            /**
              * Secret Ids
              * @description Secrets merged into the process environment.
              */
@@ -7638,6 +7654,22 @@ export interface components {
             session: components["schemas"]["SessionDetailResponse"];
         };
         /**
+         * SetupCommandHook
+         * @description Setup command hook.
+         */
+        SetupCommandHook: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "setup_command";
+        };
+        /**
          * StaticCase
          * @description Static tool call case.
          */
@@ -7980,6 +8012,11 @@ export interface components {
             env: {
                 [key: string]: string;
             };
+            /**
+             * Hooks
+             * @description Hooks run around the task process.
+             */
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
             /** @description Kind of work the task runs. */
             kind: components["schemas"]["TaskKind"];
             /** @description Command to run, unset for evaluator and importer tasks. */
@@ -8042,6 +8079,29 @@ export interface components {
              * @description Bearer token scoped to this task and attempt.
              */
             token: string;
+        };
+        /**
+         * TeardownCommandHook
+         * @description Teardown command hook.
+         */
+        TeardownCommandHook: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * On
+             * @description Task process outcome the command runs on.
+             * @default success
+             * @enum {string}
+             */
+            on: "success" | "failure" | "always";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "teardown_command";
         };
         /**
          * TokenErrorCode

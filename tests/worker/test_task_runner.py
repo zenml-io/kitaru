@@ -31,6 +31,7 @@ from fakes import (
 )
 
 from kitaru.api_models.v1.base import Page
+from kitaru.api_models.v1.hook import CopyWorkdirHook, TeardownCommandHook
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import PackagePluginSpec, TaskKind, TaskStatus
 from kitaru.client.exceptions import (
@@ -376,6 +377,84 @@ async def test_prepare_failure_fails_the_task_with_the_label_and_exception(
     _, request = client.tasks.update_calls[-1]
     assert request.status == TaskStatus.FAILED
     assert request.error.startswith("Failed to prepare the Agent process:")
+
+
+async def test_failing_setup_hook_fails_the_task(tmp_path: Path) -> None:
+    """A setup hook failure fails the task with the hook type in the error."""
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    # The run spec has no working directory, so the copy_workdir setup raises.
+    spec = make_agent_spec(task.id, hooks=[CopyWorkdirHook()])
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    failed_task = running_task.model_copy(update={"status": TaskStatus.FAILED})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(failed_task)
+
+    await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    _, request = client.tasks.update_calls[-1]
+    assert request.status == TaskStatus.FAILED
+    assert request.error.startswith("Hook copy_workdir failed:")
+
+
+async def test_failing_teardown_command_fails_a_successful_task(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A teardown command failure fails a task whose process succeeded."""
+    _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
+    client = FakeKitaruAPIClient()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    working_dir = tmp_path / "work"
+    working_dir.mkdir()
+    spec = make_agent_spec(
+        task.id,
+        working_dir=str(working_dir),
+        hooks=[TeardownCommandHook(command="exit 3")],
+    )
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    failed_task = running_task.model_copy(update={"status": TaskStatus.FAILED})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(failed_task)
+
+    await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    _, request = client.tasks.update_calls[-1]
+    assert request.status == TaskStatus.FAILED
+    assert "Hook teardown_command failed:" in request.error
+
+
+async def test_copy_workdir_hook_runs_the_process_in_the_copied_directory(
+    tmp_path: Path,
+) -> None:
+    """A copy_workdir hook runs the task process in the copy, not the original."""
+    client = FakeKitaruAPIClient()
+    original = tmp_path / "original"
+    original.mkdir()
+    task = make_task(kind=TaskKind.AGENT, attempt=1)
+    command = 'touch marker.txt && printf \'"%s"\' "$PWD" > "$KITARU_TASK_RESULT_PATH"'
+    spec = make_agent_spec(
+        task.id,
+        command=command,
+        working_dir=str(original),
+        hooks=[CopyWorkdirHook()],
+    )
+    running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
+    completed_task = running_task.model_copy(update={"status": TaskStatus.COMPLETED})
+    client.tasks.update_responses.append(running_task)
+    client.tasks.update_responses.append(completed_task)
+
+    await TaskRunner(_ctx(tmp_path, client)).execute(
+        make_claimed(task, spec), asyncio.Event()
+    )
+
+    _, request = client.tasks.update_calls[-1]
+    assert request.status == TaskStatus.COMPLETED
+    assert request.result.endswith("hook-0-workdir")
+    assert not (original / "marker.txt").exists()
 
 
 async def test_running_transition_conflict_abandons_without_running_the_process(

@@ -14,27 +14,50 @@
 """Isolated unit tests for the REST mapping layer."""
 
 import uuid
+from datetime import UTC, datetime
 
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionUpdateRequest,
     RunSpec,
 )
+from kitaru.api_models.v1.hook import (
+    CopyWorkdirHook,
+    SetupCommandHook,
+    TeardownCommandHook,
+)
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
+from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.adapters.rest.mapping.agent_versions import (
+    agent_version_to_response,
     agent_version_update_to_command,
     capabilities_to_domain,
     run_spec_to_domain,
 )
 from kitaru.server.adapters.rest.mapping.plugins import plugin_source_to_domain
+from kitaru.server.adapters.rest.mapping.tasks import spec_to_response
 from kitaru.server.domain.agent_version import (
     AgentCapabilities as DomainAgentCapabilities,
 )
+from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.agent_version import RunSpec as DomainRunSpec
+from kitaru.server.domain.hook import (
+    CopyWorkdirHook as DomainCopyWorkdirHook,
+)
+from kitaru.server.domain.hook import (
+    SetupCommandHook as DomainSetupCommandHook,
+)
+from kitaru.server.domain.hook import (
+    TeardownCommandHook as DomainTeardownCommandHook,
+)
 from kitaru.server.domain.plugin import (
     PackagePluginSource as DomainPackagePluginSource,
 )
 from kitaru.server.domain.plugin import ScriptPluginSource as DomainScriptPluginSource
+from kitaru.server.domain.task import (
+    AgentTaskDetails as DomainAgentTaskDetails,
+)
+from kitaru.server.domain.task import TaskSpec as DomainTaskSpec
 
 
 def test_agent_version_create_converts_nested_wire_models() -> None:
@@ -58,6 +81,77 @@ def test_agent_version_update_preserves_omitted_and_explicit_null() -> None:
     assert "run_spec" not in omitted.model_fields_set
     assert "run_spec" in explicit_null.model_fields_set
     assert explicit_null.run_spec is None
+
+
+def test_run_spec_hooks_convert_to_domain_variants() -> None:
+    """Convert every discriminated hook variant to its domain value object."""
+    run_spec = run_spec_to_domain(
+        RunSpec(
+            command="run.sh",
+            hooks=[
+                CopyWorkdirHook(),
+                SetupCommandHook(command="setup.sh"),
+                TeardownCommandHook(command="teardown.sh", on="always"),
+            ],
+        )
+    )
+
+    assert run_spec.hooks == [
+        DomainCopyWorkdirHook(),
+        DomainSetupCommandHook(command="setup.sh"),
+        DomainTeardownCommandHook(command="teardown.sh", on="always"),
+    ]
+
+
+def test_agent_version_response_carries_run_spec_hooks() -> None:
+    """Convert a stored run spec's hooks back to their wire variants."""
+    now = datetime.now(UTC)
+    version = AgentVersion(
+        owner_id=uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        run_spec=DomainRunSpec(
+            command="run.sh",
+            hooks=[
+                DomainCopyWorkdirHook(),
+                DomainSetupCommandHook(command="setup.sh"),
+                DomainTeardownCommandHook(command="teardown.sh", on="always"),
+            ],
+        ),
+        created=now,
+        updated=now,
+    )
+
+    response = agent_version_to_response(version)
+
+    assert response.run_spec is not None
+    assert response.run_spec.hooks == [
+        CopyWorkdirHook(),
+        SetupCommandHook(command="setup.sh"),
+        TeardownCommandHook(command="teardown.sh", on="always"),
+    ]
+
+
+def test_task_spec_response_carries_hooks() -> None:
+    """Convert a task spec's hooks to their wire variants."""
+    spec = DomainTaskSpec(
+        task_id=uuid.uuid4(),
+        kind=TaskKind.AGENT,
+        timeout_seconds=60,
+        hooks=[
+            DomainCopyWorkdirHook(),
+            DomainSetupCommandHook(command="setup.sh"),
+            DomainTeardownCommandHook(command="teardown.sh", on="always"),
+        ],
+        details=DomainAgentTaskDetails(),
+    )
+
+    response = spec_to_response(spec)
+
+    assert response.hooks == [
+        CopyWorkdirHook(),
+        SetupCommandHook(command="setup.sh"),
+        TeardownCommandHook(command="teardown.sh", on="always"),
+    ]
 
 
 def test_plugin_sources_convert_to_domain_variants() -> None:
