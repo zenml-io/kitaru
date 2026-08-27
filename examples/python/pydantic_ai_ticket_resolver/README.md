@@ -110,7 +110,8 @@ Confirm that all ten sessions are available:
 uv run kitaru session list \
   --tag returns-baseline \
   --origin imported \
-  --size 20
+  --size 20 \
+  --include-payloads
 ```
 
 ## Continue with a coding agent
