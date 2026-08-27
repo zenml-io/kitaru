@@ -242,7 +242,7 @@ jobs:
           push: true
           build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
           tags: zenmldocker/kitaru-server:${{ needs.build.outputs.bundle-version }}
-      - name: Publish managed images
+      - name: Publish managed image
         id: publish-managed-image
         continue-on-error: true
         uses: ./.github/actions/publish-managed-image
