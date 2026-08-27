@@ -1349,6 +1349,44 @@
         "title": "CohortVersionUpdateRequest",
         "type": "object"
       },
+      "CommandHook": {
+        "additionalProperties": false,
+        "description": "Command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "run_on_failure": {
+            "default": false,
+            "description": "Whether a teardown command runs when the task process failed.",
+            "title": "Run On Failure",
+            "type": "boolean"
+          },
+          "type": {
+            "const": "command",
+            "default": "command",
+            "title": "Type",
+            "type": "string"
+          },
+          "when": {
+            "description": "Phase the command runs in.",
+            "enum": [
+              "setup",
+              "teardown"
+            ],
+            "title": "When",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command",
+          "when"
+        ],
+        "title": "CommandHook",
+        "type": "object"
+      },
       "CopyWorkdirHook": {
         "additionalProperties": false,
         "description": "Copy workdir hook.",
@@ -2954,66 +2992,6 @@
         ],
         "title": "FilterOp",
         "type": "string"
-      },
-      "GitCloneHook": {
-        "additionalProperties": false,
-        "description": "Git clone hook.",
-        "properties": {
-          "ref": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Ref checked out after the clone.",
-            "title": "Ref"
-          },
-          "type": {
-            "const": "git_clone",
-            "default": "git_clone",
-            "title": "Type",
-            "type": "string"
-          },
-          "url": {
-            "description": "Repository to clone.",
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "url"
-        ],
-        "title": "GitCloneHook",
-        "type": "object"
-      },
-      "GitPushHook": {
-        "additionalProperties": false,
-        "description": "Git push hook.",
-        "properties": {
-          "branch": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Branch pushed to.",
-            "title": "Branch"
-          },
-          "type": {
-            "const": "git_push",
-            "default": "git_push",
-            "title": "Type",
-            "type": "string"
-          }
-        },
-        "title": "GitPushHook",
-        "type": "object"
       },
       "HTTPValidationError": {
         "properties": {
@@ -5493,9 +5471,8 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
-                  "git_clone": "#/components/schemas/GitCloneHook",
-                  "git_push": "#/components/schemas/GitPushHook"
+                  "command": "#/components/schemas/CommandHook",
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook"
                 },
                 "propertyName": "type"
               },
@@ -5504,10 +5481,7 @@
                   "$ref": "#/components/schemas/CopyWorkdirHook"
                 },
                 {
-                  "$ref": "#/components/schemas/GitCloneHook"
-                },
-                {
-                  "$ref": "#/components/schemas/GitPushHook"
+                  "$ref": "#/components/schemas/CommandHook"
                 }
               ]
             },
@@ -8112,9 +8086,8 @@
             "items": {
               "discriminator": {
                 "mapping": {
-                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
-                  "git_clone": "#/components/schemas/GitCloneHook",
-                  "git_push": "#/components/schemas/GitPushHook"
+                  "command": "#/components/schemas/CommandHook",
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook"
                 },
                 "propertyName": "type"
               },
@@ -8123,10 +8096,7 @@
                   "$ref": "#/components/schemas/CopyWorkdirHook"
                 },
                 {
-                  "$ref": "#/components/schemas/GitCloneHook"
-                },
-                {
-                  "$ref": "#/components/schemas/GitPushHook"
+                  "$ref": "#/components/schemas/CommandHook"
                 }
               ]
             },

@@ -26,13 +26,10 @@ from kitaru.api_models.v1.agent_version import (
 )
 from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
 from kitaru.api_models.v1.hook import (
+    CommandHook as WireCommandHook,
+)
+from kitaru.api_models.v1.hook import (
     CopyWorkdirHook as WireCopyWorkdirHook,
-)
-from kitaru.api_models.v1.hook import (
-    GitCloneHook as WireGitCloneHook,
-)
-from kitaru.api_models.v1.hook import (
-    GitPushHook as WireGitPushHook,
 )
 from kitaru.api_models.v1.hook import (
     TaskHook as WireTaskHook,
@@ -48,9 +45,8 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.hook import (
+    CommandHook,
     CopyWorkdirHook,
-    GitCloneHook,
-    GitPushHook,
     TaskHook,
 )
 
@@ -66,9 +62,9 @@ def _hook_to_domain(hook: WireTaskHook) -> TaskHook:
     """
     if isinstance(hook, WireCopyWorkdirHook):
         return CopyWorkdirHook()
-    if isinstance(hook, WireGitCloneHook):
-        return GitCloneHook(url=hook.url, ref=hook.ref)
-    return GitPushHook(branch=hook.branch)
+    return CommandHook(
+        command=hook.command, when=hook.when, run_on_failure=hook.run_on_failure
+    )
 
 
 def _hook_to_response(hook: TaskHook) -> WireTaskHook:
@@ -82,9 +78,9 @@ def _hook_to_response(hook: TaskHook) -> WireTaskHook:
     """
     if isinstance(hook, CopyWorkdirHook):
         return WireCopyWorkdirHook()
-    if isinstance(hook, GitCloneHook):
-        return WireGitCloneHook(url=hook.url, ref=hook.ref)
-    return WireGitPushHook(branch=hook.branch)
+    return WireCommandHook(
+        command=hook.command, when=hook.when, run_on_failure=hook.run_on_failure
+    )
 
 
 def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:

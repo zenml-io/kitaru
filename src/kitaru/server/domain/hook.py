@@ -26,21 +26,13 @@ class CopyWorkdirHook(FrozenModel):
     type: Literal["copy_workdir"] = "copy_workdir"
 
 
-class GitCloneHook(FrozenModel):
-    """Git clone hook."""
+class CommandHook(FrozenModel):
+    """Command hook."""
 
-    type: Literal["git_clone"] = "git_clone"
-    url: str
-    ref: str | None = None
-
-
-class GitPushHook(FrozenModel):
-    """Git push hook."""
-
-    type: Literal["git_push"] = "git_push"
-    branch: str | None = None
+    type: Literal["command"] = "command"
+    command: str
+    when: Literal["setup", "teardown"]
+    run_on_failure: bool = False
 
 
-TaskHook = Annotated[
-    CopyWorkdirHook | GitCloneHook | GitPushHook, Field(discriminator="type")
-]
+TaskHook = Annotated[CopyWorkdirHook | CommandHook, Field(discriminator="type")]

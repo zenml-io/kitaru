@@ -26,23 +26,16 @@ class CopyWorkdirHook(DiscriminatedRequestModel):
     type: Literal["copy_workdir"] = Field(default="copy_workdir")
 
 
-class GitCloneHook(DiscriminatedRequestModel):
-    """Git clone hook."""
+class CommandHook(DiscriminatedRequestModel):
+    """Command hook."""
 
-    type: Literal["git_clone"] = Field(default="git_clone")
-    url: str = Field(description="Repository to clone.")
-    ref: str | None = Field(
-        default=None, description="Ref checked out after the clone."
+    type: Literal["command"] = Field(default="command")
+    command: str = Field(description="Shell command to run.")
+    when: Literal["setup", "teardown"] = Field(description="Phase the command runs in.")
+    run_on_failure: bool = Field(
+        default=False,
+        description="Whether a teardown command runs when the task process failed.",
     )
 
 
-class GitPushHook(DiscriminatedRequestModel):
-    """Git push hook."""
-
-    type: Literal["git_push"] = Field(default="git_push")
-    branch: str | None = Field(default=None, description="Branch pushed to.")
-
-
-TaskHook = Annotated[
-    CopyWorkdirHook | GitCloneHook | GitPushHook, Field(discriminator="type")
-]
+TaskHook = Annotated[CopyWorkdirHook | CommandHook, Field(discriminator="type")]

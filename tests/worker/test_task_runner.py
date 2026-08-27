@@ -31,7 +31,7 @@ from fakes import (
 )
 
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.hook import CopyWorkdirHook, GitPushHook
+from kitaru.api_models.v1.hook import CommandHook, CopyWorkdirHook
 from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.task import PackagePluginSpec, TaskKind, TaskStatus
 from kitaru.client.exceptions import (
@@ -399,16 +399,20 @@ async def test_failing_setup_hook_fails_the_task(tmp_path: Path) -> None:
     assert request.error.startswith("Hook copy_workdir failed:")
 
 
-async def test_failing_git_push_teardown_fails_a_successful_task(
+async def test_failing_teardown_command_fails_a_successful_task(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A git_push teardown failure fails a task whose process succeeded."""
+    """A teardown command failure fails a task whose process succeeded."""
     _patch_run_task_process(monkeypatch, _fake_run_task_process(0))
     client = FakeKitaruAPIClient()
     task = make_task(kind=TaskKind.AGENT, attempt=1)
-    working_dir = tmp_path / "not-a-repo"
+    working_dir = tmp_path / "work"
     working_dir.mkdir()
-    spec = make_agent_spec(task.id, working_dir=str(working_dir), hooks=[GitPushHook()])
+    spec = make_agent_spec(
+        task.id,
+        working_dir=str(working_dir),
+        hooks=[CommandHook(command="exit 3", when="teardown")],
+    )
     running_task = task.model_copy(update={"status": TaskStatus.RUNNING})
     failed_task = running_task.model_copy(update={"status": TaskStatus.FAILED})
     client.tasks.update_responses.append(running_task)
@@ -420,7 +424,7 @@ async def test_failing_git_push_teardown_fails_a_successful_task(
 
     _, request = client.tasks.update_calls[-1]
     assert request.status == TaskStatus.FAILED
-    assert "Hook git_push failed:" in request.error
+    assert "Hook command failed:" in request.error
 
 
 async def test_copy_workdir_hook_runs_the_process_in_the_copied_directory(

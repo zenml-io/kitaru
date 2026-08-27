@@ -20,18 +20,15 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from kitaru.api_models.v1.hook import (
+    CommandHook as CommandHookSpec,
+)
+from kitaru.api_models.v1.hook import (
     CopyWorkdirHook as CopyWorkdirHookSpec,
-)
-from kitaru.api_models.v1.hook import (
-    GitCloneHook as GitCloneHookSpec,
-)
-from kitaru.api_models.v1.hook import (
-    GitPushHook as GitPushHookSpec,
 )
 from kitaru.api_models.v1.hook import TaskHook
 from kitaru.worker.process import TaskProcess, run_task_process
 
-# Bound on each git command a hook runs.
+# Bound on each command a hook runs.
 HOOK_TIMEOUT_SECONDS = 600
 
 
@@ -97,96 +94,45 @@ class CopyWorkdirHook(Hook):
         ctx.process = ctx.process._replace(working_dir=str(dest))
 
 
-class GitCloneHook(Hook):
-    """Git clone hook."""
+class CommandHook(Hook):
+    """Command hook."""
 
-    def __init__(self, spec: GitCloneHookSpec, index: int) -> None:
+    def __init__(self, spec: CommandHookSpec) -> None:
         """Initialize the hook.
 
         Args:
             spec: Hook spec.
-            index: Position of the hook in the spec's hook list.
         """
         self._spec = spec
-        self._index = index
 
     async def setup(self, ctx: HookContext) -> None:
-        """Clone the repository and point the process at the clone.
+        """Run a setup command before the task process starts.
 
         Args:
             ctx: Hook context.
 
         Raises:
-            HookError: A git command did not exit successfully.
+            HookError: The command did not exit successfully.
         """
-        dest = ctx.scratch_dir / f"hook-{self._index}-clone"
-        await _run_git_command(
-            ctx,
-            ["git", "clone", self._spec.url, str(dest)],
-            None,
-            "clone the repository",
-        )
-        if self._spec.ref is not None:
-            await _run_git_command(
-                ctx,
-                ["git", "checkout", self._spec.ref],
-                str(dest),
-                "check out the ref",
-            )
-        ctx.process = ctx.process._replace(working_dir=str(dest))
-
-
-class GitPushHook(Hook):
-    """Git push hook."""
-
-    def __init__(self, spec: GitPushHookSpec) -> None:
-        """Initialize the hook.
-
-        Args:
-            spec: Hook spec.
-        """
-        self._spec = spec
+        if self._spec.when != "setup":
+            return
+        await _run_command(ctx, self._spec.command)
 
     async def teardown(self, ctx: HookContext, success: bool) -> None:
-        """Commit and push the working directory changes on success.
+        """Run a teardown command after the task process exits.
 
         Args:
             ctx: Hook context.
             success: Whether the task process exited with code 0.
 
         Raises:
-            HookError: A git command did not exit successfully.
+            HookError: The command did not exit successfully.
         """
-        if not success:
+        if self._spec.when != "teardown":
             return
-        working_dir = ctx.process.working_dir
-        await _run_git_command(
-            ctx, ["git", "add", "-A"], working_dir, "stage the changes"
-        )
-        staged = await _run_git_command(
-            ctx,
-            ["git", "diff", "--cached", "--quiet"],
-            working_dir,
-            "check for staged changes",
-            expected_returncodes=(0, 1),
-        )
-        if staged == 0:
+        if not success and not self._spec.run_on_failure:
             return
-        branch = self._spec.branch or f"kitaru/task-{ctx.task_id}"
-        await _run_git_command(
-            ctx,
-            ["git", "commit", "-m", f"Kitaru task {ctx.task_id}"],
-            working_dir,
-            "commit the changes",
-        )
-        # Qualify the destination because a detached HEAD, left behind by a
-        # ref checkout, cannot resolve an unqualified new branch name.
-        await _run_git_command(
-            ctx,
-            ["git", "push", "origin", f"HEAD:refs/heads/{branch}"],
-            working_dir,
-            "push the changes",
-        )
+        await _run_command(ctx, self._spec.command)
 
 
 def build_hooks(specs: list[TaskHook]) -> list[Hook]:
@@ -202,49 +148,34 @@ def build_hooks(specs: list[TaskHook]) -> list[Hook]:
     for index, spec in enumerate(specs):
         if isinstance(spec, CopyWorkdirHookSpec):
             hooks.append(CopyWorkdirHook(index))
-        elif isinstance(spec, GitCloneHookSpec):
-            hooks.append(GitCloneHook(spec, index))
         else:
-            hooks.append(GitPushHook(spec))
+            hooks.append(CommandHook(spec))
     return hooks
 
 
-async def _run_git_command(
-    ctx: HookContext,
-    command: list[str],
-    working_dir: str | None,
-    purpose: str,
-    expected_returncodes: tuple[int, ...] = (0,),
-) -> int:
-    """Run a git command, raising on an unexpected outcome.
+async def _run_command(ctx: HookContext, command: str) -> None:
+    """Run a hook command in the task process's working directory.
 
     Args:
         ctx: Hook context.
-        command: Command to run.
-        working_dir: Directory the command runs in.
-        purpose: Action named in the error message.
-        expected_returncodes: Exit codes that are not an error.
+        command: Shell command to run.
 
     Raises:
-        HookError: The command was canceled, timed out, or exited with an
-            unexpected code.
-
-    Returns:
-        Exit code.
+        HookError: The command was canceled, timed out, or exited with a
+            nonzero code.
     """
     process = TaskProcess(
         command=command,
-        working_dir=working_dir,
+        working_dir=ctx.process.working_dir,
         env=ctx.process.env,
         timeout_seconds=HOOK_TIMEOUT_SECONDS,
     )
     result = await run_task_process(process, ctx.canceled)
     if result.returncode is None:
         outcome = "was canceled" if ctx.canceled.is_set() else "timed out"
-        raise HookError(f"Command to {purpose} {outcome}.")
-    if result.returncode not in expected_returncodes:
-        message = f"Command to {purpose} exited with code {result.returncode}."
+        raise HookError(f"Command {outcome}.")
+    if result.returncode != 0:
+        message = f"Command exited with code {result.returncode}."
         if result.tail:
             message = f"{message}\n\n{result.tail}"
         raise HookError(message)
-    return result.returncode

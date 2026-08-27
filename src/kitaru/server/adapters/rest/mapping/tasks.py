@@ -16,9 +16,8 @@
 import uuid
 
 from kitaru.api_models.v1.hook import (
+    CommandHook,
     CopyWorkdirHook,
-    GitCloneHook,
-    GitPushHook,
     TaskHook,
 )
 from kitaru.api_models.v1.task import (
@@ -42,9 +41,6 @@ from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
 from kitaru.server.domain.hook import (
     CopyWorkdirHook as DomainCopyWorkdirHook,
-)
-from kitaru.server.domain.hook import (
-    GitCloneHook as DomainGitCloneHook,
 )
 from kitaru.server.domain.hook import (
     TaskHook as DomainTaskHook,
@@ -179,9 +175,9 @@ def _hook_to_response(hook: DomainTaskHook) -> TaskHook:
     """
     if isinstance(hook, DomainCopyWorkdirHook):
         return CopyWorkdirHook()
-    if isinstance(hook, DomainGitCloneHook):
-        return GitCloneHook(url=hook.url, ref=hook.ref)
-    return GitPushHook(branch=hook.branch)
+    return CommandHook(
+        command=hook.command, when=hook.when, run_on_failure=hook.run_on_failure
+    )
 
 
 def _details_to_response(spec: TaskSpec) -> TaskDetails:

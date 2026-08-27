@@ -21,7 +21,7 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionUpdateRequest,
     RunSpec,
 )
-from kitaru.api_models.v1.hook import CopyWorkdirHook, GitCloneHook, GitPushHook
+from kitaru.api_models.v1.hook import CommandHook, CopyWorkdirHook
 from kitaru.api_models.v1.plugin import PackagePluginSource, ScriptPluginSource
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.server.adapters.rest.mapping.agent_versions import (
@@ -38,13 +38,10 @@ from kitaru.server.domain.agent_version import (
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.agent_version import RunSpec as DomainRunSpec
 from kitaru.server.domain.hook import (
+    CommandHook as DomainCommandHook,
+)
+from kitaru.server.domain.hook import (
     CopyWorkdirHook as DomainCopyWorkdirHook,
-)
-from kitaru.server.domain.hook import (
-    GitCloneHook as DomainGitCloneHook,
-)
-from kitaru.server.domain.hook import (
-    GitPushHook as DomainGitPushHook,
 )
 from kitaru.server.domain.plugin import (
     PackagePluginSource as DomainPackagePluginSource,
@@ -86,16 +83,18 @@ def test_run_spec_hooks_convert_to_domain_variants() -> None:
             command="run.sh",
             hooks=[
                 CopyWorkdirHook(),
-                GitCloneHook(url="https://example.com/repo.git", ref="main"),
-                GitPushHook(branch="results"),
+                CommandHook(command="setup.sh", when="setup"),
+                CommandHook(
+                    command="teardown.sh", when="teardown", run_on_failure=True
+                ),
             ],
         )
     )
 
     assert run_spec.hooks == [
         DomainCopyWorkdirHook(),
-        DomainGitCloneHook(url="https://example.com/repo.git", ref="main"),
-        DomainGitPushHook(branch="results"),
+        DomainCommandHook(command="setup.sh", when="setup"),
+        DomainCommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
     ]
 
 
@@ -109,8 +108,10 @@ def test_agent_version_response_carries_run_spec_hooks() -> None:
             command="run.sh",
             hooks=[
                 DomainCopyWorkdirHook(),
-                DomainGitCloneHook(url="https://example.com/repo.git", ref="main"),
-                DomainGitPushHook(branch="results"),
+                DomainCommandHook(command="setup.sh", when="setup"),
+                DomainCommandHook(
+                    command="teardown.sh", when="teardown", run_on_failure=True
+                ),
             ],
         ),
         created=now,
@@ -122,8 +123,8 @@ def test_agent_version_response_carries_run_spec_hooks() -> None:
     assert response.run_spec is not None
     assert response.run_spec.hooks == [
         CopyWorkdirHook(),
-        GitCloneHook(url="https://example.com/repo.git", ref="main"),
-        GitPushHook(branch="results"),
+        CommandHook(command="setup.sh", when="setup"),
+        CommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
     ]
 
 
@@ -135,8 +136,10 @@ def test_task_spec_response_carries_hooks() -> None:
         timeout_seconds=60,
         hooks=[
             DomainCopyWorkdirHook(),
-            DomainGitCloneHook(url="https://example.com/repo.git", ref="main"),
-            DomainGitPushHook(branch="results"),
+            DomainCommandHook(command="setup.sh", when="setup"),
+            DomainCommandHook(
+                command="teardown.sh", when="teardown", run_on_failure=True
+            ),
         ],
         details=DomainAgentTaskDetails(),
     )
@@ -145,8 +148,8 @@ def test_task_spec_response_carries_hooks() -> None:
 
     assert response.hooks == [
         CopyWorkdirHook(),
-        GitCloneHook(url="https://example.com/repo.git", ref="main"),
-        GitPushHook(branch="results"),
+        CommandHook(command="setup.sh", when="setup"),
+        CommandHook(command="teardown.sh", when="teardown", run_on_failure=True),
     ]
 
 
