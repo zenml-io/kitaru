@@ -44,7 +44,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     split_payload,
     unique_constraint_name,
 )
-from kitaru.server.domain.payload import PayloadMediaType
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.session import Session
 
 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -165,16 +165,14 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         row = cls(id=session.id)
         row.apply_domain(session)
         row.inputs, row.inputs_blob_id = split_payload(session.inputs)
-        if not session.outputs_changed:
-            row.outputs, row.outputs_blob_id = split_payload(session.outputs)
         return row
 
     def apply_domain(self, session: Session) -> None:
         """Copy the mutable fields of a domain session onto this row.
 
         The inputs are create-only and never written here. The outputs are
-        written only when the session's outputs were changed, so a session
-        loaded without payloads writes none back. A payload with a blob ref
+        written only when set on the session, so a session loaded without
+        payloads writes none back. A payload with a blob ref
         writes the ref column and leaves the inline column null, an
         inline-only payload writes the inline column and leaves the ref
         column null, and ``None`` writes null to both. The token usage is
@@ -185,7 +183,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             session: Session carrying the desired field values.
         """
         tokens = session.tokens
-        if session.outputs_changed:
+        if "outputs" in session.model_fields_set:
             self.outputs, self.outputs_blob_id = split_payload(session.outputs)
         self.owner_id = session.owner_id
         self.agent_id = session.agent_id
@@ -222,9 +220,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         them is null, matching a session that has never rolled up a node.
 
         Args:
-            exclude: Keys of payload columns to leave unread and ``None``
-                on the session, so a column the load deferred never fires
-                a lazy load.
+            exclude: Keys of payload columns to leave unread and unset on
+                the session, so a column the load deferred never fires a
+                lazy load.
 
         Returns:
             Session with timestamps set.
@@ -248,6 +246,15 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             if has_tokens
             else None
         )
+        payloads: dict[str, Payload | None] = {}
+        if "inputs" not in exclude:
+            payloads["inputs"] = payload_from_columns(
+                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
+            )
+        if "outputs" not in exclude:
+            payloads["outputs"] = payload_from_columns(
+                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
+            )
         return Session(
             id=self.id,
             owner_id=self.owner_id,
@@ -260,16 +267,7 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=self.name,
             input_text_selector=self.input_text_selector,
             output_text_selector=self.output_text_selector,
-            inputs=payload_from_columns(
-                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
-            )
-            if "inputs" not in exclude
-            else None,
-            outputs=payload_from_columns(
-                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
-            )
-            if "outputs" not in exclude
-            else None,
+            **payloads,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

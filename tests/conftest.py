@@ -2472,7 +2472,12 @@ class FakeSessionRepository:
         """
         if include_payloads:
             return session.model_copy()
-        return session.model_copy(update={"inputs": None, "outputs": None})
+        # Rebuild without the payload fields so they stay unset, like a load
+        # that excluded the payload columns.
+        data = dict(session)
+        del data["inputs"]
+        del data["outputs"]
+        return Session(**data)
 
     async def get(
         self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -2584,11 +2589,7 @@ class FakeSessionRepository:
                 if _evaluate_filter_expression(s, session_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(sessions, session_filter)
-        if include_payloads:
-            return [s.model_copy() for s in page], next_cursor
-        return [
-            s.model_copy(update={"inputs": None, "outputs": None}) for s in page
-        ], next_cursor
+        return [self._copy(s, include_payloads) for s in page], next_cursor
 
     def _evaluate_tag_condition(
         self, session: Session, condition: FilterCondition
@@ -2685,13 +2686,10 @@ class FakeSessionRepository:
                 "updated": now,
                 "inputs": stored.inputs,
                 "outputs": session.outputs
-                if session.outputs_changed
+                if "outputs" in session.model_fields_set
                 else stored.outputs,
             }
         )
-        # Rebuild to drop the outputs-changed mark, like a load from
-        # columns does.
-        updated = Session(**dict(updated))
         self._sessions[session.id] = updated
         return self._copy(updated, include_payloads=False)
 

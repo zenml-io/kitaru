@@ -387,13 +387,15 @@ class SessionService:
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
             if "outputs" in fields:
-                session.set_outputs(
+                session.outputs = (
                     Payload.from_json(command.outputs)
                     if command.outputs is not None
                     else None
                 )
-            if session.outputs_changed and session.outputs is not None:
-                await self._payload_store.offload([session.outputs], session.owner_id)
+                if session.outputs is not None:
+                    await self._payload_store.offload(
+                        [session.outputs], session.owner_id
+                    )
             if (
                 self._analytics is not None
                 and session.status != SessionStatus.IN_PROGRESS

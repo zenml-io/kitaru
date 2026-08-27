@@ -735,7 +735,7 @@ async def test_update(setup: Setup) -> None:
         error=None,
         ended_at=None,
     )
-    created.set_outputs(Payload.from_json({"a": 1}))
+    created.outputs = Payload.from_json({"a": 1})
     updated = await repository.update(created)
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.COMPLETED
