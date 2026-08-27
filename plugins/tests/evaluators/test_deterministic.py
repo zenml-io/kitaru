@@ -15,8 +15,8 @@ import pytest
 
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import (
+    SessionDetailResponse,
     SessionOrigin,
-    SessionResponse,
     SessionStatus,
     TokenUsage,
 )
@@ -99,7 +99,7 @@ def _view(
         outputs = {"answer": 42}
     llm_count = sum(n.node_type is NodeType.LLM_CALL for n in materialized_nodes)
     tool_count = sum(n.node_type is NodeType.TOOL_CALL for n in materialized_nodes)
-    session = SessionResponse(
+    session = SessionDetailResponse(
         id=SESSION_ID,
         owner_id=uuid.UUID(int=2),
         agent_id=uuid.UUID(int=3),
