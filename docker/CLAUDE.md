@@ -13,6 +13,13 @@ main project `CLAUDE.md` links here for Docker-specific guidance.
 | `release-client.Dockerfile` | Release client | Published PyPI wheel |
 | `release-server.Dockerfile` | Release server | Published PyPI wheel |
 | `release-worker.Dockerfile` | Release worker | Published PyPI wheel |
+| `onboarding-sandbox.Dockerfile` | Onboarding sandbox | Published worker image |
+
+`onboarding-sandbox.Dockerfile` extends the published worker image with
+Node.js, npm, npx, Git, curl, the `cli` and `mcp` extras, the Kitaru repository
+cloned at the release tag to `/opt/kitaru`, and the published Kitaru skills.
+Releases publish it to the private Amazon ECR registry as
+`kitaru-onboarding-sandbox` alongside the managed server image.
 
 All development and release builds resolve dependencies from the committed
 `uv.lock`. The release
@@ -95,6 +102,11 @@ docker build -f docker/release-worker.Dockerfile --target worker \
 # Release server from the matching published package
 docker build -f docker/release-server.Dockerfile --target server \
   --build-arg KITARU_VERSION=<version> -t kitaru-server .
+
+# Onboarding sandbox from the published worker image
+docker build -f docker/onboarding-sandbox.Dockerfile --target worker \
+  --build-arg BASE_IMAGE=zenmldocker/kitaru-worker:<version> \
+  -t kitaru-onboarding-sandbox .
 ```
 
 The release server listens on port 8000 and starts the FastAPI application
