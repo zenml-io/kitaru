@@ -14,7 +14,6 @@
 """Session ORM table."""
 
 import uuid
-from collections.abc import Collection
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -30,7 +29,7 @@ from sqlalchemy import (
     UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.server.adapters.db.orm.base import (
@@ -216,23 +215,20 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.llm_call_count = session.llm_call_count
         self.tool_call_count = session.tool_call_count
 
-    def to_domain(
-        self, deferred_columns: Collection[InstrumentedAttribute[Any]]
-    ) -> Session:
+    def to_domain(self, exclude: set[str]) -> Session:
         """Build a domain session from this row.
 
         The token columns collapse back to ``None`` only when every one of
         them is null, matching a session that has never rolled up a node.
 
         Args:
-            deferred_columns: Payload columns to leave unread and ``None``
+            exclude: Keys of payload columns to leave unread and ``None``
                 on the session, so a column the load deferred never fires
                 a lazy load.
 
         Returns:
             Session with timestamps set.
         """
-        deferred = {column.key for column in deferred_columns}
         has_tokens = any(
             value is not None
             for value in (
@@ -267,12 +263,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             inputs=payload_from_columns(
                 self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
             )
-            if "inputs" not in deferred
+            if "inputs" not in exclude
             else None,
             outputs=payload_from_columns(
                 self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
             )
-            if "outputs" not in deferred
+            if "outputs" not in exclude
             else None,
             error=self.error,
             started_at=self.started_at,

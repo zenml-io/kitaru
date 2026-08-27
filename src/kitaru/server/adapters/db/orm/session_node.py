@@ -14,7 +14,6 @@
 """Session node ORM table."""
 
 import uuid
-from collections.abc import Collection
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
@@ -32,7 +31,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.session import TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -241,20 +240,17 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.attributes_blob_id = attributes_blob_id
         self.metadata_ = node.metadata
 
-    def to_domain(
-        self, deferred_columns: Collection[InstrumentedAttribute[Any]]
-    ) -> SessionNode:
+    def to_domain(self, exclude: set[str]) -> SessionNode:
         """Build a domain session node from this row.
 
         Args:
-            deferred_columns: Payload columns to leave unread and ``None``
+            exclude: Keys of payload columns to leave unread and ``None``
                 on the node, so a column the load deferred never fires a
                 lazy load.
 
         Returns:
             Session node with timestamps set.
         """
-        deferred = {column.key for column in deferred_columns}
         has_tokens = any(
             value is not None
             for value in (
@@ -299,21 +295,21 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                     self.reasoning_blob_id,
                     media_type=PayloadMediaType.TEXT,
                 )
-                if "reasoning" not in deferred
+                if "reasoning" not in exclude
                 else None
             ),
             inputs=(
                 payload_from_columns(
                     self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
                 )
-                if "inputs" not in deferred
+                if "inputs" not in exclude
                 else None
             ),
             outputs=(
                 payload_from_columns(
                     self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
                 )
-                if "outputs" not in deferred
+                if "outputs" not in exclude
                 else None
             ),
             requested_model=self.requested_model,
@@ -331,7 +327,7 @@ class SessionNodeORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                     self.attributes_blob_id,
                     media_type=PayloadMediaType.JSON,
                 )
-                if "attributes" not in deferred
+                if "attributes" not in exclude
                 else None
             ),
             metadata=self.metadata_,

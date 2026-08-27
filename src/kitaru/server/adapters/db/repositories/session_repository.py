@@ -239,7 +239,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 AgentVersionNotFound(agent_version_id)
             )
         await self._add(row, constraints)
-        return row.to_domain(deferred_columns=PAYLOAD_COLUMNS)
+        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
 
     async def get(
         self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -263,7 +263,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         row = await self._get_row(
             session_id, exclusive=exclusive, deferred_columns=deferred
         )
-        return row.to_domain(deferred_columns=deferred)
+        return row.to_domain(exclude={column.key for column in deferred})
 
     async def get_by_task_id(
         self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
@@ -285,7 +285,8 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         if exclusive:
             statement = statement.with_for_update()
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain(deferred_columns=deferred) if row is not None else None
+        exclude = {column.key for column in deferred}
+        return row.to_domain(exclude=exclude) if row is not None else None
 
     async def query(
         self, session_filter: SessionFilter, include_payloads: bool
@@ -313,7 +314,8 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         rows, next_cursor = await paginate(
             self._session, statement, session_filter, id_column=SessionORM.id
         )
-        return [row.to_domain(deferred_columns=deferred) for row in rows], next_cursor
+        exclude = {column.key for column in deferred}
+        return [row.to_domain(exclude=exclude) for row in rows], next_cursor
 
     async def get_many(
         self, session_ids: Sequence[uuid.UUID], include_payloads: bool
@@ -330,8 +332,9 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         """
         deferred = () if include_payloads else PAYLOAD_COLUMNS
         rows = await self._load_by_ids(list(session_ids), deferred_columns=deferred)
+        exclude = {column.key for column in deferred}
         return {
-            session_id: row.to_domain(deferred_columns=deferred)
+            session_id: row.to_domain(exclude=exclude)
             for session_id, row in rows.items()
         }
 
@@ -361,7 +364,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 )
             }
         )
-        return row.to_domain(deferred_columns=PAYLOAD_COLUMNS)
+        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.
