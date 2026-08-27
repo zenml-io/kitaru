@@ -274,6 +274,8 @@ class Session(DomainModel):
     origin: SessionOrigin
     status: SessionStatus = SessionStatus.IN_PROGRESS
     name: str | None = None
+    input_text_selector: str | None = None
+    output_text_selector: str | None = None
     inputs: Payload | None = None
     outputs: Payload | None = None
     error: str | None = None
@@ -353,12 +355,12 @@ class Session(DomainModel):
     def finish(
         self,
         status: SessionStatus,
-        outputs: Payload | None,
+        output_text_selector: str | None,
         error: str | None,
         ended_at: datetime | None,
     ) -> None:
-        """Apply a status transition together with its outputs, error, and end time."""
+        """Apply a status transition with its output selector, error, and end time."""
         self.status = status
-        self.outputs = outputs
+        self.output_text_selector = output_text_selector
         self.error = error
         self.ended_at = ended_at

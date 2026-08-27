@@ -387,9 +387,12 @@ class ExperimentService:
         membership = FilterCondition(
             field="cohort_version_id", op=FilterOp.EQ, value=cohort_version_id
         )
+        # Replay seeding reads each baseline's inputs, so the member
+        # sessions are loaded with payloads.
         return await paginate_all(
             lambda cursor: self._sessions.query(
-                SessionFilter(expression=membership, cursor=cursor, size=1000)
+                SessionFilter(expression=membership, cursor=cursor, size=1000),
+                include_payloads=True,
             )
         )
 

@@ -161,7 +161,7 @@ async def test_ingest_insert_assigns_ids_and_rollups(
     assert stored[1].parent_id == stored[0].id
     assert stored[1].cache_key is not None
 
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.cost == Decimal("1.50")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 10
@@ -305,7 +305,7 @@ async def test_ingest_replace_updates_rollup_delta(
         [_llm_node(0, cost=Decimal("4.00"), tokens=TokenUsage(input_tokens=30))],
         actor=ACTOR,
     )
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.cost == Decimal("4.00")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 30
@@ -331,7 +331,7 @@ async def test_ingest_replace_changing_node_type_updates_call_counts(
         ],
         actor=ACTOR,
     )
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.llm_call_count == 0
     assert session.tool_call_count == 0
 
@@ -344,9 +344,9 @@ async def test_ingest_retry_identical_batch_nets_zero_delta(
     """Net a zero rollup delta when an identical batch is retried."""
     batch = [_llm_node(0, cost=Decimal("2.00"), tokens=TokenUsage(input_tokens=5))]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    before = await session_repository.get(session_id)
+    before = await session_repository.get(session_id, include_payloads=True)
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    after = await session_repository.get(session_id)
+    after = await session_repository.get(session_id, include_payloads=True)
     assert after.cost == before.cost
     assert after.tokens == before.tokens
     assert after.llm_call_count == before.llm_call_count
@@ -622,21 +622,7 @@ async def test_ingest_offloads_over_threshold_payloads(
             attributes=attributes,
         )
     ]
-    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
-
-    # The service response carries the original values in memory.
-    assert stored[0].reasoning is not None
-    assert stored[0].reasoning.value == reasoning
-    assert stored[0].reasoning.blob_id is not None
-    assert stored[0].inputs is not None
-    assert stored[0].inputs.value == inputs
-    assert stored[0].inputs.blob_id is not None
-    assert stored[0].outputs is not None
-    assert stored[0].outputs.value == outputs
-    assert stored[0].outputs.blob_id is not None
-    assert stored[0].attributes is not None
-    assert stored[0].attributes.value == attributes
-    assert stored[0].attributes.blob_id is not None
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
 
     raw = (
         await node_repository.get_by_indexes(session_id, [0], include_payloads=True)

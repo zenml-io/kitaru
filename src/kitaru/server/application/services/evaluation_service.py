@@ -113,7 +113,9 @@ class EvaluationService:
         """
         # Lock the session so a concurrent delete cannot land between this
         # read and the merge insert, whose foreign key would otherwise fail.
-        session = await self._sessions.get(session_id, exclusive=True)
+        session = await self._sessions.get(
+            session_id, include_payloads=False, exclusive=True
+        )
         check_task_session_read(session_id, session.task_id, actor)
         session.check_evaluate()
         seen: set[str] = set()

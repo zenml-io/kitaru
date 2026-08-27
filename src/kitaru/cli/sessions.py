@@ -396,10 +396,13 @@ async def list_sessions(
     cohort: str | None = None,
     started_after: datetime | None = None,
     started_before: datetime | None = None,
+    include_payloads: bool = False,
 ) -> CommandResult:
     """List one bounded server page of sessions."""
     params = list_params("session", size=size, cursor=cursor, sort=sort, filter=filter)
     assert isinstance(params, SessionListParams)
+    if include_payloads:
+        params = params.model_copy(update={"include_payloads": True})
     conditions = []
     if params.filter is not None:
         conditions.append(params.filter)

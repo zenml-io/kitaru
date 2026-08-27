@@ -4846,6 +4846,36 @@
         "title": "Page[SecretResponse]",
         "type": "object"
       },
+      "Page_SessionDetailResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/SessionDetailResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[SessionDetailResponse]",
+        "type": "object"
+      },
       "Page_SessionNodeResponse_": {
         "properties": {
           "items": {
@@ -5962,6 +5992,18 @@
             "description": "Source system the session was imported from.",
             "title": "Imported From"
           },
+          "input_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session inputs.",
+            "title": "Input Text Selector"
+          },
           "inputs": {
             "description": "Session inputs.",
             "title": "Inputs"
@@ -5987,6 +6029,18 @@
           "origin": {
             "$ref": "#/components/schemas/SessionOrigin",
             "description": "How the session came to exist."
+          },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session outputs.",
+            "title": "Output Text Selector"
           },
           "outputs": {
             "description": "Session outputs.",
@@ -6023,6 +6077,289 @@
           "outputs"
         ],
         "title": "SessionCreateRequest",
+        "type": "object"
+      },
+      "SessionDetailResponse": {
+        "description": "Session detail response.",
+        "properties": {
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recording adapter version.",
+            "title": "Adapter Version"
+          },
+          "agent_id": {
+            "description": "Agent the session belongs to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version recorded for the session.",
+            "title": "Agent Version Id"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total cost.",
+            "title": "Cost"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the session ended.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error from a failed session.",
+            "title": "Error"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id from the source system.",
+            "title": "External Id"
+          },
+          "framework": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent framework used.",
+            "title": "Framework"
+          },
+          "id": {
+            "description": "Session id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
+          },
+          "input_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session inputs.",
+            "title": "Input Text Selector"
+          },
+          "inputs": {
+            "description": "Session inputs.",
+            "title": "Inputs"
+          },
+          "llm_call_count": {
+            "description": "Number of LLM call nodes.",
+            "title": "Llm Call Count",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session name.",
+            "title": "Name"
+          },
+          "number": {
+            "description": "Session number within the agent.",
+            "title": "Number",
+            "type": "integer"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SessionOrigin",
+            "description": "How the session came to exist."
+          },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session outputs.",
+            "title": "Output Text Selector"
+          },
+          "outputs": {
+            "description": "Session outputs.",
+            "title": "Outputs"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the session started.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Task the session was produced by.",
+            "title": "Task Id"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total token usage."
+          },
+          "tool_call_count": {
+            "description": "Number of tool call nodes.",
+            "title": "Tool Call Count",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "agent_id",
+          "number",
+          "origin",
+          "status",
+          "metadata",
+          "llm_call_count",
+          "tool_call_count",
+          "inputs",
+          "outputs"
+        ],
+        "title": "SessionDetailResponse",
+        "type": "object"
+      },
+      "SessionDetailWithEvaluationsResponse": {
+        "description": "Session detail with evaluations response.",
+        "properties": {
+          "evaluations": {
+            "description": "Every evaluation of the session, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationResponse"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionDetailResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "evaluations"
+        ],
+        "title": "SessionDetailWithEvaluationsResponse",
         "type": "object"
       },
       "SessionEvaluationsRequest": {
@@ -6809,10 +7146,6 @@
             "description": "Source system the session was imported from.",
             "title": "Imported From"
           },
-          "inputs": {
-            "description": "Session inputs.",
-            "title": "Inputs"
-          },
           "llm_call_count": {
             "description": "Number of LLM call nodes.",
             "title": "Llm Call Count",
@@ -6844,10 +7177,6 @@
           "origin": {
             "$ref": "#/components/schemas/SessionOrigin",
             "description": "How the session came to exist."
-          },
-          "outputs": {
-            "description": "Session outputs.",
-            "title": "Outputs"
           },
           "owner_id": {
             "description": "Id of the owning account.",
@@ -6916,8 +7245,6 @@
           "number",
           "origin",
           "status",
-          "inputs",
-          "outputs",
           "metadata",
           "llm_call_count",
           "tool_call_count"
@@ -7023,6 +7350,18 @@
             "description": "New session name.",
             "title": "Name"
           },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New output text selector.",
+            "title": "Output Text Selector"
+          },
           "outputs": {
             "description": "New session outputs.",
             "title": "Outputs"
@@ -7077,7 +7416,7 @@
             "type": "array"
           },
           "session": {
-            "$ref": "#/components/schemas/SessionResponse",
+            "$ref": "#/components/schemas/SessionDetailResponse",
             "description": "Session."
           }
         },
@@ -15024,7 +15363,7 @@
     },
     "/api/v1/sessions": {
       "get": {
-        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions.",
+        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
         "operationId": "list_sessions_api_v1_sessions_get",
         "parameters": [
           {
@@ -15098,6 +15437,18 @@
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
             }
+          },
+          {
+            "description": "Include inputs and outputs.",
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include inputs and outputs.",
+              "title": "Include Payloads",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -15105,7 +15456,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_SessionResponse_"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Page_SessionDetailResponse_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Page_SessionResponse_"
+                    }
+                  ],
+                  "title": "Response List Sessions Api V1 Sessions Get"
                 }
               }
             },
@@ -15242,7 +15601,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
+                  "$ref": "#/components/schemas/SessionDetailResponse"
                 }
               }
             },
@@ -15507,7 +15866,7 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with inputs, outputs, and attributes\n    populated.",
+        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
         "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {
@@ -16386,6 +16745,18 @@
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
             }
+          },
+          {
+            "description": "Include inputs and outputs.",
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include inputs and outputs.",
+              "title": "Include Payloads",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -16437,7 +16808,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+                  "$ref": "#/components/schemas/SessionDetailWithEvaluationsResponse"
                 }
               }
             },

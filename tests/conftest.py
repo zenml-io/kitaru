@@ -2451,19 +2451,43 @@ class FakeSessionRepository:
                 already registered.
 
         Returns:
-            Stored session with timestamps set.
+            Stored session with timestamps set, without payloads.
         """
         self._check_duplicate_external_id(session)
         now = datetime.now(UTC)
         stored = session.model_copy(update={"created": now, "updated": now})
         self._sessions[stored.id] = stored
-        return stored.model_copy()
+        return self._copy(stored, include_payloads=False)
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    @staticmethod
+    def _copy(session: Session, include_payloads: bool) -> Session:
+        """Copy a stored session, dropping payloads unless requested.
+
+        Args:
+            session: Stored session.
+            include_payloads: Whether to keep the inputs and outputs.
+
+        Returns:
+            Copied session.
+        """
+        if include_payloads:
+            return session.model_copy()
+        # Rebuild without the payload fields so they stay unset, like a load
+        # that excluded the payload columns.
+        data = dict(session)
+        del data["inputs"]
+        del data["outputs"]
+        return Session(**data)
+
+    async def get(
+        self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Ignored, the fake has no concurrent callers to lock
                 against.
 
@@ -2477,15 +2501,17 @@ class FakeSessionRepository:
         session = self._sessions.get(session_id)
         if session is None:
             raise SessionNotFound(session_id)
-        return session.model_copy()
+        return self._copy(session, include_payloads)
 
     async def get_by_task_id(
-        self, task_id: uuid.UUID, exclusive: bool = False
+        self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
     ) -> Session | None:
         """Load the session a task produced, if any.
 
         Args:
             task_id: Id of the producing task.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Ignored, the fake has no concurrent callers to lock
                 against.
 
@@ -2495,7 +2521,7 @@ class FakeSessionRepository:
         _ = exclusive
         for session in self._sessions.values():
             if session.task_id == task_id:
-                return session.model_copy()
+                return self._copy(session, include_payloads)
         return None
 
     def _session_ids_tagged(self, tag_name: str) -> set[uuid.UUID]:
@@ -2537,12 +2563,14 @@ class FakeSessionRepository:
         return set(self._cohort_versions._members.get(cohort_version_id, []))
 
     async def query(
-        self, session_filter: SessionFilter
+        self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Page of matching sessions and the next cursor.
@@ -2561,7 +2589,7 @@ class FakeSessionRepository:
                 if _evaluate_filter_expression(s, session_filter.expression, resolvers)
             ]
         page, next_cursor = _paginate_fake(sessions, session_filter)
-        return [s.model_copy() for s in page], next_cursor
+        return [self._copy(s, include_payloads) for s in page], next_cursor
 
     def _evaluate_tag_condition(
         self, session: Session, condition: FilterCondition
@@ -2614,18 +2642,20 @@ class FakeSessionRepository:
         return self._evaluations.has_evaluation(session.id) == expected
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID]
+        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
         Args:
             session_ids: Ids of the sessions to load.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Stored sessions keyed by id.
         """
         return {
-            session_id: self._sessions[session_id].model_copy()
+            session_id: self._copy(self._sessions[session_id], include_payloads)
             for session_id in session_ids
             if session_id in self._sessions
         }
@@ -2642,16 +2672,26 @@ class FakeSessionRepository:
                 already registered.
 
         Returns:
-            Stored session with the updated timestamp renewed.
+            Stored session with the updated timestamp renewed, without
+            payloads.
         """
         stored = self._sessions.get(session.id)
         if stored is None:
             raise SessionNotFound(session.id)
         self._check_duplicate_external_id(session)
         now = _renewed_timestamp(stored.updated)
-        updated = session.model_copy(update={"created": stored.created, "updated": now})
+        updated = session.model_copy(
+            update={
+                "created": stored.created,
+                "updated": now,
+                "inputs": stored.inputs,
+                "outputs": session.outputs
+                if "outputs" in session.model_fields_set
+                else stored.outputs,
+            }
+        )
         self._sessions[session.id] = updated
-        return updated.model_copy()
+        return self._copy(updated, include_payloads=False)
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.
@@ -2748,7 +2788,8 @@ async def create_session(
         value = values.get(field)
         if value is not None and not isinstance(value, Payload):
             values[field] = Payload.from_json(value)
-    return await repository.create(Session(**values))
+    stored = await repository.create(Session(**values))
+    return await repository.get(stored.id, include_payloads=True)
 
 
 def _paginate_fake_by_index(
@@ -2843,7 +2884,7 @@ class FakeSessionNodeRepository:
             nodes: Fully resolved nodes to store, in batch order.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         _ = session_id
         stored: list[SessionNode] = []
@@ -2856,7 +2897,16 @@ class FakeSessionNodeRepository:
             )
             row = node.model_copy(update={"created": created, "updated": updated})
             self._nodes[node.id] = row
-            stored.append(row.model_copy())
+            stored.append(
+                row.model_copy(
+                    update={
+                        "reasoning": None,
+                        "inputs": None,
+                        "outputs": None,
+                        "attributes": None,
+                    }
+                )
+            )
         return stored
 
     async def query(

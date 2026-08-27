@@ -45,6 +45,14 @@ PAYLOAD_COLUMNS = (
     SessionNodeORM.attributes,
 )
 
+# Tool lookups replay only the stored result, so every payload column
+# except outputs stays unread.
+TOOL_LOOKUP_DEFERRED_COLUMNS = (
+    SessionNodeORM.reasoning,
+    SessionNodeORM.inputs,
+    SessionNodeORM.attributes,
+)
+
 
 class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
     """Session node repository backed by the application database."""
@@ -67,18 +75,15 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         """
         if not indexes:
             return {}
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_id,
             SessionNodeORM.index.in_(indexes),
         )
-        if not include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
+        statement = statement.options(*(defer(column) for column in deferred))
         rows = (await self._session.scalars(statement)).all()
-        return {
-            row.index: row.to_domain(include_payloads=include_payloads) for row in rows
-        }
+        exclude = {column.key for column in deferred}
+        return {row.index: row.to_domain(exclude=exclude) for row in rows}
 
     async def upsert_batch(
         self, session_id: uuid.UUID, nodes: list[SessionNode]
@@ -97,7 +102,7 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
             SessionNotFound: No session has this id.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         if not nodes:
             return []
@@ -118,7 +123,8 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         await self._flush(
             {SESSION_NODE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(session_id)}
         )
-        return [row.to_domain(include_payloads=True) for row in stored_rows]
+        exclude = {column.key for column in PAYLOAD_COLUMNS}
+        return [row.to_domain(exclude=exclude) for row in stored_rows]
 
     async def query(
         self, session_node_filter: SessionNodeFilter
@@ -131,23 +137,19 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Page of matching nodes and the next cursor.
         """
+        deferred = () if session_node_filter.include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionNodeORM).where(
             SessionNodeORM.session_id == session_node_filter.session_id
         )
-        if not session_node_filter.include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
+        statement = statement.options(*(defer(column) for column in deferred))
         rows, next_cursor = await paginate_by_index(
             self._session,
             statement,
             session_node_filter,
             index_column=SessionNodeORM.index,
         )
-        return [
-            row.to_domain(include_payloads=session_node_filter.include_payloads)
-            for row in rows
-        ], next_cursor
+        exclude = {column.key for column in deferred}
+        return [row.to_domain(exclude=exclude) for row in rows], next_cursor
 
     async def list_all(
         self, session_id: uuid.UUID, include_payloads: bool
@@ -162,17 +164,16 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Every node of the session.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = (
             select(SessionNodeORM)
             .where(SessionNodeORM.session_id == session_id)
             .order_by(SessionNodeORM.index)
+            .options(*(defer(column) for column in deferred))
         )
-        if not include_payloads:
-            statement = statement.options(
-                *(defer(column) for column in PAYLOAD_COLUMNS)
-            )
         rows = (await self._session.scalars(statement)).all()
-        return [row.to_domain(include_payloads=include_payloads) for row in rows]
+        exclude = {column.key for column in deferred}
+        return [row.to_domain(exclude=exclude) for row in rows]
 
     async def get_indexes_by_ids(
         self, session_id: uuid.UUID, node_ids: Collection[uuid.UUID]
@@ -206,9 +207,16 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
         Returns:
             Highest-id matching node, or ``None`` on a miss.
         """
-        statement = statement.order_by(SessionNodeORM.id.desc()).limit(1)
+        statement = (
+            statement.options(
+                *(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS)
+            )
+            .order_by(SessionNodeORM.id.desc())
+            .limit(1)
+        )
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain(include_payloads=True) if row is not None else None
+        exclude = {column.key for column in TOOL_LOOKUP_DEFERRED_COLUMNS}
+        return row.to_domain(exclude=exclude) if row is not None else None
 
     async def find_latest_by_cache_key_in_session(
         self, session_id: uuid.UUID, cache_key: str
@@ -253,12 +261,14 @@ class SQLSessionNodeRepository(BaseSQLRepository[SessionNodeORM]):
                 SessionNodeORM.cache_key == cache_key,
                 SessionNodeORM.status.in_(FINISHED_NODE_STATUSES),
             )
+            .options(*(defer(column) for column in TOOL_LOOKUP_DEFERRED_COLUMNS))
             .order_by(SessionNodeORM.index)
             .offset(occurrence)
             .limit(1)
         )
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain(include_payloads=True) if row is not None else None
+        exclude = {column.key for column in TOOL_LOOKUP_DEFERRED_COLUMNS}
+        return row.to_domain(exclude=exclude) if row is not None else None
 
     async def find_latest_by_cache_key_in_agent(
         self, agent_id: uuid.UUID, cache_key: str

@@ -140,7 +140,10 @@ class SessionService:
             task.check_attempt(actor.principal.attempt)
             if (
                 isinstance(task, AgentTask)
-                and await self._repository.get_by_task_id(task.id) is not None
+                and await self._repository.get_by_task_id(
+                    task.id, include_payloads=False
+                )
+                is not None
             ):
                 raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
@@ -156,6 +159,8 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
+            input_text_selector=command.input_text_selector,
+            output_text_selector=command.output_text_selector,
             inputs=Payload.from_json(command.inputs)
             if command.inputs is not None
             else None,
@@ -176,9 +181,6 @@ class SessionService:
             session.owner_id,
         )
         stored = await self._repository.create(session)
-        stored = stored.model_copy(
-            update={"inputs": session.inputs, "outputs": session.outputs}
-        )
         if isinstance(task, AgentTask):
             replay = await self._replays.get_by_job_id(task.job_id)
             if replay is not None:
@@ -262,7 +264,7 @@ class SessionService:
         Returns:
             Stored session.
         """
-        session = await self._repository.get(session_id)
+        session = await self._repository.get(session_id, include_payloads=True)
         check_task_session_read(session_id, session.task_id, actor)
         await self._payload_store.resolve(
             [p for p in (session.inputs, session.outputs) if p is not None]
@@ -291,39 +293,49 @@ class SessionService:
         Returns:
             Baseline session the replay ran against.
         """
-        session = await self._repository.get(session_id)
+        session = await self._repository.get(session_id, include_payloads=False)
         check_task_session_read(session_id, session.task_id, actor)
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
-        baseline = await self._repository.get(replay.baseline_session_id)
+        baseline = await self._repository.get(
+            replay.baseline_session_id, include_payloads=True
+        )
         await self._payload_store.resolve(
             [p for p in (baseline.inputs, baseline.outputs) if p is not None]
         )
         return baseline
 
     async def list_sessions(
-        self, session_filter: SessionFilter, actor: AuthContext
+        self,
+        session_filter: SessionFilter,
+        include_payloads: bool,
+        actor: AuthContext,
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read and resolve the inputs and
+                outputs.
             actor: Caller context.
 
         Returns:
             Page of matching sessions and the next cursor.
         """
         _ = actor
-        sessions, next_cursor = await self._repository.query(session_filter)
-        await self._payload_store.resolve(
-            [
-                p
-                for session in sessions
-                for p in (session.inputs, session.outputs)
-                if p is not None
-            ]
+        sessions, next_cursor = await self._repository.query(
+            session_filter, include_payloads=include_payloads
         )
+        if include_payloads:
+            await self._payload_store.resolve(
+                [
+                    p
+                    for session in sessions
+                    for p in (session.inputs, session.outputs)
+                    if p is not None
+                ]
+            )
         return sessions, next_cursor
 
     async def update_session(
@@ -331,12 +343,12 @@ class SessionService:
     ) -> Session:
         """Partially update a session.
 
-        ``outputs``, ``error``, and ``ended_at`` only ever change together
-        with a status transition, applied through ``Session.finish``. When
-        the command sets none of ``status``, ``outputs``, ``error``, or
-        ``ended_at``, the session's current status carries through as a
-        no-op transition, which leaves those fields untouched. A task
-        principal writes only a session it owns.
+        ``outputs``, ``output_text_selector``, ``error``, and ``ended_at``
+        only ever change together with a status transition, applied through
+        ``Session.finish``. When the command sets none of them and no
+        ``status``, the session's current status carries through as a no-op
+        transition, which leaves those fields untouched. A task principal
+        writes only a session it owns.
 
         Args:
             session_id: Id of the session.
@@ -353,30 +365,37 @@ class SessionService:
         Returns:
             Updated session.
         """
-        session = await self._repository.get(session_id, exclusive=True)
+        session = await self._repository.get(
+            session_id, include_payloads=False, exclusive=True
+        )
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_update()
         fields = command.model_fields_set
-        if {"status", "outputs", "error", "ended_at"} & fields:
+        if {"status", "outputs", "output_text_selector", "error", "ended_at"} & fields:
             target_status = session.status
             if "status" in fields:
                 if command.status is None:
                     raise SessionStatusCannotBeCleared(session_id)
                 target_status = command.status
-            new_outputs = (
-                Payload.from_json(command.outputs)
-                if command.outputs is not None
-                else None
-            )
             session.finish(
                 status=target_status,
-                outputs=new_outputs if "outputs" in fields else session.outputs,
+                output_text_selector=command.output_text_selector
+                if "output_text_selector" in fields
+                else session.output_text_selector,
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
-            if "outputs" in fields and session.outputs is not None:
-                await self._payload_store.offload([session.outputs], session.owner_id)
+            if "outputs" in fields:
+                session.outputs = (
+                    Payload.from_json(command.outputs)
+                    if command.outputs is not None
+                    else None
+                )
+                if session.outputs is not None:
+                    await self._payload_store.offload(
+                        [session.outputs], session.owner_id
+                    )
             if (
                 self._analytics is not None
                 and session.status != SessionStatus.IN_PROGRESS
@@ -392,16 +411,7 @@ class SessionService:
             session.update_metadata(
                 command.metadata if command.metadata is not None else {}
             )
-        stored = await self._repository.update(session)
-        # The untouched inputs ref, and outputs when this update did not
-        # carry a new value, still need a round trip to the blob store.
-        to_resolve = [session.inputs]
-        if "outputs" not in fields:
-            to_resolve.append(session.outputs)
-        await self._payload_store.resolve([p for p in to_resolve if p is not None])
-        return stored.model_copy(
-            update={"inputs": session.inputs, "outputs": session.outputs}
-        )
+        return await self._repository.update(session)
 
     async def delete_session(self, session_id: uuid.UUID, actor: AuthContext) -> None:
         """Delete a session.

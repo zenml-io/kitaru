@@ -21,6 +21,7 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionEvaluationsRequest,
     SessionListParams,
     SessionResponse,
@@ -74,7 +75,7 @@ class SessionsResource:
         )
         return SessionResponse.model_validate(response.json())
 
-    async def get(self, session_id: uuid.UUID) -> SessionResponse:
+    async def get(self, session_id: uuid.UUID) -> SessionDetailResponse:
         """Get a session by id.
 
         Args:
@@ -88,7 +89,7 @@ class SessionsResource:
             Stored session.
         """
         response = await self._client.request("GET", f"/api/v1/sessions/{session_id}")
-        return SessionResponse.model_validate(response.json())
+        return SessionDetailResponse.model_validate(response.json())
 
     async def get_with_nodes(self, session_id: uuid.UUID) -> SessionWithNodesResponse:
         """Get a session together with every one of its nodes.
@@ -165,7 +166,7 @@ class SessionsResource:
     async def list(
         self,
         params: SessionListParams | None = None,
-    ) -> Page[SessionResponse]:
+    ) -> Page[SessionResponse] | Page[SessionDetailResponse]:
         """List sessions.
 
         Args:
@@ -175,7 +176,7 @@ class SessionsResource:
             APIError: The request failed.
 
         Returns:
-            Page of sessions.
+            Page of sessions, with payloads when include_payloads is set.
         """
         params = params or SessionListParams()
         response = await self._client.request(
@@ -183,6 +184,8 @@ class SessionsResource:
             "/api/v1/sessions",
             params=params.model_dump(mode="json", exclude_unset=True),
         )
+        if params.include_payloads:
+            return Page[SessionDetailResponse].model_validate(response.json())
         return Page[SessionResponse].model_validate(response.json())
 
     async def iter(

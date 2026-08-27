@@ -55,13 +55,23 @@ class BaseSQLRepository(Generic[RowT]):
         """
         raise NotImplementedError
 
-    async def _get_row(self, entity_id: uuid.UUID, exclusive: bool = False) -> RowT:
+    async def _get_row(
+        self,
+        entity_id: uuid.UUID,
+        exclusive: bool = False,
+        deferred_columns: Sequence[InstrumentedAttribute[Any]] = (),
+    ) -> RowT:
         """Load a row by id.
+
+        A deferred column is left out of the select and loads on first read.
+        A row already present in the identity map comes back as loaded, so
+        deferral only takes effect on the first load.
 
         Args:
             entity_id: Id of the row.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
+            deferred_columns: Columns to leave out of the select.
 
         Raises:
             NotFoundError: No row has this id.
@@ -70,7 +80,10 @@ class BaseSQLRepository(Generic[RowT]):
             Stored row.
         """
         row = await self._session.get(
-            self.orm_class, entity_id, with_for_update=exclusive
+            self.orm_class,
+            entity_id,
+            with_for_update=exclusive,
+            options=[defer(column) for column in deferred_columns],
         )
         if row is None:
             raise self._not_found(entity_id)

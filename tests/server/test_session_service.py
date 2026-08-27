@@ -362,6 +362,7 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
         SessionFilter(
             expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
         ),
+        include_payloads=False,
         actor=ACTOR,
     )
     assert next_cursor is None
@@ -404,10 +405,11 @@ async def test_update_session_omitted_fields_unchanged(
     updated = await service.update_session(
         created.id, SessionUpdate(name="renamed"), actor=ACTOR
     )
-    assert updated.outputs is not None
-    assert updated.outputs.value == {"answer": 42}
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.IN_PROGRESS
+    reloaded = await service.get_session(created.id, actor=ACTOR)
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == {"answer": 42}
 
 
 async def test_update_session_metadata_replaced_whole(
@@ -794,7 +796,7 @@ async def test_create_session_rejects_a_stale_task_attempt(
             SessionCreate(origin=SessionOrigin.RECORDED),
             actor=stale_actor,
         )
-    assert await repository.get_by_task_id(task.id) is None
+    assert await repository.get_by_task_id(task.id, include_payloads=True) is None
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id, attempt=task.attempt),
@@ -817,7 +819,7 @@ async def test_create_session_links_the_session_to_its_agent_task(
         actor=_task_principal(task.id),
     )
     assert session.task_id == task.id
-    linked = await repository.get_by_task_id(task.id)
+    linked = await repository.get_by_task_id(task.id, include_payloads=True)
     assert linked is not None
     assert linked.id == session.id
 
@@ -1240,7 +1242,7 @@ async def test_create_session_offloads_over_threshold_inputs_and_outputs(
     task_repository: FakeTaskRepository,
     agent_version_repository: FakeAgentVersionRepository,
 ) -> None:
-    """Offload inputs and outputs above the threshold, keeping the response inline."""
+    """Offload inputs and outputs above the threshold."""
     service, blob_repository, _ = _service_with_threshold(
         repository, task_repository, agent_version_repository, threshold_bytes=10
     )
@@ -1255,14 +1257,15 @@ async def test_create_session_offloads_over_threshold_inputs_and_outputs(
         ),
         actor=ACTOR,
     )
-    assert session.inputs is not None
-    assert session.inputs.value == inputs
-    assert session.inputs.blob_id is not None
-    assert session.outputs is not None
-    assert session.outputs.value == outputs
-    assert session.outputs.blob_id is not None
+    reloaded = await service.get_session(session.id, actor=ACTOR)
+    assert reloaded.inputs is not None
+    assert reloaded.inputs.value == inputs
+    assert reloaded.inputs.blob_id is not None
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == outputs
+    assert reloaded.outputs.blob_id is not None
 
-    inputs_blob = await blob_repository.get(session.inputs.blob_id)
+    inputs_blob = await blob_repository.get(reloaded.inputs.blob_id)
     assert inputs_blob.owner_id == ACTOR.account.id
     assert inputs_blob.media_type == PayloadMediaType.JSON
     assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
@@ -1286,7 +1289,7 @@ async def test_create_session_under_threshold_stays_inline(
         ),
         actor=ACTOR,
     )
-    raw = await repository.get(session.id)
+    raw = await repository.get(session.id, include_payloads=True)
     assert raw.inputs is not None
     assert raw.inputs.value == {"a": 1}
     assert raw.inputs.blob_id is None
@@ -1341,11 +1344,9 @@ async def test_update_session_offloads_new_outputs_above_threshold(
         SessionUpdate(status=SessionStatus.COMPLETED, outputs=outputs),
         actor=ACTOR,
     )
-    assert updated.outputs is not None
-    assert updated.outputs.value == outputs
-    assert updated.outputs.blob_id is not None
+    assert updated.status == SessionStatus.COMPLETED
 
-    raw = await repository.get(created.id)
+    raw = await repository.get(created.id, include_payloads=True)
     assert raw.outputs is not None
     assert raw.outputs.blob_id is not None
 
@@ -1370,8 +1371,7 @@ async def test_update_session_without_touching_outputs_preserves_offloaded_outpu
     updated = await service.update_session(
         created.id, SessionUpdate(name="renamed"), actor=ACTOR
     )
-    assert updated.outputs is not None
-    assert updated.outputs.value == outputs
+    assert updated.name == "renamed"
 
     reloaded = await service.get_session(created.id, actor=ACTOR)
     assert reloaded.outputs is not None

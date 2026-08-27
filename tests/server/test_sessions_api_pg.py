@@ -64,7 +64,13 @@ async def test_sessions_persist_across_requests(
 
     response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
-    assert response.json() == created
+    assert response.json() == {
+        **created,
+        "input_text_selector": None,
+        "output_text_selector": None,
+        "inputs": {"prompt": "hi"},
+        "outputs": None,
+    }
 
     response = await client.get("/api/v1/sessions")
     assert response.status_code == 200
@@ -285,13 +291,22 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
                 json=_session_body(agent["id"], inputs=large_inputs, outputs=None),
             )
         ).json()
-        assert created["inputs"] == large_inputs
-
         detail = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
-        assert detail == created
+        assert detail == {
+            **created,
+            "input_text_selector": None,
+            "output_text_selector": None,
+            "inputs": large_inputs,
+            "outputs": None,
+        }
 
         listed = (await client.get("/api/v1/sessions")).json()["items"]
         assert listed[0] == created
+
+        listed_with_payloads = (
+            await client.get("/api/v1/sessions", params={"include_payloads": "true"})
+        ).json()["items"]
+        assert listed_with_payloads[0]["inputs"] == large_inputs
 
         large_outputs = {"result": "y" * 1000}
         nodes_response = await client.post(
@@ -313,7 +328,7 @@ async def test_large_payload_offload_round_trips_through_the_api() -> None:
         )
         assert nodes_response.status_code == 200
         ingested = nodes_response.json()
-        assert ingested[0]["outputs"] == large_outputs
+        assert ingested[0]["outputs"] is None
 
         list_response = await client.get(
             f"/api/v1/sessions/{created['id']}/nodes",

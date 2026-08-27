@@ -36,11 +36,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - MCP tools that create a resource take an optional `idempotency_key` field, so a retried tool call whose response was lost returns the original result instead of acting twice.
 - CLI commands that create a single resource take `--idempotency-key`, so a retried invocation with the same key returns the original result instead of acting twice.
 - Blob content storage is now pluggable: `KITARU_SERVER_BLOB_STORAGE__BACKEND=s3` stores blob content in an S3 bucket instead of the database, configured through `KITARU_SERVER_BLOB_STORAGE__S3__*` variables.
-- Session and node payload columns above `KITARU_SERVER_PAYLOAD_OFFLOAD_THRESHOLD_BYTES` (default 20KB) are now offloaded to blob storage at ingestion, deduplicated by content hash. API responses stay inline and byte-for-byte unchanged, the server hydrates offloaded payloads back on every read.
+- Session and node payload columns above `KITARU_SERVER_PAYLOAD_OFFLOAD_THRESHOLD_BYTES` (default 20KB) are now offloaded to blob storage at ingestion, deduplicated by content hash. Payloads remain inline JSON in the API responses that carry them, the server hydrates offloaded payloads back on read.
+
+- Sessions carry optional `input_text_selector` and `output_text_selector` RFC 6901 JSON Pointers selecting display text from their payloads, mirroring the node selectors. Set them on create, and change the output selector together with a status transition on update.
 
 ### Changed
 
 - Updated the bundled frontend to `kitaru-ui-v0.2.3`.
+- Session list, create, and update responses no longer carry `inputs` and `outputs`. `GET /api/v1/sessions` includes them when `include_payloads` is set. `GET /api/v1/sessions/{session_id}`, `GET /api/v1/sessions/{session_id}/full`, and `GET /api/v1/ui/sessions/{session_id}` return the new `SessionDetailResponse`, which still carries them. The Python and TypeScript SDKs type `sessions.get` and `sessions.list` accordingly.
+- `POST /api/v1/sessions/{session_id}/nodes` no longer echoes the ingested payloads: `reasoning`, `inputs`, `outputs`, and `attributes` are null in its response, matching a node list without `include_payloads`.
 - `POST /api/v1/evaluations` requires every input session to belong to the same agent.
 - Every worker start now registers a new worker, worker names are labels and no longer need to be unique. Worker listings leave stale workers out unless `include_stale` is set. `kitaru worker get` takes a worker id, the name lookup it also accepted is gone.
 - Server analytics events now carry the reporting client in `client_version`, as the client name and the version it reported. Each client versions on its own series, so a bare version says nothing without the client that sent it.

@@ -3609,6 +3609,13 @@ async def session_import(
                 False,
                 "Only sessions started before this ISO 8601 timestamp.",
             ),
+            ParameterSpec(
+                "--include-payloads",
+                "boolean",
+                "option",
+                False,
+                "Include session inputs and outputs.",
+            ),
         ),
         errors=_COLLECTION_READ_ERRORS,
     ),
@@ -3627,6 +3634,7 @@ async def session_list(
     cohort: str | None = None,
     started_after: datetime | None = None,
     started_before: datetime | None = None,
+    include_payloads: bool = False,
 ) -> CommandResult:
     """List one server page of sessions."""
     registration.list_params(
@@ -3647,6 +3655,7 @@ async def session_list(
             cohort=cohort,
             started_after=started_after,
             started_before=started_before,
+            include_payloads=include_payloads,
         )
 
 

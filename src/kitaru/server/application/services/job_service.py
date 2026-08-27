@@ -372,7 +372,9 @@ class JobService:
                 f"Evaluation request holds {pairs} pairs, the cap is "
                 f"{self._policy.evaluation_pair_limit}"
             )
-        stored = await self._sessions.get_many(command.input_session_ids)
+        stored = await self._sessions.get_many(
+            command.input_session_ids, include_payloads=False
+        )
         for session_id in command.input_session_ids:
             session = stored.get(session_id)
             if session is None:

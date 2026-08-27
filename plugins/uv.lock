@@ -958,6 +958,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "langfuse", marker = "extra == 'examples'", specifier = ">=4.14,<5" },
     { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.0,<3" },
+    { name = "obstore", marker = "extra == 's3'", specifier = ">=0.11.1" },
     { name = "opentelemetry-exporter-otlp-proto-http", marker = "extra == 'otel'", specifier = ">=1.44" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "extra == 'otel'", specifier = ">=0.65b0" },
     { name = "opentelemetry-instrumentation-httpx", marker = "extra == 'otel'", specifier = ">=0.65b0" },
@@ -978,7 +979,7 @@ requires-dist = [
     { name = "uuid-utils", marker = "extra == 'server'", specifier = ">=0.10" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.51" },
 ]
-provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel"]
+provides-extras = ["mcp", "cli", "examples", "server", "worker", "otel", "s3"]
 
 [package.metadata.requires-dev]
 dev = [

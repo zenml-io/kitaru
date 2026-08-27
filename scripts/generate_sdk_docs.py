@@ -142,6 +142,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "SessionEvaluationsRequest",
                 "SessionListParams",
                 "SessionResponse",
+                "SessionDetailResponse",
                 "SessionOrigin",
                 "SessionStatus",
                 "TokenUsage",

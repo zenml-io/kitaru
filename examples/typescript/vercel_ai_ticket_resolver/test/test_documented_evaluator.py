@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse
 from kitaru.api_models.v1.session_node import (
     NodeStatus,
     NodeType,
@@ -100,7 +100,7 @@ def _session(
         tool_name=ACTION_TO_TOOL[action],
         outputs=terminal_output if node_outputs is None else node_outputs,
     )
-    session = SessionResponse.model_construct(inputs=inputs, outputs=outputs)
+    session = SessionDetailResponse.model_construct(inputs=inputs, outputs=outputs)
     return SessionView(session=session, nodes=[node, *(extra_nodes or [])])
 
 

@@ -70,7 +70,9 @@ async def record_task_evaluations(
     # check and the insert. A deleted session cascade-removes its evaluation
     # rows, so a vanished session leaves nothing to record.
     try:
-        await session_repository.get(task.input_session_id, exclusive=True)
+        await session_repository.get(
+            task.input_session_id, include_payloads=False, exclusive=True
+        )
     except NotFoundError:
         return
     # The evaluator can be deleted while its task runs, cascading its version

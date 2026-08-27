@@ -491,7 +491,7 @@ async def test_sweep_requeue_unlinks_the_result_session(
 
     await _sweep_stale(services)
 
-    reloaded_session = await services.sessions.get(session.id)
+    reloaded_session = await services.sessions.get(session.id, include_payloads=True)
     assert reloaded_session.task_id is None
 
 
@@ -532,7 +532,7 @@ async def test_sweep_requeue_clears_the_replays_result_session() -> None:
 
     await _sweep_stale(services)
 
-    reloaded_session = await services.sessions.get(session.id)
+    reloaded_session = await services.sessions.get(session.id, include_payloads=True)
     assert reloaded_session.task_id is None
     reloaded_replay = await services.replays.get(replay.id)
     assert reloaded_replay.result_session_id is None

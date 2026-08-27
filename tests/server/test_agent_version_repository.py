@@ -527,5 +527,5 @@ async def test_delete_nulls_session_agent_version(setup: Setup) -> None:
 
     await repository.delete(created.id)
 
-    reloaded = await sessions.get(session.id)
+    reloaded = await sessions.get(session.id, include_payloads=True)
     assert reloaded.agent_version_id is None

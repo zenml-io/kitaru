@@ -44,7 +44,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     split_payload,
     unique_constraint_name,
 )
-from kitaru.server.domain.payload import PayloadMediaType
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.session import Session
 
 SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
@@ -130,6 +130,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
+    input_text_selector: Mapped[str | None] = mapped_column(Text)
+    output_text_selector: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
     inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
@@ -162,23 +164,27 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         """
         row = cls(id=session.id)
         row.apply_domain(session)
+        row.inputs, row.inputs_blob_id = split_payload(session.inputs)
         return row
 
     def apply_domain(self, session: Session) -> None:
-        """Copy every mutable field of a domain session onto this row.
+        """Copy the mutable fields of a domain session onto this row.
 
-        A payload with a blob ref writes the ref column and leaves the
-        inline column null, an inline-only payload writes the inline column
-        and leaves the ref column null, and ``None`` writes null to both. The
-        token usage is flattened into the token columns, all null when the
-        session carries no token usage.
+        The inputs are create-only and never written here. The outputs are
+        written only when set on the session, so a session loaded without
+        payloads writes none back. A payload with a blob ref
+        writes the ref column and leaves the inline column null, an
+        inline-only payload writes the inline column and leaves the ref
+        column null, and ``None`` writes null to both. The token usage is
+        flattened into the token columns, all null when the session carries
+        no token usage.
 
         Args:
             session: Session carrying the desired field values.
         """
         tokens = session.tokens
-        inputs, inputs_blob_id = split_payload(session.inputs)
-        outputs, outputs_blob_id = split_payload(session.outputs)
+        if "outputs" in session.model_fields_set:
+            self.outputs, self.outputs_blob_id = split_payload(session.outputs)
         self.owner_id = session.owner_id
         self.agent_id = session.agent_id
         self.number = session.number
@@ -187,10 +193,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.origin = session.origin.value
         self.status = session.status.value
         self.name = session.name
-        self.inputs = inputs
-        self.inputs_blob_id = inputs_blob_id
-        self.outputs = outputs
-        self.outputs_blob_id = outputs_blob_id
+        self.input_text_selector = session.input_text_selector
+        self.output_text_selector = session.output_text_selector
         self.error = session.error
         self.started_at = session.started_at
         self.ended_at = session.ended_at
@@ -209,11 +213,16 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         self.llm_call_count = session.llm_call_count
         self.tool_call_count = session.tool_call_count
 
-    def to_domain(self) -> Session:
+    def to_domain(self, exclude: set[str]) -> Session:
         """Build a domain session from this row.
 
         The token columns collapse back to ``None`` only when every one of
         them is null, matching a session that has never rolled up a node.
+
+        Args:
+            exclude: Keys of payload columns to leave unread and unset on
+                the session, so a column the load deferred never fires a
+                lazy load.
 
         Returns:
             Session with timestamps set.
@@ -237,6 +246,15 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             if has_tokens
             else None
         )
+        payloads: dict[str, Payload | None] = {}
+        if "inputs" not in exclude:
+            payloads["inputs"] = payload_from_columns(
+                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
+            )
+        if "outputs" not in exclude:
+            payloads["outputs"] = payload_from_columns(
+                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
+            )
         return Session(
             id=self.id,
             owner_id=self.owner_id,
@@ -247,12 +265,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,
-            inputs=payload_from_columns(
-                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
-            ),
-            outputs=payload_from_columns(
-                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
-            ),
+            input_text_selector=self.input_text_selector,
+            output_text_selector=self.output_text_selector,
+            **payloads,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

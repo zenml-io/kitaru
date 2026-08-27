@@ -19,7 +19,7 @@ from pydantic import Field
 
 from kitaru.api_models.v1.base import FiniteFloat, RequestModel, ResponseModel
 from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResponse
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 
 
 class EvaluationValue(ResponseModel):
@@ -90,6 +90,15 @@ class SessionWithEvaluationsResponse(ResponseModel):
     """Session with evaluations response."""
 
     session: SessionResponse = Field(description="Session.")
+    evaluations: list[EvaluationResponse] = Field(
+        description="Every evaluation of the session, newest first."
+    )
+
+
+class SessionDetailWithEvaluationsResponse(ResponseModel):
+    """Session detail with evaluations response."""
+
+    session: SessionDetailResponse = Field(description="Session.")
     evaluations: list[EvaluationResponse] = Field(
         description="Every evaluation of the session, newest first."
     )

@@ -33,6 +33,7 @@ from conftest import (
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionListParams,
     SessionOrigin,
     SessionResponse,
@@ -148,7 +149,17 @@ async def test_get(api_client: KitaruAPIClient) -> None:
         )
     )
     loaded = await api_client.sessions.get(created.id)
-    assert loaded == created
+    assert (
+        loaded.model_dump(
+            exclude={
+                "inputs",
+                "outputs",
+                "input_text_selector",
+                "output_text_selector",
+            }
+        )
+        == created.model_dump()
+    )
 
 
 async def test_get_not_found(api_client: KitaruAPIClient) -> None:
@@ -185,6 +196,27 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
         )
     ]
     assert len(collected) == 3
+
+
+async def test_list_include_payloads(api_client: KitaruAPIClient) -> None:
+    """List sessions with their payloads through the SDK."""
+    agent_id = uuid.uuid4()
+    await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            inputs={"q": "hi"},
+            outputs=None,
+            metadata={},
+        )
+    )
+    agent_filter = FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+    page = await api_client.sessions.list(
+        SessionListParams(filter=agent_filter, include_payloads=True)
+    )
+    assert isinstance(page.items[0], SessionDetailResponse)
+    assert page.items[0].inputs == {"q": "hi"}
+    assert page.items[0].outputs is None
 
 
 async def test_list_with_filter_expression(api_client: KitaruAPIClient) -> None:
@@ -240,7 +272,8 @@ async def test_update(api_client: KitaruAPIClient) -> None:
         SessionUpdateRequest(status=SessionStatus.COMPLETED, outputs={"a": 1}),
     )
     assert updated.status == SessionStatus.COMPLETED
-    assert updated.outputs == {"a": 1}
+    fetched = await api_client.sessions.get(created.id)
+    assert fetched.outputs == {"a": 1}
 
 
 async def test_update_status_conflict(api_client: KitaruAPIClient) -> None:

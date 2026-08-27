@@ -285,7 +285,13 @@ async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
     response = await client.get(f"/api/v1/ui/sessions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["session"] == created
+    assert body["session"] == {
+        **created,
+        "input_text_selector": None,
+        "output_text_selector": None,
+        "inputs": {"prompt": "hi"},
+        "outputs": None,
+    }
     assert {evaluation["name"] for evaluation in body["evaluations"]} == {
         "accuracy",
         "verdict",

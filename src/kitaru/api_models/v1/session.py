@@ -75,6 +75,18 @@ class SessionCreateRequest(RequestModel):
         default=None, description="Initial session status."
     )
     name: str | None = Field(default=None, description="Session name.")
+    input_text_selector: str | None = Field(
+        default=None,
+        description=(
+            "RFC 6901 JSON Pointer selecting display text from session inputs."
+        ),
+    )
+    output_text_selector: str | None = Field(
+        default=None,
+        description=(
+            "RFC 6901 JSON Pointer selecting display text from session outputs."
+        ),
+    )
     inputs: Any = Field(description="Session inputs.")
     outputs: Any = Field(description="Session outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
@@ -106,6 +118,9 @@ class SessionUpdateRequest(RequestModel):
         default=None, description="New session status."
     )
     outputs: Any = Field(default=None, description="New session outputs.")
+    output_text_selector: str | None = Field(
+        default=None, description="New output text selector."
+    )
     error: str | None = Field(default=None, description="New error.")
     ended_at: AwareDatetime | None = Field(default=None, description="New end time.")
     name: str | None = Field(default=None, description="New session name.")
@@ -125,6 +140,11 @@ class SessionEvaluationsRequest(RequestModel):
 class SessionListParams(FilterableListParams):
     """Session list params."""
 
+    include_payloads: bool = Field(
+        default=False,
+        description="Include inputs and outputs.",
+    )
+
 
 class SessionResponse(OwnedResponseModel):
     """Session response."""
@@ -141,8 +161,6 @@ class SessionResponse(OwnedResponseModel):
     origin: SessionOrigin = Field(description="How the session came to exist.")
     status: SessionStatus = Field(description="Session status.")
     name: str | None = Field(default=None, description="Session name.")
-    inputs: Any = Field(description="Session inputs.")
-    outputs: Any = Field(description="Session outputs.")
     error: str | None = Field(default=None, description="Error from a failed session.")
     started_at: datetime | None = Field(
         default=None, description="Time the session started."
@@ -165,3 +183,22 @@ class SessionResponse(OwnedResponseModel):
     tokens: TokenUsage | None = Field(default=None, description="Total token usage.")
     llm_call_count: int = Field(description="Number of LLM call nodes.")
     tool_call_count: int = Field(description="Number of tool call nodes.")
+
+
+class SessionDetailResponse(SessionResponse):
+    """Session detail response."""
+
+    input_text_selector: str | None = Field(
+        default=None,
+        description=(
+            "RFC 6901 JSON Pointer selecting display text from session inputs."
+        ),
+    )
+    output_text_selector: str | None = Field(
+        default=None,
+        description=(
+            "RFC 6901 JSON Pointer selecting display text from session outputs."
+        ),
+    )
+    inputs: Any = Field(description="Session inputs.")
+    outputs: Any = Field(description="Session outputs.")

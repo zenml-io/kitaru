@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import ColumnElement, CursorResult, func, select, update
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+from sqlalchemy.orm import defer
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.tag import TagResourceType
@@ -114,6 +115,11 @@ def _compile_has_evaluation_condition(
     )
     return evaluation_exists.exists() if expected else ~evaluation_exists.exists()
 
+
+PAYLOAD_COLUMNS = (
+    SessionORM.inputs,
+    SessionORM.outputs,
+)
 
 SESSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": SessionORM.id,
@@ -219,7 +225,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 version id.
 
         Returns:
-            Stored session with timestamps set.
+            Stored session with timestamps set, without payloads.
         """
         row = SessionORM.from_domain(session)
         constraints: dict[str, Callable[[], DomainError]] = {
@@ -233,13 +239,17 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 AgentVersionNotFound(agent_version_id)
             )
         await self._add(row, constraints)
-        return row.to_domain()
+        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
 
-    async def get(self, session_id: uuid.UUID, exclusive: bool = False) -> Session:
+    async def get(
+        self, session_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
+    ) -> Session:
         """Load a session by id.
 
         Args:
             session_id: Id of the session.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Whether to lock the row for the duration of the
                 transaction.
 
@@ -249,38 +259,49 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
         Returns:
             Stored session.
         """
-        row = await self._get_row(session_id, exclusive=exclusive)
-        return row.to_domain()
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
+        row = await self._get_row(
+            session_id, exclusive=exclusive, deferred_columns=deferred
+        )
+        return row.to_domain(exclude={column.key for column in deferred})
 
     async def get_by_task_id(
-        self, task_id: uuid.UUID, exclusive: bool = False
+        self, task_id: uuid.UUID, include_payloads: bool, exclusive: bool = False
     ) -> Session | None:
         """Load the session a task produced, if any.
 
         Args:
             task_id: Id of the producing task.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
             exclusive: Lock the row for update.
 
         Returns:
             Stored session, or ``None`` when no session links the task.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionORM).where(SessionORM.task_id == task_id)
+        statement = statement.options(*(defer(column) for column in deferred))
         if exclusive:
             statement = statement.with_for_update()
         row = (await self._session.scalars(statement)).one_or_none()
-        return row.to_domain() if row is not None else None
+        exclude = {column.key for column in deferred}
+        return row.to_domain(exclude=exclude) if row is not None else None
 
     async def query(
-        self, session_filter: SessionFilter
+        self, session_filter: SessionFilter, include_payloads: bool
     ) -> tuple[list[Session], str | None]:
         """Query sessions matching a filter.
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Page of matching sessions and the next cursor.
         """
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
         statement = select(SessionORM)
         if session_filter.expression is not None:
             statement = statement.where(
@@ -288,25 +309,34 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                     session_filter.expression, SESSION_FILTER_BINDINGS
                 )
             )
+        statement = statement.options(*(defer(column) for column in deferred))
 
         rows, next_cursor = await paginate(
             self._session, statement, session_filter, id_column=SessionORM.id
         )
-        return [row.to_domain() for row in rows], next_cursor
+        exclude = {column.key for column in deferred}
+        return [row.to_domain(exclude=exclude) for row in rows], next_cursor
 
     async def get_many(
-        self, session_ids: Sequence[uuid.UUID]
+        self, session_ids: Sequence[uuid.UUID], include_payloads: bool
     ) -> dict[uuid.UUID, Session]:
         """Bulk-load sessions by id, keyed by id, missing ids omitted.
 
         Args:
             session_ids: Ids of the sessions to load.
+            include_payloads: Whether to read the inputs and outputs
+                columns.
 
         Returns:
             Stored sessions keyed by id.
         """
-        rows = await self._load_by_ids(list(session_ids))
-        return {session_id: row.to_domain() for session_id, row in rows.items()}
+        deferred = () if include_payloads else PAYLOAD_COLUMNS
+        rows = await self._load_by_ids(list(session_ids), deferred_columns=deferred)
+        exclude = {column.key for column in deferred}
+        return {
+            session_id: row.to_domain(exclude=exclude)
+            for session_id, row in rows.items()
+        }
 
     async def update(self, session: Session) -> Session:
         """Persist changes to an existing session.
@@ -320,9 +350,12 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 already registered.
 
         Returns:
-            Stored session with the updated timestamp renewed.
+            Stored session with the updated timestamp renewed, without
+            payloads.
         """
-        row = await self._get_row(session.id)
+        # Defer the payload columns because apply_domain writes them without
+        # ever reading them, so the deferred load never fires.
+        row = await self._get_row(session.id, deferred_columns=PAYLOAD_COLUMNS)
         row.apply_domain(session)
         await self._flush(
             {
@@ -331,7 +364,7 @@ class SQLSessionRepository(BaseSQLRepository[SessionORM]):
                 )
             }
         )
-        return row.to_domain()
+        return row.to_domain(exclude={column.key for column in PAYLOAD_COLUMNS})
 
     async def delete(self, session_id: uuid.UUID) -> None:
         """Delete a session by id.

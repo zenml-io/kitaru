@@ -2600,7 +2600,7 @@ export interface paths {
          *         params: Session list params.
          *
          *     Returns:
-         *         Page of sessions.
+         *         Page of sessions, with payloads when include_payloads is set.
          */
         get: operations["list_sessions_api_v1_sessions_get"];
         put?: never;
@@ -2799,8 +2799,8 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         Stored nodes in batch order, with inputs, outputs, and attributes
-         *         populated.
+         *         Stored nodes in batch order, with reasoning, inputs, outputs, and
+         *         attributes null.
          */
         post: operations["ingest_session_nodes_api_v1_sessions__session_id__nodes_post"];
         delete?: never;
@@ -6286,6 +6286,19 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** Page[SessionDetailResponse] */
+        Page_SessionDetailResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["SessionDetailResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
         /** Page[SessionNodeResponse] */
         Page_SessionNodeResponse_: {
             /**
@@ -6893,6 +6906,11 @@ export interface components {
              */
             imported_from?: string | null;
             /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session inputs.
+             */
+            input_text_selector?: string | null;
+            /**
              * Inputs
              * @description Session inputs.
              */
@@ -6912,6 +6930,11 @@ export interface components {
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
             /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session outputs.
+             */
+            output_text_selector?: string | null;
+            /**
              * Outputs
              * @description Session outputs.
              */
@@ -6923,6 +6946,157 @@ export interface components {
             started_at?: string | null;
             /** @description Initial session status. */
             status?: components["schemas"]["SessionStatus"] | null;
+        };
+        /**
+         * SessionDetailResponse
+         * @description Session detail response.
+         */
+        SessionDetailResponse: {
+            /**
+             * Adapter Version
+             * @description Recording adapter version.
+             */
+            adapter_version?: string | null;
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the session belongs to.
+             */
+            agent_id: string;
+            /**
+             * Agent Version Id
+             * @description Agent version recorded for the session.
+             */
+            agent_version_id?: string | null;
+            /**
+             * Cost
+             * @description Total cost.
+             */
+            cost?: string | null;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Ended At
+             * @description Time the session ended.
+             */
+            ended_at?: string | null;
+            /**
+             * Error
+             * @description Error from a failed session.
+             */
+            error?: string | null;
+            /**
+             * External Id
+             * @description Id from the source system.
+             */
+            external_id?: string | null;
+            /**
+             * Framework
+             * @description Agent framework used.
+             */
+            framework?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Session id.
+             */
+            id: string;
+            /**
+             * Imported From
+             * @description Source system the session was imported from.
+             */
+            imported_from?: string | null;
+            /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session inputs.
+             */
+            input_text_selector?: string | null;
+            /**
+             * Inputs
+             * @description Session inputs.
+             */
+            inputs: unknown;
+            /**
+             * Llm Call Count
+             * @description Number of LLM call nodes.
+             */
+            llm_call_count: number;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Session name.
+             */
+            name?: string | null;
+            /**
+             * Number
+             * @description Session number within the agent.
+             */
+            number: number;
+            /** @description How the session came to exist. */
+            origin: components["schemas"]["SessionOrigin"];
+            /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session outputs.
+             */
+            output_text_selector?: string | null;
+            /**
+             * Outputs
+             * @description Session outputs.
+             */
+            outputs: unknown;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Started At
+             * @description Time the session started.
+             */
+            started_at?: string | null;
+            status: components["schemas"]["SessionStatus"];
+            /**
+             * Task Id
+             * @description Task the session was produced by.
+             */
+            task_id?: string | null;
+            /** @description Total token usage. */
+            tokens?: components["schemas"]["TokenUsage"] | null;
+            /**
+             * Tool Call Count
+             * @description Number of tool call nodes.
+             */
+            tool_call_count: number;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * SessionDetailWithEvaluationsResponse
+         * @description Session detail with evaluations response.
+         */
+        SessionDetailWithEvaluationsResponse: {
+            /**
+             * Evaluations
+             * @description Every evaluation of the session, newest first.
+             */
+            evaluations: components["schemas"]["EvaluationResponse"][];
+            /** @description Session. */
+            session: components["schemas"]["SessionDetailResponse"];
         };
         /**
          * SessionEvaluationsRequest
@@ -7315,11 +7489,6 @@ export interface components {
              */
             imported_from?: string | null;
             /**
-             * Inputs
-             * @description Session inputs.
-             */
-            inputs: unknown;
-            /**
              * Llm Call Count
              * @description Number of LLM call nodes.
              */
@@ -7343,11 +7512,6 @@ export interface components {
             number: number;
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
-            /**
-             * Outputs
-             * @description Session outputs.
-             */
-            outputs: unknown;
             /**
              * Owner Id
              * Format: uuid
@@ -7435,6 +7599,11 @@ export interface components {
              */
             name?: string | null;
             /**
+             * Output Text Selector
+             * @description New output text selector.
+             */
+            output_text_selector?: string | null;
+            /**
              * Outputs
              * @description New session outputs.
              */
@@ -7466,7 +7635,7 @@ export interface components {
              */
             nodes: components["schemas"]["SessionNodeResponse"][];
             /** @description Session. */
-            session: components["schemas"]["SessionResponse"];
+            session: components["schemas"]["SessionDetailResponse"];
         };
         /**
          * StaticCase
@@ -11932,6 +12101,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include inputs and outputs. */
+                include_payloads?: boolean;
             };
             header?: never;
             path?: never;
@@ -11945,7 +12116,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_SessionResponse_"];
+                    "application/json": components["schemas"]["Page_SessionDetailResponse_"] | components["schemas"]["Page_SessionResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -12011,7 +12182,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionResponse"];
+                    "application/json": components["schemas"]["SessionDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12674,6 +12845,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include inputs and outputs. */
+                include_payloads?: boolean;
             };
             header?: never;
             path?: never;
@@ -12718,7 +12891,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionWithEvaluationsResponse"];
+                    "application/json": components["schemas"]["SessionDetailWithEvaluationsResponse"];
                 };
             };
             /** @description Validation Error */

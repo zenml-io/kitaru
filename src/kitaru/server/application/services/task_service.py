@@ -443,7 +443,7 @@ class TaskService:
         """
         if not isinstance(task, AgentTask):
             return
-        session = await self._sessions.get_by_task_id(task.id)
+        session = await self._sessions.get_by_task_id(task.id, include_payloads=False)
         if session is None:
             raise TaskResultSessionMissing(task.id)
         if session.status is not SessionStatus.COMPLETED:
@@ -462,7 +462,9 @@ class TaskService:
             return
         # The replay's link is written together with the session, so no
         # session means nothing to clear on the replay either.
-        session = await self._sessions.get_by_task_id(task.id, exclusive=True)
+        session = await self._sessions.get_by_task_id(
+            task.id, include_payloads=False, exclusive=True
+        )
         if session is None:
             return
         session.unlink_task()
