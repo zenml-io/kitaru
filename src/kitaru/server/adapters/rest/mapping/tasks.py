@@ -15,11 +15,6 @@
 
 import uuid
 
-from kitaru.api_models.v1.hook import (
-    CommandHook,
-    CopyWorkdirHook,
-    TaskHook,
-)
 from kitaru.api_models.v1.task import (
     AgentTaskDetails,
     EvaluationTaskDetails,
@@ -38,13 +33,8 @@ from kitaru.api_models.v1.task import (
     TaskWithSpec,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.adapters.rest.mapping.hooks import hook_to_response
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
-from kitaru.server.domain.hook import (
-    CopyWorkdirHook as DomainCopyWorkdirHook,
-)
-from kitaru.server.domain.hook import (
-    TaskHook as DomainTaskHook,
-)
 from kitaru.server.domain.task import (
     AgentTask,
     EvaluationTask,
@@ -164,22 +154,6 @@ def _run_spec_to_response(run_spec: DomainTaskRunSpec) -> TaskRunSpec:
     )
 
 
-def _hook_to_response(hook: DomainTaskHook) -> TaskHook:
-    """Convert a task hook value object to its response DTO.
-
-    Args:
-        hook: Hook the worker runs around the task process.
-
-    Returns:
-        Task hook DTO.
-    """
-    if isinstance(hook, DomainCopyWorkdirHook):
-        return CopyWorkdirHook()
-    return CommandHook(
-        command=hook.command, when=hook.when, run_on_failure=hook.run_on_failure
-    )
-
-
 def _details_to_response(spec: TaskSpec) -> TaskDetails:
     """Convert the kind-specific details of a task spec to their response DTO.
 
@@ -231,7 +205,7 @@ def spec_to_response(spec: TaskSpec) -> TaskSpecResponse:
         ),
         env=spec.env,
         secret_env=spec.secret_env,
-        hooks=[_hook_to_response(hook) for hook in spec.hooks],
+        hooks=[hook_to_response(hook) for hook in spec.hooks],
         details=_details_to_response(spec),
     )
 
