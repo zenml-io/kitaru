@@ -73,11 +73,18 @@ async def create_replay_pipelines(
         task_repository: Task repository.
         payload_store: Payload store, for the baseline sessions' inputs.
 
+    Raises:
+        SessionNotEvaluatable: ``evaluate_baselines`` is set and a baseline
+            session is in progress.
+
     Returns:
         Created replays, in baseline order.
     """
     if not baselines:
         return []
+    if evaluate_baselines:
+        for baseline in baselines:
+            baseline.check_evaluate()
     await payload_store.resolve(
         [baseline.inputs for baseline in baselines if baseline.inputs is not None]
     )
@@ -143,7 +150,8 @@ async def append_result_evaluations(
     locking the job row. The completing task's own transition settles the
     job afterward, in the same transaction, and its drained scan reads every
     task including these, so the job can never be judged drained before they
-    exist.
+    exist. The result session is finished here, since completing the agent
+    task requires it to be completed.
 
     Args:
         event: TaskTerminal event.

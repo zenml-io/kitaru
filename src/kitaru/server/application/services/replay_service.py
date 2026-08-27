@@ -152,6 +152,8 @@ class ReplayService:
                 spec, the config uses cohort-version-scoped history, or an
                 evaluator config is scoped to another agent.
             AgentVersionNotFound: No agent version has the resolved id.
+            SessionNotEvaluatable: ``evaluate_baselines`` is set and the
+                baseline session is in progress.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.

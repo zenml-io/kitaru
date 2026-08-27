@@ -154,8 +154,8 @@ async def update_session(
     """Update a session.
 
     Clients observe HTTP 200 on success, 404 when no session has this id,
-    409 when the update moves a terminal session back to in_progress, and
-    422 on invalid input, including an attempt to clear the status.
+    409 when the session is no longer in progress, and 422 on invalid
+    input, including an attempt to clear the status.
 
     Args:
         session_id: Id of the session.
@@ -314,7 +314,8 @@ async def merge_session_evaluations(
 
     A resent name overwrites its score, value, data type, and explanation.
     Clients observe HTTP 200 on success, 404 when no session has this id,
-    and 422 when the request names the same evaluation twice.
+    409 when the session is not finished, and 422 when the request names
+    the same evaluation twice.
 
     Args:
         session_id: Id of the session to merge evaluations into.

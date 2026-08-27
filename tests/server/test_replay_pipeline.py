@@ -61,7 +61,7 @@ from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
-from kitaru.server.domain.session import Session
+from kitaru.server.domain.session import Session, SessionNotEvaluatable
 from kitaru.server.domain.task import AgentTask, AgentTaskDetails, EvaluationTask
 from kitaru.server.filtering import FilterCondition
 
@@ -105,6 +105,7 @@ async def _baseline_session(
         agent_id=agent_version.agent_id,
         agent_version_id=agent_version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
         inputs={"q": "hi"},
     )
 
@@ -321,6 +322,31 @@ async def test_evaluate_baselines_skips_already_scored_pairs(
     assert len(baseline_tasks) == 1
     assert baseline_tasks[0].plugin_version_id == evaluator_b.id
     assert baseline_tasks[0].on_failure is TaskOnFailure.ABORT
+
+
+async def test_create_replay_rejects_in_progress_baseline_evaluation(
+    services: ReplayServices,
+) -> None:
+    """Reject scoring a baseline session that is in progress."""
+    agent_version = await _agent_version_with_run_spec(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.RECORDED,
+        inputs={"q": "hi"},
+    )
+    with pytest.raises(SessionNotEvaluatable):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+                evaluate_baselines=True,
+            ),
+            actor=ACTOR,
+        )
 
 
 async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
@@ -577,6 +603,37 @@ async def test_start_run_stamps_the_job_kind_replay(
     for bundle in bundles:
         job = await services.jobs.get(get_replay_job_id(bundle.replay))
         assert job.kind is JobKind.REPLAY
+
+
+async def test_start_run_rejects_in_progress_cohort_session_evaluation(
+    services: ReplayServices,
+) -> None:
+    """Reject scoring a cohort baseline session that is in progress."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
+    session = await create_session(
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=agent_version.agent_id,
+        agent_version_id=agent_version.id,
+        origin=SessionOrigin.RECORDED,
+        inputs={"q": "hi"},
+    )
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id]
+    )
+    with pytest.raises(SessionNotEvaluatable):
+        await services.experiment_service.start_run(
+            experiment_id,
+            ExperimentRunCreate(
+                cohort_version_id=cohort_version.id,
+                agent_version_id=agent_version.id,
+                evaluate_baselines=True,
+            ),
+            actor=ACTOR,
+        )
 
 
 async def test_start_run_evaluate_baselines_skips_already_scored_sessions(

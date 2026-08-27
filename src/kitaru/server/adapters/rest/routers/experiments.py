@@ -186,10 +186,11 @@ async def start_run(
     """Start an experiment run, fanning out one replay per cohort version session.
 
     Clients observe HTTP 201 on success, 404 when the experiment, the
-    cohort version, or the resolved agent version does not exist, and 422
-    when the cohort version has no sessions, the cohort version or agent
-    version belongs to another agent, or the resolved agent version has no
-    run spec.
+    cohort version, or the resolved agent version does not exist, 409 when
+    evaluate_baselines is set and a cohort version session is not finished,
+    and 422 when the cohort version has no sessions, the cohort version or
+    agent version belongs to another agent, or the resolved agent version
+    has no run spec.
 
     Args:
         experiment_id: Id of the experiment.

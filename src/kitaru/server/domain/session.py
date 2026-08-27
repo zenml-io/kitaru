@@ -165,25 +165,16 @@ class SessionStatusCannotBeCleared(ValidationError):
         super().__init__(f"Session {session_id} status cannot be cleared")
 
 
-class IllegalSessionStatusTransition(ConflictError):
-    """Raised when a session status transition is not allowed."""
+class SessionNotEvaluatable(ConflictError):
+    """Raised when a session does not currently accept evaluations."""
 
-    def __init__(
-        self,
-        session_id: uuid.UUID,
-        current: SessionStatus,
-        target: SessionStatus,
-    ) -> None:
+    def __init__(self, session_id: uuid.UUID) -> None:
         """Initialize the error.
 
         Args:
             session_id: Id of the session.
-            current: Current session status.
-            target: Target session status.
         """
-        super().__init__(
-            f"Session {session_id} cannot transition from {current} to {target}"
-        )
+        super().__init__(f"Session {session_id} does not accept evaluations")
 
 
 class SessionNotIngestable(ConflictError):
@@ -196,6 +187,18 @@ class SessionNotIngestable(ConflictError):
             session_id: Id of the session.
         """
         super().__init__(f"Session {session_id} does not accept node ingestion")
+
+
+class SessionNotUpdatable(ConflictError):
+    """Raised when a session does not currently accept updates."""
+
+    def __init__(self, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            session_id: Id of the session.
+        """
+        super().__init__(f"Session {session_id} does not accept updates")
 
 
 class SessionRollups(FrozenModel):
@@ -316,6 +319,24 @@ class Session(DomainModel):
         """Clear the task this session was produced by."""
         self.task_id = None
 
+    def check_update(self) -> None:
+        """Require the session to currently accept updates.
+
+        Raises:
+            SessionNotUpdatable: The session is not in progress.
+        """
+        if self.status != SessionStatus.IN_PROGRESS:
+            raise SessionNotUpdatable(self.id)
+
+    def check_evaluate(self) -> None:
+        """Require the session to currently accept evaluations.
+
+        Raises:
+            SessionNotEvaluatable: The session is in progress.
+        """
+        if self.status == SessionStatus.IN_PROGRESS:
+            raise SessionNotEvaluatable(self.id)
+
     def check_node_ingest(self) -> None:
         """Require the session to currently accept node ingestion.
 
@@ -336,14 +357,7 @@ class Session(DomainModel):
         error: str | None,
         ended_at: datetime | None,
     ) -> None:
-        """Apply a status transition together with its outputs, error, and end time.
-
-        Raises:
-            IllegalSessionStatusTransition: The session is terminal and
-                ``status`` changes it.
-        """
-        if status != self.status and self.status != SessionStatus.IN_PROGRESS:
-            raise IllegalSessionStatusTransition(self.id, self.status, status)
+        """Apply a status transition together with its outputs, error, and end time."""
         self.status = status
         self.outputs = outputs
         self.error = error

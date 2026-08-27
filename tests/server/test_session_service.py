@@ -60,7 +60,6 @@ from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.session import (
-    IllegalSessionStatusTransition,
     Session,
     SessionAccessDenied,
     SessionAgentMismatch,
@@ -69,6 +68,7 @@ from kitaru.server.domain.session import (
     SessionBaselineNotFound,
     SessionInUse,
     SessionNotFound,
+    SessionNotUpdatable,
     SessionStatusCannotBeCleared,
 )
 from kitaru.server.domain.task import (
@@ -484,7 +484,7 @@ async def test_update_session_rejects_terminal_back_to_in_progress(
     await service.update_session(
         created.id, SessionUpdate(status=SessionStatus.FAILED), actor=ACTOR
     )
-    with pytest.raises(IllegalSessionStatusTransition):
+    with pytest.raises(SessionNotUpdatable):
         await service.update_session(
             created.id, SessionUpdate(status=SessionStatus.IN_PROGRESS), actor=ACTOR
         )
@@ -501,9 +501,26 @@ async def test_update_session_rejects_terminal_to_other_terminal(
     await service.update_session(
         created.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
     )
-    with pytest.raises(IllegalSessionStatusTransition):
+    with pytest.raises(SessionNotUpdatable):
         await service.update_session(
             created.id, SessionUpdate(status=SessionStatus.FAILED), actor=ACTOR
+        )
+
+
+async def test_update_session_rejects_any_update_on_finished_session(
+    service: SessionService,
+) -> None:
+    """Reject a non-status update on a finished session."""
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    await service.update_session(
+        created.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    with pytest.raises(SessionNotUpdatable):
+        await service.update_session(
+            created.id, SessionUpdate(name="renamed"), actor=ACTOR
         )
 
 
@@ -579,35 +596,6 @@ async def test_update_session_non_status_update_tracks_nothing(
         actor=ACTOR,
     )
     await service.update_session(created.id, SessionUpdate(name="renamed"), actor=ACTOR)
-
-    assert analytics.tracked == []
-
-
-async def test_update_session_already_terminal_tracks_nothing(
-    repository: FakeSessionRepository,
-    task_repository: FakeTaskRepository,
-    agent_version_repository: FakeAgentVersionRepository,
-) -> None:
-    """Skip tracking when a finished update reaches a session already terminal."""
-    analytics = _RecordingAnalytics()
-    service = SessionService(
-        repository=repository,
-        task_repository=task_repository,
-        agent_version_repository=agent_version_repository,
-        replay_repository=FakeReplayRepository(),
-        payload_store=build_payload_store().store,
-        analytics=analytics,
-    )
-    created = await create_session(
-        repository,
-        owner_id=ACTOR.account.id,
-        agent_id=uuid.uuid4(),
-        origin=SessionOrigin.RECORDED,
-        status=SessionStatus.COMPLETED,
-    )
-    await service.update_session(
-        created.id, SessionUpdate(outputs={"answer": 42}), actor=ACTOR
-    )
 
     assert analytics.tracked == []
 
@@ -1371,14 +1359,11 @@ async def test_update_session_without_touching_outputs_preserves_offloaded_outpu
     service, _, _ = _service_with_threshold(
         repository, task_repository, agent_version_repository, threshold_bytes=10
     )
-    created = await service.create_session(
-        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
-        actor=ACTOR,
-    )
     outputs = {"b": "y" * 50}
-    await service.update_session(
-        created.id,
-        SessionUpdate(status=SessionStatus.COMPLETED, outputs=outputs),
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, outputs=outputs
+        ),
         actor=ACTOR,
     )
 

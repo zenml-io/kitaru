@@ -346,10 +346,9 @@ class SessionService:
         Raises:
             SessionNotFound: No session has this id.
             SessionAccessDenied: A task principal does not own the session.
+            SessionNotUpdatable: The session is not in progress.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
-            IllegalSessionStatusTransition: The session is terminal and the
-                command moves it back to in_progress.
 
         Returns:
             Updated session.
@@ -357,9 +356,9 @@ class SessionService:
         session = await self._repository.get(session_id, exclusive=True)
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
+        session.check_update()
         fields = command.model_fields_set
         if {"status", "outputs", "error", "ended_at"} & fields:
-            previous_status = session.status
             target_status = session.status
             if "status" in fields:
                 if command.status is None:
@@ -380,7 +379,6 @@ class SessionService:
                 await self._payload_store.offload([session.outputs], session.owner_id)
             if (
                 self._analytics is not None
-                and previous_status == SessionStatus.IN_PROGRESS
                 and session.status != SessionStatus.IN_PROGRESS
             ):
                 self._analytics.track(

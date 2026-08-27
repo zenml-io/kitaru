@@ -39,6 +39,7 @@ async def session_id(client: httpx.AsyncClient) -> str:
             json={
                 "agent_id": agent["id"],
                 "origin": "recorded",
+                "status": "completed",
                 "inputs": {"prompt": "hi"},
                 "outputs": None,
                 "metadata": {},

@@ -92,8 +92,8 @@ class EvaluationService:
 
         A resent name overwrites its data type, score, value, explanation,
         and pass flag. The stored rows carry no evaluator_version_id or
-        task_id. The session accepts a merge in any status. A task principal
-        merges into a session it owns or holds as its task's input session.
+        task_id. A task principal merges into a session it owns or holds as
+        its task's input session.
 
         Args:
             session_id: Id of the session to merge evaluations into.
@@ -104,6 +104,7 @@ class EvaluationService:
             SessionNotFound: No session has this id.
             SessionAccessDenied: A task principal owns neither the session nor
                 holds it as its task's input session.
+            SessionNotEvaluatable: The session is in progress.
             DuplicateEvaluationNameInBatch: The request names the same
                 evaluation twice.
 
@@ -114,6 +115,7 @@ class EvaluationService:
         # read and the merge insert, whose foreign key would otherwise fail.
         session = await self._sessions.get(session_id, exclusive=True)
         check_task_session_read(session_id, session.task_id, actor)
+        session.check_evaluate()
         seen: set[str] = set()
         for command in commands:
             if command.name in seen:

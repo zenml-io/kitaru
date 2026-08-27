@@ -33,6 +33,7 @@ from conftest import (
     create_session,
     override_idempotency,
 )
+from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -115,9 +116,12 @@ async def client(
         yield client
 
 
-async def _create_session(session_repository: FakeSessionRepository) -> str:
+async def _create_session(
+    session_repository: FakeSessionRepository,
+    status: SessionStatus = SessionStatus.COMPLETED,
+) -> str:
     session = await create_session(
-        session_repository, ACCOUNT.id, agent_id=uuid.uuid4()
+        session_repository, ACCOUNT.id, agent_id=uuid.uuid4(), status=status
     )
     return str(session.id)
 
@@ -223,6 +227,34 @@ async def test_create_evaluations_rejects_an_unknown_session(
         },
     )
     assert response.status_code == 422
+
+
+async def test_create_evaluations_rejects_an_in_progress_session(
+    client: httpx.AsyncClient,
+    session_repository: FakeSessionRepository,
+    plugin_repository: FakePluginRepository,
+) -> None:
+    """Observe HTTP 409 for an in-progress input session."""
+    session_id = await _create_session(
+        session_repository, status=SessionStatus.IN_PROGRESS
+    )
+    plugin = await create_plugin(
+        plugin_repository, ACCOUNT.id, PluginKind.EVALUATOR, name="scorer"
+    )
+    await plugin_repository.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version=None,
+    )
+
+    response = await client.post(
+        "/api/v1/evaluations",
+        json={
+            "input_session_ids": [session_id],
+            "evaluators": [{"evaluator": "scorer"}],
+        },
+    )
+    assert response.status_code == 409
 
 
 async def test_create_evaluations_not_found_for_unknown_evaluator(
