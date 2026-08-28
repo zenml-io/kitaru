@@ -75,6 +75,47 @@ def release_repo(tmp_path: Path) -> Path:
     return tmp_path
 
 
+@pytest.fixture(params=["0.22.3", "1.4.2"])
+def core_release_repo(
+    tmp_path: Path, request: pytest.FixtureRequest
+) -> tuple[Path, str]:
+    """Create stable release files independently of the checkout's release state."""
+    version = str(request.param)
+    documents = {
+        "pyproject.toml": (
+            f'[project]\nname = "kitaru"\nversion = "{version}"\n'
+            f'description = "Release {version}"\n'
+        ),
+        "CHANGELOG.md": (
+            f"# Changelog\n\n## [{version}]\n\n- Current release.\n\n"
+            "## [0.1.0]\n\n- Previous release.\n"
+        ),
+        "openapi/openapi.json": json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "Kitaru", "version": version},
+                "paths": {},
+                "components": {"schemas": {"Example": {"example": version}}},
+            },
+            indent=2,
+        )
+        + "\n",
+    }
+    for lock_path, source in (("uv.lock", "."), ("plugins/uv.lock", "../")):
+        documents[lock_path] = (
+            'version = 1\n\n[[package]]\nname = "kitaru"\n'
+            f'version = "{version}"\nsource = {{ editable = "{source}" }}\n'
+            '\n[[package]]\nname = "example-plugin"\n'
+            f'version = "{version}"\n'
+            'source = { registry = "https://pypi.org/simple" }\n'
+        )
+    for relative_path, content in documents.items():
+        path = tmp_path / relative_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content)
+    return tmp_path, version
+
+
 def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
     inventory = load_inventory()
 
@@ -178,9 +219,9 @@ def test_core_version_proposal_requires_a_stable_semantic_version(
 
 
 def test_core_development_reset_updates_only_release_state(
-    release_repo: Path,
+    core_release_repo: tuple[Path, str],
 ) -> None:
-    release_version = "0.22.3"
+    release_repo, release_version = core_release_repo
     development_version = f"{release_version}+dev"
     project = release_repo / "pyproject.toml"
     changelog = release_repo / "CHANGELOG.md"
@@ -188,56 +229,87 @@ def test_core_development_reset_updates_only_release_state(
     root_lock = release_repo / "uv.lock"
     plugin_lock = release_repo / "plugins" / "uv.lock"
 
-    for path in (project, openapi, root_lock, plugin_lock):
-        path.write_text(path.read_text().replace("0.23.0", release_version))
-    changelog.write_text(
-        changelog.read_text().replace("## [0.23.0]", f"## [{release_version}]")
-    )
+    originals = {
+        path: path.read_text()
+        for path in (project, openapi, root_lock, plugin_lock, changelog)
+    }
 
     assert (
         prepare_core_development_reset(release_version, release_repo)
         == development_version
     )
-    assert f'version = "{development_version}"' in project.read_text()
-    assert f'"version": "{development_version}"' in openapi.read_text()
-    assert (
-        f'name = "kitaru"\nversion = "{development_version}"\n'
-        'source = { editable = "." }' in root_lock.read_text()
+    assert project.read_text() == originals[project].replace(
+        f'version = "{release_version}"', f'version = "{development_version}"', 1
     )
-    assert (
-        f'name = "kitaru"\nversion = "{development_version}"\n'
-        'source = { editable = "../" }' in plugin_lock.read_text()
+    assert openapi.read_text() == originals[openapi].replace(
+        f'"version": "{release_version}"', f'"version": "{development_version}"', 1
     )
-    assert changelog.read_text().index("## [Unreleased]") < changelog.read_text().index(
-        f"## [{release_version}]"
+    for lock in (root_lock, plugin_lock):
+        assert lock.read_text() == originals[lock].replace(
+            f'name = "kitaru"\nversion = "{release_version}"',
+            f'name = "kitaru"\nversion = "{development_version}"',
+            1,
+        )
+    release_heading = f"## [{release_version}]"
+    assert changelog.read_text() == originals[changelog].replace(
+        release_heading, f"## [Unreleased]\n\n{release_heading}", 1
     )
 
 
 @pytest.mark.parametrize("version", ["0.23.0rc1", "0.23.0+dev", "1.0.post1"])
 def test_core_development_reset_requires_a_stable_release(
-    release_repo: Path, version: str
+    tmp_path: Path, version: str
 ) -> None:
     with pytest.raises(ReleaseInventoryError, match=r"stable X\.Y\.Z"):
-        prepare_core_development_reset(version, release_repo)
+        prepare_core_development_reset(version, tmp_path)
 
 
 def test_core_development_reset_fails_before_partial_writes(
-    release_repo: Path,
+    core_release_repo: tuple[Path, str],
 ) -> None:
-    project = release_repo / "pyproject.toml"
-    original_project = project.read_text()
+    release_repo, release_version = core_release_repo
     changelog = release_repo / "CHANGELOG.md"
-    release_heading = "## [0.23.0]"
+    release_heading = f"## [{release_version}]"
     changelog.write_text(
         changelog.read_text().replace(
             release_heading, f"## [Unreleased]\n\n{release_heading}", 1
         )
     )
+    originals = {
+        path: path.read_bytes() for path in release_repo.rglob("*") if path.is_file()
+    }
 
     with pytest.raises(ReleaseInventoryError, match="already contains"):
-        prepare_core_development_reset("0.23.0", release_repo)
+        prepare_core_development_reset(release_version, release_repo)
 
-    assert project.read_text() == original_project
+    assert {path: path.read_bytes() for path in originals} == originals
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "error"),
+    [
+        ("pyproject.toml", "project"),
+        ("openapi/openapi.json", "OpenAPI"),
+        ("uv.lock", "root lock"),
+        ("plugins/uv.lock", "plugin lock"),
+    ],
+)
+def test_core_development_reset_rejects_mismatched_versions_without_writes(
+    core_release_repo: tuple[Path, str], relative_path: str, error: str
+) -> None:
+    release_repo, release_version = core_release_repo
+    path = release_repo / relative_path
+    path.write_text(path.read_text().replace(release_version, f"{release_version}+dev"))
+    originals = {
+        path: path.read_bytes() for path in release_repo.rglob("*") if path.is_file()
+    }
+
+    with pytest.raises(
+        ReleaseInventoryError, match=f"{error} must contain exactly one"
+    ):
+        prepare_core_development_reset(release_version, release_repo)
+
+    assert {path: path.read_bytes() for path in originals} == originals
 
 
 def test_core_release_publishes_deployables_without_waiting_for_plugins() -> None:
