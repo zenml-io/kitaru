@@ -226,29 +226,3 @@ async def test_delete_not_found(setup: Setup) -> None:
     missing_id = uuid.uuid4()
     with pytest.raises(JobNotFound, match=f"Job {missing_id} was not found"):
         await repository.delete(missing_id)
-
-
-async def test_delete_many(setup: Setup) -> None:
-    """Delete many stored jobs."""
-    repository, owner_id = setup
-    first = await repository.create(_job(owner_id))
-    second = await repository.create(_job(owner_id))
-    await repository.delete_many([second.id, first.id])
-    for job_id in (first.id, second.id):
-        with pytest.raises(JobNotFound):
-            await repository.get(job_id)
-
-
-async def test_delete_many_empty(setup: Setup) -> None:
-    """Bulk-delete with no jobs is a no-op."""
-    repository, _ = setup
-    await repository.delete_many([])
-
-
-async def test_delete_many_not_found(setup: Setup) -> None:
-    """Raise when bulk-deleting a job that does not exist."""
-    repository, owner_id = setup
-    created = await repository.create(_job(owner_id))
-    missing_id = uuid.uuid4()
-    with pytest.raises(JobNotFound):
-        await repository.delete_many([created.id, missing_id])

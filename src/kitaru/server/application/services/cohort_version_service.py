@@ -106,7 +106,9 @@ class CohortVersionService:
             ValidationError: A session is missing or belongs to a different
                 agent.
         """
-        sessions_by_id = await self._sessions.get_many(session_ids)
+        sessions_by_id = await self._sessions.get_many(
+            session_ids, include_payloads=False
+        )
         for session_id in session_ids:
             session = sessions_by_id.get(session_id)
             if session is None:

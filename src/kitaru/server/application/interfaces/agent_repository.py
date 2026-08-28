@@ -77,14 +77,13 @@ class AgentRepository(Protocol):
         """
         ...
 
-    async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id.
+    async def mark_deleted(self, agent_id: uuid.UUID) -> None:
+        """Mark an agent deleted, hiding it from every read.
 
         Args:
             agent_id: Id of the agent.
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
         ...

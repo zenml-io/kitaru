@@ -41,6 +41,7 @@ from kitaru.server.application.models.replay import (
     ReplayWithDetails,
     ToolLookupResult,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
@@ -49,7 +50,12 @@ from kitaru.server.application.services.evaluator_resolution import validate_eva
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.replay import Replay, ReplayAccessDenied
+from kitaru.server.domain.replay import (
+    Replay,
+    ReplayAccessDenied,
+    ReplayInUse,
+    ReplayNotFound,
+)
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     ReplayConfig,
@@ -72,6 +78,7 @@ class ReplayService:
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
         plugin_repository: PluginRepository,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -88,6 +95,8 @@ class ReplayService:
                 lookup.
             agent_version_repository: Agent version repository.
             plugin_repository: Plugin repository, for evaluator resolution.
+            payload_store: Payload store, for the baseline session's inputs
+                and the tool lookup's node output.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
@@ -99,6 +108,7 @@ class ReplayService:
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
         self._plugins = plugin_repository
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def _bundle(self, replays: list[Replay]) -> list[ReplayWithDetails]:
@@ -115,9 +125,12 @@ class ReplayService:
         configs = await self._experiments.get_many_replay_configs(
             list({replay.replay_config_id for replay in replays})
         )
+        # Skip replays whose replay config a concurrent delete removed between
+        # the two reads.
         return [
             ReplayWithDetails(replay=replay, config=configs[replay.replay_config_id])
             for replay in replays
+            if replay.replay_config_id in configs
         ]
 
     async def create_replay(
@@ -139,6 +152,8 @@ class ReplayService:
                 spec, the config uses cohort-version-scoped history, or an
                 evaluator config is scoped to another agent.
             AgentVersionNotFound: No agent version has the resolved id.
+            SessionNotEvaluatable: ``evaluate_baselines`` is set and the
+                baseline session is in progress.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.
@@ -146,7 +161,9 @@ class ReplayService:
         Returns:
             Created replay, paired with its config.
         """
-        baseline = await self._sessions.get(command.baseline_session_id)
+        baseline = await self._sessions.get(
+            command.baseline_session_id, include_payloads=True
+        )
         agent_version_id = command.agent_version_id
         if agent_version_id is None:
             if baseline.agent_version_id is None:
@@ -179,6 +196,7 @@ class ReplayService:
             replay_repository=self._repository,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            payload_store=self._payload_store,
         )
         if self._analytics is not None:
             self._analytics.track(
@@ -207,7 +225,10 @@ class ReplayService:
         """
         replay = await self._repository.get(replay_id)
         await self._check_task_access(replay, actor)
-        return (await self._bundle([replay]))[0]
+        bundled = await self._bundle([replay])
+        if not bundled:
+            raise ReplayNotFound(replay_id)
+        return bundled[0]
 
     async def list_replays(
         self, replay_filter: ReplayFilter, actor: AuthContext
@@ -225,6 +246,23 @@ class ReplayService:
         _ = actor
         replays, next_cursor = await self._repository.query(replay_filter)
         return await self._bundle(replays), next_cursor
+
+    async def delete_replay(self, replay_id: uuid.UUID, actor: AuthContext) -> None:
+        """Delete a replay.
+
+        Args:
+            replay_id: Id of the replay.
+            actor: Caller context.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+            ReplayInUse: The replay belongs to an experiment run.
+        """
+        _ = actor
+        replay = await self._repository.get(replay_id)
+        if replay.experiment_run_id is not None:
+            raise ReplayInUse(replay_id)
+        await self._repository.delete(replay_id)
 
     async def tool_lookup(
         self,
@@ -275,8 +313,12 @@ class ReplayService:
         )
         if node is None:
             return None
+        if node.outputs is not None:
+            await self._payload_store.resolve([node.outputs])
         return ToolLookupResult(
-            result=node.outputs, status=node.status, error=node.error
+            result=node.outputs.value if node.outputs is not None else None,
+            status=node.status,
+            error=node.error,
         )
 
     async def _check_task_access(self, replay: Replay, actor: AuthContext) -> None:
@@ -325,7 +367,9 @@ class ReplayService:
                 replay.baseline_session_id, cache_key
             )
         if scope is HistoryScope.AGENT:
-            baseline = await self._sessions.get(replay.baseline_session_id)
+            baseline = await self._sessions.get(
+                replay.baseline_session_id, include_payloads=False
+            )
             return await self._session_nodes.find_latest_by_cache_key_in_agent(
                 baseline.agent_id, cache_key
             )

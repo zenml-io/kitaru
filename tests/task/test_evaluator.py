@@ -38,8 +38,8 @@ from conftest import (
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionOrigin,
-    SessionResponse,
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import (
@@ -67,7 +67,7 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
 def _session_view() -> SessionView:
     """Build a minimal valid SessionView for evaluator contract tests."""
     now = datetime.now(UTC)
-    session = SessionResponse(
+    session = SessionDetailResponse(
         id=uuid.uuid4(),
         owner_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
@@ -185,7 +185,7 @@ async def test_run_fetches_the_session_and_its_nodes_in_one_call(
         ),
         input_session_id=session_id,
     )
-    session = SessionResponse.model_construct(id=session_id)
+    session = SessionDetailResponse.model_construct(id=session_id)
     node = SessionNodeResponse.model_construct(
         id=uuid.uuid4(), session_id=session_id, index=0
     )

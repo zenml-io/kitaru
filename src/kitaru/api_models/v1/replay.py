@@ -74,7 +74,9 @@ class ReplayResponse(TimestampedResponseModel):
     """Replay response."""
 
     id: uuid.UUID = Field(description="Replay id.")
-    job_id: uuid.UUID = Field(description="Job running the replay.")
+    job_id: uuid.UUID | None = Field(
+        default=None, description="Job running the replay."
+    )
     experiment_run_id: uuid.UUID | None = Field(
         default=None, description="Experiment run this replay belongs to."
     )

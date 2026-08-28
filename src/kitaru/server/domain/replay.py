@@ -104,12 +104,24 @@ class DuplicateReplayForBaseline(ConflictError):
         )
 
 
+class ReplayInUse(ConflictError):
+    """Raised when a replay belongs to an experiment run."""
+
+    def __init__(self, replay_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            replay_id: Id of the replay in use.
+        """
+        super().__init__(f"Replay {replay_id} is in use by an experiment run")
+
+
 class Replay(DomainModel):
     """Replay."""
 
     id: uuid.UUID = Field(default_factory=uuid7)
     owner_id: uuid.UUID
-    job_id: uuid.UUID
+    job_id: uuid.UUID | None = None
     experiment_run_id: uuid.UUID | None = None
     replay_config_id: uuid.UUID
     baseline_session_id: uuid.UUID

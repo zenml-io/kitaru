@@ -20,6 +20,7 @@ import pytest
 from conftest import FakeEvaluationRepository, FakeSessionRepository, create_session
 from kitaru.api_models.v1.evaluation import EvaluationDataType
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.session import SessionStatus
 from kitaru.server.application.models.auth import (
     AuthContext,
     GrantKind,
@@ -32,7 +33,11 @@ from kitaru.server.application.models.evaluation import (
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import DuplicateEvaluationNameInBatch
-from kitaru.server.domain.session import SessionAccessDenied, SessionNotFound
+from kitaru.server.domain.session import (
+    SessionAccessDenied,
+    SessionNotEvaluatable,
+    SessionNotFound,
+)
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -66,7 +71,10 @@ async def test_get_evaluation(
 ) -> None:
     """Get a stored evaluation by id."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     stored = await service.merge_evaluations(
         session.id,
@@ -82,7 +90,10 @@ async def test_list_evaluations(
 ) -> None:
     """List evaluations matching a filter."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     await service.merge_evaluations(
         session.id,
@@ -119,7 +130,10 @@ async def test_merge_evaluations_inserts_and_overwrites(
 ) -> None:
     """Resending a name overwrites its value and keeps the row id."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     first = await service.merge_evaluations(
         session.id,
@@ -149,7 +163,10 @@ async def test_merge_evaluations_carries_passed(
 ) -> None:
     """Carry the pass flag from the merge command onto the stored evaluation."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     stored = await service.merge_evaluations(
         session.id,
@@ -169,7 +186,10 @@ async def test_merge_evaluations_owner_is_actor(
 ) -> None:
     """Stamp the merged evaluations with the caller's account id."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     stored = await service.merge_evaluations(
         session.id,
@@ -184,7 +204,10 @@ async def test_merge_evaluations_rejects_duplicate_name_in_batch(
 ) -> None:
     """Reject a request naming the same evaluation twice."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     with pytest.raises(
         DuplicateEvaluationNameInBatch,
@@ -209,7 +232,10 @@ async def test_merge_evaluations_manual_rows_carry_no_evaluator_or_task(
 ) -> None:
     """Leave evaluator_version_id and task_id null on manually merged rows."""
     session = await create_session(
-        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     stored = await service.merge_evaluations(
         session.id,
@@ -238,6 +264,21 @@ async def test_merge_evaluations_accepts_any_session_status(
     assert stored[0].name == "a"
 
 
+async def test_merge_evaluations_rejects_an_in_progress_session(
+    service: EvaluationService, session_repository: FakeSessionRepository
+) -> None:
+    """Reject merging evaluations into an in-progress session."""
+    session = await create_session(
+        session_repository, ACTOR.account.id, agent_id=uuid.uuid4()
+    )
+    with pytest.raises(SessionNotEvaluatable):
+        await service.merge_evaluations(
+            session.id,
+            [EvaluationMerge(name="a", data_type=EvaluationDataType.FLOAT, score=1.0)],
+            actor=ACTOR,
+        )
+
+
 def _task_principal(
     task_id: uuid.UUID, granted_session_id: uuid.UUID | None = None
 ) -> AuthContext:
@@ -263,7 +304,11 @@ async def test_merge_evaluations_allows_a_task_principal_for_its_own_session(
     """Allow a task principal to merge evaluations into the session it owns."""
     task_id = uuid.uuid4()
     session = await create_session(
-        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=task_id
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        task_id=task_id,
+        status=SessionStatus.COMPLETED,
     )
     actor = _task_principal(task_id)
     stored = await service.merge_evaluations(
@@ -279,7 +324,11 @@ async def test_merge_evaluations_allows_a_task_principal_for_its_input_session(
 ) -> None:
     """Allow an evaluator task to merge results into the session it scored."""
     session = await create_session(
-        session_repository, uuid.uuid4(), agent_id=uuid.uuid4(), task_id=uuid.uuid4()
+        session_repository,
+        uuid.uuid4(),
+        agent_id=uuid.uuid4(),
+        task_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     actor = _task_principal(uuid.uuid4(), granted_session_id=session.id)
     stored = await service.merge_evaluations(

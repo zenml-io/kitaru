@@ -30,6 +30,7 @@ from kitaru.server.application.models.session import (
     SessionFilter,
     SessionUpdate,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import resolve_agent_id
 from kitaru.server.application.services.resource_access import (
@@ -38,6 +39,7 @@ from kitaru.server.application.services.resource_access import (
     check_task_session_write,
 )
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import (
     Session,
     SessionAgentMismatch,
@@ -64,6 +66,7 @@ class SessionService:
         task_repository: TaskRepository,
         agent_version_repository: AgentVersionRepository,
         replay_repository: ReplayRepository,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -74,12 +77,15 @@ class SessionService:
             agent_version_repository: Agent version repository, for the agent
                 a version belongs to.
             replay_repository: Replay repository, for the baseline lookup.
+            payload_store: Payload store, for inputs and outputs offload and
+                resolve.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
         self._tasks = task_repository
         self._agent_versions = agent_version_repository
         self._replays = replay_repository
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def create_session(
@@ -134,7 +140,10 @@ class SessionService:
             task.check_attempt(actor.principal.attempt)
             if (
                 isinstance(task, AgentTask)
-                and await self._repository.get_by_task_id(task.id) is not None
+                and await self._repository.get_by_task_id(
+                    task.id, include_payloads=False
+                )
+                is not None
             ):
                 raise TaskResultSessionAlreadyLinked(task.id)
         agent_id, agent_version_id = await self._resolve_agent(command, task)
@@ -150,8 +159,14 @@ class SessionService:
             if command.status is not None
             else SessionStatus.IN_PROGRESS,
             name=command.name,
-            inputs=command.inputs,
-            outputs=command.outputs,
+            input_text_selector=command.input_text_selector,
+            output_text_selector=command.output_text_selector,
+            inputs=Payload.from_json(command.inputs)
+            if command.inputs is not None
+            else None,
+            outputs=Payload.from_json(command.outputs)
+            if command.outputs is not None
+            else None,
             error=command.error,
             started_at=command.started_at,
             ended_at=command.ended_at,
@@ -160,6 +175,10 @@ class SessionService:
             imported_from=command.imported_from,
             framework=command.framework,
             adapter_version=command.adapter_version,
+        )
+        await self._payload_store.offload(
+            [p for p in (session.inputs, session.outputs) if p is not None],
+            session.owner_id,
         )
         stored = await self._repository.create(session)
         if isinstance(task, AgentTask):
@@ -245,8 +264,11 @@ class SessionService:
         Returns:
             Stored session.
         """
-        session = await self._repository.get(session_id)
+        session = await self._repository.get(session_id, include_payloads=True)
         check_task_session_read(session_id, session.task_id, actor)
+        await self._payload_store.resolve(
+            [p for p in (session.inputs, session.outputs) if p is not None]
+        )
         return session
 
     async def get_baseline_session(
@@ -271,39 +293,62 @@ class SessionService:
         Returns:
             Baseline session the replay ran against.
         """
-        session = await self._repository.get(session_id)
+        session = await self._repository.get(session_id, include_payloads=False)
         check_task_session_read(session_id, session.task_id, actor)
         replay = await self._replays.get_by_result_session_id(session_id)
         if replay is None:
             raise SessionBaselineNotFound(session_id)
-        return await self._repository.get(replay.baseline_session_id)
+        baseline = await self._repository.get(
+            replay.baseline_session_id, include_payloads=True
+        )
+        await self._payload_store.resolve(
+            [p for p in (baseline.inputs, baseline.outputs) if p is not None]
+        )
+        return baseline
 
     async def list_sessions(
-        self, session_filter: SessionFilter, actor: AuthContext
+        self,
+        session_filter: SessionFilter,
+        include_payloads: bool,
+        actor: AuthContext,
     ) -> tuple[list[Session], str | None]:
         """List sessions matching a filter.
 
         Args:
             session_filter: Filter and pagination parameters.
+            include_payloads: Whether to read and resolve the inputs and
+                outputs.
             actor: Caller context.
 
         Returns:
             Page of matching sessions and the next cursor.
         """
         _ = actor
-        return await self._repository.query(session_filter)
+        sessions, next_cursor = await self._repository.query(
+            session_filter, include_payloads=include_payloads
+        )
+        if include_payloads:
+            await self._payload_store.resolve(
+                [
+                    p
+                    for session in sessions
+                    for p in (session.inputs, session.outputs)
+                    if p is not None
+                ]
+            )
+        return sessions, next_cursor
 
     async def update_session(
         self, session_id: uuid.UUID, command: SessionUpdate, actor: AuthContext
     ) -> Session:
         """Partially update a session.
 
-        ``outputs``, ``error``, and ``ended_at`` only ever change together
-        with a status transition, applied through ``Session.finish``. When
-        the command sets none of ``status``, ``outputs``, ``error``, or
-        ``ended_at``, the session's current status carries through as a
-        no-op transition, which leaves those fields untouched. A task
-        principal writes only a session it owns.
+        ``outputs``, ``output_text_selector``, ``error``, and ``ended_at``
+        only ever change together with a status transition, applied through
+        ``Session.finish``. When the command sets none of them and no
+        ``status``, the session's current status carries through as a no-op
+        transition, which leaves those fields untouched. A task principal
+        writes only a session it owns.
 
         Args:
             session_id: Id of the session.
@@ -313,20 +358,21 @@ class SessionService:
         Raises:
             SessionNotFound: No session has this id.
             SessionAccessDenied: A task principal does not own the session.
+            SessionNotUpdatable: The session is not in progress.
             SessionStatusCannotBeCleared: The command clears the status with
                 an explicit null.
-            IllegalSessionStatusTransition: The session is terminal and the
-                command moves it back to in_progress.
 
         Returns:
             Updated session.
         """
-        session = await self._repository.get(session_id, exclusive=True)
+        session = await self._repository.get(
+            session_id, include_payloads=False, exclusive=True
+        )
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
+        session.check_update()
         fields = command.model_fields_set
-        if {"status", "outputs", "error", "ended_at"} & fields:
-            previous_status = session.status
+        if {"status", "outputs", "output_text_selector", "error", "ended_at"} & fields:
             target_status = session.status
             if "status" in fields:
                 if command.status is None:
@@ -334,13 +380,24 @@ class SessionService:
                 target_status = command.status
             session.finish(
                 status=target_status,
-                outputs=command.outputs if "outputs" in fields else session.outputs,
+                output_text_selector=command.output_text_selector
+                if "output_text_selector" in fields
+                else session.output_text_selector,
                 error=command.error if "error" in fields else session.error,
                 ended_at=command.ended_at if "ended_at" in fields else session.ended_at,
             )
+            if "outputs" in fields:
+                session.outputs = (
+                    Payload.from_json(command.outputs)
+                    if command.outputs is not None
+                    else None
+                )
+                if session.outputs is not None:
+                    await self._payload_store.offload(
+                        [session.outputs], session.owner_id
+                    )
             if (
                 self._analytics is not None
-                and previous_status == SessionStatus.IN_PROGRESS
                 and session.status != SessionStatus.IN_PROGRESS
             ):
                 self._analytics.track(
@@ -367,6 +424,8 @@ class SessionService:
 
         Raises:
             SessionNotFound: No session has this id.
+            SessionInUse: The session is referenced by a cohort version,
+                investigation, or replay and cannot be deleted.
         """
         _ = actor
         await self._repository.delete(session_id)

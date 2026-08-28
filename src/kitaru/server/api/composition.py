@@ -15,7 +15,7 @@
 
 from functools import partial
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.server.adapters.db.repositories.evaluation_repository import (
     SQLEvaluationRepository,
@@ -29,6 +29,9 @@ from kitaru.server.adapters.db.repositories.experiment_run_repository import (
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.replay_repository import (
     SQLReplayRepository,
+)
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.events import (
@@ -48,6 +51,7 @@ from kitaru.server.application.interfaces.experiment_run_repository import (
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
+from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.services import (
     evaluation_recording,
@@ -65,6 +69,7 @@ def register_subscribers(
     experiment_repository: ExperimentRepository,
     experiment_run_repository: ExperimentRunRepository,
     evaluation_repository: EvaluationRepository,
+    session_repository: SessionRepository,
     analytics: ServerAnalytics | None = None,
 ) -> None:
     """Register every task-transition subscriber on a dispatcher.
@@ -81,6 +86,7 @@ def register_subscribers(
         experiment_repository: Experiment repository, for replay configs.
         experiment_run_repository: Experiment run repository.
         evaluation_repository: Evaluation repository.
+        session_repository: Session repository.
         analytics: Analytics tracker, None skips tracking.
     """
     dispatcher.register(
@@ -89,6 +95,7 @@ def register_subscribers(
             evaluation_recording.record_task_evaluations,
             evaluation_repository=evaluation_repository,
             job_repository=job_repository,
+            session_repository=session_repository,
         ),
     )
     dispatcher.register(
@@ -120,7 +127,9 @@ def register_subscribers(
 
 
 def build_event_dispatcher(
-    session: AsyncSession, analytics: ServerAnalytics | None = None
+    session: AsyncSession,
+    engine: AsyncEngine,
+    analytics: ServerAnalytics | None = None,
 ) -> EventDispatcher:
     """Build the event dispatcher every subscriber of one request shares.
 
@@ -130,6 +139,7 @@ def build_event_dispatcher(
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker, None skips tracking.
 
     Returns:
@@ -144,6 +154,7 @@ def build_event_dispatcher(
         experiment_repository=SQLExperimentRepository(session),
         experiment_run_repository=SQLExperimentRunRepository(session),
         evaluation_repository=SQLEvaluationRepository(session),
+        session_repository=SQLSessionRepository(session, engine),
         analytics=analytics,
     )
     return dispatcher

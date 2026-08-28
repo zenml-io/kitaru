@@ -72,7 +72,6 @@ class InvestigationSessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["session_id"],
             ["session.id"],
             name=INVESTIGATION_SESSION_SESSION_ID_FOREIGN_KEY,
-            ondelete="CASCADE",
         ),
         Index(INVESTIGATION_SESSION_SESSION_ID_INDEX, "session_id"),
     )

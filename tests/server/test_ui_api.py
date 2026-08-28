@@ -32,6 +32,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTagRepository,
     FakeTaskRepository,
+    build_payload_store,
     override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -140,16 +141,19 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
+    payload_store = build_payload_store().store
     session_service = SessionService(
         repository=session_repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
+        payload_store=payload_store,
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
@@ -181,7 +185,9 @@ def _session_body(**overrides: object) -> dict[str, object]:
 
 async def test_list_sessions_with_evaluations(client: httpx.AsyncClient) -> None:
     """List sessions with each session's evaluations attached."""
-    scored = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    scored = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     unscored = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
         f"/api/v1/sessions/{scored['id']}/evaluations",
@@ -206,7 +212,11 @@ async def test_list_sessions_with_evaluations_walks_pages(
 ) -> None:
     """Walk every page of sessions with evaluations without duplicates or gaps."""
     sessions = [
-        (await client.post("/api/v1/sessions", json=_session_body())).json()
+        (
+            await client.post(
+                "/api/v1/sessions", json=_session_body(status="completed")
+            )
+        ).json()
         for _ in range(3)
     ]
     names = ["accuracy", "relevance", "coherence"]
@@ -259,7 +269,9 @@ async def test_list_sessions_with_evaluations_applies_filter(
 
 async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
     """Get a session with its evaluations attached."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={
@@ -273,7 +285,13 @@ async def test_get_session_with_evaluations(client: httpx.AsyncClient) -> None:
     response = await client.get(f"/api/v1/ui/sessions/{created['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["session"] == created
+    assert body["session"] == {
+        **created,
+        "input_text_selector": None,
+        "output_text_selector": None,
+        "inputs": {"prompt": "hi"},
+        "outputs": None,
+    }
     assert {evaluation["name"] for evaluation in body["evaluations"]} == {
         "accuracy",
         "verdict",

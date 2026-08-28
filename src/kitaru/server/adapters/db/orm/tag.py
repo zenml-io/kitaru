@@ -15,8 +15,14 @@
 
 import uuid
 
-from sqlalchemy import ForeignKeyConstraint, Index, String, UniqueConstraint
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    UniqueConstraint,
+)
+from sqlalchemy.orm import InstrumentedAttribute, Mapped, mapped_column
 
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.adapters.db.orm.base import (
@@ -25,6 +31,7 @@ from kitaru.server.adapters.db.orm.base import (
     UUIDPrimaryKeyMixin,
 )
 from kitaru.server.adapters.db.orm.orm_utils import (
+    check_constraint_name,
     foreign_key_name,
     index_name,
     unique_constraint_name,
@@ -35,8 +42,6 @@ from kitaru.server.domain.tag import Tag, TagLink
 TAG_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("tag", ["name"])
 TAG_OWNER_ID_FOREIGN_KEY = foreign_key_name("tag", ["owner_id"])
 TAG_OWNER_ID_INDEX = index_name("tag", ["owner_id"])
-
-MAX_RESOURCE_TYPE_LENGTH = 32
 
 
 class TagORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -81,11 +86,55 @@ class TagORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         )
 
 
-TAG_LINK_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "tag_link", ["tag_id", "resource_type", "resource_id"]
-)
 TAG_LINK_TAG_ID_FOREIGN_KEY = foreign_key_name("tag_link", ["tag_id"])
-TAG_LINK_RESOURCE_INDEX = index_name("tag_link", ["resource_type", "resource_id"])
+TAG_LINK_TAG_ID_INDEX = index_name("tag_link", ["tag_id"])
+TAG_LINK_SESSION_ID_FOREIGN_KEY = foreign_key_name("tag_link", ["session_id"])
+TAG_LINK_COHORT_ID_FOREIGN_KEY = foreign_key_name("tag_link", ["cohort_id"])
+TAG_LINK_COHORT_VERSION_ID_FOREIGN_KEY = foreign_key_name(
+    "tag_link", ["cohort_version_id"]
+)
+TAG_LINK_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name(
+    "tag_link", ["agent_version_id"]
+)
+TAG_LINK_EXPERIMENT_ID_FOREIGN_KEY = foreign_key_name("tag_link", ["experiment_id"])
+TAG_LINK_EXPERIMENT_RUN_ID_FOREIGN_KEY = foreign_key_name(
+    "tag_link", ["experiment_run_id"]
+)
+# Resource id leads tag id in each unique constraint so the FK cascade
+# lookups and the filter EXISTS join, both keyed by resource id, can use it.
+TAG_LINK_SESSION_ID_TAG_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "tag_link", ["session_id", "tag_id"]
+)
+TAG_LINK_COHORT_ID_TAG_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "tag_link", ["cohort_id", "tag_id"]
+)
+TAG_LINK_COHORT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "tag_link", ["cohort_version_id", "tag_id"]
+)
+TAG_LINK_AGENT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "tag_link", ["agent_version_id", "tag_id"]
+)
+TAG_LINK_EXPERIMENT_ID_TAG_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "tag_link", ["experiment_id", "tag_id"]
+)
+TAG_LINK_EXPERIMENT_RUN_ID_TAG_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "tag_link", ["experiment_run_id", "tag_id"]
+)
+TAG_LINK_RESOURCE_CHECK_CONSTRAINT = check_constraint_name(
+    "tag_link",
+    [
+        "session_id",
+        "cohort_id",
+        "cohort_version_id",
+        "agent_version_id",
+        "experiment_id",
+        "experiment_run_id",
+    ],
+)
+_TAG_LINK_RESOURCE_CHECK_SQL = (
+    "num_nonnulls(session_id, cohort_id, cohort_version_id, "
+    "agent_version_id, experiment_id, experiment_run_id) = 1"
+)
 
 
 class TagLinkORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
@@ -94,23 +143,107 @@ class TagLinkORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     __tablename__ = "tag_link"
     __table_args__ = (
         UniqueConstraint(
-            "tag_id",
-            "resource_type",
-            "resource_id",
-            name=TAG_LINK_UNIQUE_CONSTRAINT,
+            "session_id", "tag_id", name=TAG_LINK_SESSION_ID_TAG_ID_UNIQUE_CONSTRAINT
         ),
+        UniqueConstraint(
+            "cohort_id", "tag_id", name=TAG_LINK_COHORT_ID_TAG_ID_UNIQUE_CONSTRAINT
+        ),
+        UniqueConstraint(
+            "cohort_version_id",
+            "tag_id",
+            name=TAG_LINK_COHORT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT,
+        ),
+        UniqueConstraint(
+            "agent_version_id",
+            "tag_id",
+            name=TAG_LINK_AGENT_VERSION_ID_TAG_ID_UNIQUE_CONSTRAINT,
+        ),
+        UniqueConstraint(
+            "experiment_id",
+            "tag_id",
+            name=TAG_LINK_EXPERIMENT_ID_TAG_ID_UNIQUE_CONSTRAINT,
+        ),
+        UniqueConstraint(
+            "experiment_run_id",
+            "tag_id",
+            name=TAG_LINK_EXPERIMENT_RUN_ID_TAG_ID_UNIQUE_CONSTRAINT,
+        ),
+        Index(TAG_LINK_TAG_ID_INDEX, "tag_id"),
         ForeignKeyConstraint(
             ["tag_id"],
             ["tag.id"],
             name=TAG_LINK_TAG_ID_FOREIGN_KEY,
             ondelete="CASCADE",
         ),
-        Index(TAG_LINK_RESOURCE_INDEX, "resource_type", "resource_id"),
+        ForeignKeyConstraint(
+            ["session_id"],
+            ["session.id"],
+            name=TAG_LINK_SESSION_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["cohort_id"],
+            ["cohort.id"],
+            name=TAG_LINK_COHORT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["cohort_version_id"],
+            ["cohort_version.id"],
+            name=TAG_LINK_COHORT_VERSION_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["agent_version_id"],
+            ["agent_version.id"],
+            name=TAG_LINK_AGENT_VERSION_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["experiment_id"],
+            ["experiment.id"],
+            name=TAG_LINK_EXPERIMENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["experiment_run_id"],
+            ["experiment_run.id"],
+            name=TAG_LINK_EXPERIMENT_RUN_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            _TAG_LINK_RESOURCE_CHECK_SQL, name=TAG_LINK_RESOURCE_CHECK_CONSTRAINT
+        ),
     )
 
     tag_id: Mapped[uuid.UUID]
-    resource_type: Mapped[str] = mapped_column(String(MAX_RESOURCE_TYPE_LENGTH))
-    resource_id: Mapped[uuid.UUID]
+    session_id: Mapped[uuid.UUID | None]
+    cohort_id: Mapped[uuid.UUID | None]
+    cohort_version_id: Mapped[uuid.UUID | None]
+    agent_version_id: Mapped[uuid.UUID | None]
+    experiment_id: Mapped[uuid.UUID | None]
+    experiment_run_id: Mapped[uuid.UUID | None]
+
+    @classmethod
+    def get_resource_column(
+        cls, resource_type: TagResourceType
+    ) -> InstrumentedAttribute[uuid.UUID | None]:
+        """Map a resource type to its typed foreign key column.
+
+        Args:
+            resource_type: Kind of resource a tag link points at.
+
+        Returns:
+            Column storing the linked resource id for that type.
+        """
+        return {
+            TagResourceType.SESSION: cls.session_id,
+            TagResourceType.COHORT: cls.cohort_id,
+            TagResourceType.COHORT_VERSION: cls.cohort_version_id,
+            TagResourceType.AGENT_VERSION: cls.agent_version_id,
+            TagResourceType.EXPERIMENT: cls.experiment_id,
+            TagResourceType.EXPERIMENT_RUN: cls.experiment_run_id,
+        }[resource_type]
 
     @classmethod
     def from_domain(cls, link: TagLink) -> "TagLinkORM":
@@ -122,24 +255,28 @@ class TagLinkORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         Returns:
             Row without timestamps set.
         """
-        return cls(
-            id=link.id,
-            tag_id=link.tag_id,
-            resource_type=link.resource_type.value,
-            resource_id=link.resource_id,
-        )
+        row = cls(id=link.id, tag_id=link.tag_id)
+        setattr(row, cls.get_resource_column(link.resource_type).key, link.resource_id)
+        return row
 
     def to_domain(self) -> TagLink:
         """Build a domain tag link from this row.
 
+        Raises:
+            ValueError: No typed resource column carries a value.
+
         Returns:
             Tag link with timestamps set.
         """
-        return TagLink(
-            id=self.id,
-            tag_id=self.tag_id,
-            resource_type=TagResourceType(self.resource_type),
-            resource_id=self.resource_id,
-            created=self.created,
-            updated=self.updated,
-        )
+        for resource_type in TagResourceType:
+            resource_id = getattr(self, self.get_resource_column(resource_type).key)
+            if resource_id is not None:
+                return TagLink(
+                    id=self.id,
+                    tag_id=self.tag_id,
+                    resource_type=resource_type,
+                    resource_id=resource_id,
+                    created=self.created,
+                    updated=self.updated,
+                )
+        raise ValueError(f"Tag link {self.id} has no resource id set")

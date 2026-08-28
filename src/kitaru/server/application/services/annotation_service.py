@@ -125,7 +125,7 @@ class AnnotationService:
         Returns:
             Created annotation.
         """
-        await self._sessions.get(command.session_id)
+        await self._sessions.get(command.session_id, include_payloads=False)
         await self._check_selector(command.session_id, command.selector)
         annotation = Annotation(
             owner_id=actor.account.id,

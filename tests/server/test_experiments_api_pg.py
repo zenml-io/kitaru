@@ -96,6 +96,32 @@ async def test_duplicate_name_conflict(
     assert response.json() == {"detail": "Experiment name 'exp1' is already registered"}
 
 
+async def test_same_name_different_agent(
+    client: httpx.AsyncClient, agent_id: str
+) -> None:
+    """Accept the same experiment name under another agent."""
+    await _create_evaluator(client)
+    other = (await client.post("/api/v1/agents", json={"name": "reviewer"})).json()
+    response = await client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "exp1",
+            "agent_id": agent_id,
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert response.status_code == 201
+    response = await client.post(
+        "/api/v1/experiments",
+        json={
+            "name": "exp1",
+            "agent_id": other["id"],
+            "evaluators": [{"evaluator": "accuracy"}],
+        },
+    )
+    assert response.status_code == 201
+
+
 async def test_update_persists_across_requests(
     client: httpx.AsyncClient, agent_id: str
 ) -> None:

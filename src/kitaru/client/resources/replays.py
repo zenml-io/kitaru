@@ -124,6 +124,18 @@ class ReplaysResource:
         async for item in iterate_pages(params or ReplayListParams(), self.list):
             yield item
 
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            APIError: The request failed, including 404 for a missing replay
+                and 409 when the replay belongs to an experiment run.
+        """
+        await self._client.request("DELETE", f"/api/v1/replays/{replay_id}")
+
     async def tool_lookup(
         self, replay_id: uuid.UUID, request: ToolLookupRequest
     ) -> ToolLookupResponse:

@@ -22,14 +22,18 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeBlobDataStore,
+    FakeBlobRepository,
     FakeReplayRepository,
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    build_payload_store,
     create_session,
 )
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
+from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.server.application.models.auth import (
     AuthContext,
     GrantKind,
@@ -40,11 +44,14 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.session_node_service import (
     SessionNodeService,
 )
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.session import SessionAccessDenied
 from kitaru.server.domain.session_node import SessionNodeParentNotFound
 from kitaru.server.domain.task import AgentTask
@@ -71,27 +78,38 @@ def task_repository() -> FakeTaskRepository:
 
 
 @pytest.fixture
+def payload_store() -> PayloadStore:
+    """Provide a payload store backed by fresh fake blob storage."""
+    return build_payload_store().store
+
+
+@pytest.fixture
 def service(
     node_repository: FakeSessionNodeRepository,
     session_repository: FakeSessionRepository,
     task_repository: FakeTaskRepository,
+    payload_store: PayloadStore,
 ) -> SessionNodeService:
     """Provide a session node service backed by the fake repositories."""
     return SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
+        payload_store=payload_store,
     )
 
 
 @pytest.fixture
-def session_service(session_repository: FakeSessionRepository) -> SessionService:
+def session_service(
+    session_repository: FakeSessionRepository, payload_store: PayloadStore
+) -> SessionService:
     """Provide a session service sharing the fake session repository."""
     return SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
 
 
@@ -143,7 +161,7 @@ async def test_ingest_insert_assigns_ids_and_rollups(
     assert stored[1].parent_id == stored[0].id
     assert stored[1].cache_key is not None
 
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.cost == Decimal("1.50")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 10
@@ -287,7 +305,7 @@ async def test_ingest_replace_updates_rollup_delta(
         [_llm_node(0, cost=Decimal("4.00"), tokens=TokenUsage(input_tokens=30))],
         actor=ACTOR,
     )
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.cost == Decimal("4.00")
     assert session.tokens is not None
     assert session.tokens.input_tokens == 30
@@ -313,7 +331,7 @@ async def test_ingest_replace_changing_node_type_updates_call_counts(
         ],
         actor=ACTOR,
     )
-    session = await session_repository.get(session_id)
+    session = await session_repository.get(session_id, include_payloads=True)
     assert session.llm_call_count == 0
     assert session.tool_call_count == 0
 
@@ -326,9 +344,9 @@ async def test_ingest_retry_identical_batch_nets_zero_delta(
     """Net a zero rollup delta when an identical batch is retried."""
     batch = [_llm_node(0, cost=Decimal("2.00"), tokens=TokenUsage(input_tokens=5))]
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    before = await session_repository.get(session_id)
+    before = await session_repository.get(session_id, include_payloads=True)
     await service.ingest_nodes(session_id, batch, actor=ACTOR)
-    after = await session_repository.get(session_id)
+    after = await session_repository.get(session_id, include_payloads=True)
     assert after.cost == before.cost
     assert after.tokens == before.tokens
     assert after.llm_call_count == before.llm_call_count
@@ -377,9 +395,12 @@ async def test_list_nodes_include_payloads_true(
         SessionNodeFilter(session_id=session_id, include_payloads=True), actor=ACTOR
     )
     assert next_cursor is None
-    assert nodes[0].inputs == {"q": "hi"}
-    assert nodes[0].outputs == {"a": "there"}
-    assert nodes[0].attributes == {"k": 1}
+    assert nodes[0].inputs is not None
+    assert nodes[0].inputs.value == {"q": "hi"}
+    assert nodes[0].outputs is not None
+    assert nodes[0].outputs.value == {"a": "there"}
+    assert nodes[0].attributes is not None
+    assert nodes[0].attributes.value == {"k": 1}
 
 
 async def test_list_nodes_include_payloads_false(
@@ -559,3 +580,208 @@ async def test_list_nodes_allows_a_task_principal_for_its_input_session(
     )
     assert nodes == []
     assert next_cursor is None
+
+
+def _service_with_threshold(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    threshold_bytes: int,
+) -> tuple[SessionNodeService, FakeBlobRepository, FakeBlobDataStore]:
+    """Build a session node service backed by a payload store at a given threshold."""
+    fakes = build_payload_store(threshold_bytes)
+    service = SessionNodeService(
+        repository=node_repository,
+        session_repository=session_repository,
+        task_repository=task_repository,
+        payload_store=fakes.store,
+    )
+    return service, fakes.blob_repository, fakes.blob_data_store
+
+
+async def test_ingest_offloads_over_threshold_payloads(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Offload reasoning, inputs, outputs, and attributes above the threshold."""
+    service, blob_repository, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=10
+    )
+    reasoning = "r" * 50
+    inputs = {"a": "i" * 50}
+    outputs = {"b": "o" * 50}
+    attributes = {"c": "attr" * 50}
+    batch = [
+        _llm_node(
+            0,
+            reasoning=reasoning,
+            inputs=inputs,
+            outputs=outputs,
+            attributes=attributes,
+        )
+    ]
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    raw = (
+        await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
+    )[0]
+    assert raw.reasoning is not None
+    assert raw.reasoning.blob_id is not None
+    assert raw.inputs is not None
+    assert raw.inputs.blob_id is not None
+    assert raw.outputs is not None
+    assert raw.outputs.blob_id is not None
+    assert raw.attributes is not None
+    assert raw.attributes.blob_id is not None
+
+    inputs_blob = await blob_repository.get(raw.inputs.blob_id)
+    assert inputs_blob.owner_id == ACTOR.account.id
+    assert inputs_blob.media_type == PayloadMediaType.JSON
+    assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
+
+    reasoning_blob = await blob_repository.get(raw.reasoning.blob_id)
+    assert reasoning_blob.media_type == PayloadMediaType.TEXT
+
+
+async def test_ingest_under_threshold_stays_inline(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Keep small payloads inline, with no blob reference."""
+    service, _, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=1024
+    )
+    batch = [
+        _llm_node(0, reasoning="short", inputs={"a": 1}, attributes={"c": 3}),
+    ]
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    raw = (
+        await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
+    )[0]
+    assert raw.reasoning is not None
+    assert raw.reasoning.value == "short"
+    assert raw.reasoning.blob_id is None
+    assert raw.inputs is not None
+    assert raw.inputs.value == {"a": 1}
+    assert raw.inputs.blob_id is None
+    assert raw.attributes is not None
+    assert raw.attributes.value == {"c": 3}
+    assert raw.attributes.blob_id is None
+    assert raw.outputs is None
+
+
+async def test_ingest_dedupes_identical_inputs_across_nodes(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Share one blob between two nodes offloading the same value."""
+    service, _, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=10
+    )
+    shared_inputs = {"a": "i" * 50}
+    batch = [
+        _llm_node(0, inputs=shared_inputs),
+        _llm_node(1, inputs=shared_inputs),
+    ]
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    raw = await node_repository.get_by_indexes(
+        session_id, [0, 1], include_payloads=True
+    )
+    assert raw[0].inputs is not None
+    assert raw[1].inputs is not None
+    assert raw[0].inputs.blob_id is not None
+    assert raw[0].inputs.blob_id == raw[1].inputs.blob_id
+
+
+async def test_ingest_threshold_zero_offloads_every_non_null_payload(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Offload every non-null payload when the threshold is zero."""
+    service, _, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=0
+    )
+    batch = [_llm_node(0, inputs={"a": 1})]
+    await service.ingest_nodes(session_id, batch, actor=ACTOR)
+
+    raw = (
+        await node_repository.get_by_indexes(session_id, [0], include_payloads=True)
+    )[0]
+    assert raw.inputs is not None
+    assert raw.inputs.blob_id is not None
+    # outputs was never set, so it stays trivially None with no payload at all.
+    assert raw.outputs is None
+
+
+async def test_ingest_cache_key_computed_from_raw_inputs_before_offload(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Compute the cache key from the raw inputs, unaffected by offload."""
+    service, _, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=10
+    )
+    inputs = {"q": "i" * 50}
+    batch = [
+        SessionNodeUpsert(
+            index=0,
+            node_type=NodeType.TOOL_CALL,
+            name="search",
+            status=NodeStatus.COMPLETED,
+            tool_name="search",
+            inputs=inputs,
+        )
+    ]
+    stored = await service.ingest_nodes(session_id, batch, actor=ACTOR)
+    assert stored[0].cache_key == compute_tool_cache_key("search", inputs)
+
+
+async def test_list_all_nodes_include_payloads_hydrates_offloaded_values(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Return the original values for offloaded payloads when listing with payloads."""
+    service, _, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=10
+    )
+    inputs = {"a": "i" * 50}
+    await service.ingest_nodes(session_id, [_llm_node(0, inputs=inputs)], actor=ACTOR)
+
+    nodes = await service.list_all_nodes(session_id, include_payloads=True, actor=ACTOR)
+    assert nodes[0].inputs is not None
+    assert nodes[0].inputs.value == inputs
+
+
+async def test_list_all_nodes_exclude_payloads_returns_no_payloads(
+    node_repository: FakeSessionNodeRepository,
+    session_repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    session_id: uuid.UUID,
+) -> None:
+    """Return no payloads, offloaded or inline, when payloads are excluded."""
+    service, _, _ = _service_with_threshold(
+        node_repository, session_repository, task_repository, threshold_bytes=10
+    )
+    inputs = {"a": "i" * 50}
+    await service.ingest_nodes(session_id, [_llm_node(0, inputs=inputs)], actor=ACTOR)
+
+    nodes = await service.list_all_nodes(
+        session_id, include_payloads=False, actor=ACTOR
+    )
+    assert nodes[0].inputs is None
+    assert nodes[0].outputs is None
+    assert nodes[0].attributes is None

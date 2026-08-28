@@ -17,6 +17,7 @@ from typing import Any
 
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionListParams,
     SessionResponse,
     SessionUpdateRequest,
@@ -45,6 +46,8 @@ def session_create_to_command(body: SessionCreateRequest) -> SessionCreate:
         origin=body.origin,
         status=body.status,
         name=body.name,
+        input_text_selector=body.input_text_selector,
+        output_text_selector=body.output_text_selector,
         inputs=body.inputs,
         outputs=body.outputs,
         error=body.error,
@@ -79,8 +82,6 @@ def session_to_response(session: Session) -> SessionResponse:
         origin=session.origin,
         status=session.status,
         name=session.name,
-        inputs=session.inputs,
-        outputs=session.outputs,
         error=session.error,
         started_at=session.started_at,
         ended_at=session.ended_at,
@@ -95,6 +96,24 @@ def session_to_response(session: Session) -> SessionResponse:
         tool_call_count=session.tool_call_count,
         created=session.created,
         updated=session.updated,
+    )
+
+
+def session_to_detail_response(session: Session) -> SessionDetailResponse:
+    """Convert a session entity to its detail response DTO.
+
+    Args:
+        session: Stored session with payloads resolved.
+
+    Returns:
+        Session detail response.
+    """
+    return SessionDetailResponse(
+        **dict(session_to_response(session)),
+        input_text_selector=session.input_text_selector,
+        output_text_selector=session.output_text_selector,
+        inputs=session.inputs.value if session.inputs is not None else None,
+        outputs=session.outputs.value if session.outputs is not None else None,
     )
 
 
@@ -131,6 +150,7 @@ def session_update_to_command(body: SessionUpdateRequest) -> SessionUpdate:
     for field in (
         "status",
         "outputs",
+        "output_text_selector",
         "error",
         "ended_at",
         "name",

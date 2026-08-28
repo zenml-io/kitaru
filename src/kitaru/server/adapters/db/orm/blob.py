@@ -20,7 +20,6 @@ from sqlalchemy import (
     DateTime,
     ForeignKeyConstraint,
     Index,
-    LargeBinary,
     String,
     UniqueConstraint,
 )
@@ -32,9 +31,11 @@ from kitaru.server.adapters.db.orm.orm_utils import (
     index_name,
     unique_constraint_name,
 )
-from kitaru.server.domain.blob import Blob
+from kitaru.server.domain.blob import Blob, BlobStorageBackend
 
-BLOB_SHA256_UNIQUE_CONSTRAINT = unique_constraint_name("blob", ["sha256"])
+BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "blob", ["sha256", "media_type"]
+)
 BLOB_OWNER_ID_FOREIGN_KEY = foreign_key_name("blob", ["owner_id"])
 BLOB_OWNER_ID_INDEX = index_name("blob", ["owner_id"])
 
@@ -44,7 +45,9 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
 
     __tablename__ = "blob"
     __table_args__ = (
-        UniqueConstraint("sha256", name=BLOB_SHA256_UNIQUE_CONSTRAINT),
+        UniqueConstraint(
+            "sha256", "media_type", name=BLOB_SHA256_MEDIA_TYPE_UNIQUE_CONSTRAINT
+        ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=BLOB_OWNER_ID_FOREIGN_KEY
         ),
@@ -60,7 +63,7 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
     sha256: Mapped[str] = mapped_column(String(64))
     size: Mapped[int]
     media_type: Mapped[str] = mapped_column(String(255))
-    data: Mapped[bytes] = mapped_column(LargeBinary)
+    stored_in: Mapped[str] = mapped_column(String(16))
 
     @classmethod
     def from_domain(cls, blob: Blob) -> "BlobORM":
@@ -78,7 +81,7 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
             sha256=blob.sha256,
             size=blob.size,
             media_type=blob.media_type,
-            data=blob.data,
+            stored_in=blob.stored_in.value,
         )
 
     def to_domain(self) -> Blob:
@@ -93,6 +96,6 @@ class BlobORM(UUIDPrimaryKeyMixin, Base):
             sha256=self.sha256,
             size=self.size,
             media_type=self.media_type,
-            data=self.data,
+            stored_in=BlobStorageBackend(self.stored_in),
             created=self.created,
         )

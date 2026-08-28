@@ -33,6 +33,7 @@ from kitaru.api_models.v1.task import (
     TaskWithSpec,
 )
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.adapters.rest.mapping.hooks import hook_to_response
 from kitaru.server.application.models.task import ClaimedTask, TaskFilter, TaskUpdate
 from kitaru.server.domain.task import (
     AgentTask,
@@ -204,6 +205,7 @@ def spec_to_response(spec: TaskSpec) -> TaskSpecResponse:
         ),
         env=spec.env,
         secret_env=spec.secret_env,
+        hooks=[hook_to_response(hook) for hook in spec.hooks],
         details=_details_to_response(spec),
     )
 

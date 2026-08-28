@@ -34,6 +34,8 @@ class ReplayRepository(Protocol):
             DuplicateReplayForBaseline: The run already holds a replay for
                 this baseline session.
             ReplayAlreadyExistsForJob: The job already has a replay.
+            SessionNotFound: No session has the baseline session id.
+            ExperimentRunNotFound: No experiment run has the replay's run id.
 
         Returns:
             Stored replay with timestamps set.
@@ -41,10 +43,13 @@ class ReplayRepository(Protocol):
         ...
 
     async def create_many(self, replays: list[Replay]) -> list[Replay]:
-        """Persist many new replays in one round trip, skipping constraint translation.
+        """Persist many new replays in one round trip.
 
         Args:
             replays: Replays to store.
+
+        Raises:
+            SessionNotFound: No session has one of the baseline session ids.
 
         Returns:
             Stored replays with timestamps set, in the same order.
@@ -152,6 +157,17 @@ class ReplayRepository(Protocol):
         Returns:
             Stored replays with the updated timestamp renewed, in the same
             order.
+        """
+        ...
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
         """
         ...
 

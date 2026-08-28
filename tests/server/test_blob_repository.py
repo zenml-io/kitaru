@@ -19,22 +19,51 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeBlobRepository, pg_session, postgres_available
+from conftest import (
+    FakeBlobRepository,
+    pg_session,
+    pg_session_with_engine,
+    postgres_available,
+)
+from kitaru.api_models.v1.job import JobKind, JobStatus
+from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
+from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
 from kitaru.server.adapters.db.repositories.blob_repository import SQLBlobRepository
+from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.plugin_repository import (
     SQLPluginRepository,
 )
+from kitaru.server.adapters.db.repositories.session_node_repository import (
+    SQLSessionNodeRepository,
+)
+from kitaru.server.adapters.db.repositories.session_repository import (
+    SQLSessionRepository,
+)
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.interfaces.blob_repository import BlobRepository
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.blob import Blob, BlobInUse, BlobNotFound
+from kitaru.server.domain.agent import Agent
+from kitaru.server.domain.blob import (
+    Blob,
+    BlobInUse,
+    BlobNotFound,
+    BlobStorageBackend,
+)
+from kitaru.server.domain.job import Job
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.plugin import (
+    PackagePluginSource,
     Plugin,
     PluginKind,
     ScriptPluginSource,
 )
+from kitaru.server.domain.session import Session
+from kitaru.server.domain.session_node import SessionNode
+from kitaru.server.domain.task import ImportTask
 
 Setup = tuple[BlobRepository, uuid.UUID]
 
@@ -45,7 +74,7 @@ def _blob(owner_id: uuid.UUID | None, content: bytes = b"content") -> Blob:
         sha256=hashlib.sha256(content).hexdigest(),
         size=len(content),
         media_type="text/plain",
-        data=content,
+        stored_in=BlobStorageBackend.DATABASE,
     )
 
 
@@ -70,7 +99,7 @@ async def test_create_sets_timestamp(setup: Setup) -> None:
     assert blob.owner_id == owner_id
     assert blob.size == len(b"content")
     assert blob.media_type == "text/plain"
-    assert blob.data == b"content"
+    assert blob.stored_in == BlobStorageBackend.DATABASE
     assert blob.created is not None
 
 
@@ -84,7 +113,7 @@ async def test_create_and_round_trip_without_owner(setup: Setup) -> None:
 
 
 async def test_create_dedup(setup: Setup) -> None:
-    """Return the existing row unmarked as created on a duplicate sha256."""
+    """Return the existing row unmarked as created on a duplicate sha256 and type."""
     repository, owner_id = setup
     first, created_first = await repository.create(_blob(owner_id, b"same"))
     assert created_first is True
@@ -94,8 +123,27 @@ async def test_create_dedup(setup: Setup) -> None:
     assert second.sha256 == first.sha256
 
 
+async def test_create_same_content_different_media_type_creates_second_row(
+    setup: Setup,
+) -> None:
+    """Create a second row for identical bytes stored under a different media type."""
+    repository, owner_id = setup
+    text_blob = _blob(owner_id, b"same")
+    json_blob = _blob(owner_id, b"same").model_copy(
+        update={"media_type": "application/json"}
+    )
+    first, created_first = await repository.create(text_blob)
+    assert created_first is True
+    second, created_second = await repository.create(json_blob)
+    assert created_second is True
+    assert second.id != first.id
+    assert second.sha256 == first.sha256
+    assert second.media_type == "application/json"
+    assert first.media_type == "text/plain"
+
+
 async def test_get(setup: Setup) -> None:
-    """Load a stored blob by id with its content."""
+    """Load a stored blob by id."""
     repository, owner_id = setup
     created, _ = await repository.create(_blob(owner_id))
     loaded = await repository.get(created.id)
@@ -148,3 +196,111 @@ async def test_delete_in_use(setup: Setup) -> None:
 
     with pytest.raises(BlobInUse, match=f"Blob {blob.id} is in use"):
         await repository.delete(blob.id)
+
+
+async def test_delete_leaves_task_with_payload() -> None:
+    """Deleting a blob leaves the import task that names it as payload."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session() as session:
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        blob_repository = SQLBlobRepository(session)
+        payload_blob, _ = await blob_repository.create(_blob(owner.id, b"payload"))
+        plugin_repository = SQLPluginRepository(session)
+        plugin = await plugin_repository.create(
+            Plugin(owner_id=owner.id, kind=PluginKind.IMPORTER, name="importer")
+        )
+        version = await plugin_repository.create_version(
+            plugin.id,
+            PackagePluginSource(
+                requirement="kitaru-importer==1.0.0", entrypoint="pkg:run"
+            ),
+            display_version=None,
+        )
+        job_repository = SQLJobRepository(session)
+        job = await job_repository.create(
+            Job(owner_id=owner.id, kind=JobKind.IMPORT, status=JobStatus.PENDING)
+        )
+        task_repository = SQLTaskRepository(session)
+        task = await task_repository.create(
+            ImportTask(
+                job_id=job.id,
+                plugin_version_id=version.id,
+                payload_blob_id=payload_blob.id,
+                agent_id=agent.id,
+            )
+        )
+
+        await blob_repository.delete(payload_blob.id)
+
+        stored = await task_repository.get(task.id)
+        assert isinstance(stored, ImportTask)
+        assert stored.payload_blob_id == payload_blob.id
+
+
+async def test_delete_in_use_by_session() -> None:
+    """Reject deleting a blob referenced by a session's offloaded payload."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        blob_repository = SQLBlobRepository(session)
+        blob, _ = await blob_repository.create(_blob(owner.id, b"inputs"))
+        session_repository = SQLSessionRepository(session, engine)
+        await session_repository.create(
+            Session(
+                owner_id=owner.id,
+                agent_id=agent.id,
+                number=1,
+                origin=SessionOrigin.RECORDED,
+                inputs=Payload.from_ref(blob.id),
+            )
+        )
+
+        with pytest.raises(BlobInUse, match=f"Blob {blob.id} is in use"):
+            await blob_repository.delete(blob.id)
+
+
+async def test_delete_in_use_by_session_node() -> None:
+    """Reject deleting a blob referenced by a session node's offloaded payload."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner = await SQLAccountRepository(session).create(Account(name="owner"))
+        agent = await SQLAgentRepository(session).create(
+            Agent(owner_id=owner.id, name="assistant")
+        )
+        blob_repository = SQLBlobRepository(session)
+        blob, _ = await blob_repository.create(_blob(owner.id, b"outputs"))
+        session_repository = SQLSessionRepository(session, engine)
+        stored_session = await session_repository.create(
+            Session(
+                owner_id=owner.id,
+                agent_id=agent.id,
+                number=1,
+                origin=SessionOrigin.RECORDED,
+            )
+        )
+        session_node_repository = SQLSessionNodeRepository(session)
+        await session_node_repository.upsert_batch(
+            stored_session.id,
+            [
+                SessionNode(
+                    session_id=stored_session.id,
+                    index=0,
+                    node_type=NodeType.LLM_CALL,
+                    name="call",
+                    status=NodeStatus.COMPLETED,
+                    outputs=Payload.from_ref(blob.id),
+                )
+            ],
+        )
+
+        with pytest.raises(BlobInUse, match=f"Blob {blob.id} is in use"):
+            await blob_repository.delete(blob.id)

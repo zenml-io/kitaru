@@ -55,8 +55,9 @@ from kitaru.server.domain.agent_version import (
     RunSpec,
 )
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.job import JobAlreadySettled, JobNotFound
+from kitaru.server.domain.job import JobAlreadySettled, JobNotFound, JobNotSettled
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
+from kitaru.server.domain.session import SessionNotEvaluatable
 from kitaru.server.domain.task import (
     AgentTask,
     DuplicateEvaluationTask,
@@ -325,14 +326,36 @@ async def test_create_evaluations_rejects_an_unknown_session(
         )
 
 
+async def test_create_evaluations_rejects_an_in_progress_session(
+    services: JobAndTaskServices,
+) -> None:
+    """An in-progress input session fails the whole batch."""
+    await _evaluator_version(services, "scorer")
+    session = await create_session(
+        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+    )
+    with pytest.raises(SessionNotEvaluatable):
+        await services.job_service.create_evaluations(
+            EvaluationBatchCreate(
+                input_session_ids=[session.id],
+                evaluators=[EvaluatorConfigInput(evaluator="scorer")],
+            ),
+            actor=ACTOR,
+        )
+
+
 async def test_create_evaluations_scoped_evaluator_all_sessions_match(
     services: JobAndTaskServices,
 ) -> None:
     """Accept a scoped evaluator when every input session belongs to its agent."""
     agent_id = uuid.uuid4()
     await _evaluator_version(services, "scorer", agent_id=agent_id)
-    session_a = await create_session(services.sessions, ACTOR.account.id, agent_id)
-    session_b = await create_session(services.sessions, ACTOR.account.id, agent_id)
+    session_a = await create_session(
+        services.sessions, ACTOR.account.id, agent_id, status=SessionStatus.COMPLETED
+    )
+    session_b = await create_session(
+        services.sessions, ACTOR.account.id, agent_id, status=SessionStatus.COMPLETED
+    )
     job = await services.job_service.create_evaluations(
         EvaluationBatchCreate(
             input_session_ids=[session_a.id, session_b.id],
@@ -349,7 +372,10 @@ async def test_create_evaluations_scoped_evaluator_session_from_other_agent(
     """Reject a scoped evaluator whose only session belongs to another agent."""
     await _evaluator_version(services, "scorer", agent_id=uuid.uuid4())
     session = await create_session(
-        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     with pytest.raises(ValidationError, match="scoped to a different agent"):
         await services.job_service.create_evaluations(
@@ -367,10 +393,16 @@ async def test_create_evaluations_rejects_sessions_spanning_agents(
     """Reject input sessions that do not all belong to one agent."""
     await _evaluator_version(services, "scorer")
     session_a = await create_session(
-        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     session_b = await create_session(
-        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     with pytest.raises(ValidationError, match="single agent"):
         await services.job_service.create_evaluations(
@@ -389,8 +421,12 @@ async def test_create_evaluations_makes_one_continue_task_per_pair(
     await _evaluator_version(services, "accuracy")
     await _evaluator_version(services, "tone")
     agent_id = uuid.uuid4()
-    session_a = await create_session(services.sessions, ACTOR.account.id, agent_id)
-    session_b = await create_session(services.sessions, ACTOR.account.id, agent_id)
+    session_a = await create_session(
+        services.sessions, ACTOR.account.id, agent_id, status=SessionStatus.COMPLETED
+    )
+    session_b = await create_session(
+        services.sessions, ACTOR.account.id, agent_id, status=SessionStatus.COMPLETED
+    )
 
     job = await services.job_service.create_evaluations(
         EvaluationBatchCreate(
@@ -417,7 +453,10 @@ async def test_create_evaluations_stamps_the_job_kind_evaluation(
     """An evaluation batch's job carries the evaluation kind."""
     await _evaluator_version(services, "accuracy")
     session = await create_session(
-        services.sessions, ACTOR.account.id, agent_id=uuid.uuid4()
+        services.sessions,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
     )
     job = await services.job_service.create_evaluations(
         EvaluationBatchCreate(
@@ -481,13 +520,23 @@ async def test_cancel_job_rejects_an_already_settled_job(
 
 
 async def test_delete_job_cascades_its_tasks(services: JobAndTaskServices) -> None:
-    """Deleting a job removes its tasks in the fake, mirroring the cascade."""
-    job = await create_job(services.jobs, ACTOR.account.id)
+    """Deleting a settled job removes its tasks in the fake, mirroring the cascade."""
+    job = await create_job(services.jobs, ACTOR.account.id, status=JobStatus.COMPLETED)
     task = await create_agent_task(services.tasks, job.id)
     await services.job_service.delete_job(job.id, actor=ACTOR)
     with pytest.raises(JobNotFound):
         await services.jobs.get(job.id)
     assert await services.tasks.get_many([task.id]) == {}
+
+
+async def test_delete_job_rejects_an_unsettled_job(
+    services: JobAndTaskServices,
+) -> None:
+    """Deleting a job that has not settled conflicts and leaves it stored."""
+    job = await create_job(services.jobs, ACTOR.account.id)
+    with pytest.raises(JobNotSettled):
+        await services.job_service.delete_job(job.id, actor=ACTOR)
+    assert (await services.jobs.get(job.id)).id == job.id
 
 
 async def test_settlement_precedence_failed_over_canceled_over_completed(

@@ -18,7 +18,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal, localcontext
 from typing import Any
 
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
 from kitaru_evaluator.basic import cost, latency, tool_call_patterns
@@ -26,7 +26,7 @@ from kitaru_evaluator.basic import cost, latency, tool_call_patterns
 
 def _view(**session_fields: Any) -> SessionView:
     return SessionView(
-        session=SessionResponse.model_construct(**session_fields),
+        session=SessionDetailResponse.model_construct(**session_fields),
         nodes=[],
     )
 

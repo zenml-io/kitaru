@@ -40,12 +40,15 @@ from kitaru.server.adapters.db.orm.base import (
 from kitaru.server.adapters.db.orm.orm_utils import (
     foreign_key_name,
     index_name,
+    payload_from_columns,
+    split_payload,
     unique_constraint_name,
 )
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.session import Session
 
-SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
-    "session", ["imported_from", "external_id"]
+SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "session", ["imported_from", "external_id", "agent_id"]
 )
 SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT = unique_constraint_name(
     "session", ["agent_id", "number"]
@@ -54,6 +57,8 @@ SESSION_AGENT_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_id"])
 SESSION_AGENT_VERSION_ID_FOREIGN_KEY = foreign_key_name("session", ["agent_version_id"])
 SESSION_OWNER_ID_FOREIGN_KEY = foreign_key_name("session", ["owner_id"])
 SESSION_TASK_ID_FOREIGN_KEY = foreign_key_name("session", ["task_id"])
+SESSION_INPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["inputs_blob_id"])
+SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY = foreign_key_name("session", ["outputs_blob_id"])
 SESSION_AGENT_ID_ID_INDEX = index_name("session", ["agent_id", "id"])
 SESSION_AGENT_VERSION_ID_ID_INDEX = index_name("session", ["agent_version_id", "id"])
 SESSION_STATUS_INDEX = index_name("session", ["status"])
@@ -72,7 +77,8 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         UniqueConstraint(
             "imported_from",
             "external_id",
-            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_UNIQUE_CONSTRAINT,
+            "agent_id",
+            name=SESSION_IMPORTED_FROM_EXTERNAL_ID_AGENT_ID_UNIQUE_CONSTRAINT,
         ),
         UniqueConstraint(
             "agent_id",
@@ -80,12 +86,16 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_AGENT_ID_NUMBER_UNIQUE_CONSTRAINT,
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=SESSION_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=SESSION_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["agent_version_id"],
             ["agent_version.id"],
             name=SESSION_AGENT_VERSION_ID_FOREIGN_KEY,
+            ondelete="SET NULL",
         ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=SESSION_OWNER_ID_FOREIGN_KEY
@@ -98,6 +108,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             name=SESSION_TASK_ID_FOREIGN_KEY,
             ondelete="SET NULL",
             use_alter=True,
+        ),
+        ForeignKeyConstraint(
+            ["inputs_blob_id"], ["blob.id"], name=SESSION_INPUTS_BLOB_ID_FOREIGN_KEY
+        ),
+        ForeignKeyConstraint(
+            ["outputs_blob_id"], ["blob.id"], name=SESSION_OUTPUTS_BLOB_ID_FOREIGN_KEY
         ),
         Index(SESSION_AGENT_ID_ID_INDEX, "agent_id", "id"),
         Index(SESSION_AGENT_VERSION_ID_ID_INDEX, "agent_version_id", "id"),
@@ -114,8 +130,12 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     origin: Mapped[str] = mapped_column(String(ORIGIN_LENGTH))
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     name: Mapped[str | None] = mapped_column(Text)
+    input_text_selector: Mapped[str | None] = mapped_column(Text)
+    output_text_selector: Mapped[str | None] = mapped_column(Text)
     inputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    inputs_blob_id: Mapped[uuid.UUID | None]
     outputs: Mapped[Any | None] = mapped_column(JSONB(none_as_null=True))
+    outputs_blob_id: Mapped[uuid.UUID | None]
     error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -136,52 +156,73 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     def from_domain(cls, session: Session) -> "SessionORM":
         """Build a row from a domain session.
 
-        The token usage is flattened into the token columns, all null when
-        the session carries no token usage.
-
         Args:
             session: Session to store.
 
         Returns:
             Row without timestamps set.
         """
-        tokens = session.tokens
-        return cls(
-            id=session.id,
-            owner_id=session.owner_id,
-            agent_id=session.agent_id,
-            number=session.number,
-            agent_version_id=session.agent_version_id,
-            task_id=session.task_id,
-            origin=session.origin.value,
-            status=session.status.value,
-            name=session.name,
-            inputs=session.inputs,
-            outputs=session.outputs,
-            error=session.error,
-            started_at=session.started_at,
-            ended_at=session.ended_at,
-            external_id=session.external_id,
-            metadata_=session.metadata,
-            imported_from=session.imported_from,
-            framework=session.framework,
-            adapter_version=session.adapter_version,
-            cost=session.cost,
-            input_tokens=tokens.input_tokens if tokens is not None else None,
-            output_tokens=tokens.output_tokens if tokens is not None else None,
-            cached_input_tokens=(
-                tokens.cached_input_tokens if tokens is not None else None
-            ),
-            reasoning_tokens=tokens.reasoning_tokens if tokens is not None else None,
-            llm_call_count=session.llm_call_count,
-            tool_call_count=session.tool_call_count,
-        )
+        row = cls(id=session.id)
+        row.apply_domain(session)
+        row.inputs, row.inputs_blob_id = split_payload(session.inputs)
+        return row
 
-    def to_domain(self) -> Session:
+    def apply_domain(self, session: Session) -> None:
+        """Copy the mutable fields of a domain session onto this row.
+
+        The inputs are create-only and never written here. The outputs are
+        written only when set on the session, so a session loaded without
+        payloads writes none back. A payload with a blob ref
+        writes the ref column and leaves the inline column null, an
+        inline-only payload writes the inline column and leaves the ref
+        column null, and ``None`` writes null to both. The token usage is
+        flattened into the token columns, all null when the session carries
+        no token usage.
+
+        Args:
+            session: Session carrying the desired field values.
+        """
+        tokens = session.tokens
+        if "outputs" in session.model_fields_set:
+            self.outputs, self.outputs_blob_id = split_payload(session.outputs)
+        self.owner_id = session.owner_id
+        self.agent_id = session.agent_id
+        self.number = session.number
+        self.agent_version_id = session.agent_version_id
+        self.task_id = session.task_id
+        self.origin = session.origin.value
+        self.status = session.status.value
+        self.name = session.name
+        self.input_text_selector = session.input_text_selector
+        self.output_text_selector = session.output_text_selector
+        self.error = session.error
+        self.started_at = session.started_at
+        self.ended_at = session.ended_at
+        self.external_id = session.external_id
+        self.metadata_ = session.metadata
+        self.imported_from = session.imported_from
+        self.framework = session.framework
+        self.adapter_version = session.adapter_version
+        self.cost = session.cost
+        self.input_tokens = tokens.input_tokens if tokens is not None else None
+        self.output_tokens = tokens.output_tokens if tokens is not None else None
+        self.cached_input_tokens = (
+            tokens.cached_input_tokens if tokens is not None else None
+        )
+        self.reasoning_tokens = tokens.reasoning_tokens if tokens is not None else None
+        self.llm_call_count = session.llm_call_count
+        self.tool_call_count = session.tool_call_count
+
+    def to_domain(self, exclude: set[str]) -> Session:
         """Build a domain session from this row.
 
         The token columns collapse back to ``None`` only when every one of
         them is null, matching a session that has never rolled up a node.
+
+        Args:
+            exclude: Keys of payload columns to leave unread and unset on
+                the session, so a column the load deferred never fires a
+                lazy load.
 
         Returns:
             Session with timestamps set.
@@ -205,6 +246,15 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             if has_tokens
             else None
         )
+        payloads: dict[str, Payload | None] = {}
+        if "inputs" not in exclude:
+            payloads["inputs"] = payload_from_columns(
+                self.inputs, self.inputs_blob_id, media_type=PayloadMediaType.JSON
+            )
+        if "outputs" not in exclude:
+            payloads["outputs"] = payload_from_columns(
+                self.outputs, self.outputs_blob_id, media_type=PayloadMediaType.JSON
+            )
         return Session(
             id=self.id,
             owner_id=self.owner_id,
@@ -215,8 +265,9 @@ class SessionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             origin=SessionOrigin(self.origin),
             status=SessionStatus(self.status),
             name=self.name,
-            inputs=self.inputs,
-            outputs=self.outputs,
+            input_text_selector=self.input_text_selector,
+            output_text_selector=self.output_text_selector,
+            **payloads,
             error=self.error,
             started_at=self.started_at,
             ended_at=self.ended_at,

@@ -14,12 +14,15 @@
 """Contract tests for cohort repositories."""
 
 import uuid
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 
 import pytest
 
 from conftest import (
     FakeCohortRepository,
+    FakeCohortVersionRepository,
+    FakeExperimentRunRepository,
+    FakeSessionRepository,
     FakeTagRepository,
     pg_session,
     postgres_available,
@@ -30,8 +33,20 @@ from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
 from kitaru.server.adapters.db.repositories.agent_repository import SQLAgentRepository
+from kitaru.server.adapters.db.repositories.agent_version_repository import (
+    SQLAgentVersionRepository,
+)
 from kitaru.server.adapters.db.repositories.cohort_repository import (
     SQLCohortRepository,
+)
+from kitaru.server.adapters.db.repositories.cohort_version_repository import (
+    SQLCohortVersionRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_repository import (
+    SQLExperimentRepository,
+)
+from kitaru.server.adapters.db.repositories.experiment_run_repository import (
+    SQLExperimentRunRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
@@ -39,23 +54,67 @@ from kitaru.server.application.interfaces.tag_repository import TagRepository
 from kitaru.server.application.models.cohort import CohortFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
-from kitaru.server.domain.cohort import Cohort, CohortNotFound, DuplicateCohortName
+from kitaru.server.domain.agent_version import AgentVersion
+from kitaru.server.domain.cohort import (
+    Cohort,
+    CohortInUse,
+    CohortNotFound,
+    DuplicateCohortName,
+)
+from kitaru.server.domain.cohort_version import CohortVersion
+from kitaru.server.domain.experiment import Experiment
+from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.replay_config import (
+    PassthroughConfig,
+    ReplayConfig,
+    ToolPolicy,
+)
 from kitaru.server.domain.tag import Tag, TagLink
 from kitaru.server.filtering import FilterCondition
 
-Setup = tuple[CohortRepository, uuid.UUID, uuid.UUID, TagRepository]
+Setup = tuple[
+    CohortRepository,
+    uuid.UUID,
+    uuid.UUID,
+    TagRepository,
+    Callable[[uuid.UUID], Awaitable[None]],
+]
 
 
 @pytest.fixture(params=["fake", "postgres"])
 async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
     """Provide each cohort repository implementation and its collaborators.
 
-    Yields the repository, an owner id, an agent id to attach cohorts to, and
-    a tag repository sharing the backend.
+    Yields the repository, an owner id, an agent id to attach cohorts to, a
+    tag repository sharing the backend, and a factory attaching an
+    experiment run to one of a given cohort's versions.
     """
     if request.param == "fake":
         tags = FakeTagRepository()
-        yield FakeCohortRepository(tags=tags), uuid.uuid4(), uuid.uuid4(), tags
+        cohorts = FakeCohortRepository(tags=tags)
+        sessions = FakeSessionRepository()
+        experiment_runs = FakeExperimentRunRepository()
+        owner_id = uuid.uuid4()
+        cohort_versions = FakeCohortVersionRepository(
+            cohorts=cohorts, sessions=sessions, experiment_runs=experiment_runs
+        )
+
+        async def attach_experiment_run(cohort_id: uuid.UUID) -> None:
+            version = await cohort_versions.create(
+                CohortVersion(owner_id=owner_id, cohort_id=cohort_id, session_count=0),
+                [],
+            )
+            await experiment_runs.create(
+                ExperimentRun(
+                    owner_id=owner_id,
+                    experiment_id=uuid.uuid4(),
+                    number=1,
+                    cohort_version_id=version.id,
+                    agent_version_id=uuid.uuid4(),
+                )
+            )
+
+        yield cohorts, owner_id, uuid.uuid4(), tags, attach_experiment_run
         return
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -64,17 +123,55 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         owner = await accounts.create(Account(name="owner"))
         agents = SQLAgentRepository(session)
         agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        cohort_versions_repository = SQLCohortVersionRepository(session)
+        agent_version = await SQLAgentVersionRepository(session).create(
+            AgentVersion(owner_id=owner.id, agent_id=agent.id)
+        )
+        experiments_repository = SQLExperimentRepository(session)
+        experiment_run_repository = SQLExperimentRunRepository(session)
+
+        async def attach_experiment_run(cohort_id: uuid.UUID) -> None:
+            version = await cohort_versions_repository.create(
+                CohortVersion(owner_id=owner.id, cohort_id=cohort_id, session_count=0),
+                [],
+            )
+            config = await experiments_repository.create_replay_config(
+                ReplayConfig(
+                    owner_id=owner.id,
+                    tool_policy=ToolPolicy(default=PassthroughConfig()),
+                    evaluators=[],
+                )
+            )
+            experiment = await experiments_repository.create(
+                Experiment(
+                    owner_id=owner.id,
+                    name=f"exp-{uuid.uuid4().hex[:8]}",
+                    agent_id=agent.id,
+                    replay_config_id=config.id,
+                )
+            )
+            await experiment_run_repository.create(
+                ExperimentRun(
+                    owner_id=owner.id,
+                    experiment_id=experiment.id,
+                    number=1,
+                    cohort_version_id=version.id,
+                    agent_version_id=agent_version.id,
+                )
+            )
+
         yield (
             SQLCohortRepository(session),
             owner.id,
             agent.id,
             SQLTagRepository(session),
+            attach_experiment_run,
         )
 
 
 async def test_create_sets_timestamps(setup: Setup) -> None:
     """Store a new cohort namespace with both timestamps set."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     cohort = await repository.create(
         Cohort(
             owner_id=owner_id,
@@ -95,7 +192,7 @@ async def test_create_sets_timestamps(setup: Setup) -> None:
 
 async def test_create_duplicate_name(setup: Setup) -> None:
     """Reject a second cohort with the same name."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     await repository.create(
         Cohort(owner_id=owner_id, name="smoke-test", agent_id=agent_id)
     )
@@ -109,7 +206,7 @@ async def test_create_duplicate_name(setup: Setup) -> None:
 
 async def test_get(setup: Setup) -> None:
     """Load a stored cohort by id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
     )
@@ -119,7 +216,7 @@ async def test_get(setup: Setup) -> None:
 
 async def test_get_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort id."""
-    repository, _, _, _ = setup
+    repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(CohortNotFound, match=f"Cohort {missing_id} was not found"):
         await repository.get(missing_id)
@@ -127,7 +224,7 @@ async def test_get_not_found(setup: Setup) -> None:
 
 async def test_query_filters_by_name(setup: Setup) -> None:
     """Filter cohorts by exact name."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     await repository.create(Cohort(owner_id=owner_id, name="alpha", agent_id=agent_id))
     await repository.create(Cohort(owner_id=owner_id, name="beta", agent_id=agent_id))
     cohorts, next_cursor = await repository.query(
@@ -141,7 +238,7 @@ async def test_query_filters_by_name(setup: Setup) -> None:
 
 async def test_query_filters_by_agent(setup: Setup) -> None:
     """Filter cohorts by agent id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Cohort(owner_id=owner_id, name="alpha", agent_id=agent_id)
     )
@@ -165,7 +262,7 @@ async def test_query_filters_by_agent(setup: Setup) -> None:
 
 async def test_query_filters_by_tag(setup: Setup) -> None:
     """Filter cohorts linked to a tag through tag_link."""
-    repository, owner_id, agent_id, tags = setup
+    repository, owner_id, agent_id, tags, _ = setup
     tagged = await repository.create(
         Cohort(owner_id=owner_id, name="tagged", agent_id=agent_id)
     )
@@ -190,7 +287,7 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
 
 async def test_query_walks_pages(setup: Setup) -> None:
     """Walk every page via next_cursor without duplicates or gaps."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = [
         await repository.create(
             Cohort(owner_id=owner_id, name=f"cohort-{index}", agent_id=agent_id)
@@ -215,7 +312,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
 
 async def test_update(setup: Setup) -> None:
     """Persist field changes and renew the updated timestamp."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Cohort(owner_id=owner_id, name="cohort", description="old", agent_id=agent_id)
     )
@@ -236,7 +333,7 @@ async def test_update(setup: Setup) -> None:
 
 async def test_update_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort id."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     cohort = Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
     with pytest.raises(CohortNotFound, match=f"Cohort {cohort.id} was not found"):
         await repository.update(cohort)
@@ -244,7 +341,7 @@ async def test_update_not_found(setup: Setup) -> None:
 
 async def test_update_duplicate_name(setup: Setup) -> None:
     """Reject renaming a cohort to a registered name."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     await repository.create(Cohort(owner_id=owner_id, name="alpha", agent_id=agent_id))
     other = await repository.create(
         Cohort(owner_id=owner_id, name="beta", agent_id=agent_id)
@@ -256,7 +353,7 @@ async def test_update_duplicate_name(setup: Setup) -> None:
 
 async def test_delete(setup: Setup) -> None:
     """Delete a stored cohort."""
-    repository, owner_id, agent_id, _ = setup
+    repository, owner_id, agent_id, _, _ = setup
     created = await repository.create(
         Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
     )
@@ -267,7 +364,19 @@ async def test_delete(setup: Setup) -> None:
 
 async def test_delete_not_found(setup: Setup) -> None:
     """Raise for an unknown cohort id."""
-    repository, _, _, _ = setup
+    repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(CohortNotFound, match=f"Cohort {missing_id} was not found"):
         await repository.delete(missing_id)
+
+
+async def test_delete_restricted_by_run(setup: Setup) -> None:
+    """Reject deleting a cohort whose version an experiment run references."""
+    repository, owner_id, agent_id, _, attach_experiment_run = setup
+    created = await repository.create(
+        Cohort(owner_id=owner_id, name="cohort", agent_id=agent_id)
+    )
+    await attach_experiment_run(created.id)
+
+    with pytest.raises(CohortInUse):
+        await repository.delete(created.id)

@@ -160,7 +160,8 @@ class CohortsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                cohort.
+                cohort and 409 when an experiment run references one of
+                its versions.
         """
         await self._client.request("DELETE", f"/api/v1/cohorts/{cohort_id}")
 

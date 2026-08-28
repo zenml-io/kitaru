@@ -156,6 +156,7 @@ jobs:
           --extra mcp
           --extra cli
           --extra worker
+          --extra s3
       - run: uv run ty check
   audit:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}

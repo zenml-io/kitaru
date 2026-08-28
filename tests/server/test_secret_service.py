@@ -18,13 +18,20 @@ import uuid
 import pytest
 from pydantic import SecretStr
 
-from conftest import FakeSecretRepository, create_secret
+from conftest import (
+    FakeAgentRepository,
+    FakeAgentVersionRepository,
+    FakeSecretRepository,
+    create_agent,
+    create_secret,
+)
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.secret import SecretFilter
 from kitaru.server.application.services.secret_service import SecretService
 from kitaru.server.domain.account import Account
-from kitaru.server.domain.secret import DuplicateSecretName, SecretNotFound
+from kitaru.server.domain.agent_version import AgentVersion, RunSpec
+from kitaru.server.domain.secret import DuplicateSecretName, SecretInUse, SecretNotFound
 from kitaru.server.filtering import FilterCondition
 
 ACTOR = AuthContext(account=Account(id=uuid.uuid4(), name="ann"))
@@ -284,3 +291,23 @@ async def test_delete_secret_internal(
         await service.delete_secret(created.id, actor=ACTOR)
     loaded = await repository.get(created.id)
     assert loaded == created
+
+
+async def test_delete_secret_restricted_by_agent_version() -> None:
+    """Reject deleting a secret referenced by an agent version's run spec."""
+    agents = FakeAgentRepository()
+    agent = await create_agent(agents, ACTOR.account.id)
+    agent_versions = FakeAgentVersionRepository(agents)
+    repository = FakeSecretRepository(agent_versions=agent_versions)
+    service = SecretService(repository=repository)
+    created = await create_secret(repository, ACTOR.account.id)
+    await agent_versions.create(
+        AgentVersion(
+            owner_id=ACTOR.account.id,
+            agent_id=agent.id,
+            run_spec=RunSpec(command="run.sh", secret_ids=[created.id]),
+        )
+    )
+
+    with pytest.raises(SecretInUse):
+        await service.delete_secret(created.id, actor=ACTOR)

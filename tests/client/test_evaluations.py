@@ -29,6 +29,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
+    build_payload_store,
     create_plugin,
     override_idempotency,
 )
@@ -43,6 +44,7 @@ from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionEvaluationsRequest,
     SessionOrigin,
+    SessionStatus,
 )
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
@@ -95,6 +97,7 @@ async def api_client(
         task_repository=FakeTaskRepository(),
         agent_version_repository=agent_versions,
         replay_repository=FakeReplayRepository(),
+        payload_store=build_payload_store().store,
     )
     evaluation_service = EvaluationService(
         repository=evaluation_repository, session_repository=session_repository
@@ -125,11 +128,14 @@ async def api_client(
         yield client
 
 
-async def _create_session(api_client: KitaruAPIClient) -> uuid.UUID:
+async def _create_session(
+    api_client: KitaruAPIClient, status: SessionStatus = SessionStatus.COMPLETED
+) -> uuid.UUID:
     session = await api_client.sessions.create(
         SessionCreateRequest(
             agent_id=uuid.uuid4(),
             origin=SessionOrigin.RECORDED,
+            status=status,
             inputs=None,
             outputs=None,
             metadata={},

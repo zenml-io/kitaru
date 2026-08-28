@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.23.0"
+version = "0.23.0+dev"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
@@ -9,7 +9,7 @@ authors = [
     { name = "ZenML GmbH", email = "info@zenml.io" },
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Framework :: Pydantic",
     "Framework :: Pydantic :: 2",
@@ -82,6 +82,9 @@ otel = [
     "opentelemetry-instrumentation-httpx>=0.65b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.65b0",
     "opentelemetry-instrumentation-logging>=0.65b0",
+]
+s3 = [
+    "obstore>=0.11.1",
 ]
 
 [project.scripts]

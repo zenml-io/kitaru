@@ -804,6 +804,20 @@
           "title": "CohortVersionResponse",
           "type": "object"
         },
+        "CopyWorkdirHook": {
+          "additionalProperties": false,
+          "description": "Copy workdir hook.",
+          "properties": {
+            "type": {
+              "const": "copy_workdir",
+              "default": "copy_workdir",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "title": "CopyWorkdirHook",
+          "type": "object"
+        },
         "EvaluatorConfig": {
           "additionalProperties": false,
           "description": "Evaluator config.",
@@ -1601,6 +1615,32 @@
               "title": "Env",
               "type": "object"
             },
+            "hooks": {
+              "description": "Hooks run around the task process.",
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "copy_workdir": "#/$defs/CopyWorkdirHook",
+                    "setup_command": "#/$defs/SetupCommandHook",
+                    "teardown_command": "#/$defs/TeardownCommandHook"
+                  },
+                  "propertyName": "type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/CopyWorkdirHook"
+                  },
+                  {
+                    "$ref": "#/$defs/SetupCommandHook"
+                  },
+                  {
+                    "$ref": "#/$defs/TeardownCommandHook"
+                  }
+                ]
+              },
+              "title": "Hooks",
+              "type": "array"
+            },
             "secret_ids": {
               "description": "Secrets merged into the process environment.",
               "items": {
@@ -1664,6 +1704,28 @@
             "entrypoint"
           ],
           "title": "ScriptPluginSource",
+          "type": "object"
+        },
+        "SetupCommandHook": {
+          "additionalProperties": false,
+          "description": "Setup command hook.",
+          "properties": {
+            "command": {
+              "description": "Shell command to run.",
+              "title": "Command",
+              "type": "string"
+            },
+            "type": {
+              "const": "setup_command",
+              "default": "setup_command",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "title": "SetupCommandHook",
           "type": "object"
         },
         "StaticCase": {
@@ -1788,6 +1850,39 @@
           ],
           "title": "TaskKind",
           "type": "string"
+        },
+        "TeardownCommandHook": {
+          "additionalProperties": false,
+          "description": "Teardown command hook.",
+          "properties": {
+            "command": {
+              "description": "Shell command to run.",
+              "title": "Command",
+              "type": "string"
+            },
+            "on": {
+              "default": "success",
+              "description": "Task process outcome the command runs on.",
+              "enum": [
+                "success",
+                "failure",
+                "always"
+              ],
+              "title": "On",
+              "type": "string"
+            },
+            "type": {
+              "const": "teardown_command",
+              "default": "teardown_command",
+              "title": "Type",
+              "type": "string"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "title": "TeardownCommandHook",
+          "type": "object"
         },
         "ToolError": {
           "additionalProperties": false,
@@ -3188,12 +3283,15 @@
           "title": "NodeType",
           "type": "string"
         },
-        "PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
+        "PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__": {
           "additionalProperties": false,
           "properties": {
             "items": {
               "items": {
                 "anyOf": [
+                  {
+                    "$ref": "#/$defs/SessionDetailResponse"
+                  },
                   {
                     "$ref": "#/$defs/SessionResponse"
                   },
@@ -3228,7 +3326,7 @@
             "items",
             "page"
           ],
-          "title": "PageData[Union[SessionResponse, ReplayResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
+          "title": "PageData[Union[SessionDetailResponse, SessionResponse, ReplayResponse, EvaluationResponse, ExperimentRunResponse, SessionNodeResponse, TaskResponse, _MCPJob]]",
           "type": "object"
         },
         "PageMetadata": {
@@ -3406,10 +3504,18 @@
               "type": "string"
             },
             "job_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
               "description": "Job running the replay.",
-              "format": "uuid",
-              "title": "Job Id",
-              "type": "string"
+              "title": "Job Id"
             },
             "override": {
               "anyOf": [
@@ -3454,7 +3560,6 @@
             "created",
             "updated",
             "id",
-            "job_id",
             "baseline_session_id",
             "override",
             "tool_policy",
@@ -3476,6 +3581,283 @@
           ],
           "title": "ReplayStatus",
           "type": "string"
+        },
+        "SessionDetailResponse": {
+          "description": "Session detail response.",
+          "properties": {
+            "adapter_version": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Recording adapter version.",
+              "title": "Adapter Version"
+            },
+            "agent_id": {
+              "description": "Agent the session belongs to.",
+              "format": "uuid",
+              "title": "Agent Id",
+              "type": "string"
+            },
+            "agent_version_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent version recorded for the session.",
+              "title": "Agent Version Id"
+            },
+            "cost": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total cost.",
+              "title": "Cost"
+            },
+            "created": {
+              "description": "Creation time.",
+              "format": "date-time",
+              "title": "Created",
+              "type": "string"
+            },
+            "ended_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the session ended.",
+              "title": "Ended At"
+            },
+            "error": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Error from a failed session.",
+              "title": "Error"
+            },
+            "external_id": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Id from the source system.",
+              "title": "External Id"
+            },
+            "framework": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Agent framework used.",
+              "title": "Framework"
+            },
+            "id": {
+              "description": "Session id.",
+              "format": "uuid",
+              "title": "Id",
+              "type": "string"
+            },
+            "imported_from": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Source system the session was imported from.",
+              "title": "Imported From"
+            },
+            "input_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from session inputs.",
+              "title": "Input Text Selector"
+            },
+            "inputs": {
+              "description": "Session inputs.",
+              "title": "Inputs"
+            },
+            "llm_call_count": {
+              "description": "Number of LLM call nodes.",
+              "title": "Llm Call Count",
+              "type": "integer"
+            },
+            "metadata": {
+              "additionalProperties": true,
+              "description": "Arbitrary metadata.",
+              "title": "Metadata",
+              "type": "object"
+            },
+            "name": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Session name.",
+              "title": "Name"
+            },
+            "number": {
+              "description": "Session number within the agent.",
+              "title": "Number",
+              "type": "integer"
+            },
+            "origin": {
+              "$ref": "#/$defs/SessionOrigin",
+              "description": "How the session came to exist."
+            },
+            "output_text_selector": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "RFC 6901 JSON Pointer selecting display text from session outputs.",
+              "title": "Output Text Selector"
+            },
+            "outputs": {
+              "description": "Session outputs.",
+              "title": "Outputs"
+            },
+            "owner_id": {
+              "description": "Id of the owning account.",
+              "format": "uuid",
+              "title": "Owner Id",
+              "type": "string"
+            },
+            "started_at": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Time the session started.",
+              "title": "Started At"
+            },
+            "status": {
+              "$ref": "#/$defs/SessionStatus"
+            },
+            "task_id": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Task the session was produced by.",
+              "title": "Task Id"
+            },
+            "tokens": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TokenUsage"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Total token usage."
+            },
+            "tool_call_count": {
+              "description": "Number of tool call nodes.",
+              "title": "Tool Call Count",
+              "type": "integer"
+            },
+            "updated": {
+              "description": "Last modification time.",
+              "format": "date-time",
+              "title": "Updated",
+              "type": "string"
+            }
+          },
+          "required": [
+            "created",
+            "updated",
+            "owner_id",
+            "id",
+            "agent_id",
+            "number",
+            "origin",
+            "status",
+            "metadata",
+            "llm_call_count",
+            "tool_call_count",
+            "inputs",
+            "outputs"
+          ],
+          "title": "SessionDetailResponse",
+          "type": "object"
         },
         "SessionNodeResponse": {
           "description": "Session node response.",
@@ -3971,10 +4353,6 @@
               "description": "Source system the session was imported from.",
               "title": "Imported From"
             },
-            "inputs": {
-              "description": "Session inputs.",
-              "title": "Inputs"
-            },
             "llm_call_count": {
               "description": "Number of LLM call nodes.",
               "title": "Llm Call Count",
@@ -4007,10 +4385,6 @@
             "origin": {
               "$ref": "#/$defs/SessionOrigin",
               "description": "How the session came to exist."
-            },
-            "outputs": {
-              "description": "Session outputs.",
-              "title": "Outputs"
             },
             "owner_id": {
               "description": "Id of the owning account.",
@@ -4082,8 +4456,6 @@
             "number",
             "origin",
             "status",
-            "inputs",
-            "outputs",
             "metadata",
             "llm_call_count",
             "tool_call_count"
@@ -4744,6 +5116,9 @@
         "data": {
           "anyOf": [
             {
+              "$ref": "#/$defs/SessionDetailResponse"
+            },
+            {
               "$ref": "#/$defs/SessionResponse"
             },
             {
@@ -4765,7 +5140,7 @@
               "$ref": "#/$defs/_MCPJob"
             },
             {
-              "$ref": "#/$defs/PageData_Union_SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
+              "$ref": "#/$defs/PageData_Union_SessionDetailResponse__SessionResponse__ReplayResponse__EvaluationResponse__ExperimentRunResponse__SessionNodeResponse__TaskResponse___MCPJob__"
             },
             {
               "type": "null"

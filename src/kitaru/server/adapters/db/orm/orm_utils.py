@@ -11,7 +11,12 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Deterministic naming helpers for ORM tables."""
+"""ORM naming and column-mapping helpers."""
+
+import uuid
+from typing import Any
+
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 
 # Postgres truncates identifiers to 63 bytes.
 _MAX_IDENTIFIER_LENGTH = 63
@@ -67,3 +72,41 @@ def check_constraint_name(table: str, columns: list[str]) -> str:
         Constraint name of the form ``ck_<table>_<columns>``.
     """
     return f"ck_{table}_{'_'.join(columns)}"[:_MAX_IDENTIFIER_LENGTH]
+
+
+def split_payload(payload: Payload | None) -> tuple[Any | None, uuid.UUID | None]:
+    """Split a payload into its inline value and blob ref columns.
+
+    Returns:
+        Inline value and blob ref, both ``None`` when ``payload`` is ``None``.
+    """
+    if payload is None:
+        return None, None
+    if payload.blob_id is not None:
+        return None, payload.blob_id
+    return payload.value, None
+
+
+def payload_from_columns(
+    inline: Any | None, blob_id: uuid.UUID | None, media_type: PayloadMediaType
+) -> Payload | None:
+    """Rebuild a payload from its inline value and blob ref columns.
+
+    Args:
+        inline: Inline value column.
+        blob_id: Blob ref column.
+        media_type: Media type of the inline value.
+
+    Returns:
+        Payload built from whichever column is set, ``None`` when both are
+        null.
+    """
+    if blob_id is not None:
+        return Payload.from_ref(blob_id)
+    if inline is not None:
+        match media_type:
+            case PayloadMediaType.TEXT:
+                return Payload.from_text(inline)
+            case PayloadMediaType.JSON:
+                return Payload.from_json(inline)
+    return None

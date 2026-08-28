@@ -27,6 +27,7 @@ from conftest import (
     FakeSessionNodeRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    build_payload_store,
     override_idempotency,
 )
 from kitaru.server.adapters.rest.dependencies import (
@@ -72,16 +73,19 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
+    payload_store = build_payload_store().store
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=FakeTaskRepository(),
+        payload_store=payload_store,
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
@@ -159,9 +163,16 @@ async def test_ingest_nodes(client: httpx.AsyncClient, session_id: str) -> None:
     assert items[0]["input_text_selector"] == "/q"
     assert items[0]["output_text_selector"] == "/answer"
     assert items[0]["system_prompt_selector"] == "/system"
-    assert items[0]["reasoning"] == "The greeting matches the request."
-    # Ingest responses populate payloads even without include_payloads.
-    assert items[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
+    # Ingest responses carry no payloads.
+    assert items[0]["reasoning"] is None
+    assert items[0]["inputs"] is None
+    listed = await client.get(
+        f"/api/v1/sessions/{session_id}/nodes",
+        params={"include_payloads": "true"},
+    )
+    stored = listed.json()["items"]
+    assert stored[0]["reasoning"] == "The greeting matches the request."
+    assert stored[0]["inputs"] == {"q": "hi", "system": "Follow policy."}
 
 
 async def test_ingest_nodes_unresolved_parent_index(

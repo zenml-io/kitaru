@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Added `DELETE /api/v1/replays/{replay_id}` to delete a standalone replay. A replay that belongs to an experiment run returns HTTP 409, since deleting the run removes its replays.
+- Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
+- Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
+
+### Changed
+
+- Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
+- Creating evaluations for a session that is not finished is now rejected with HTTP 409 on every path. This covers evaluation batches, merging manual evaluations into a session, and replays and experiment runs that score baseline sessions.
+- Deleting an agent now hides the agent and retains its subtree instead of rejecting the delete with HTTP 409. The subtree stays readable through its own resources, creating a session, agent version, cohort, experiment, or investigation for a deleted agent returns HTTP 404, deleting individual child resources is unchanged, and a concurrent second delete of the same agent returns HTTP 404. Deleting a plugin or experiment cascades its versions, runs, and replays. Deleting an agent version, cohort, or secret can now return HTTP 409 when an experiment run or agent version still references it. Deleting a session can now return HTTP 409 when an investigation or replay references it, in addition to a cohort version, and is no longer blocked by a task. Tasks are deleted with the agent version, plugin version, session, or blob they take as input. Tag links are removed with the resource they point at. Creating a session, session node, experiment, experiment run, cohort, cohort version, investigation, replay, or annotation whose parent was deleted concurrently now returns HTTP 404 instead of HTTP 500.
+- Starting a session run, a replay, or an experiment run against an agent version whose agent was deleted returns HTTP 404 instead of accepting work that can never produce a session.
+- A task names the rows it takes as input by id and no longer holds a foreign key to them, so deleting an agent version, plugin version, blob, or session neither deletes the tasks that name it nor is blocked by them. A worker claim that cannot resolve a task's inputs cancels that task, which settles its job the same way any other terminal task does.
+- Cancelling a job's pending tasks now settles the job when that leaves it with nothing running, so a replay job whose experiment or experiment run was deleted reaches `canceled` on its own instead of staying pending until someone cancels it by hand.
+- Deleting a job no longer deletes its replay, and is rejected with HTTP 409 until the job has settled. Cancel the job and let it settle first. Deleting an experiment or an experiment run cancels its replay jobs instead of deleting them, so those jobs outlive the experiment or run they came from.
+- Concurrent deletes of the same resource now give exactly one caller HTTP 204, every other caller gets HTTP 404. Previously several racing deletes could all report success.
+- Downgrading the database below migration `006_deletion_rules` is refused with an explicit error, since the earlier schema cannot hold an agent name reused after a delete. The refusal rolls back the whole downgrade, so the database stays at its current revision.
+
 ## [0.23.0]
 
 ### Added
@@ -17,10 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - SDK methods that call an endpoint supporting idempotency now take an `idempotency_key` argument, so callers can supply their own key instead of the per-request key the transport generates. Those endpoints declare an `Idempotency-Key` header parameter in the OpenAPI schema.
 - MCP tools that create a resource take an optional `idempotency_key` field, so a retried tool call whose response was lost returns the original result instead of acting twice.
 - CLI commands that create a single resource take `--idempotency-key`, so a retried invocation with the same key returns the original result instead of acting twice.
+- Blob content storage is now pluggable: `KITARU_SERVER_BLOB_STORAGE__BACKEND=s3` stores blob content in an S3 bucket instead of the database, configured through `KITARU_SERVER_BLOB_STORAGE__S3__*` variables.
+- Session and node payload columns above `KITARU_SERVER_PAYLOAD_OFFLOAD_THRESHOLD_BYTES` (default 20KB) are now offloaded to blob storage at ingestion, deduplicated by content hash. Payloads remain inline JSON in the API responses that carry them, the server hydrates offloaded payloads back on read.
+
+- Sessions carry optional `input_text_selector` and `output_text_selector` RFC 6901 JSON Pointers selecting display text from their payloads, mirroring the node selectors. Set them on create, and change the output selector together with a status transition on update.
 
 ### Changed
 
 - Updated the bundled frontend to `kitaru-ui-v0.2.3`.
+- Session list, create, and update responses no longer carry `inputs` and `outputs`. `GET /api/v1/sessions` includes them when `include_payloads` is set. `GET /api/v1/sessions/{session_id}`, `GET /api/v1/sessions/{session_id}/full`, and `GET /api/v1/ui/sessions/{session_id}` return the new `SessionDetailResponse`, which still carries them. The Python and TypeScript SDKs type `sessions.get` and `sessions.list` accordingly.
+- `POST /api/v1/sessions/{session_id}/nodes` no longer echoes the ingested payloads: `reasoning`, `inputs`, `outputs`, and `attributes` are null in its response, matching a node list without `include_payloads`.
 - `POST /api/v1/evaluations` requires every input session to belong to the same agent.
 - Every worker start now registers a new worker, worker names are labels and no longer need to be unique. Worker listings leave stale workers out unless `include_stale` is set. `kitaru worker get` takes a worker id, the name lookup it also accepted is gone.
 - Server analytics events now carry the reporting client in `client_version`, as the client name and the version it reported. Each client versions on its own series, so a bare version says nothing without the client that sent it.

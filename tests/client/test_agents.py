@@ -176,13 +176,17 @@ async def test_delete(api_client: KitaruAPIClient) -> None:
         await api_client.agents.get(created.id)
 
 
-async def test_delete_in_use(api_client: KitaruAPIClient) -> None:
-    """Surface HTTP 409 as a typed error when the agent has versions."""
+async def test_delete_retains_versions(api_client: KitaruAPIClient) -> None:
+    """Keep an agent's versions readable after the agent is deleted."""
     created = await api_client.agents.create(AgentCreateRequest(name="assistant"))
-    await api_client.agents.create_version(created.id, AgentVersionCreateRequest())
-    with pytest.raises(APIError) as exc_info:
-        await api_client.agents.delete(created.id)
-    assert exc_info.value.status_code == 409
+    version = await api_client.agents.create_version(
+        created.id, AgentVersionCreateRequest()
+    )
+
+    await api_client.agents.delete(created.id)
+
+    loaded = await api_client.agent_versions.get(version.id)
+    assert loaded == version
 
 
 async def test_create_version(api_client: KitaruAPIClient) -> None:

@@ -22,9 +22,12 @@ import pytest
 from conftest import (
     FakeAgentRepository,
     FakeAgentVersionRepository,
+    FakeBlobDataStore,
+    FakeBlobRepository,
     FakeReplayRepository,
     FakeSessionRepository,
     FakeTaskRepository,
+    build_payload_store,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -53,16 +56,19 @@ from kitaru.server.domain.agent_version import (
     AgentVersionAgentMismatch,
     AgentVersionNotFound,
 )
+from kitaru.server.domain.blob import BlobStorageBackend
+from kitaru.server.domain.payload import PayloadMediaType
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.session import (
-    IllegalSessionStatusTransition,
     Session,
     SessionAccessDenied,
     SessionAgentMismatch,
     SessionAgentRequired,
     SessionAgentVersionMismatch,
     SessionBaselineNotFound,
+    SessionInUse,
     SessionNotFound,
+    SessionNotUpdatable,
     SessionStatusCannotBeCleared,
 )
 from kitaru.server.domain.task import (
@@ -128,9 +134,9 @@ def agent_version_repository(
 
 
 @pytest.fixture
-def replay_repository() -> FakeReplayRepository:
-    """Provide a fake replay repository."""
-    return FakeReplayRepository()
+def replay_repository(repository: FakeSessionRepository) -> FakeReplayRepository:
+    """Provide a fake replay repository sharing the session repository."""
+    return FakeReplayRepository(sessions=repository)
 
 
 @pytest.fixture
@@ -146,6 +152,7 @@ def service(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=replay_repository,
+        payload_store=build_payload_store().store,
     )
 
 
@@ -355,6 +362,7 @@ async def test_list_sessions_scoped_by_agent(service: SessionService) -> None:
         SessionFilter(
             expression=FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
         ),
+        include_payloads=False,
         actor=ACTOR,
     )
     assert next_cursor is None
@@ -397,9 +405,11 @@ async def test_update_session_omitted_fields_unchanged(
     updated = await service.update_session(
         created.id, SessionUpdate(name="renamed"), actor=ACTOR
     )
-    assert updated.outputs == {"answer": 42}
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.IN_PROGRESS
+    reloaded = await service.get_session(created.id, actor=ACTOR)
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == {"answer": 42}
 
 
 async def test_update_session_metadata_replaced_whole(
@@ -476,7 +486,7 @@ async def test_update_session_rejects_terminal_back_to_in_progress(
     await service.update_session(
         created.id, SessionUpdate(status=SessionStatus.FAILED), actor=ACTOR
     )
-    with pytest.raises(IllegalSessionStatusTransition):
+    with pytest.raises(SessionNotUpdatable):
         await service.update_session(
             created.id, SessionUpdate(status=SessionStatus.IN_PROGRESS), actor=ACTOR
         )
@@ -493,9 +503,26 @@ async def test_update_session_rejects_terminal_to_other_terminal(
     await service.update_session(
         created.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
     )
-    with pytest.raises(IllegalSessionStatusTransition):
+    with pytest.raises(SessionNotUpdatable):
         await service.update_session(
             created.id, SessionUpdate(status=SessionStatus.FAILED), actor=ACTOR
+        )
+
+
+async def test_update_session_rejects_any_update_on_finished_session(
+    service: SessionService,
+) -> None:
+    """Reject a non-status update on a finished session."""
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    await service.update_session(
+        created.id, SessionUpdate(status=SessionStatus.COMPLETED), actor=ACTOR
+    )
+    with pytest.raises(SessionNotUpdatable):
+        await service.update_session(
+            created.id, SessionUpdate(name="renamed"), actor=ACTOR
         )
 
 
@@ -511,6 +538,7 @@ async def test_update_session_transition_to_terminal_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        payload_store=build_payload_store().store,
         analytics=analytics,
     )
     started_at = datetime.now(UTC)
@@ -562,6 +590,7 @@ async def test_update_session_non_status_update_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        payload_store=build_payload_store().store,
         analytics=analytics,
     )
     created = await service.create_session(
@@ -569,34 +598,6 @@ async def test_update_session_non_status_update_tracks_nothing(
         actor=ACTOR,
     )
     await service.update_session(created.id, SessionUpdate(name="renamed"), actor=ACTOR)
-
-    assert analytics.tracked == []
-
-
-async def test_update_session_already_terminal_tracks_nothing(
-    repository: FakeSessionRepository,
-    task_repository: FakeTaskRepository,
-    agent_version_repository: FakeAgentVersionRepository,
-) -> None:
-    """Skip tracking when a finished update reaches a session already terminal."""
-    analytics = _RecordingAnalytics()
-    service = SessionService(
-        repository=repository,
-        task_repository=task_repository,
-        agent_version_repository=agent_version_repository,
-        replay_repository=FakeReplayRepository(),
-        analytics=analytics,
-    )
-    created = await create_session(
-        repository,
-        owner_id=ACTOR.account.id,
-        agent_id=uuid.uuid4(),
-        origin=SessionOrigin.RECORDED,
-        status=SessionStatus.COMPLETED,
-    )
-    await service.update_session(
-        created.id, SessionUpdate(outputs={"answer": 42}), actor=ACTOR
-    )
 
     assert analytics.tracked == []
 
@@ -613,6 +614,7 @@ async def test_create_session_with_terminal_status_tracks_analytics_event(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        payload_store=build_payload_store().store,
         analytics=analytics,
     )
     created = await service.create_session(
@@ -648,6 +650,7 @@ async def test_create_session_in_progress_tracks_nothing(
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        payload_store=build_payload_store().store,
         analytics=analytics,
     )
     await service.create_session(
@@ -695,13 +698,35 @@ async def test_delete_session_not_found(service: SessionService) -> None:
         await service.delete_session(uuid.uuid4(), actor=ACTOR)
 
 
+async def test_delete_session_restricted_by_replay_baseline(
+    service: SessionService, replay_repository: FakeReplayRepository
+) -> None:
+    """Reject deleting a session that is a replay's baseline."""
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    await replay_repository.create(
+        Replay(
+            owner_id=ACTOR.account.id,
+            job_id=uuid.uuid4(),
+            replay_config_id=uuid.uuid4(),
+            baseline_session_id=created.id,
+        )
+    )
+
+    with pytest.raises(SessionInUse):
+        await service.delete_session(created.id, actor=ACTOR)
+
+
 async def test_create_session_duplicate_external_id_conflict(
     service: SessionService,
 ) -> None:
-    """Reject a duplicate imported_from and external id pair."""
+    """Reject a duplicate imported_from and external id pair under one agent."""
+    agent_id = uuid.uuid4()
     await service.create_session(
         SessionCreate(
-            agent_id=uuid.uuid4(),
+            agent_id=agent_id,
             origin=SessionOrigin.IMPORTED,
             imported_from="langsmith",
             external_id="run-1",
@@ -711,7 +736,7 @@ async def test_create_session_duplicate_external_id_conflict(
     with pytest.raises(Exception, match="already registered"):
         await service.create_session(
             SessionCreate(
-                agent_id=uuid.uuid4(),
+                agent_id=agent_id,
                 origin=SessionOrigin.IMPORTED,
                 imported_from="langsmith",
                 external_id="run-1",
@@ -771,7 +796,7 @@ async def test_create_session_rejects_a_stale_task_attempt(
             SessionCreate(origin=SessionOrigin.RECORDED),
             actor=stale_actor,
         )
-    assert await repository.get_by_task_id(task.id) is None
+    assert await repository.get_by_task_id(task.id, include_payloads=True) is None
     session = await service.create_session(
         SessionCreate(origin=SessionOrigin.RECORDED),
         actor=_task_principal(task.id, attempt=task.attempt),
@@ -794,7 +819,7 @@ async def test_create_session_links_the_session_to_its_agent_task(
         actor=_task_principal(task.id),
     )
     assert session.task_id == task.id
-    linked = await repository.get_by_task_id(task.id)
+    linked = await repository.get_by_task_id(task.id, include_payloads=True)
     assert linked is not None
     assert linked.id == session.id
 
@@ -1192,3 +1217,162 @@ async def test_update_session_denies_a_task_principal_for_its_input_session(
         await service.update_session(
             session.id, SessionUpdate(name="renamed"), actor=actor
         )
+
+
+def _service_with_threshold(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+    threshold_bytes: int,
+) -> tuple[SessionService, FakeBlobRepository, FakeBlobDataStore]:
+    """Build a session service backed by a payload store at an offload threshold."""
+    fakes = build_payload_store(threshold_bytes)
+    service = SessionService(
+        repository=repository,
+        task_repository=task_repository,
+        agent_version_repository=agent_version_repository,
+        replay_repository=FakeReplayRepository(),
+        payload_store=fakes.store,
+    )
+    return service, fakes.blob_repository, fakes.blob_data_store
+
+
+async def test_create_session_offloads_over_threshold_inputs_and_outputs(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Offload inputs and outputs above the threshold."""
+    service, blob_repository, _ = _service_with_threshold(
+        repository, task_repository, agent_version_repository, threshold_bytes=10
+    )
+    inputs = {"a": "x" * 50}
+    outputs = {"b": "y" * 50}
+    session = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            inputs=inputs,
+            outputs=outputs,
+        ),
+        actor=ACTOR,
+    )
+    reloaded = await service.get_session(session.id, actor=ACTOR)
+    assert reloaded.inputs is not None
+    assert reloaded.inputs.value == inputs
+    assert reloaded.inputs.blob_id is not None
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == outputs
+    assert reloaded.outputs.blob_id is not None
+
+    inputs_blob = await blob_repository.get(reloaded.inputs.blob_id)
+    assert inputs_blob.owner_id == ACTOR.account.id
+    assert inputs_blob.media_type == PayloadMediaType.JSON
+    assert inputs_blob.stored_in == BlobStorageBackend.DATABASE
+
+
+async def test_create_session_under_threshold_stays_inline(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Keep small inputs and outputs inline, with no blob reference."""
+    service, _, _ = _service_with_threshold(
+        repository, task_repository, agent_version_repository, threshold_bytes=1024
+    )
+    session = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            inputs={"a": 1},
+            outputs={"b": 2},
+        ),
+        actor=ACTOR,
+    )
+    raw = await repository.get(session.id, include_payloads=True)
+    assert raw.inputs is not None
+    assert raw.inputs.value == {"a": 1}
+    assert raw.inputs.blob_id is None
+    assert raw.outputs is not None
+    assert raw.outputs.value == {"b": 2}
+    assert raw.outputs.blob_id is None
+
+
+async def test_get_session_hydrates_offloaded_inputs_and_outputs(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Return the original inputs and outputs for a session with offloaded payloads."""
+    service, _, _ = _service_with_threshold(
+        repository, task_repository, agent_version_repository, threshold_bytes=10
+    )
+    inputs = {"a": "x" * 50}
+    outputs = {"b": "y" * 50}
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(),
+            origin=SessionOrigin.RECORDED,
+            inputs=inputs,
+            outputs=outputs,
+        ),
+        actor=ACTOR,
+    )
+    loaded = await service.get_session(created.id, actor=ACTOR)
+    assert loaded.inputs is not None
+    assert loaded.inputs.value == inputs
+    assert loaded.outputs is not None
+    assert loaded.outputs.value == outputs
+
+
+async def test_update_session_offloads_new_outputs_above_threshold(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """Offload a finish transition's outputs above the threshold."""
+    service, _, _ = _service_with_threshold(
+        repository, task_repository, agent_version_repository, threshold_bytes=10
+    )
+    created = await service.create_session(
+        SessionCreate(agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED),
+        actor=ACTOR,
+    )
+    outputs = {"b": "y" * 50}
+    updated = await service.update_session(
+        created.id,
+        SessionUpdate(status=SessionStatus.COMPLETED, outputs=outputs),
+        actor=ACTOR,
+    )
+    assert updated.status == SessionStatus.COMPLETED
+
+    raw = await repository.get(created.id, include_payloads=True)
+    assert raw.outputs is not None
+    assert raw.outputs.blob_id is not None
+
+
+async def test_update_session_without_touching_outputs_preserves_offloaded_outputs(
+    repository: FakeSessionRepository,
+    task_repository: FakeTaskRepository,
+    agent_version_repository: FakeAgentVersionRepository,
+) -> None:
+    """An update that never sets outputs leaves the offloaded outputs intact on read."""
+    service, _, _ = _service_with_threshold(
+        repository, task_repository, agent_version_repository, threshold_bytes=10
+    )
+    outputs = {"b": "y" * 50}
+    created = await service.create_session(
+        SessionCreate(
+            agent_id=uuid.uuid4(), origin=SessionOrigin.RECORDED, outputs=outputs
+        ),
+        actor=ACTOR,
+    )
+
+    updated = await service.update_session(
+        created.id, SessionUpdate(name="renamed"), actor=ACTOR
+    )
+    assert updated.name == "renamed"
+
+    reloaded = await service.get_session(created.id, actor=ACTOR)
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == outputs

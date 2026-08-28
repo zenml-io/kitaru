@@ -33,6 +33,7 @@ from conftest import (
     FakeSessionRepository,
     FakeTagRepository,
     FakeTaskRepository,
+    build_payload_store,
     create_agent,
     create_agent_task,
     create_agent_version,
@@ -155,16 +156,19 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
+    payload_store = build_payload_store().store
     session_service = SessionService(
         repository=session_repository,
         task_repository=task_repository,
         agent_version_repository=agent_version_repository,
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
+        payload_store=payload_store,
     )
     tag_service = TagService(repository=tag_repository)
     evaluation_service = EvaluationService(
@@ -208,6 +212,32 @@ async def test_create_session_duplicate_external_id(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 409 for a duplicated imported_from and external id pair."""
+    agent_id = str(uuid.uuid4())
+    await client.post(
+        "/api/v1/sessions",
+        json=_session_body(
+            agent_id=agent_id,
+            origin="imported",
+            imported_from="langsmith",
+            external_id="run-1",
+        ),
+    )
+    response = await client.post(
+        "/api/v1/sessions",
+        json=_session_body(
+            agent_id=agent_id,
+            origin="imported",
+            imported_from="langsmith",
+            external_id="run-1",
+        ),
+    )
+    assert response.status_code == 409
+
+
+async def test_create_session_same_external_id_different_agent(
+    client: httpx.AsyncClient,
+) -> None:
+    """Accept the same imported_from and external id pair under another agent."""
     await client.post(
         "/api/v1/sessions",
         json=_session_body(
@@ -220,7 +250,7 @@ async def test_create_session_duplicate_external_id(
             origin="imported", imported_from="langsmith", external_id="run-1"
         ),
     )
-    assert response.status_code == 409
+    assert response.status_code == 201
 
 
 async def test_get_session(client: httpx.AsyncClient) -> None:
@@ -228,7 +258,23 @@ async def test_get_session(client: httpx.AsyncClient) -> None:
     created = (await client.post("/api/v1/sessions", json=_session_body())).json()
     response = await client.get(f"/api/v1/sessions/{created['id']}")
     assert response.status_code == 200
-    assert response.json() == created
+    assert response.json() == {
+        **created,
+        "input_text_selector": None,
+        "output_text_selector": None,
+        "inputs": {"prompt": "hi"},
+        "outputs": None,
+    }
+
+
+async def test_list_sessions_include_payloads(client: httpx.AsyncClient) -> None:
+    """Include inputs and outputs in the list when requested."""
+    await client.post("/api/v1/sessions", json=_session_body())
+    response = await client.get("/api/v1/sessions", params={"include_payloads": "true"})
+    assert response.status_code == 200
+    items = response.json()["items"]
+    assert items[0]["inputs"] == {"prompt": "hi"}
+    assert items[0]["outputs"] is None
 
 
 async def test_get_session_not_found(client: httpx.AsyncClient) -> None:
@@ -451,7 +497,9 @@ async def test_list_sessions_filters_by_has_evaluation(
     client: httpx.AsyncClient,
 ) -> None:
     """Filter sessions by whether they have a stored evaluation."""
-    scored = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    scored = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     unscored = (await client.post("/api/v1/sessions", json=_session_body())).json()
     await client.post(
         f"/api/v1/sessions/{scored['id']}/evaluations",
@@ -481,7 +529,9 @@ async def test_list_sessions_filters_by_has_evaluation(
 
 async def test_merge_session_evaluations(client: httpx.AsyncClient) -> None:
     """Merge manual evaluations into a session."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     response = await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={
@@ -504,7 +554,9 @@ async def test_merge_session_evaluations_carries_passed(
     client: httpx.AsyncClient,
 ) -> None:
     """Merge the optional pass flag, leaving it null when omitted."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     response = await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={
@@ -523,7 +575,9 @@ async def test_merge_session_evaluations_overwrites_matching_name(
     client: httpx.AsyncClient,
 ) -> None:
     """Resending a name overwrites its score, value, and data type."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     first = (
         await client.post(
             f"/api/v1/sessions/{created['id']}/evaluations",
@@ -541,6 +595,18 @@ async def test_merge_session_evaluations_overwrites_matching_name(
     assert second[0]["score"] is None
 
 
+async def test_merge_session_evaluations_rejects_in_progress_session(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 409 when the session is not finished."""
+    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    response = await client.post(
+        f"/api/v1/sessions/{created['id']}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
+    )
+    assert response.status_code == 409
+
+
 async def test_merge_session_evaluations_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(
@@ -554,7 +620,9 @@ async def test_merge_session_evaluations_rejects_duplicate_name(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 422 when the request names the same evaluation twice."""
-    created = (await client.post("/api/v1/sessions", json=_session_body())).json()
+    created = (
+        await client.post("/api/v1/sessions", json=_session_body(status="completed"))
+    ).json()
     response = await client.post(
         f"/api/v1/sessions/{created['id']}/evaluations",
         json={
@@ -581,9 +649,9 @@ async def test_update_session_clears_outputs_with_explicit_null(
         json={"status": "completed", "outputs": None},
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["outputs"] is None
-    assert body["status"] == "completed"
+    assert response.json()["status"] == "completed"
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["outputs"] is None
 
 
 async def test_update_session_omitted_outputs_unchanged(
@@ -599,9 +667,55 @@ async def test_update_session_omitted_outputs_unchanged(
         f"/api/v1/sessions/{created['id']}", json={"name": "renamed"}
     )
     assert response.status_code == 200
-    body = response.json()
-    assert body["outputs"] == {"answer": 42}
-    assert body["name"] == "renamed"
+    assert response.json()["name"] == "renamed"
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["outputs"] == {"answer": 42}
+
+
+async def test_session_text_selectors(client: httpx.AsyncClient) -> None:
+    """Store the text selectors at create and change the output one at finish."""
+    created = (
+        await client.post(
+            "/api/v1/sessions",
+            json=_session_body(
+                input_text_selector="/prompt", output_text_selector="/answer"
+            ),
+        )
+    ).json()
+    assert "input_text_selector" not in created
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["input_text_selector"] == "/prompt"
+    assert fetched["output_text_selector"] == "/answer"
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={
+            "status": "completed",
+            "outputs": {"text": "hello"},
+            "output_text_selector": "/text",
+        },
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["output_text_selector"] == "/text"
+    assert fetched["input_text_selector"] == "/prompt"
+
+
+async def test_update_session_omitted_output_selector_unchanged(
+    client: httpx.AsyncClient,
+) -> None:
+    """Leave the output text selector unchanged when the update omits it."""
+    created = (
+        await client.post(
+            "/api/v1/sessions", json=_session_body(output_text_selector="/answer")
+        )
+    ).json()
+    response = await client.patch(
+        f"/api/v1/sessions/{created['id']}",
+        json={"status": "completed", "outputs": {"answer": "hello"}},
+    )
+    assert response.status_code == 200
+    fetched = (await client.get(f"/api/v1/sessions/{created['id']}")).json()
+    assert fetched["output_text_selector"] == "/answer"
 
 
 async def test_update_session_rejects_system_prompt(
@@ -862,6 +976,7 @@ async def test_list_sessions_rejects_worker_and_task_credentials(
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        payload_store=build_payload_store().store,
     )
     app.dependency_overrides[get_auth_service] = lambda: auth_service
     app.dependency_overrides[get_auth_session] = stub_auth_session
@@ -914,6 +1029,7 @@ def _build_task_scoped_app(
         HTTP client routed to the app.
     """
     app = create_app(local_settings())
+    payload_store = build_payload_store().store
     app.dependency_overrides[get_session_service] = lambda: SessionService(
         repository=session_repository,
         task_repository=task_repository,
@@ -921,11 +1037,13 @@ def _build_task_scoped_app(
         if agent_version_repository is not None
         else FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     app.dependency_overrides[get_session_node_service] = lambda: SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=task_repository,
+        payload_store=payload_store,
     )
     app.dependency_overrides[get_evaluation_service] = lambda: EvaluationService(
         repository=evaluation_repository, session_repository=session_repository

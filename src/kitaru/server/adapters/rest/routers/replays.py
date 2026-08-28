@@ -54,10 +54,12 @@ async def create_replay(
     """Create a standalone replay of a recorded or imported session.
 
     Clients observe HTTP 201 on success, 404 when the baseline session or
-    the resolved agent version or an evaluator config does not exist, and
-    422 when the baseline session carries no agent version and none was
-    given, the resolved agent version has no run spec, the tool policy uses
-    cohort-version-scoped history, or an evaluator version repeats.
+    the resolved agent version or an evaluator config does not exist, 409
+    when evaluate_baselines is set and the baseline session is not
+    finished, and 422 when the baseline session carries no agent version
+    and none was given, the resolved agent version has no run spec, the
+    tool policy uses cohort-version-scoped history, or an evaluator
+    version repeats.
 
     Args:
         body: Replay create request.
@@ -120,6 +122,25 @@ async def get_replay(
     """
     bundle = await service.get_replay(replay_id, actor=actor)
     return replay_to_response(bundle.replay, bundle.config)
+
+
+@router.delete("/{replay_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_replay(
+    replay_id: uuid.UUID,
+    service: Annotated[ReplayService, Depends(get_replay_service)],
+    actor: Annotated[AuthContext, Depends(authorize)],
+) -> None:
+    """Delete a replay.
+
+    Clients observe HTTP 204 on success, 404 when no replay has this id, and
+    409 when the replay belongs to an experiment run.
+
+    Args:
+        replay_id: Id of the replay.
+        service: Replay service.
+        actor: Caller context.
+    """
+    await service.delete_replay(replay_id, actor=actor)
 
 
 @router.post("/{replay_id}/tool-lookup")

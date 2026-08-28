@@ -21,10 +21,12 @@ from pydantic import AfterValidator, Field
 
 from kitaru.base import FrozenModel
 from kitaru.server.domain.base import (
+    ConflictError,
     DomainModel,
     NotFoundError,
     ValidationError,
 )
+from kitaru.server.domain.hook import TaskHook
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import VersionName
 
@@ -39,6 +41,20 @@ class AgentVersionNotFound(NotFoundError):
             agent_version_id: Id of the missing agent version.
         """
         super().__init__(f"Agent version {agent_version_id} was not found")
+
+
+class AgentVersionInUse(ConflictError):
+    """Raised when an agent version is referenced by an experiment run."""
+
+    def __init__(self, agent_version_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            agent_version_id: Id of the agent version in use.
+        """
+        super().__init__(
+            f"Agent version {agent_version_id} is in use by an experiment run"
+        )
 
 
 class AgentVersionWithoutRunSpec(ValidationError):
@@ -99,6 +115,7 @@ class RunSpec(FrozenModel):
     working_dir: str | None = None
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: list[uuid.UUID] = Field(default_factory=list)
+    hooks: list[TaskHook] = Field(default_factory=list)
     timeout_seconds: TimeoutSeconds = 3600
 
 

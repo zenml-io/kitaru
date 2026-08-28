@@ -173,6 +173,6 @@ class SecretsResource:
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                secret.
+                secret and 409 when an agent version references it.
         """
         await self._client.request("DELETE", f"/api/v1/secrets/{secret_id}")

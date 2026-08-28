@@ -23,6 +23,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
+from kitaru.server.adapters.db.orm.agent_version_secret import (
+    AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.orm.secret import (
     SECRET_NAME_UNIQUE_CONSTRAINT,
     SecretORM,
@@ -34,6 +37,7 @@ from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.secret import (
     DuplicateSecretName,
     Secret,
+    SecretInUse,
     SecretNotFound,
 )
 
@@ -191,5 +195,13 @@ class SQLSecretRepository(BaseSQLRepository[SecretORM]):
 
         Raises:
             SecretNotFound: No secret has this id.
+            SecretInUse: The secret is referenced by an agent version.
         """
-        await self._delete_row(secret_id)
+        await self._delete_row(
+            secret_id,
+            {
+                AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY: lambda: SecretInUse(
+                    secret_id
+                )
+            },
+        )

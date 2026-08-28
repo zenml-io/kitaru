@@ -105,7 +105,9 @@ class ReplayConfigORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
         )
 
 
-EXPERIMENT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("experiment", ["name"])
+EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
+    "experiment", ["agent_id", "name"]
+)
 EXPERIMENT_OWNER_ID_FOREIGN_KEY = foreign_key_name("experiment", ["owner_id"])
 EXPERIMENT_AGENT_ID_FOREIGN_KEY = foreign_key_name("experiment", ["agent_id"])
 EXPERIMENT_AGENT_ID_INDEX = index_name("experiment", ["agent_id"])
@@ -119,12 +121,17 @@ class ExperimentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "experiment"
     __table_args__ = (
-        UniqueConstraint("name", name=EXPERIMENT_NAME_UNIQUE_CONSTRAINT),
+        UniqueConstraint(
+            "agent_id", "name", name=EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT
+        ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=EXPERIMENT_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
-            ["agent_id"], ["agent.id"], name=EXPERIMENT_AGENT_ID_FOREIGN_KEY
+            ["agent_id"],
+            ["agent.id"],
+            name=EXPERIMENT_AGENT_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
         ),
         ForeignKeyConstraint(
             ["replay_config_id"],

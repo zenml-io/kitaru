@@ -14,21 +14,20 @@
 """SQL agent repository."""
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
+from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, select, update
+from sqlalchemy.orm import InstrumentedAttribute, defer
 
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
 from kitaru.server.adapters.db.orm.agent import AGENT_NAME_UNIQUE_CONSTRAINT, AgentORM
-from kitaru.server.adapters.db.orm.agent_version import (
-    AGENT_VERSION_AGENT_ID_FOREIGN_KEY,
-)
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.domain.agent import (
     Agent,
-    AgentInUse,
     AgentNotFound,
     DuplicateAgentName,
 )
@@ -55,6 +54,40 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
             Not-found error.
         """
         return AgentNotFound(entity_id)
+
+    async def _get_row(
+        self,
+        entity_id: uuid.UUID,
+        exclusive: bool = False,
+        deferred_columns: Sequence[InstrumentedAttribute[Any]] = (),
+    ) -> AgentORM:
+        """Load a row by id, skipping rows marked deleted.
+
+        Args:
+            entity_id: Id of the row.
+            exclusive: Whether to lock the row for the duration of the
+                transaction.
+            deferred_columns: Columns to leave out of the select.
+
+        Raises:
+            AgentNotFound: No agent has this id.
+
+        Returns:
+            Stored row.
+        """
+        statement = select(AgentORM).where(
+            AgentORM.id == entity_id, AgentORM.deleted_at.is_(None)
+        )
+        if deferred_columns:
+            statement = statement.options(
+                *(defer(column) for column in deferred_columns)
+            )
+        if exclusive:
+            statement = statement.with_for_update()
+        row = await self._session.scalar(statement)
+        if row is None:
+            raise self._not_found(entity_id)
+        return row
 
     async def create(self, agent: Agent) -> Agent:
         """Persist a new agent.
@@ -98,7 +131,7 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         Returns:
             Page of matching agents and the next cursor.
         """
-        statement = select(AgentORM)
+        statement = select(AgentORM).where(AgentORM.deleted_at.is_(None))
         if agent_filter.expression is not None:
             statement = statement.where(
                 compile_filter_expression(
@@ -133,17 +166,23 @@ class SQLAgentRepository(BaseSQLRepository[AgentORM]):
         )
         return row.to_domain()
 
-    async def delete(self, agent_id: uuid.UUID) -> None:
-        """Delete an agent by id.
+    async def mark_deleted(self, agent_id: uuid.UUID) -> None:
+        """Mark an agent deleted, hiding it from every read.
 
         Args:
             agent_id: Id of the agent.
 
         Raises:
             AgentNotFound: No agent has this id.
-            AgentInUse: The agent has versions and cannot be deleted.
         """
-        await self._delete_row(
-            agent_id,
-            {AGENT_VERSION_AGENT_ID_FOREIGN_KEY: lambda: AgentInUse(agent_id)},
+        now = datetime.now(UTC)
+        statement = (
+            update(AgentORM)
+            .where(AgentORM.id == agent_id, AgentORM.deleted_at.is_(None))
+            .values(deleted_at=now, updated=now)
+            .execution_options(synchronize_session="fetch")
         )
+        result = await self._session.execute(statement)
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise self._not_found(agent_id)

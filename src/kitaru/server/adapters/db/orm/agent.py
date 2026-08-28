@@ -14,8 +14,16 @@
 """Agent ORM table."""
 
 import uuid
+from datetime import datetime
 
-from sqlalchemy import ForeignKeyConstraint, Index, String, Text, UniqueConstraint
+from sqlalchemy import (
+    DateTime,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.server.adapters.db.orm.base import (
@@ -31,6 +39,9 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.names import MAX_NAME_LENGTH
 
+# A partial unique index, not a plain unique constraint, since Postgres only
+# supports a WHERE predicate on an index. Soft-deleted agents release their
+# name for reuse.
 AGENT_NAME_UNIQUE_CONSTRAINT = unique_constraint_name("agent", ["name"])
 AGENT_OWNER_ID_FOREIGN_KEY = foreign_key_name("agent", ["owner_id"])
 AGENT_OWNER_ID_INDEX = index_name("agent", ["owner_id"])
@@ -41,7 +52,12 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     __tablename__ = "agent"
     __table_args__ = (
-        UniqueConstraint("name", name=AGENT_NAME_UNIQUE_CONSTRAINT),
+        Index(
+            AGENT_NAME_UNIQUE_CONSTRAINT,
+            "name",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         ForeignKeyConstraint(
             ["owner_id"], ["account.id"], name=AGENT_OWNER_ID_FOREIGN_KEY
         ),
@@ -53,6 +69,7 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     description: Mapped[str | None] = mapped_column(Text)
     latest_version: Mapped[int]
     latest_session_number: Mapped[int]
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     @classmethod
     def from_domain(cls, agent: Agent) -> "AgentORM":
@@ -71,6 +88,7 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             description=agent.description,
             latest_version=agent.latest_version,
             latest_session_number=agent.latest_session_number,
+            deleted_at=agent.deleted_at,
         )
 
     def to_domain(self) -> Agent:
@@ -86,6 +104,7 @@ class AgentORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             description=self.description,
             latest_version=self.latest_version,
             latest_session_number=self.latest_session_number,
+            deleted_at=self.deleted_at,
             created=self.created,
             updated=self.updated,
         )

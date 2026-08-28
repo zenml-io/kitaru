@@ -18,7 +18,7 @@ from collections.abc import Awaitable, Callable
 from typing import Annotated
 
 from fastapi import Depends, Request
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from kitaru.analytics.client import AnalyticsClient
 from kitaru.server.adapters.rest.dependencies import (
@@ -69,7 +69,7 @@ async def cancel_run(
     """
     async for session in database.get_async_session():
         try:
-            service = _build_service(session, analytics)
+            service = _build_service(session, database.engine, analytics)
             await service.mark_run_canceling(experiment_run_id, actor=actor)
             await session.commit()
         except Exception:
@@ -78,7 +78,7 @@ async def cancel_run(
 
     async for session in database.get_async_session():
         try:
-            service = _build_service(session, analytics)
+            service = _build_service(session, database.engine, analytics)
             result = await service.cancel_run_jobs(experiment_run_id, actor=actor)
             await session.commit()
             return result
@@ -89,19 +89,20 @@ async def cancel_run(
 
 
 def _build_service(
-    session: AsyncSession, analytics: AnalyticsClient
+    session: AsyncSession, engine: AsyncEngine, analytics: AnalyticsClient
 ) -> ExperimentRunService:
     """Build a run service the same way a request does.
 
     Args:
         session: Session the service binds its repositories to.
+        engine: Application database engine.
         analytics: Analytics client for this process.
 
     Returns:
         Experiment run service.
     """
     tracker = get_server_analytics(session, analytics)
-    return get_experiment_run_service(session, tracker)
+    return get_experiment_run_service(session, engine, tracker)
 
 
 def get_run_canceler(

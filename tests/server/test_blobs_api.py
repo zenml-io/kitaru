@@ -19,7 +19,11 @@ from collections.abc import AsyncGenerator
 import httpx
 import pytest
 
-from conftest import FakeBlobRepository, create_blob
+from conftest import (
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    create_blob,
+)
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     authorize_with_task,
@@ -28,9 +32,11 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.blob import BlobStorageBackend
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -53,7 +59,14 @@ async def client(
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    service = BlobService(repository=repository, max_size_bytes=16)
+    service = BlobService(
+        repository=repository,
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: FakeBlobDataStore()},
+            BlobStorageBackend.DATABASE,
+        ),
+        max_size_bytes=16,
+    )
     app.dependency_overrides[get_blob_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)

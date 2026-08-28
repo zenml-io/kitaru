@@ -16,7 +16,7 @@
 import uuid
 from collections.abc import Mapping, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import CursorResult, delete, select
 from sqlalchemy.exc import IntegrityError
 
 from kitaru.api_models.v1.tag import TagResourceType
@@ -26,22 +26,20 @@ from kitaru.server.adapters.db.filtering import (
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.experiment import (
-    EXPERIMENT_NAME_UNIQUE_CONSTRAINT,
+    EXPERIMENT_AGENT_ID_FOREIGN_KEY,
+    EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT,
     ExperimentORM,
     ReplayConfigORM,
-)
-from kitaru.server.adapters.db.orm.experiment_run import (
-    EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.replay import REPLAY_REPLAY_CONFIG_ID_FOREIGN_KEY
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.experiment import ExperimentFilter
+from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
-    ExperimentInUse,
     ExperimentNotFound,
 )
 from kitaru.server.domain.replay_config import (
@@ -83,6 +81,7 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         Raises:
             DuplicateExperimentName: The experiment name is already
                 registered.
+            AgentNotFound: No agent has the experiment's agent id.
 
         Returns:
             Stored experiment with timestamps set.
@@ -91,9 +90,12 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         await self._add(
             row,
             {
-                EXPERIMENT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateExperimentName(
-                    experiment.name
-                )
+                EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: (
+                    DuplicateExperimentName(experiment.name)
+                ),
+                EXPERIMENT_AGENT_ID_FOREIGN_KEY: lambda: AgentNotFound(
+                    experiment.agent_id
+                ),
             },
         )
         return row.to_domain()
@@ -160,8 +162,8 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
         row.replay_config_id = experiment.replay_config_id
         await self._flush(
             {
-                EXPERIMENT_NAME_UNIQUE_CONSTRAINT: lambda: DuplicateExperimentName(
-                    experiment.name
+                EXPERIMENT_AGENT_ID_NAME_UNIQUE_CONSTRAINT: lambda: (
+                    DuplicateExperimentName(experiment.name)
                 )
             }
         )
@@ -170,21 +172,15 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
     async def delete(self, experiment_id: uuid.UUID) -> None:
         """Delete an experiment by id.
 
+        Deleting an experiment cascades its runs and their replays.
+
         Args:
             experiment_id: Id of the experiment.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
-            ExperimentInUse: The experiment has runs.
         """
-        await self._delete_row(
-            experiment_id,
-            {
-                EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY: lambda: ExperimentInUse(
-                    experiment_id
-                )
-            },
-        )
+        await self._delete_row(experiment_id)
 
     async def create_replay_config(self, config: ReplayConfig) -> ReplayConfig:
         """Persist a new replay config.
@@ -258,11 +254,14 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
             ReplayConfigNotFound: No replay config has this id.
             ReplayConfigInUse: A replay references the replay config.
         """
-        row = await self._get_replay_config_row(config_id)
+        statement = (
+            delete(ReplayConfigORM)
+            .where(ReplayConfigORM.id == config_id)
+            .execution_options(synchronize_session="fetch")
+        )
         try:
             async with self._session.begin_nested():
-                await self._session.delete(row)
-                await self._session.flush()
+                result = await self._session.execute(statement)
         except IntegrityError as exc:
             self._raise_translated(
                 exc,
@@ -272,3 +271,6 @@ class SQLExperimentRepository(BaseSQLRepository[ExperimentORM]):
                     )
                 },
             )
+        rowcount = result.rowcount if isinstance(result, CursorResult) else 0
+        if rowcount == 0:
+            raise ReplayConfigNotFound(config_id)

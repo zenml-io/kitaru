@@ -31,6 +31,7 @@ from kitaru.server.adapters.auth.control_plane import (
     ControlPlaneClient,
 )
 from kitaru.server.adapters.auth.passwords import BcryptPasswordHasher
+from kitaru.server.adapters.db.blob_data_store import DatabaseBlobDataStore
 from kitaru.server.adapters.db.encryption import AesGcmCipher
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
@@ -101,6 +102,10 @@ from kitaru.server.adapters.rest.request_state import (
 )
 from kitaru.server.api.composition import build_event_dispatcher
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.blob_data_store import (
+    BlobDataStore,
+    BlobDataStores,
+)
 from kitaru.server.application.interfaces.idempotency_key_repository import (
     IdempotencyKeyRepository,
 )
@@ -113,6 +118,7 @@ from kitaru.server.application.models.auth import (
 )
 from kitaru.server.application.models.device import DevicePolicy
 from kitaru.server.application.models.task import TaskPolicy
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.account_service import AccountService
 from kitaru.server.application.services.agent_service import AgentService
 from kitaru.server.application.services.agent_version_service import (
@@ -157,6 +163,7 @@ from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.application.services.worker_service import WorkerService
 from kitaru.server.database.service import DatabaseService
 from kitaru.server.domain.account import AccountNotFound
+from kitaru.server.domain.blob import BlobStorageBackend
 from kitaru.server.domain.plugin import PluginKind
 
 CSRF_HEADER = "X-CSRF-Token"
@@ -407,22 +414,71 @@ def get_secret_service(
     )
 
 
+def get_blob_data_stores(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+) -> BlobDataStores:
+    """Return the blob content stores configured for the current process.
+
+    Args:
+        request: Incoming request.
+        session: Request-scoped database session.
+        settings: API settings for this process.
+
+    Returns:
+        Content stores keyed by the backend they serve.
+    """
+    stores: dict[BlobStorageBackend, BlobDataStore] = {
+        BlobStorageBackend.DATABASE: DatabaseBlobDataStore(session)
+    }
+    s3_store: BlobDataStore | None = request.app.state.s3_blob_data_store
+    if s3_store is not None:
+        stores[BlobStorageBackend.S3] = s3_store
+    return BlobDataStores(stores, settings.BLOB_STORAGE.backend)
+
+
 def get_blob_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     settings: Annotated[APISettings, Depends(get_app_settings)],
+    data_stores: Annotated[BlobDataStores, Depends(get_blob_data_stores)],
 ) -> BlobService:
     """Return a blob service for the current request.
 
     Args:
         session: Request-scoped database session.
         settings: API settings for this process.
+        data_stores: Content stores keyed by the backend they serve.
 
     Returns:
         Blob service bound to the SQL repository.
     """
     return BlobService(
         repository=SQLBlobRepository(session),
+        data_stores=data_stores,
         max_size_bytes=settings.MAX_BLOB_SIZE_BYTES,
+    )
+
+
+def get_payload_store(
+    session: Annotated[AsyncSession, Depends(get_session)],
+    settings: Annotated[APISettings, Depends(get_app_settings)],
+    data_stores: Annotated[BlobDataStores, Depends(get_blob_data_stores)],
+) -> PayloadStore:
+    """Return a payload store for the current request.
+
+    Args:
+        session: Request-scoped database session.
+        settings: API settings for this process.
+        data_stores: Content stores keyed by the backend they serve.
+
+    Returns:
+        Payload store bound to the SQL repository.
+    """
+    return PayloadStore(
+        repository=SQLBlobRepository(session),
+        data_stores=data_stores,
+        threshold_bytes=settings.PAYLOAD_OFFLOAD_THRESHOLD_BYTES,
     )
 
 
@@ -471,6 +527,7 @@ def get_importer_service(
 def get_session_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> SessionService:
     """Return a session service for the current request.
@@ -478,6 +535,7 @@ def get_session_service(
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        payload_store: Payload store for the current request.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -488,6 +546,7 @@ def get_session_service(
         task_repository=SQLTaskRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         replay_repository=SQLReplayRepository(session),
+        payload_store=payload_store,
         analytics=analytics,
     )
 
@@ -513,12 +572,13 @@ def get_task_policy(settings: APISettings) -> TaskPolicy:
 
 
 def _build_task_transitions(
-    session: AsyncSession, analytics: ServerAnalytics
+    session: AsyncSession, engine: AsyncEngine, analytics: ServerAnalytics
 ) -> TaskTransitions:
     """Build the request-scoped task transition dispatch.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -527,7 +587,7 @@ def _build_task_transitions(
     return TaskTransitions(
         task_repository=SQLTaskRepository(session),
         job_repository=SQLJobRepository(session),
-        dispatcher=build_event_dispatcher(session, analytics),
+        dispatcher=build_event_dispatcher(session, engine, analytics),
         analytics=analytics,
         plugin_repository=SQLPluginRepository(session),
     )
@@ -558,7 +618,7 @@ def get_job_service(
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
         blob_repository=SQLBlobRepository(session),
-        transitions=_build_task_transitions(session, analytics),
+        transitions=_build_task_transitions(session, engine, analytics),
         policy=get_task_policy(settings),
     )
 
@@ -599,7 +659,7 @@ def get_task_service(
         job_repository=SQLJobRepository(session),
         replay_repository=replay_repository,
         spec_builder=spec_builder,
-        transitions=_build_task_transitions(session, analytics),
+        transitions=_build_task_transitions(session, engine, analytics),
         policy=policy,
     )
 
@@ -607,12 +667,14 @@ def get_task_service(
 def get_session_node_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
 ) -> SessionNodeService:
     """Return a session node service for the current request.
 
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        payload_store: Payload store for the current request.
 
     Returns:
         Session node service bound to the SQL repositories.
@@ -621,12 +683,14 @@ def get_session_node_service(
         repository=SQLSessionNodeRepository(session),
         session_repository=SQLSessionRepository(session, engine),
         task_repository=SQLTaskRepository(session),
+        payload_store=payload_store,
     )
 
 
 def get_experiment_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentService:
     """Return an experiment service for the current request.
@@ -634,6 +698,7 @@ def get_experiment_service(
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        payload_store: Payload store for the current request.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -650,6 +715,8 @@ def get_experiment_service(
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
         task_repository=SQLTaskRepository(session),
+        transitions=_build_task_transitions(session, engine, analytics),
+        payload_store=payload_store,
         analytics=analytics,
     )
 
@@ -657,6 +724,7 @@ def get_experiment_service(
 def get_replay_service(
     session: Annotated[AsyncSession, Depends(get_session)],
     engine: Annotated[AsyncEngine, Depends(get_engine)],
+    payload_store: Annotated[PayloadStore, Depends(get_payload_store)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ReplayService:
     """Return a replay service for the current request.
@@ -664,6 +732,7 @@ def get_replay_service(
     Args:
         session: Request-scoped database session.
         engine: Application database engine.
+        payload_store: Payload store for the current request.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -679,18 +748,21 @@ def get_replay_service(
         session_node_repository=SQLSessionNodeRepository(session),
         agent_version_repository=SQLAgentVersionRepository(session),
         plugin_repository=SQLPluginRepository(session),
+        payload_store=payload_store,
         analytics=analytics,
     )
 
 
 def get_experiment_run_service(
     session: Annotated[AsyncSession, Depends(get_session)],
+    engine: Annotated[AsyncEngine, Depends(get_engine)],
     analytics: Annotated[ServerAnalytics, Depends(get_server_analytics)],
 ) -> ExperimentRunService:
     """Return an experiment run service for the current request.
 
     Args:
         session: Request-scoped database session.
+        engine: Application database engine.
         analytics: Analytics tracker for the current request.
 
     Returns:
@@ -700,7 +772,7 @@ def get_experiment_run_service(
         repository=SQLExperimentRunRepository(session),
         replay_repository=SQLReplayRepository(session),
         job_repository=SQLJobRepository(session),
-        transitions=_build_task_transitions(session, analytics),
+        transitions=_build_task_transitions(session, engine, analytics),
         analytics=analytics,
     )
 

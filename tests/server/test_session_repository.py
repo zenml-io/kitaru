@@ -26,8 +26,12 @@ from conftest import (
     FakeCohortRepository,
     FakeCohortVersionRepository,
     FakeEvaluationRepository,
+    FakeInvestigationRepository,
+    FakeJobRepository,
+    FakeReplayRepository,
     FakeSessionRepository,
     FakeTagRepository,
+    FakeTaskRepository,
     pg_session_with_engine,
     postgres_available,
 )
@@ -63,6 +67,9 @@ from kitaru.server.adapters.db.repositories.experiment_repository import (
 from kitaru.server.adapters.db.repositories.experiment_run_repository import (
     SQLExperimentRunRepository,
 )
+from kitaru.server.adapters.db.repositories.investigation_repository import (
+    SQLInvestigationRepository,
+)
 from kitaru.server.adapters.db.repositories.job_repository import SQLJobRepository
 from kitaru.server.adapters.db.repositories.replay_repository import (
     SQLReplayRepository,
@@ -71,6 +78,7 @@ from kitaru.server.adapters.db.repositories.session_repository import (
     SQLSessionRepository,
 )
 from kitaru.server.adapters.db.repositories.tag_repository import SQLTagRepository
+from kitaru.server.adapters.db.repositories.task_repository import SQLTaskRepository
 from kitaru.server.application.interfaces.cohort_repository import CohortRepository
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
@@ -78,11 +86,16 @@ from kitaru.server.application.interfaces.cohort_version_repository import (
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
+from kitaru.server.application.interfaces.investigation_repository import (
+    InvestigationRepository,
+)
+from kitaru.server.application.interfaces.job_repository import JobRepository
 from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import (
     SessionRepository,
 )
 from kitaru.server.application.interfaces.tag_repository import TagRepository
+from kitaru.server.application.interfaces.task_repository import TaskRepository
 from kitaru.server.application.models.session import SessionFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent, AgentNotFound
@@ -93,7 +106,9 @@ from kitaru.server.domain.cohort_version import CohortVersion
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.investigation import Investigation, InvestigationSession
 from kitaru.server.domain.job import Job
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import (
     PassthroughConfig,
@@ -104,7 +119,6 @@ from kitaru.server.domain.session import (
     DuplicateSessionExternalId,
     Session,
     SessionInUse,
-    SessionInUseByReplay,
     SessionNotFound,
     SessionRollups,
 )
@@ -121,9 +135,6 @@ Setup = tuple[
 ]
 CohortSetup = tuple[
     SessionRepository, CohortRepository, CohortVersionRepository, uuid.UUID, uuid.UUID
-]
-ReplaySetup = tuple[
-    SessionRepository, ReplayRepository, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID
 ]
 
 
@@ -192,6 +203,123 @@ async def cohort_setup(
             SQLCohortVersionRepository(session),
             owner.id,
             agent.id,
+        )
+
+
+InvestigationSetup = tuple[
+    SessionRepository, InvestigationRepository, uuid.UUID, uuid.UUID
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def investigation_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[InvestigationSetup, None]:
+    """Provide a session repository and its investigation collaborators.
+
+    Yields the repository wired to an investigation repository sharing its
+    backend, an owner id, and an agent id.
+    """
+    if request.param == "fake":
+        sessions = FakeSessionRepository()
+        investigations = FakeInvestigationRepository(session_repository=sessions)
+        yield sessions, investigations, uuid.uuid4(), uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLInvestigationRepository(session),
+            owner.id,
+            agent.id,
+        )
+
+
+ReplaySetup = tuple[
+    SessionRepository, ReplayRepository, JobRepository, uuid.UUID, uuid.UUID, uuid.UUID
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def replay_setup(
+    request: pytest.FixtureRequest,
+) -> AsyncGenerator[ReplaySetup, None]:
+    """Provide a session repository and its replay collaborators.
+
+    Yields the repository wired to replay and job repositories sharing its
+    backend, an owner id, an agent id, and a replay config id.
+    """
+    if request.param == "fake":
+        sessions = FakeSessionRepository()
+        jobs = FakeJobRepository()
+        replays = FakeReplayRepository(sessions=sessions)
+        yield sessions, replays, jobs, uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        experiments = SQLExperimentRepository(session)
+        config = await experiments.create_replay_config(
+            ReplayConfig(
+                owner_id=owner.id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLReplayRepository(session),
+            SQLJobRepository(session),
+            owner.id,
+            agent.id,
+            config.id,
+        )
+
+
+TaskSetup = tuple[
+    SessionRepository, TaskRepository, JobRepository, uuid.UUID, uuid.UUID, uuid.UUID
+]
+
+
+@pytest.fixture(params=["fake", "postgres"])
+async def task_setup(request: pytest.FixtureRequest) -> AsyncGenerator[TaskSetup, None]:
+    """Provide a session repository and its task collaborators.
+
+    Yields the repository wired to a task repository sharing its backend, a
+    job repository, an owner id, an agent id, and an agent version id.
+    """
+    if request.param == "fake":
+        sessions = FakeSessionRepository()
+        tasks = FakeTaskRepository(sessions=sessions)
+        jobs = FakeJobRepository(tasks=tasks)
+        yield sessions, tasks, jobs, uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+        return
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        accounts = SQLAccountRepository(session)
+        owner = await accounts.create(Account(name="owner"))
+        agents = SQLAgentRepository(session)
+        agent = await agents.create(Agent(owner_id=owner.id, name="assistant"))
+        agent_version = await SQLAgentVersionRepository(session).create(
+            AgentVersion(owner_id=owner.id, agent_id=agent.id)
+        )
+        yield (
+            SQLSessionRepository(session, engine),
+            SQLTaskRepository(session),
+            SQLJobRepository(session),
+            owner.id,
+            agent.id,
+            agent_version.id,
         )
 
 
@@ -278,7 +406,7 @@ async def test_get(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    loaded = await repository.get(created.id)
+    loaded = await repository.get(created.id, include_payloads=True)
     assert loaded == created
 
 
@@ -287,7 +415,7 @@ async def test_get_not_found(setup: Setup) -> None:
     repository, _, _, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(SessionNotFound, match=f"Session {missing_id} was not found"):
-        await repository.get(missing_id)
+        await repository.get(missing_id, include_payloads=True)
 
 
 async def test_get_exclusive(setup: Setup) -> None:
@@ -301,7 +429,7 @@ async def test_get_exclusive(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    loaded = await repository.get(created.id, exclusive=True)
+    loaded = await repository.get(created.id, exclusive=True, include_payloads=True)
     assert loaded == created
 
 
@@ -329,7 +457,8 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
     sessions, next_cursor = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="origin", op=FilterOp.EQ, value="recorded")
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is None
     assert [s.id for s in sessions] == [recorded.id]
@@ -339,7 +468,8 @@ async def test_query_filters_by_origin_and_status(setup: Setup) -> None:
             expression=FilterCondition(
                 field="status", op=FilterOp.EQ, value="completed"
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is None
     assert len(sessions) == 1
@@ -380,7 +510,8 @@ async def test_query_filters_by_imported_from_and_external_id(setup: Setup) -> N
                     FilterCondition(field="external_id", op=FilterOp.EQ, value="run-2"),
                 )
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is None
     assert [s.id for s in sessions] == [target.id]
@@ -417,7 +548,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.GE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [late.id]
 
@@ -428,7 +560,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.LE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [early.id]
 
@@ -439,7 +572,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.GE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [late.id]
 
@@ -450,7 +584,8 @@ async def test_query_filters_by_date_bounds(setup: Setup) -> None:
                 op=FilterOp.LE,
                 value=datetime(2026, 3, 1, tzinfo=UTC),
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [early.id]
 
@@ -482,7 +617,8 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
             expression=FilterCondition(
                 field="cost", op=FilterOp.GE, value=Decimal("5.00")
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [pricey.id]
 
@@ -491,7 +627,8 @@ async def test_query_filters_by_cost_bounds(setup: Setup) -> None:
             expression=FilterCondition(
                 field="cost", op=FilterOp.LE, value=Decimal("5.00")
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [cheap.id]
 
@@ -533,7 +670,8 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
             expression=FilterCondition(
                 field="has_evaluation", op=FilterOp.EQ, value=True
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [scored.id]
 
@@ -542,7 +680,8 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
             expression=FilterCondition(
                 field="has_evaluation", op=FilterOp.EQ, value=False
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [unscored.id]
 
@@ -567,7 +706,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
     cursor = None
     while True:
         sessions, next_cursor = await repository.query(
-            SessionFilter(cursor=cursor, size=2)
+            SessionFilter(cursor=cursor, size=2), include_payloads=True
         )
         collected.extend(sessions)
         if next_cursor is None:
@@ -591,18 +730,24 @@ async def test_update(setup: Setup) -> None:
     )
     created.update_name("renamed")
     created.finish(
-        status=SessionStatus.COMPLETED, outputs={"a": 1}, error=None, ended_at=None
+        status=SessionStatus.COMPLETED,
+        output_text_selector=None,
+        error=None,
+        ended_at=None,
     )
+    created.outputs = Payload.from_json({"a": 1})
     updated = await repository.update(created)
     assert updated.name == "renamed"
     assert updated.status == SessionStatus.COMPLETED
-    assert updated.outputs == {"a": 1}
+    reloaded = await repository.get(created.id, include_payloads=True)
+    assert reloaded.outputs is not None
+    assert reloaded.outputs.value == {"a": 1}
     assert updated.created == created.created
     assert updated.updated is not None
     assert created.updated is not None
     assert updated.updated > created.updated
-    loaded = await repository.get(created.id)
-    assert loaded == updated
+    loaded = await repository.get(created.id, include_payloads=True)
+    assert updated == loaded.model_copy(update={"inputs": None, "outputs": None})
 
 
 async def test_update_not_found(setup: Setup) -> None:
@@ -659,7 +804,7 @@ async def test_delete(setup: Setup) -> None:
     )
     await repository.delete(created.id)
     with pytest.raises(SessionNotFound):
-        await repository.get(created.id)
+        await repository.get(created.id, include_payloads=True)
 
 
 async def test_delete_not_found(setup: Setup) -> None:
@@ -693,45 +838,45 @@ async def test_delete_in_use_by_cohort_version(cohort_setup: CohortSetup) -> Non
         await sessions.delete(member.id)
 
 
-@pytest.fixture
-async def replay_setup() -> AsyncGenerator[ReplaySetup, None]:
-    """Provide a Postgres session repository and a replay's collaborators.
-
-    Yields a session repository, a replay repository sharing its backend,
-    an owner id, an agent id, a replay config id, and a job id.
-    """
-    if not await postgres_available():
-        pytest.skip("PostgreSQL is not reachable")
-    async with pg_session_with_engine() as (session, engine):
-        owner = await SQLAccountRepository(session).create(Account(name="owner"))
-        agent = await SQLAgentRepository(session).create(
-            Agent(owner_id=owner.id, name="assistant")
-        )
-        config = await SQLExperimentRepository(session).create_replay_config(
-            ReplayConfig(
-                owner_id=owner.id,
-                tool_policy=ToolPolicy(default=PassthroughConfig()),
-                evaluators=[],
-            )
-        )
-        job = await SQLJobRepository(session).create(
-            Job(owner_id=owner.id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
-        )
-        yield (
-            SQLSessionRepository(session, engine),
-            SQLReplayRepository(session),
-            owner.id,
-            agent.id,
-            config.id,
-            job.id,
-        )
-
-
-async def test_delete_in_use_by_replay_as_baseline_session(
-    replay_setup: ReplaySetup,
+async def test_delete_restricted_by_investigation_membership(
+    investigation_setup: InvestigationSetup,
 ) -> None:
-    """Reject deleting a session that is a replay's baseline session."""
-    sessions, replays, owner_id, agent_id, config_id, job_id = replay_setup
+    """Reject deleting a session linked to an investigation."""
+    sessions, investigations, owner_id, agent_id = investigation_setup
+    member = await sessions.create(
+        Session(
+            owner_id=owner_id,
+            agent_id=agent_id,
+            number=1,
+            origin=SessionOrigin.RECORDED,
+        )
+    )
+    investigation = Investigation(
+        owner_id=owner_id,
+        agent_id=agent_id,
+        name="investigation",
+        total_sessions=0,
+        completed_sessions=0,
+    )
+    await investigations.create(
+        investigation,
+        [
+            InvestigationSession(
+                investigation_id=investigation.id,
+                session_id=member.id,
+                position=0,
+                questions=[],
+            )
+        ],
+    )
+
+    with pytest.raises(SessionInUse, match=f"Session {member.id} is referenced"):
+        await sessions.delete(member.id)
+
+
+async def test_delete_restricted_by_replay_baseline(replay_setup: ReplaySetup) -> None:
+    """Reject deleting a session that is a replay's baseline."""
+    sessions, replays, jobs, owner_id, agent_id, replay_config_id = replay_setup
     baseline = await sessions.create(
         Session(
             owner_id=owner_id,
@@ -740,24 +885,25 @@ async def test_delete_in_use_by_replay_as_baseline_session(
             origin=SessionOrigin.RECORDED,
         )
     )
+    job = await jobs.create(
+        Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+    )
     await replays.create(
         Replay(
             owner_id=owner_id,
-            job_id=job_id,
-            replay_config_id=config_id,
+            job_id=job.id,
+            replay_config_id=replay_config_id,
             baseline_session_id=baseline.id,
         )
     )
 
-    with pytest.raises(SessionInUseByReplay):
+    with pytest.raises(SessionInUse, match=f"Session {baseline.id} is referenced"):
         await sessions.delete(baseline.id)
 
 
-async def test_delete_in_use_by_replay_as_result_session(
-    replay_setup: ReplaySetup,
-) -> None:
-    """Reject deleting a session that is a replay's result session."""
-    sessions, replays, owner_id, agent_id, config_id, job_id = replay_setup
+async def test_delete_restricted_by_replay_result(replay_setup: ReplaySetup) -> None:
+    """Reject deleting a session that is a replay's result."""
+    sessions, replays, jobs, owner_id, agent_id, replay_config_id = replay_setup
     baseline = await sessions.create(
         Session(
             owner_id=owner_id,
@@ -774,17 +920,20 @@ async def test_delete_in_use_by_replay_as_result_session(
             origin=SessionOrigin.RECORDED,
         )
     )
+    job = await jobs.create(
+        Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+    )
     await replays.create(
         Replay(
             owner_id=owner_id,
-            job_id=job_id,
-            replay_config_id=config_id,
+            job_id=job.id,
+            replay_config_id=replay_config_id,
             baseline_session_id=baseline.id,
             result_session_id=result.id,
         )
     )
 
-    with pytest.raises(SessionInUseByReplay):
+    with pytest.raises(SessionInUse, match=f"Session {result.id} is referenced"):
         await sessions.delete(result.id)
 
 
@@ -812,7 +961,7 @@ async def test_apply_rollups_accumulates_deltas(setup: Setup) -> None:
         created.id,
         SessionRollups(cost=Decimal("0.50"), tool_call_count=1),
     )
-    loaded = await repository.get(created.id)
+    loaded = await repository.get(created.id, include_payloads=True)
     assert loaded.cost == Decimal("2.00")
     assert loaded.tokens is not None
     assert loaded.tokens.input_tokens == 10
@@ -861,7 +1010,8 @@ async def test_query_filters_by_tag(setup: Setup) -> None:
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [tagged.id]
 
@@ -916,7 +1066,8 @@ async def test_query_filters_by_tag_in_unions_names(setup: Setup) -> None:
             expression=FilterCondition(
                 field="tag", op=FilterOp.IN, value=["smoke-test", "regression"]
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert {s.id for s in sessions} == {smoke.id, regression.id}
 
@@ -955,7 +1106,8 @@ async def test_query_filters_by_not_tag_returns_untagged(setup: Setup) -> None:
             expression=NotExpression(
                 operand=FilterCondition(field="tag", op=FilterOp.EQ, value="smoke-test")
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [untagged.id]
 
@@ -982,7 +1134,8 @@ async def test_query_filters_by_is_null_on_name(setup: Setup) -> None:
     )
 
     sessions, _ = await repository.query(
-        SessionFilter(expression=FilterCondition(field="name", op=FilterOp.IS_NULL))
+        SessionFilter(expression=FilterCondition(field="name", op=FilterOp.IS_NULL)),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [unnamed.id]
 
@@ -1019,7 +1172,8 @@ async def test_query_filters_by_cohort_version(cohort_setup: CohortSetup) -> Non
             expression=FilterCondition(
                 field="cohort_version_id", op=FilterOp.EQ, value=version.id
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in matched] == [member.id]
 
@@ -1132,7 +1286,8 @@ async def test_query_filters_by_experiment_run() -> None:
                 expression=FilterCondition(
                     field="experiment_run_id", op=FilterOp.EQ, value=run.id
                 )
-            )
+            ),
+            include_payloads=True,
         )
         assert [s.id for s in sessions] == [result.id]
 
@@ -1141,7 +1296,8 @@ async def test_query_filters_by_experiment_run() -> None:
                 expression=FilterCondition(
                     field="experiment_run_id", op=FilterOp.EQ, value=uuid.uuid4()
                 )
-            )
+            ),
+            include_payloads=True,
         )
         assert sessions == []
 
@@ -1152,7 +1308,8 @@ async def test_query_filters_by_experiment_run() -> None:
                         field="experiment_run_id", op=FilterOp.EQ, value=run.id
                     )
                 )
-            )
+            ),
+            include_payloads=True,
         )
         assert {s.id for s in sessions} == {
             baseline.id,
@@ -1199,7 +1356,8 @@ async def test_query_filters_by_and_expression(setup: Setup) -> None:
                     FilterCondition(field="status", op=FilterOp.EQ, value="completed"),
                 )
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [match.id]
 
@@ -1244,7 +1402,8 @@ async def test_query_filters_by_or_expression(setup: Setup) -> None:
                     ),
                 )
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert {s.id for s in sessions} == {by_status.id, by_imported_from.id}
 
@@ -1275,7 +1434,8 @@ async def test_query_filters_by_not_is_null_expression(setup: Setup) -> None:
             expression=NotExpression(
                 operand=FilterCondition(field="name", op=FilterOp.IS_NULL)
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [named.id]
 
@@ -1313,7 +1473,8 @@ async def test_query_filters_by_ne_excludes_null(setup: Setup) -> None:
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="name", op=FilterOp.NE, value="run-2")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [other_name.id]
 
@@ -1353,7 +1514,8 @@ async def test_query_filters_by_in_expression(setup: Setup) -> None:
             expression=FilterCondition(
                 field="status", op=FilterOp.IN, value=["completed", "failed"]
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert {s.id for s in sessions} == {completed.id, failed.id}
 
@@ -1409,21 +1571,24 @@ async def test_query_filters_by_string_ops_on_name(setup: Setup) -> None:
             expression=FilterCondition(
                 field="name", op=FilterOp.STARTSWITH, value="web"
             )
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [web_run.id]
 
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="name", op=FilterOp.ENDSWITH, value="run")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [web_run.id]
 
     sessions, _ = await repository.query(
         SessionFilter(
             expression=FilterCondition(field="name", op=FilterOp.CONTAINS, value="0%_d")
-        )
+        ),
+        include_payloads=True,
     )
     assert [s.id for s in sessions] == [percent_run.id]
 
@@ -1463,7 +1628,8 @@ async def test_query_where_filter_persists_across_cursor(setup: Setup) -> None:
                 ),
                 cursor=cursor,
                 size=1,
-            )
+            ),
+            include_payloads=True,
         )
         collected.extend(sessions)
         if next_cursor is None:
@@ -1500,11 +1666,14 @@ async def test_query_cursor_expression_mismatch(setup: Setup) -> None:
                 field="status", op=FilterOp.EQ, value="completed"
             ),
             size=1,
-        )
+        ),
+        include_payloads=True,
     )
     assert next_cursor is not None
     with pytest.raises(ValidationError):
-        await repository.query(SessionFilter(cursor=next_cursor, size=1))
+        await repository.query(
+            SessionFilter(cursor=next_cursor, size=1), include_payloads=True
+        )
 
 
 async def test_query_applies_list_query_timeout() -> None:
@@ -1514,7 +1683,7 @@ async def test_query_applies_list_query_timeout() -> None:
     async with pg_session_with_engine() as (session, engine):
         session.info[LIST_QUERY_TIMEOUT_INFO_KEY] = 3
         repository = SQLSessionRepository(session, engine)
-        await repository.query(SessionFilter())
+        await repository.query(SessionFilter(), include_payloads=True)
         timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert timeout == "3s"
 
@@ -1525,7 +1694,7 @@ async def test_query_without_list_query_timeout() -> None:
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, engine):
         repository = SQLSessionRepository(session, engine)
-        await repository.query(SessionFilter())
+        await repository.query(SessionFilter(), include_payloads=True)
         timeout = (await session.execute(text("SHOW statement_timeout"))).scalar_one()
         assert timeout == "0"
 
@@ -1568,7 +1737,7 @@ async def test_allocate_session_number_fake() -> None:
 
 
 async def test_allocate_session_number_pg() -> None:
-    """Bump session numbers per agent, and raise for an unknown agent."""
+    """Bump session numbers per agent, and raise for an unknown or deleted agent."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, engine):
@@ -1588,3 +1757,8 @@ async def test_allocate_session_number_pg() -> None:
         missing_agent_id = uuid.uuid4()
         with pytest.raises(AgentNotFound):
             await repository.allocate_session_number(missing_agent_id)
+
+        await agents.mark_deleted(other_agent.id)
+        await session.commit()
+        with pytest.raises(AgentNotFound):
+            await repository.allocate_session_number(other_agent.id)

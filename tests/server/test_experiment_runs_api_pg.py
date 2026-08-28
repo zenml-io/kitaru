@@ -199,10 +199,10 @@ async def test_cancel_run_drains_pending_replicas_immediately(
     assert reloaded["status"] == "canceled"
 
 
-async def test_delete_run_cascades_its_jobs_and_replays(
+async def test_delete_run_cascades_its_replays_and_cancels_its_jobs(
     client: httpx.AsyncClient,
 ) -> None:
-    """Deleting a run removes its jobs, tasks, and replay rows."""
+    """Deleting a run removes its replay rows and cancels the jobs that ran them."""
     setup = await _setup_run(client)
     run = (
         await client.post(
@@ -232,7 +232,9 @@ async def test_delete_run_cascades_its_jobs_and_replays(
 
     assert (await client.get(f"/api/v1/experiment-runs/{run['id']}")).status_code == 404
     for job in jobs:
-        assert (await client.get(f"/api/v1/jobs/{job['id']}")).status_code == 404
+        kept = await client.get(f"/api/v1/jobs/{job['id']}")
+        assert kept.status_code == 200
+        assert kept.json()["cancel_requested_at"] is not None
     for replay in replays:
         assert (await client.get(f"/api/v1/replays/{replay['id']}")).status_code == 404
 

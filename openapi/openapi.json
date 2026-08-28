@@ -1349,6 +1349,20 @@
         "title": "CohortVersionUpdateRequest",
         "type": "object"
       },
+      "CopyWorkdirHook": {
+        "additionalProperties": false,
+        "description": "Copy workdir hook.",
+        "properties": {
+          "type": {
+            "const": "copy_workdir",
+            "default": "copy_workdir",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "CopyWorkdirHook",
+        "type": "object"
+      },
       "DeviceAuthorizationResponse": {
         "description": "Device authorization response.",
         "properties": {
@@ -4846,6 +4860,36 @@
         "title": "Page[SecretResponse]",
         "type": "object"
       },
+      "Page_SessionDetailResponse_": {
+        "properties": {
+          "items": {
+            "description": "Items on this page.",
+            "items": {
+              "$ref": "#/components/schemas/SessionDetailResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Cursor for the next page, null on the last page.",
+            "title": "Next Cursor"
+          }
+        },
+        "required": [
+          "items",
+          "next_cursor"
+        ],
+        "title": "Page[SessionDetailResponse]",
+        "type": "object"
+      },
       "Page_SessionNodeResponse_": {
         "properties": {
           "items": {
@@ -5291,10 +5335,17 @@
             "type": "string"
           },
           "job_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Job running the replay.",
-            "format": "uuid",
-            "title": "Job Id",
-            "type": "string"
+            "title": "Job Id"
           },
           "override": {
             "anyOf": [
@@ -5338,7 +5389,6 @@
           "created",
           "updated",
           "id",
-          "job_id",
           "baseline_session_id",
           "override",
           "tool_policy",
@@ -5377,6 +5427,32 @@
             "description": "Process environment.",
             "title": "Env",
             "type": "object"
+          },
+          "hooks": {
+            "description": "Hooks run around the task process.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "setup_command": "#/components/schemas/SetupCommandHook",
+                  "teardown_command": "#/components/schemas/TeardownCommandHook"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CopyWorkdirHook"
+                },
+                {
+                  "$ref": "#/components/schemas/SetupCommandHook"
+                },
+                {
+                  "$ref": "#/components/schemas/TeardownCommandHook"
+                }
+              ]
+            },
+            "title": "Hooks",
+            "type": "array"
           },
           "secret_ids": {
             "description": "Secrets merged into the process environment.",
@@ -5956,6 +6032,18 @@
             "description": "Source system the session was imported from.",
             "title": "Imported From"
           },
+          "input_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session inputs.",
+            "title": "Input Text Selector"
+          },
           "inputs": {
             "description": "Session inputs.",
             "title": "Inputs"
@@ -5981,6 +6069,18 @@
           "origin": {
             "$ref": "#/components/schemas/SessionOrigin",
             "description": "How the session came to exist."
+          },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session outputs.",
+            "title": "Output Text Selector"
           },
           "outputs": {
             "description": "Session outputs.",
@@ -6017,6 +6117,289 @@
           "outputs"
         ],
         "title": "SessionCreateRequest",
+        "type": "object"
+      },
+      "SessionDetailResponse": {
+        "description": "Session detail response.",
+        "properties": {
+          "adapter_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Recording adapter version.",
+            "title": "Adapter Version"
+          },
+          "agent_id": {
+            "description": "Agent the session belongs to.",
+            "format": "uuid",
+            "title": "Agent Id",
+            "type": "string"
+          },
+          "agent_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent version recorded for the session.",
+            "title": "Agent Version Id"
+          },
+          "cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total cost.",
+            "title": "Cost"
+          },
+          "created": {
+            "description": "Creation time.",
+            "format": "date-time",
+            "title": "Created",
+            "type": "string"
+          },
+          "ended_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the session ended.",
+            "title": "Ended At"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Error from a failed session.",
+            "title": "Error"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Id from the source system.",
+            "title": "External Id"
+          },
+          "framework": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Agent framework used.",
+            "title": "Framework"
+          },
+          "id": {
+            "description": "Session id.",
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "imported_from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Source system the session was imported from.",
+            "title": "Imported From"
+          },
+          "input_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session inputs.",
+            "title": "Input Text Selector"
+          },
+          "inputs": {
+            "description": "Session inputs.",
+            "title": "Inputs"
+          },
+          "llm_call_count": {
+            "description": "Number of LLM call nodes.",
+            "title": "Llm Call Count",
+            "type": "integer"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Arbitrary metadata.",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Session name.",
+            "title": "Name"
+          },
+          "number": {
+            "description": "Session number within the agent.",
+            "title": "Number",
+            "type": "integer"
+          },
+          "origin": {
+            "$ref": "#/components/schemas/SessionOrigin",
+            "description": "How the session came to exist."
+          },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "RFC 6901 JSON Pointer selecting display text from session outputs.",
+            "title": "Output Text Selector"
+          },
+          "outputs": {
+            "description": "Session outputs.",
+            "title": "Outputs"
+          },
+          "owner_id": {
+            "description": "Id of the owning account.",
+            "format": "uuid",
+            "title": "Owner Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the session started.",
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SessionStatus"
+          },
+          "task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Task the session was produced by.",
+            "title": "Task Id"
+          },
+          "tokens": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TokenUsage"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Total token usage."
+          },
+          "tool_call_count": {
+            "description": "Number of tool call nodes.",
+            "title": "Tool Call Count",
+            "type": "integer"
+          },
+          "updated": {
+            "description": "Last modification time.",
+            "format": "date-time",
+            "title": "Updated",
+            "type": "string"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "owner_id",
+          "id",
+          "agent_id",
+          "number",
+          "origin",
+          "status",
+          "metadata",
+          "llm_call_count",
+          "tool_call_count",
+          "inputs",
+          "outputs"
+        ],
+        "title": "SessionDetailResponse",
+        "type": "object"
+      },
+      "SessionDetailWithEvaluationsResponse": {
+        "description": "Session detail with evaluations response.",
+        "properties": {
+          "evaluations": {
+            "description": "Every evaluation of the session, newest first.",
+            "items": {
+              "$ref": "#/components/schemas/EvaluationResponse"
+            },
+            "title": "Evaluations",
+            "type": "array"
+          },
+          "session": {
+            "$ref": "#/components/schemas/SessionDetailResponse",
+            "description": "Session."
+          }
+        },
+        "required": [
+          "session",
+          "evaluations"
+        ],
+        "title": "SessionDetailWithEvaluationsResponse",
         "type": "object"
       },
       "SessionEvaluationsRequest": {
@@ -6803,10 +7186,6 @@
             "description": "Source system the session was imported from.",
             "title": "Imported From"
           },
-          "inputs": {
-            "description": "Session inputs.",
-            "title": "Inputs"
-          },
           "llm_call_count": {
             "description": "Number of LLM call nodes.",
             "title": "Llm Call Count",
@@ -6838,10 +7217,6 @@
           "origin": {
             "$ref": "#/components/schemas/SessionOrigin",
             "description": "How the session came to exist."
-          },
-          "outputs": {
-            "description": "Session outputs.",
-            "title": "Outputs"
           },
           "owner_id": {
             "description": "Id of the owning account.",
@@ -6910,8 +7285,6 @@
           "number",
           "origin",
           "status",
-          "inputs",
-          "outputs",
           "metadata",
           "llm_call_count",
           "tool_call_count"
@@ -7017,6 +7390,18 @@
             "description": "New session name.",
             "title": "Name"
           },
+          "output_text_selector": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "New output text selector.",
+            "title": "Output Text Selector"
+          },
           "outputs": {
             "description": "New session outputs.",
             "title": "Outputs"
@@ -7071,7 +7456,7 @@
             "type": "array"
           },
           "session": {
-            "$ref": "#/components/schemas/SessionResponse",
+            "$ref": "#/components/schemas/SessionDetailResponse",
             "description": "Session."
           }
         },
@@ -7080,6 +7465,28 @@
           "nodes"
         ],
         "title": "SessionWithNodesResponse",
+        "type": "object"
+      },
+      "SetupCommandHook": {
+        "additionalProperties": false,
+        "description": "Setup command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "type": {
+            "const": "setup_command",
+            "default": "setup_command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "SetupCommandHook",
         "type": "object"
       },
       "StaticCase": {
@@ -7662,6 +8069,32 @@
             "title": "Env",
             "type": "object"
           },
+          "hooks": {
+            "description": "Hooks run around the task process.",
+            "items": {
+              "discriminator": {
+                "mapping": {
+                  "copy_workdir": "#/components/schemas/CopyWorkdirHook",
+                  "setup_command": "#/components/schemas/SetupCommandHook",
+                  "teardown_command": "#/components/schemas/TeardownCommandHook"
+                },
+                "propertyName": "type"
+              },
+              "oneOf": [
+                {
+                  "$ref": "#/components/schemas/CopyWorkdirHook"
+                },
+                {
+                  "$ref": "#/components/schemas/SetupCommandHook"
+                },
+                {
+                  "$ref": "#/components/schemas/TeardownCommandHook"
+                }
+              ]
+            },
+            "title": "Hooks",
+            "type": "array"
+          },
           "kind": {
             "$ref": "#/components/schemas/TaskKind",
             "description": "Kind of work the task runs."
@@ -7789,6 +8222,39 @@
           "token"
         ],
         "title": "TaskWithSpec",
+        "type": "object"
+      },
+      "TeardownCommandHook": {
+        "additionalProperties": false,
+        "description": "Teardown command hook.",
+        "properties": {
+          "command": {
+            "description": "Shell command to run.",
+            "title": "Command",
+            "type": "string"
+          },
+          "on": {
+            "default": "success",
+            "description": "Task process outcome the command runs on.",
+            "enum": [
+              "success",
+              "failure",
+              "always"
+            ],
+            "title": "On",
+            "type": "string"
+          },
+          "type": {
+            "const": "teardown_command",
+            "default": "teardown_command",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "command"
+        ],
+        "title": "TeardownCommandHook",
         "type": "object"
       },
       "TokenErrorCode": {
@@ -8711,7 +9177,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.23.0"
+    "version": "0.23.0+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -8889,7 +9355,7 @@
     },
     "/api/v1/agent-versions/{agent_version_id}": {
       "delete": {
-        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success and 404 when no agent version has\nthis id.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
+        "description": "Delete an agent version.\n\nClients observe HTTP 204 on success, 404 when no agent version has\nthis id, and 409 when an experiment run references it.\n\nArgs:\n    agent_version_id: Id of the agent version.\n    service: Agent version service.\n    actor: Caller context.",
         "operationId": "delete_agent_version_api_v1_agent_versions__agent_version_id__delete",
         "parameters": [
           {
@@ -9184,7 +9650,7 @@
     },
     "/api/v1/agents/{agent_id}": {
       "delete": {
-        "description": "Delete an agent.\n\nClients observe HTTP 204 on success, 404 when no agent has this id, and\n409 when the agent has versions.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
+        "description": "Delete an agent, hiding the agent and retaining its subtree.\n\nThe agent's stored sessions, versions, cohorts, experiments, and\ninvestigations are retained and stay readable through their own routes.\nCreating new ones for the agent returns HTTP 404. Clients observe HTTP\n204 on success and 404 when no agent has this id.\n\nArgs:\n    agent_id: Id of the agent.\n    service: Agent service.\n    actor: Caller context.",
         "operationId": "delete_agent_api_v1_agents__agent_id__delete",
         "parameters": [
           {
@@ -10625,7 +11091,7 @@
     },
     "/api/v1/cohorts/{cohort_id}": {
       "delete": {
-        "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess and 404 when no cohort has this id.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
+        "description": "Delete a cohort.\n\nDeleting a cohort cascades its versions. Clients observe HTTP 204 on\nsuccess, 404 when no cohort has this id, and 409 when an experiment\nrun references one of its versions.\n\nArgs:\n    cohort_id: Id of the cohort.\n    service: Cohort service.\n    actor: Caller context.",
         "operationId": "delete_cohort_api_v1_cohorts__cohort_id__delete",
         "parameters": [
           {
@@ -11392,7 +11858,7 @@
         ]
       },
       "post": {
-        "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, and 422 when the pair count exceeds the cap or an input\nsession does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
+        "description": "Score every input session with every evaluator, as one job.\n\nClients observe HTTP 201 on success, 404 when an evaluator or version\ndoes not exist, 409 when an input session is not finished, and 422 when\nthe pair count exceeds the cap or an input session does not exist.\n\nArgs:\n    body: Evaluation batch create request.\n    service: Job service.\n    actor: Caller context.\n\nReturns:\n    Created job.",
         "operationId": "create_evaluations_api_v1_evaluations_post",
         "parameters": [
           {
@@ -12152,7 +12618,7 @@
     },
     "/api/v1/experiment-runs/{experiment_run_id}": {
       "delete": {
-        "description": "Delete an experiment run and its jobs.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
+        "description": "Delete an experiment run and its replays.\n\nClients observe HTTP 204 on success and 404 when no run has this id.\n\nArgs:\n    experiment_run_id: Id of the run.\n    service: Experiment run service.\n    actor: Caller context.",
         "operationId": "delete_experiment_run_api_v1_experiment_runs__experiment_run_id__delete",
         "parameters": [
           {
@@ -12686,7 +13152,7 @@
     },
     "/api/v1/experiments/{experiment_id}/runs": {
       "post": {
-        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, and 422\nwhen the cohort version has no sessions, the cohort version or agent\nversion belongs to another agent, or the resolved agent version has no\nrun spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
+        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, 409 when\nevaluate_baselines is set and a cohort version session is not finished,\nand 422 when the cohort version has no sessions, the cohort version or\nagent version belongs to another agent, or the resolved agent version\nhas no run spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
         "operationId": "start_run_api_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {
@@ -13929,7 +14395,7 @@
     },
     "/api/v1/jobs/{job_id}": {
       "delete": {
-        "description": "Delete a job, cascading its tasks.\n\nClients observe HTTP 204 on success and 404 when no job has this id.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
+        "description": "Delete a settled job, cascading its tasks.\n\nClients observe HTTP 204 on success, 404 when no job has this id, and\n409 when the job has not settled.\n\nArgs:\n    job_id: Id of the job.\n    service: Job service.\n    actor: Caller context.",
         "operationId": "delete_job_api_v1_jobs__job_id__delete",
         "parameters": [
           {
@@ -14338,7 +14804,7 @@
         ]
       },
       "post": {
-        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, and\n422 when the baseline session carries no agent version and none was\ngiven, the resolved agent version has no run spec, the tool policy uses\ncohort-version-scoped history, or an evaluator version repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
+        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, 409\nwhen evaluate_baselines is set and the baseline session is not\nfinished, and 422 when the baseline session carries no agent version\nand none was given, the resolved agent version has no run spec, the\ntool policy uses cohort-version-scoped history, or an evaluator\nversion repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
         "operationId": "create_replay_api_v1_replays_post",
         "parameters": [
           {
@@ -14397,6 +14863,41 @@
       }
     },
     "/api/v1/replays/{replay_id}": {
+      "delete": {
+        "description": "Delete a replay.\n\nClients observe HTTP 204 on success, 404 when no replay has this id, and\n409 when the replay belongs to an experiment run.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.",
+        "operationId": "delete_replay_api_v1_replays__replay_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "replay_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Replay Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Replay",
+        "tags": [
+          "replays"
+        ]
+      },
       "get": {
         "description": "Get a replay by id.\n\nClients observe HTTP 200 on success, 403 when a task token names a task\noutside this replay's job, and 404 when no replay has this id.\n\nArgs:\n    replay_id: Id of the replay.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Stored replay.",
         "operationId": "get_replay_api_v1_replays__replay_id__get",
@@ -14660,7 +15161,7 @@
     },
     "/api/v1/secrets/{secret_id}": {
       "delete": {
-        "description": "Delete a secret.\n\nClients observe HTTP 204 on success and 404 when no secret has this\nid.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
+        "description": "Delete a secret.\n\nClients observe HTTP 204 on success, 404 when no secret has this id,\nand 409 when an agent version references it.\n\nArgs:\n    secret_id: Id of the secret.\n    service: Secret service.\n    actor: Caller context.",
         "operationId": "delete_secret_api_v1_secrets__secret_id__delete",
         "parameters": [
           {
@@ -14983,7 +15484,7 @@
     },
     "/api/v1/sessions": {
       "get": {
-        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions.",
+        "description": "List sessions.\n\nClients observe HTTP 200 on success and 422 on invalid pagination\nparameters.\n\nArgs:\n    service: Session service.\n    actor: Caller context.\n    params: Session list params.\n\nReturns:\n    Page of sessions, with payloads when include_payloads is set.",
         "operationId": "list_sessions_api_v1_sessions_get",
         "parameters": [
           {
@@ -15057,6 +15558,18 @@
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
             }
+          },
+          {
+            "description": "Include inputs and outputs.",
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include inputs and outputs.",
+              "title": "Include Payloads",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -15064,7 +15577,15 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/Page_SessionResponse_"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/Page_SessionDetailResponse_"
+                    },
+                    {
+                      "$ref": "#/components/schemas/Page_SessionResponse_"
+                    }
+                  ],
+                  "title": "Response List Sessions Api V1 Sessions Get"
                 }
               }
             },
@@ -15147,7 +15668,7 @@
     },
     "/api/v1/sessions/{session_id}": {
       "delete": {
-        "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess and 404 when no session has this id.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
+        "description": "Delete a session.\n\nDeleting a session cascades its nodes. Clients observe HTTP 204 on\nsuccess, 404 when no session has this id, and 409 when the session is\nreferenced by a cohort version, investigation, or replay.\n\nArgs:\n    session_id: Id of the session.\n    service: Session service.\n    actor: Caller context.",
         "operationId": "delete_session_api_v1_sessions__session_id__delete",
         "parameters": [
           {
@@ -15201,7 +15722,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionResponse"
+                  "$ref": "#/components/schemas/SessionDetailResponse"
                 }
               }
             },
@@ -15224,7 +15745,7 @@
         ]
       },
       "patch": {
-        "description": "Update a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the update moves a terminal session back to in_progress, and\n422 on invalid input, including an attempt to clear the status.\n\nArgs:\n    session_id: Id of the session.\n    body: Session update request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
+        "description": "Update a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is no longer in progress, and 422 on invalid\ninput, including an attempt to clear the status.\n\nArgs:\n    session_id: Id of the session.\n    body: Session update request.\n    service: Session service.\n    actor: Caller context.\n\nReturns:\n    Updated session.",
         "operationId": "update_session_api_v1_sessions__session_id__patch",
         "parameters": [
           {
@@ -15278,7 +15799,7 @@
     },
     "/api/v1/sessions/{session_id}/evaluations": {
       "post": {
-        "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\nand 422 when the request names the same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
+        "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is not finished, and 422 when the request names\nthe same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
         "operationId": "merge_session_evaluations_api_v1_sessions__session_id__evaluations_post",
         "parameters": [
           {
@@ -15466,7 +15987,7 @@
         ]
       },
       "post": {
-        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with inputs, outputs, and attributes\n    populated.",
+        "description": "Ingest a batch of session nodes.\n\nAn index already stored is replaced whole, matching the upsert\nsemantics of ``POST /api/v1/workers``. Clients observe HTTP 200 on success,\n404 when no session has this id, 409 when the session does not\ncurrently accept node ingestion, and 422 when a parent_index does not\nresolve.\n\nArgs:\n    session_id: Id of the session to ingest into.\n    body: Session node batch request.\n    service: Session node service.\n    actor: Caller context.\n\nReturns:\n    Stored nodes in batch order, with reasoning, inputs, outputs, and\n    attributes null.",
         "operationId": "ingest_session_nodes_api_v1_sessions__session_id__nodes_post",
         "parameters": [
           {
@@ -15777,7 +16298,7 @@
     },
     "/api/v1/tags/{tag_id}/links": {
       "post": {
-        "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag has this id, 409\nwhen the link is already registered, and 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
+        "description": "Link a tag to a resource.\n\nClients observe HTTP 201 on success, 404 when no tag or no resource of\nthe given type and id exists, 409 when the link is already registered,\nand 422 on invalid input.\n\nArgs:\n    tag_id: Id of the tag.\n    body: Tag link create request.\n    service: Tag service.\n    actor: Caller context.\n\nReturns:\n    Created tag link.",
         "operationId": "create_tag_link_api_v1_tags__tag_id__links_post",
         "parameters": [
           {
@@ -16345,6 +16866,18 @@
               "description": "Filter expression, JSON-encoded in the query string.",
               "title": "Filter"
             }
+          },
+          {
+            "description": "Include inputs and outputs.",
+            "in": "query",
+            "name": "include_payloads",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include inputs and outputs.",
+              "title": "Include Payloads",
+              "type": "boolean"
+            }
           }
         ],
         "responses": {
@@ -16396,7 +16929,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/SessionWithEvaluationsResponse"
+                  "$ref": "#/components/schemas/SessionDetailWithEvaluationsResponse"
                 }
               }
             },

@@ -30,12 +30,16 @@ from kitaru.server.adapters.db.orm.agent_version_secret import (
     AGENT_VERSION_SECRET_SECRET_ID_FOREIGN_KEY,
     AgentVersionSecretORM,
 )
+from kitaru.server.adapters.db.orm.experiment_run import (
+    EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY,
+)
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.agent_version import AgentVersionFilter
 from kitaru.server.domain.agent import AgentNotFound
 from kitaru.server.domain.agent_version import (
     AgentVersion,
+    AgentVersionInUse,
     AgentVersionNotFound,
     RunSpec,
 )
@@ -79,7 +83,7 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         """
         statement = (
             update(AgentORM)
-            .where(AgentORM.id == agent_id)
+            .where(AgentORM.id == agent_id, AgentORM.deleted_at.is_(None))
             .values(latest_version=AgentORM.latest_version + 1)
             .returning(AgentORM.latest_version)
         )
@@ -224,6 +228,30 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         secret_ids = await self._load_secret_ids(agent_version_id)
         return row.to_domain(secret_ids)
 
+    async def get_runnable(self, agent_version_id: uuid.UUID) -> AgentVersion:
+        """Load an agent version whose agent is not deleted.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+            AgentNotFound: The version's agent is deleted.
+
+        Returns:
+            Stored agent version.
+        """
+        row = await self._get_row(agent_version_id)
+        live = await self._session.scalar(
+            select(AgentORM.id).where(
+                AgentORM.id == row.agent_id, AgentORM.deleted_at.is_(None)
+            )
+        )
+        if live is None:
+            raise AgentNotFound(row.agent_id)
+        secret_ids = await self._load_secret_ids(agent_version_id)
+        return row.to_domain(secret_ids)
+
     async def get_agent_id(self, agent_version_id: uuid.UUID) -> uuid.UUID:
         """Load the id of the agent a version belongs to.
 
@@ -303,6 +331,11 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
         row.run_command = run_spec.command if run_spec is not None else None
         row.run_working_dir = run_spec.working_dir if run_spec is not None else None
         row.run_env = run_spec.env if run_spec is not None else None
+        row.run_hooks = (
+            [hook.model_dump(mode="json") for hook in run_spec.hooks]
+            if run_spec is not None
+            else None
+        )
         row.run_timeout_seconds = (
             run_spec.timeout_seconds if run_spec is not None else None
         )
@@ -320,5 +353,13 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: The version is referenced by an experiment run.
         """
-        await self._delete_row(agent_version_id)
+        await self._delete_row(
+            agent_version_id,
+            {
+                EXPERIMENT_RUN_AGENT_VERSION_ID_FOREIGN_KEY: lambda: AgentVersionInUse(
+                    agent_version_id
+                )
+            },
+        )

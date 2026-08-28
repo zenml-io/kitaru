@@ -27,6 +27,7 @@ from kitaru.server.adapters.db.filtering import (
 from kitaru.server.adapters.db.orm.cohort import CohortORM
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
+    COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY,
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.experiment_run import (
@@ -43,6 +44,7 @@ from kitaru.server.domain.cohort_version import (
     CohortVersionInUse,
     CohortVersionNotFound,
 )
+from kitaru.server.domain.session import SessionNotFound
 
 COHORT_VERSION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": CohortVersionORM.id,
@@ -79,6 +81,7 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
 
         Raises:
             CohortNotFound: No cohort has the version's cohort id.
+            SessionNotFound: No session has one of the member session ids.
 
         Returns:
             Stored cohort version with its assigned version number and
@@ -102,7 +105,11 @@ class SQLCohortVersionRepository(BaseSQLRepository[CohortVersionORM]):
                     cohort_version_id=row.id, session_id=session_id, index=index
                 )
             )
-        await self._flush()
+        # The service validates the sessions before this insert, so a session
+        # foreign key violation means one was deleted concurrently.
+        await self._flush(
+            {COHORT_VERSION_SESSION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
+        )
         return row.to_domain()
 
     async def get(

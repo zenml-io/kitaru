@@ -40,11 +40,9 @@ from kitaru.server.application.models.agent import AgentFilter
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import (
     Agent,
-    AgentInUse,
     AgentNotFound,
     DuplicateAgentName,
 )
-from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.filtering import FilterCondition
 
 Setup = tuple[AgentRepository, uuid.UUID, Callable[[], AgentVersionRepository]]
@@ -105,6 +103,15 @@ async def test_create_after_duplicate_failure(setup: Setup) -> None:
         await repository.create(Agent(owner_id=owner_id, name="assistant"))
     agent = await repository.create(Agent(owner_id=owner_id, name="reviewer"))
     assert agent.name == "reviewer"
+
+
+async def test_create_reuses_deleted_agent_name(setup: Setup) -> None:
+    """Accept the name of an agent marked deleted for a new agent."""
+    repository, owner_id, _ = setup
+    deleted = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(deleted.id)
+    agent = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    assert agent.name == "assistant"
 
 
 async def test_get(setup: Setup) -> None:
@@ -214,29 +221,41 @@ async def test_update_duplicate_name(setup: Setup) -> None:
         await repository.update(reviewer)
 
 
-async def test_delete(setup: Setup) -> None:
-    """Delete a stored agent."""
+async def test_update_reuses_deleted_agent_name(setup: Setup) -> None:
+    """Accept the name of an agent marked deleted when renaming another."""
+    repository, owner_id, _ = setup
+    deleted = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(deleted.id)
+    reviewer = await repository.create(Agent(owner_id=owner_id, name="reviewer"))
+    reviewer.name = "assistant"
+    updated = await repository.update(reviewer)
+    assert updated.name == "assistant"
+
+
+async def test_mark_deleted_hides_agent(setup: Setup) -> None:
+    """Hide a marked agent from get and query."""
     repository, owner_id, _ = setup
     created = await repository.create(Agent(owner_id=owner_id, name="assistant"))
-    await repository.delete(created.id)
-    with pytest.raises(AgentNotFound):
+    await repository.mark_deleted(created.id)
+    with pytest.raises(AgentNotFound, match=f"Agent {created.id} was not found"):
         await repository.get(created.id)
+    agents, next_cursor = await repository.query(AgentFilter())
+    assert next_cursor is None
+    assert agents == []
 
 
-async def test_delete_not_found(setup: Setup) -> None:
+async def test_mark_deleted_already_deleted(setup: Setup) -> None:
+    """Raise for an agent already marked deleted."""
+    repository, owner_id, _ = setup
+    created = await repository.create(Agent(owner_id=owner_id, name="assistant"))
+    await repository.mark_deleted(created.id)
+    with pytest.raises(AgentNotFound, match=f"Agent {created.id} was not found"):
+        await repository.mark_deleted(created.id)
+
+
+async def test_mark_deleted_not_found(setup: Setup) -> None:
     """Raise for an unknown agent id."""
     repository, _, _ = setup
     missing_id = uuid.uuid4()
     with pytest.raises(AgentNotFound, match=f"Agent {missing_id} was not found"):
-        await repository.delete(missing_id)
-
-
-async def test_delete_in_use(setup: Setup) -> None:
-    """Reject deleting an agent that has versions."""
-    repository, owner_id, make_version_repository = setup
-    agent = await repository.create(Agent(owner_id=owner_id, name="assistant"))
-    version_repository = make_version_repository()
-    await version_repository.create(AgentVersion(owner_id=owner_id, agent_id=agent.id))
-
-    with pytest.raises(AgentInUse, match=f"Agent {agent.id} has versions"):
-        await repository.delete(agent.id)
+        await repository.mark_deleted(missing_id)

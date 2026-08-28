@@ -29,7 +29,7 @@ from kitaru.api_models.v1.replay_config import (
     ReplayOverride,
     ToolPolicy,
 )
-from kitaru.api_models.v1.session import SessionResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.client import KitaruClient
@@ -142,7 +142,7 @@ class KitaruSyncClient:
         """
         return self._iterate(self._client.list_agents())
 
-    def get_session(self, session_id: uuid.UUID) -> SessionResponse:
+    def get_session(self, session_id: uuid.UUID) -> SessionDetailResponse:
         """Get a session by id.
 
         Args:

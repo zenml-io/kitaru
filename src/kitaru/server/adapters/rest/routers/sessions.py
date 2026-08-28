@@ -22,6 +22,7 @@ from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.evaluation import EvaluationResponse
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionEvaluationsRequest,
     SessionListParams,
     SessionResponse,
@@ -53,6 +54,7 @@ from kitaru.server.adapters.rest.mapping.session_nodes import (
 from kitaru.server.adapters.rest.mapping.sessions import (
     session_create_to_command,
     session_list_params_to_filter,
+    session_to_detail_response,
     session_to_response,
     session_update_to_command,
 )
@@ -99,7 +101,7 @@ async def list_sessions(
     service: Annotated[SessionService, Depends(get_session_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
     params: Annotated[SessionListParams, Query()],
-) -> Page[SessionResponse]:
+) -> Page[SessionDetailResponse] | Page[SessionResponse]:
     """List sessions.
 
     Clients observe HTTP 200 on success and 422 on invalid pagination
@@ -111,10 +113,17 @@ async def list_sessions(
         params: Session list params.
 
     Returns:
-        Page of sessions.
+        Page of sessions, with payloads when include_payloads is set.
     """
     session_filter = session_list_params_to_filter(params)
-    sessions, next_cursor = await service.list_sessions(session_filter, actor=actor)
+    sessions, next_cursor = await service.list_sessions(
+        session_filter, include_payloads=params.include_payloads, actor=actor
+    )
+    if params.include_payloads:
+        return Page[SessionDetailResponse](
+            items=[session_to_detail_response(session) for session in sessions],
+            next_cursor=next_cursor,
+        )
     return Page[SessionResponse](
         items=[session_to_response(session) for session in sessions],
         next_cursor=next_cursor,
@@ -126,7 +135,7 @@ async def get_session(
     session_id: uuid.UUID,
     service: Annotated[SessionService, Depends(get_session_service)],
     actor: Annotated[AuthContext, Depends(authorize_with_task)],
-) -> SessionResponse:
+) -> SessionDetailResponse:
     """Get a session by id.
 
     Clients observe HTTP 200 on success and 404 when no session has this
@@ -141,7 +150,7 @@ async def get_session(
         Stored session.
     """
     session = await service.get_session(session_id, actor=actor)
-    return session_to_response(session)
+    return session_to_detail_response(session)
 
 
 @router.patch("/{session_id}")
@@ -154,8 +163,8 @@ async def update_session(
     """Update a session.
 
     Clients observe HTTP 200 on success, 404 when no session has this id,
-    409 when the update moves a terminal session back to in_progress, and
-    422 on invalid input, including an attempt to clear the status.
+    409 when the session is no longer in progress, and 422 on invalid
+    input, including an attempt to clear the status.
 
     Args:
         session_id: Id of the session.
@@ -180,7 +189,8 @@ async def delete_session(
     """Delete a session.
 
     Deleting a session cascades its nodes. Clients observe HTTP 204 on
-    success and 404 when no session has this id.
+    success, 404 when no session has this id, and 409 when the session is
+    referenced by a cohort version, investigation, or replay.
 
     Args:
         session_id: Id of the session.
@@ -212,8 +222,8 @@ async def ingest_session_nodes(
         actor: Caller context.
 
     Returns:
-        Stored nodes in batch order, with inputs, outputs, and attributes
-        populated.
+        Stored nodes in batch order, with reasoning, inputs, outputs, and
+        attributes null.
     """
     batch = session_node_batch_to_upserts(body)
     nodes = await service.ingest_nodes(session_id, batch, actor=actor)
@@ -221,7 +231,7 @@ async def ingest_session_nodes(
         session_id, referenced_parent_ids(nodes), actor=actor
     )
     return [
-        session_node_to_response(node, index_by_id, include_payloads=True)
+        session_node_to_response(node, index_by_id, include_payloads=False)
         for node in nodes
     ]
 
@@ -294,7 +304,7 @@ async def get_session_with_nodes(
         session_id, referenced_parent_ids(nodes), actor=actor
     )
     return SessionWithNodesResponse(
-        session=session_to_response(session),
+        session=session_to_detail_response(session),
         nodes=[
             session_node_to_response(node, index_by_id, include_payloads=True)
             for node in nodes
@@ -313,7 +323,8 @@ async def merge_session_evaluations(
 
     A resent name overwrites its score, value, data type, and explanation.
     Clients observe HTTP 200 on success, 404 when no session has this id,
-    and 422 when the request names the same evaluation twice.
+    409 when the session is not finished, and 422 when the request names
+    the same evaluation twice.
 
     Args:
         session_id: Id of the session to merge evaluations into.

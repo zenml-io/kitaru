@@ -155,8 +155,8 @@ async def delete_secret(
 ) -> None:
     """Delete a secret.
 
-    Clients observe HTTP 204 on success and 404 when no secret has this
-    id.
+    Clients observe HTTP 204 on success, 404 when no secret has this id,
+    and 409 when an agent version references it.
 
     Args:
         secret_id: Id of the secret.

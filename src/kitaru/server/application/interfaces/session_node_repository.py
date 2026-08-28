@@ -52,8 +52,11 @@ class SessionNodeRepository(Protocol):
             session_id: Id of the owning session.
             nodes: Fully resolved nodes to store, in batch order.
 
+        Raises:
+            SessionNotFound: No session has this id.
+
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         ...
 
@@ -104,6 +107,8 @@ class SessionNodeRepository(Protocol):
     ) -> SessionNode | None:
         """Find the newest completed node with a cache key within one session.
 
+        Only the outputs payload of the match is read.
+
         Args:
             session_id: Id of the session to search.
             cache_key: Tool call cache key to match.
@@ -119,7 +124,8 @@ class SessionNodeRepository(Protocol):
         """Find the nth finished node with a cache key in one session, in index order.
 
         Only completed and failed tool calls are candidates, so the
-        occurrence offset counts finished calls only.
+        occurrence offset counts finished calls only. Only the outputs
+        payload of the match is read.
 
         Args:
             session_id: Id of the session to search.
@@ -137,7 +143,8 @@ class SessionNodeRepository(Protocol):
         """Find the newest completed node with a cache key in an agent's history.
 
         Only sessions with a recorded or imported origin are searched, so a
-        replay's own result session is never a match.
+        replay's own result session is never a match. Only the outputs
+        payload of the match is read.
 
         Args:
             agent_id: Id of the agent to search.
@@ -152,6 +159,8 @@ class SessionNodeRepository(Protocol):
         self, cohort_version_id: uuid.UUID, cache_key: str
     ) -> SessionNode | None:
         """Find the newest completed node with a cache key in a cohort version.
+
+        Only the outputs payload of the match is read.
 
         Args:
             cohort_version_id: Id of the cohort version to search.

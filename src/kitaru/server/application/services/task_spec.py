@@ -128,6 +128,7 @@ class TaskSpecBuilder:
             ),
             env=task.env,
             secret_env=secret_env,
+            hooks=run_spec.hooks,
             details=AgentTaskDetails(
                 inputs=task.inputs,
                 replay_id=replay.id if replay is not None else None,
@@ -178,7 +179,7 @@ class TaskSpecBuilder:
         """
         plugin_version = await self._plugins.get_version_by_id(task.plugin_version_id)
         plugin = await self._plugins.get(plugin_version.plugin_id)
-        payload = await self._blobs.get_metadata(task.payload_blob_id)
+        payload = await self._blobs.get(task.payload_blob_id)
         return TaskSpec(
             task_id=task.id,
             kind=TaskKind.IMPORTER,
@@ -207,7 +208,7 @@ class TaskSpecBuilder:
         """
         source = plugin_version.source
         if isinstance(source, ScriptPluginSource):
-            blob = await self._blobs.get_metadata(source.blob_id)
+            blob = await self._blobs.get(source.blob_id)
             return ScriptPluginSpec(
                 entrypoint=source.entrypoint, blob_id=blob.id, sha256=blob.sha256
             )

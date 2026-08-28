@@ -137,9 +137,19 @@ def session_node_to_response(
         input_text_selector=node.input_text_selector,
         output_text_selector=node.output_text_selector,
         system_prompt_selector=node.system_prompt_selector,
-        reasoning=node.reasoning if include_payloads else None,
-        inputs=node.inputs if include_payloads else None,
-        outputs=node.outputs if include_payloads else None,
+        reasoning=(
+            node.reasoning.value
+            if include_payloads and node.reasoning is not None
+            else None
+        ),
+        inputs=(
+            node.inputs.value if include_payloads and node.inputs is not None else None
+        ),
+        outputs=(
+            node.outputs.value
+            if include_payloads and node.outputs is not None
+            else None
+        ),
         requested_model=node.requested_model,
         model=node.model,
         model_provider=node.model_provider,
@@ -149,7 +159,11 @@ def session_node_to_response(
         tool_name=node.tool_name,
         subagent_id=node.subagent_id,
         cache_key=node.cache_key,
-        attributes=node.attributes if include_payloads else None,
+        attributes=(
+            node.attributes.value
+            if include_payloads and node.attributes is not None
+            else None
+        ),
         metadata=node.metadata,
     )
 

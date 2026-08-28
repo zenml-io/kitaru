@@ -814,6 +814,9 @@ async function runLockedDemo(
           ) {
             throw new Error("Adopted replay does not match this run");
           }
+          if (replay.job_id === null || replay.job_id === undefined) {
+            throw new Error("Created replay has no job to verify");
+          }
           await verifyOwnedJob({
             client,
             expectedAgentVersionId: agentVersionId,
@@ -823,6 +826,9 @@ async function runLockedDemo(
           });
         },
         (current, replay) => {
+          if (replay.job_id === null || replay.job_id === undefined) {
+            throw new Error("Created replay has no job to record");
+          }
           current.resources.replay_id = replay.id;
           current.resources.replay_job_id = replay.job_id;
         },

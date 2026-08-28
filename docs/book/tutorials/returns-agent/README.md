@@ -11,6 +11,23 @@ You begin with ten recorded PydanticAI sessions exported from Langfuse. The walk
 
 The tutorial is intentionally more detailed than the [Quickstart](../../getting-started/quickstart.md). It explains what each resource preserves and why each command is part of the evidence chain. Your exact sessions, questions, evaluator, candidate, and result will depend on what you observe.
 
+## Meet the example agent
+
+Each session starts with one synthetic customer ticket. The agent looks up the order, gathers the relevant policy or shipping evidence, chooses one terminal outcome, and returns a structured resolution with a customer reply.
+
+<figure><img src="https://assets.kitaru.ai/docs/diagrams/returns-agent-overview.png" alt="The returns agent reads a ticket, looks up the order, checks shipping or return policy, chooses a resolution, then acts before replying."><figcaption>The lookup tools gather evidence. The action tools record whether a refund, replacement, or escalation actually succeeded.</figcaption></figure>
+
+For return and refund requests, `get_return_policy` supplies the rules for the order's product category. **Final sale** means the item is not eligible for an ordinary return. A reported defect can still qualify when the category has a final-sale defect exception.
+
+| Category | Return window | Final-sale defect exception | Human approval threshold |
+| --- | --- | --- | --- |
+| Footwear | 30 days | Yes | $150 |
+| Apparel | 30 days | Yes | $150 |
+| Accessories | 14 days | No | $100 |
+| Luggage | 45 days | Yes | $200 |
+
+These values are evidence available to the agent, not guarantees enforced by Kitaru. The tutorial asks you to inspect whether the agent used that evidence correctly and whether the recorded action agrees with its final response.
+
 ## What you will build
 
 | Phase | You will create | Why it exists |

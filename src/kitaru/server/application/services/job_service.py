@@ -45,7 +45,7 @@ from kitaru.server.application.services.plugin_resolution import (
 )
 from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
-from kitaru.server.domain.job import Job, JobAlreadySettled
+from kitaru.server.domain.job import Job, JobAlreadySettled, JobNotSettled
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.server.domain.task import AgentTask, EvaluationTask, ImportTask, Task
 
@@ -219,7 +219,7 @@ class JobService:
         return await self._transitions.cancel_job(job_id)
 
     async def delete_job(self, job_id: uuid.UUID, actor: AuthContext) -> None:
-        """Delete a job, cascading its tasks.
+        """Delete a settled job, cascading its tasks.
 
         Args:
             job_id: Id of the job.
@@ -227,8 +227,12 @@ class JobService:
 
         Raises:
             JobNotFound: No job has this id.
+            JobNotSettled: The job has not reached a terminal status.
         """
         _ = actor
+        job = await self._repository.get(job_id)
+        if not job.settled:
+            raise JobNotSettled(job_id)
         await self._repository.delete(job_id)
 
     async def create_job(self, kind: JobKind, actor: AuthContext) -> Job:
@@ -320,7 +324,7 @@ class JobService:
         plugin_version = await resolve_plugin_version(
             plugin, command.version, self._plugins
         )
-        payload = await self._blobs.get_metadata(command.payload_blob_id)
+        payload = await self._blobs.get(command.payload_blob_id)
         agent = await self._agents.get(command.agent_id)
         if command.agent_version_id is not None:
             await resolve_agent_id(
@@ -355,6 +359,7 @@ class JobService:
             ValidationError: The pair count exceeds the cap, an input
                 session does not exist, the input sessions do not all belong
                 to one agent, or a config is scoped to another agent.
+            SessionNotEvaluatable: An input session is in progress.
             PluginNotFound: A config names an unknown evaluator.
             PluginVersionNotFound: A config names an unknown version.
 
@@ -367,10 +372,14 @@ class JobService:
                 f"Evaluation request holds {pairs} pairs, the cap is "
                 f"{self._policy.evaluation_pair_limit}"
             )
-        stored = await self._sessions.get_many(command.input_session_ids)
+        stored = await self._sessions.get_many(
+            command.input_session_ids, include_payloads=False
+        )
         for session_id in command.input_session_ids:
-            if session_id not in stored:
+            session = stored.get(session_id)
+            if session is None:
                 raise ValidationError(f"Session {session_id} was not found")
+            session.check_evaluate()
         agent_ids = {session.agent_id for session in stored.values()}
         if len(agent_ids) > 1:
             raise ValidationError("Input sessions must belong to a single agent")

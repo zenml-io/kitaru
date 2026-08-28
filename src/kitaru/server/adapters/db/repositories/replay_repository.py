@@ -14,7 +14,7 @@
 """SQL replay repository."""
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from sqlalchemy import func, select
 
@@ -24,6 +24,8 @@ from kitaru.server.adapters.db.filtering import (
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.replay import (
+    REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY,
+    REPLAY_EXPERIMENT_RUN_ID_FOREIGN_KEY,
     REPLAY_JOB_ID_UNIQUE_CONSTRAINT,
     REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT,
     ReplayORM,
@@ -31,13 +33,15 @@ from kitaru.server.adapters.db.orm.replay import (
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.replay import ReplayFilter, ReplayStatusCounts
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.base import DomainError, NotFoundError
+from kitaru.server.domain.experiment_run import ExperimentRunNotFound
 from kitaru.server.domain.replay import (
     DuplicateReplayForBaseline,
     Replay,
     ReplayAlreadyExistsForJob,
     ReplayNotFound,
 )
+from kitaru.server.domain.session import SessionNotFound
 
 REPLAY_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": ReplayORM.id,
@@ -74,33 +78,40 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             DuplicateReplayForBaseline: The run already holds a replay for
                 this baseline session.
             ReplayAlreadyExistsForJob: The job already has a replay.
+            SessionNotFound: No session has the baseline session id.
+            ExperimentRunNotFound: No experiment run has the replay's run id.
 
         Returns:
             Stored replay with timestamps set.
         """
         row = ReplayORM.from_domain(replay)
-        await self._add(
-            row,
-            {
-                REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT: lambda: (
-                    DuplicateReplayForBaseline(
-                        replay.experiment_run_id, replay.baseline_session_id
-                    )
-                ),
-                REPLAY_JOB_ID_UNIQUE_CONSTRAINT: lambda: ReplayAlreadyExistsForJob(
-                    replay.job_id
-                ),
-            },
-        )
+        constraints: dict[str, Callable[[], DomainError]] = {
+            REPLAY_RUN_BASELINE_UNIQUE_CONSTRAINT: lambda: DuplicateReplayForBaseline(
+                replay.experiment_run_id, replay.baseline_session_id
+            ),
+            REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
+                replay.baseline_session_id
+            ),
+        }
+        if (job_id := replay.job_id) is not None:
+            constraints[REPLAY_JOB_ID_UNIQUE_CONSTRAINT] = lambda: (
+                ReplayAlreadyExistsForJob(job_id)
+            )
+        if (experiment_run_id := replay.experiment_run_id) is not None:
+            constraints[REPLAY_EXPERIMENT_RUN_ID_FOREIGN_KEY] = lambda: (
+                ExperimentRunNotFound(experiment_run_id)
+            )
+        await self._add(row, constraints)
         return row.to_domain()
 
     async def create_many(self, replays: list[Replay]) -> list[Replay]:
-        """Persist many new replays in one round trip, skipping constraint translation.
+        """Persist many new replays in one round trip.
 
         Args:
             replays: Replays to store.
 
         Raises:
+            SessionNotFound: No session has one of the baseline session ids.
             IntegrityError: The batch collides on (job_id) or
                 (experiment_run_id, baseline_session_id).
 
@@ -111,7 +122,12 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             return []
         rows = [ReplayORM.from_domain(replay) for replay in replays]
         self._session.add_all(rows)
-        await self._flush()
+        # The service resolves the baseline session before this insert, so a
+        # baseline session foreign key violation means it was deleted
+        # concurrently.
+        await self._flush(
+            {REPLAY_BASELINE_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound()}
+        )
         return [row.to_domain() for row in rows]
 
     async def get(self, replay_id: uuid.UUID) -> Replay:
@@ -170,7 +186,7 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             return {}
         statement = select(ReplayORM).where(ReplayORM.job_id.in_(list(job_ids)))
         rows = (await self._session.scalars(statement)).all()
-        return {row.job_id: row.to_domain() for row in rows}
+        return {row.job_id: row.to_domain() for row in rows if row.job_id is not None}
 
     async def query(
         self, replay_filter: ReplayFilter
@@ -256,6 +272,17 @@ class SQLReplayRepository(BaseSQLRepository[ReplayORM]):
             rows.append(row)
         await self._flush()
         return [row.to_domain() for row in rows]
+
+    async def delete(self, replay_id: uuid.UUID) -> None:
+        """Delete a replay by id.
+
+        Args:
+            replay_id: Id of the replay.
+
+        Raises:
+            ReplayNotFound: No replay has this id.
+        """
+        await self._delete_row(replay_id)
 
     async def count_by_status(self, experiment_run_id: uuid.UUID) -> ReplayStatusCounts:
         """Count an experiment run's replays by status.

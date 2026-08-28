@@ -305,6 +305,29 @@ async def test_update_not_found(setup: Setup) -> None:
         await repository.update(missing)
 
 
+async def test_delete(setup: Setup) -> None:
+    """Delete a stored replay, no longer reachable by id."""
+    repository, owner_id, make_job_id, make_config_id, make_session_id = setup
+    created = await repository.create(
+        Replay(
+            owner_id=owner_id,
+            job_id=await make_job_id(),
+            replay_config_id=await make_config_id(),
+            baseline_session_id=await make_session_id(),
+        )
+    )
+    await repository.delete(created.id)
+    with pytest.raises(ReplayNotFound):
+        await repository.get(created.id)
+
+
+async def test_delete_not_found(setup: Setup) -> None:
+    """Raise when deleting a replay that does not exist."""
+    repository, *_ = setup
+    with pytest.raises(ReplayNotFound):
+        await repository.delete(uuid.uuid4())
+
+
 async def test_query_filters_by_status(setup: Setup) -> None:
     """Filter replays by status."""
     repository, owner_id, make_job_id, make_config_id, make_session_id = setup

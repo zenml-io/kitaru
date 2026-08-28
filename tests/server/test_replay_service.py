@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for replay use cases: creation validation, reads, and tool lookup."""
 
+import json
 import uuid
 from typing import Any
 
@@ -20,6 +21,7 @@ import pytest
 
 from conftest import (
     ReplayServices,
+    build_payload_store,
     build_replay_services,
     create_agent,
     create_agent_task,
@@ -31,6 +33,7 @@ from conftest import (
     create_replay,
     create_session,
     create_worker,
+    get_replay_job_id,
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
@@ -48,6 +51,7 @@ from kitaru.server.application.models.auth import (
 from kitaru.server.application.models.replay import ReplayCreate, ReplayFilter
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
 from kitaru.server.application.models.task import TaskFilter
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.server_analytics import ServerAnalytics
 from kitaru.server.domain.account import Account
@@ -58,8 +62,13 @@ from kitaru.server.domain.agent_version import (
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
+from kitaru.server.domain.payload import Payload, PayloadMediaType
 from kitaru.server.domain.plugin import PluginKind, ScriptPluginSource
-from kitaru.server.domain.replay import ReplayAccessDenied
+from kitaru.server.domain.replay import (
+    ReplayAccessDenied,
+    ReplayInUse,
+    ReplayNotFound,
+)
 from kitaru.server.domain.replay_config import (
     HistoryConfig,
     PassthroughConfig,
@@ -331,7 +340,7 @@ def _cache_node(
         error=error,
         tool_name="search",
         cache_key=cache_key,
-        outputs=outputs,
+        outputs=Payload.from_json(outputs) if outputs is not None else None,
     )
 
 
@@ -771,7 +780,7 @@ async def test_get_replay_result_session_id_appears_once_linked_on_the_replay(
     )
     assert bundle.replay.result_session_id is None
 
-    replay = await services.replays.get_by_job_id(bundle.replay.job_id)
+    replay = await services.replays.get_by_job_id(get_replay_job_id(bundle.replay))
     assert replay is not None
     result_session_id = uuid.uuid4()
     replay.link_result_session(result_session_id)
@@ -864,8 +873,69 @@ def _replay_service_with_analytics(
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
         plugin_repository=services.plugins,
+        payload_store=services.payload_store,
         analytics=analytics,
     )
+
+
+def _replay_service_with_payload_store(
+    services: ReplayServices, payload_store: PayloadStore
+) -> ReplayService:
+    return ReplayService(
+        repository=services.replays,
+        experiment_repository=services.experiments,
+        experiment_run_repository=services.experiment_runs,
+        job_repository=services.jobs,
+        task_repository=services.tasks,
+        session_repository=services.sessions,
+        session_node_repository=services.session_nodes,
+        agent_version_repository=services.agent_versions,
+        plugin_repository=services.plugins,
+        payload_store=payload_store,
+    )
+
+
+async def test_tool_lookup_hydrates_an_offloaded_output(
+    services: ReplayServices,
+) -> None:
+    """Return the original output for a tool call whose output was offloaded."""
+    fakes = build_payload_store(threshold_bytes=1024)
+    blob_repository = fakes.blob_repository
+    data_store = fakes.blob_data_store
+    service = _replay_service_with_payload_store(services, fakes.store)
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    replay_id = await _replay_with_history_scope(
+        services, HistoryScope.BASELINE, baseline
+    )
+
+    outputs = {"result": "x" * 5000}
+    content = json.dumps(outputs, separators=(",", ":")).encode("utf-8")
+    blob = await create_blob(
+        blob_repository,
+        ACTOR.account.id,
+        content=content,
+        media_type=PayloadMediaType.JSON,
+        data_store=data_store,
+    )
+    cache_key = "a" * 64
+    node = SessionNode(
+        session_id=baseline.id,
+        index=0,
+        node_type=NodeType.TOOL_CALL,
+        name="search",
+        status=NodeStatus.COMPLETED,
+        tool_name="search",
+        cache_key=cache_key,
+        outputs=Payload.from_ref(blob.id),
+    )
+    await services.session_nodes.upsert_batch(baseline.id, [node])
+
+    result = await service.tool_lookup(
+        replay_id, "search", cache_key, None, actor=ACTOR
+    )
+    assert result is not None
+    assert result.result == outputs
 
 
 async def test_create_replay_tracks_replay_created(services: ReplayServices) -> None:
@@ -1004,7 +1074,7 @@ async def test_list_replays_filters_by_result_session(
             ),
             actor=ACTOR,
         )
-        replay = await services.replays.get_by_job_id(bundle.replay.job_id)
+        replay = await services.replays.get_by_job_id(get_replay_job_id(bundle.replay))
         assert replay is not None
         result_session_id = uuid.uuid4()
         replay.link_result_session(result_session_id)
@@ -1051,7 +1121,7 @@ async def test_list_replays_filters_on_a_missing_result_session(
         ),
         actor=ACTOR,
     )
-    replay = await services.replays.get_by_job_id(linked.replay.job_id)
+    replay = await services.replays.get_by_job_id(get_replay_job_id(linked.replay))
     assert replay is not None
     replay.link_result_session(uuid.uuid4())
     await services.replays.update(replay)
@@ -1072,3 +1142,65 @@ async def test_list_replays_filters_on_a_missing_result_session(
         actor=ACTOR,
     )
     assert [bundle.replay.id for bundle in pending] == [unlinked.replay.id]
+
+
+async def test_delete_replay_removes_a_standalone_replay(
+    services: ReplayServices,
+) -> None:
+    """Deleting a standalone replay removes it."""
+    bundle = await _replay_bundle(services)
+    await services.replay_service.delete_replay(bundle.replay.id, actor=ACTOR)
+    with pytest.raises(ReplayNotFound):
+        await services.replays.get(bundle.replay.id)
+
+
+async def test_get_replay_reads_not_found_when_its_config_is_gone(
+    services: ReplayServices,
+) -> None:
+    """A replay whose config a concurrent delete removed reads as not found."""
+    bundle = await _replay_bundle(services)
+    del services.experiments._configs[bundle.replay.replay_config_id]
+    with pytest.raises(ReplayNotFound):
+        await services.replay_service.get_replay(bundle.replay.id, actor=ACTOR)
+
+
+async def test_list_replays_skips_a_replay_whose_config_is_gone(
+    services: ReplayServices,
+) -> None:
+    """List omits a replay whose config a concurrent delete removed."""
+    bundle = await _replay_bundle(services)
+    del services.experiments._configs[bundle.replay.replay_config_id]
+    listed, _ = await services.replay_service.list_replays(ReplayFilter(), actor=ACTOR)
+    assert bundle.replay.id not in [item.replay.id for item in listed]
+
+
+async def test_delete_replay_rejects_a_replay_of_an_experiment_run(
+    services: ReplayServices,
+) -> None:
+    """Deleting a replay that belongs to an experiment run conflicts."""
+    agent_version = await _agent_version(services)
+    baseline = await _session(services, agent_version)
+    config = await services.experiments.create_replay_config(
+        ReplayConfig(
+            owner_id=ACTOR.account.id,
+            tool_policy=ToolPolicy(default=PassthroughConfig()),
+            evaluators=[],
+        )
+    )
+    replay = await create_replay(
+        services.replays,
+        ACTOR.account.id,
+        job_id=uuid.uuid4(),
+        replay_config_id=config.id,
+        baseline_session_id=baseline.id,
+        experiment_run_id=uuid.uuid4(),
+    )
+    with pytest.raises(ReplayInUse):
+        await services.replay_service.delete_replay(replay.id, actor=ACTOR)
+    assert await services.replays.get(replay.id) == replay
+
+
+async def test_delete_replay_not_found(services: ReplayServices) -> None:
+    """Deleting a replay that does not exist raises."""
+    with pytest.raises(ReplayNotFound):
+        await services.replay_service.delete_replay(uuid.uuid4(), actor=ACTOR)

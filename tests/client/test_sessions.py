@@ -27,11 +27,13 @@ from conftest import (
     FakeSessionRepository,
     FakeTaskRepository,
     asgi_api_client,
+    build_payload_store,
     override_idempotency,
 )
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
+    SessionDetailResponse,
     SessionListParams,
     SessionOrigin,
     SessionResponse,
@@ -77,16 +79,19 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
     )
     session_repository = FakeSessionRepository()
     node_repository = FakeSessionNodeRepository()
+    payload_store = build_payload_store().store
     session_service = SessionService(
         repository=session_repository,
         task_repository=FakeTaskRepository(),
         agent_version_repository=FakeAgentVersionRepository(FakeAgentRepository()),
         replay_repository=FakeReplayRepository(),
+        payload_store=payload_store,
     )
     node_service = SessionNodeService(
         repository=node_repository,
         session_repository=session_repository,
         task_repository=FakeTaskRepository(),
+        payload_store=payload_store,
     )
     app.dependency_overrides[get_session_service] = lambda: session_service
     app.dependency_overrides[get_session_node_service] = lambda: node_service
@@ -144,7 +149,17 @@ async def test_get(api_client: KitaruAPIClient) -> None:
         )
     )
     loaded = await api_client.sessions.get(created.id)
-    assert loaded == created
+    assert (
+        loaded.model_dump(
+            exclude={
+                "inputs",
+                "outputs",
+                "input_text_selector",
+                "output_text_selector",
+            }
+        )
+        == created.model_dump()
+    )
 
 
 async def test_get_not_found(api_client: KitaruAPIClient) -> None:
@@ -181,6 +196,27 @@ async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
         )
     ]
     assert len(collected) == 3
+
+
+async def test_list_include_payloads(api_client: KitaruAPIClient) -> None:
+    """List sessions with their payloads through the SDK."""
+    agent_id = uuid.uuid4()
+    await api_client.sessions.create(
+        SessionCreateRequest(
+            agent_id=agent_id,
+            origin=SessionOrigin.RECORDED,
+            inputs={"q": "hi"},
+            outputs=None,
+            metadata={},
+        )
+    )
+    agent_filter = FilterCondition(field="agent_id", op=FilterOp.EQ, value=agent_id)
+    page = await api_client.sessions.list(
+        SessionListParams(filter=agent_filter, include_payloads=True)
+    )
+    assert isinstance(page.items[0], SessionDetailResponse)
+    assert page.items[0].inputs == {"q": "hi"}
+    assert page.items[0].outputs is None
 
 
 async def test_list_with_filter_expression(api_client: KitaruAPIClient) -> None:
@@ -236,7 +272,8 @@ async def test_update(api_client: KitaruAPIClient) -> None:
         SessionUpdateRequest(status=SessionStatus.COMPLETED, outputs={"a": 1}),
     )
     assert updated.status == SessionStatus.COMPLETED
-    assert updated.outputs == {"a": 1}
+    fetched = await api_client.sessions.get(created.id)
+    assert fetched.outputs == {"a": 1}
 
 
 async def test_update_status_conflict(api_client: KitaruAPIClient) -> None:

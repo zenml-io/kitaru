@@ -46,6 +46,7 @@ from kitaru.server.application.models.experiment import (
 from kitaru.server.application.models.experiment_run import ExperimentRunCreate
 from kitaru.server.application.models.replay import ReplayStatusCounts
 from kitaru.server.application.models.session import SessionFilter
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services import analytics_events
 from kitaru.server.application.services.agent_version_resolution import (
     resolve_runnable_agent_version,
@@ -55,6 +56,7 @@ from kitaru.server.application.services.evaluator_resolution import (
 )
 from kitaru.server.application.services.replay_pipeline import create_replay_pipelines
 from kitaru.server.application.services.server_analytics import ServerAnalytics
+from kitaru.server.application.services.task_transitions import TaskTransitions
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -86,6 +88,8 @@ class ExperimentService:
         replay_repository: ReplayRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        transitions: TaskTransitions,
+        payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
     ) -> None:
         """Initialize the service.
@@ -93,17 +97,20 @@ class ExperimentService:
         Args:
             repository: Experiment and replay config repository.
             plugin_repository: Plugin repository, for evaluator resolution.
-            experiment_run_repository: Experiment run repository.
+            experiment_run_repository: Experiment run repository, for run
+                fan-out and delete cascade.
             agent_repository: Agent repository, to validate the owning
                 agent exists.
             cohort_version_repository: Cohort version repository, for run
                 fan-out.
             session_repository: Session repository, for run fan-out.
             agent_version_repository: Agent version repository.
-            replay_repository: Replay repository, for run fan-out and
-                progress.
+            replay_repository: Replay repository, for run fan-out, progress,
+                and job lookup on delete.
             job_repository: Job repository, for run fan-out.
             task_repository: Task repository, for run fan-out.
+            transitions: Task transition dispatch, for job cancellation.
+            payload_store: Payload store, for run fan-out's baseline sessions.
             analytics: Analytics tracker, None skips tracking.
         """
         self._repository = repository
@@ -116,6 +123,8 @@ class ExperimentService:
         self._replays = replay_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._transitions = transitions
+        self._payload_store = payload_store
         self._analytics = analytics
 
     async def _create_replay_config(
@@ -242,9 +251,12 @@ class ExperimentService:
         configs = await self._repository.get_many_replay_configs(
             [experiment.replay_config_id for experiment in experiments]
         )
+        # Skip experiments whose replay config a concurrent delete removed
+        # between the two reads.
         pairs = [
             (experiment, configs[experiment.replay_config_id])
             for experiment in experiments
+            if experiment.replay_config_id in configs
         ]
         return pairs, next_cursor
 
@@ -330,7 +342,10 @@ class ExperimentService:
     async def delete_experiment(
         self, experiment_id: uuid.UUID, actor: AuthContext
     ) -> None:
-        """Delete an experiment and its replay config.
+        """Delete an experiment, its runs, their replays, and its replay config.
+
+        The experiment row's own delete cascades the runs and their replays,
+        and the jobs that ran them stay in place.
 
         Args:
             experiment_id: Id of the experiment.
@@ -340,7 +355,21 @@ class ExperimentService:
             ExperimentNotFound: No experiment has this id.
         """
         _ = actor
-        experiment = await self._repository.get(experiment_id)
+        # Lock the experiment so a concurrent start_run, which locks it too,
+        # either commits its run before this snapshot and has that run's jobs
+        # cancelled, or finds the experiment gone. Without the lock it could
+        # slip a run in after the snapshot whose jobs then outlive the cascade.
+        experiment = await self._repository.get(experiment_id, exclusive=True)
+        runs = await self._experiment_runs.list_by_experiment(experiment_id)
+        job_ids: list[uuid.UUID] = []
+        for run in runs:
+            replays = await self._replays.list_by_experiment_run(run.id)
+            job_ids.extend(
+                replay.job_id for replay in replays if replay.job_id is not None
+            )
+        # Settle without publishing JobsSettled. Its subscribers lock the
+        # replay and run rows in the opposite order of the delete cascade.
+        await self._transitions.request_jobs_cancel(job_ids, dispatch_settled=False)
         await self._repository.delete(experiment_id)
         await self._repository.delete_replay_config(experiment.replay_config_id)
 
@@ -358,9 +387,12 @@ class ExperimentService:
         membership = FilterCondition(
             field="cohort_version_id", op=FilterOp.EQ, value=cohort_version_id
         )
+        # Replay seeding reads each baseline's inputs, so the member
+        # sessions are loaded with payloads.
         return await paginate_all(
             lambda cursor: self._sessions.query(
-                SessionFilter(expression=membership, cursor=cursor, size=1000)
+                SessionFilter(expression=membership, cursor=cursor, size=1000),
+                include_payloads=True,
             )
         )
 
@@ -388,6 +420,8 @@ class ExperimentService:
             ValidationError: The cohort version has no sessions, belongs to
                 a cohort of another agent, or the resolved agent version has
                 no run spec.
+            SessionNotEvaluatable: ``evaluate_baselines`` is set and a
+                cohort version session is in progress.
             AgentVersionNotFound: No agent version has the given id.
             AgentVersionAgentMismatch: The agent version belongs to another
                 agent.
@@ -437,6 +471,7 @@ class ExperimentService:
             replay_repository=self._replays,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            payload_store=self._payload_store,
         )
         counts = await self._replays.count_by_status(run.id)
         return run, counts

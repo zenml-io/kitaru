@@ -118,8 +118,8 @@ export interface paths {
          * Delete Agent Version
          * @description Delete an agent version.
          *
-         *     Clients observe HTTP 204 on success and 404 when no agent version has
-         *     this id.
+         *     Clients observe HTTP 204 on success, 404 when no agent version has
+         *     this id, and 409 when an experiment run references it.
          *
          *     Args:
          *         agent_version_id: Id of the agent version.
@@ -220,10 +220,12 @@ export interface paths {
         post?: never;
         /**
          * Delete Agent
-         * @description Delete an agent.
+         * @description Delete an agent, hiding the agent and retaining its subtree.
          *
-         *     Clients observe HTTP 204 on success, 404 when no agent has this id, and
-         *     409 when the agent has versions.
+         *     The agent's stored sessions, versions, cohorts, experiments, and
+         *     investigations are retained and stay readable through their own routes.
+         *     Creating new ones for the agent returns HTTP 404. Clients observe HTTP
+         *     204 on success and 404 when no agent has this id.
          *
          *     Args:
          *         agent_id: Id of the agent.
@@ -791,7 +793,8 @@ export interface paths {
          * @description Delete a cohort.
          *
          *     Deleting a cohort cascades its versions. Clients observe HTTP 204 on
-         *     success and 404 when no cohort has this id.
+         *     success, 404 when no cohort has this id, and 409 when an experiment
+         *     run references one of its versions.
          *
          *     Args:
          *         cohort_id: Id of the cohort.
@@ -1070,8 +1073,8 @@ export interface paths {
          * @description Score every input session with every evaluator, as one job.
          *
          *     Clients observe HTTP 201 on success, 404 when an evaluator or version
-         *     does not exist, and 422 when the pair count exceeds the cap or an input
-         *     session does not exist.
+         *     does not exist, 409 when an input session is not finished, and 422 when
+         *     the pair count exceeds the cap or an input session does not exist.
          *
          *     Args:
          *         body: Evaluation batch create request.
@@ -1378,7 +1381,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Experiment Run
-         * @description Delete an experiment run and its jobs.
+         * @description Delete an experiment run and its replays.
          *
          *     Clients observe HTTP 204 on success and 404 when no run has this id.
          *
@@ -1578,10 +1581,11 @@ export interface paths {
          * @description Start an experiment run, fanning out one replay per cohort version session.
          *
          *     Clients observe HTTP 201 on success, 404 when the experiment, the
-         *     cohort version, or the resolved agent version does not exist, and 422
-         *     when the cohort version has no sessions, the cohort version or agent
-         *     version belongs to another agent, or the resolved agent version has no
-         *     run spec.
+         *     cohort version, or the resolved agent version does not exist, 409 when
+         *     evaluate_baselines is set and a cohort version session is not finished,
+         *     and 422 when the cohort version has no sessions, the cohort version or
+         *     agent version belongs to another agent, or the resolved agent version
+         *     has no run spec.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2093,9 +2097,10 @@ export interface paths {
         post?: never;
         /**
          * Delete Job
-         * @description Delete a job, cascading its tasks.
+         * @description Delete a settled job, cascading its tasks.
          *
-         *     Clients observe HTTP 204 on success and 404 when no job has this id.
+         *     Clients observe HTTP 204 on success, 404 when no job has this id, and
+         *     409 when the job has not settled.
          *
          *     Args:
          *         job_id: Id of the job.
@@ -2273,10 +2278,12 @@ export interface paths {
          * @description Create a standalone replay of a recorded or imported session.
          *
          *     Clients observe HTTP 201 on success, 404 when the baseline session or
-         *     the resolved agent version or an evaluator config does not exist, and
-         *     422 when the baseline session carries no agent version and none was
-         *     given, the resolved agent version has no run spec, the tool policy uses
-         *     cohort-version-scoped history, or an evaluator version repeats.
+         *     the resolved agent version or an evaluator config does not exist, 409
+         *     when evaluate_baselines is set and the baseline session is not
+         *     finished, and 422 when the baseline session carries no agent version
+         *     and none was given, the resolved agent version has no run spec, the
+         *     tool policy uses cohort-version-scoped history, or an evaluator
+         *     version repeats.
          *
          *     Args:
          *         body: Replay create request.
@@ -2318,7 +2325,19 @@ export interface paths {
         get: operations["get_replay_api_v1_replays__replay_id__get"];
         put?: never;
         post?: never;
-        delete?: never;
+        /**
+         * Delete Replay
+         * @description Delete a replay.
+         *
+         *     Clients observe HTTP 204 on success, 404 when no replay has this id, and
+         *     409 when the replay belongs to an experiment run.
+         *
+         *     Args:
+         *         replay_id: Id of the replay.
+         *         service: Replay service.
+         *         actor: Caller context.
+         */
+        delete: operations["delete_replay_api_v1_replays__replay_id__delete"];
         options?: never;
         head?: never;
         patch?: never;
@@ -2435,8 +2454,8 @@ export interface paths {
          * Delete Secret
          * @description Delete a secret.
          *
-         *     Clients observe HTTP 204 on success and 404 when no secret has this
-         *     id.
+         *     Clients observe HTTP 204 on success, 404 when no secret has this id,
+         *     and 409 when an agent version references it.
          *
          *     Args:
          *         secret_id: Id of the secret.
@@ -2581,7 +2600,7 @@ export interface paths {
          *         params: Session list params.
          *
          *     Returns:
-         *         Page of sessions.
+         *         Page of sessions, with payloads when include_payloads is set.
          */
         get: operations["list_sessions_api_v1_sessions_get"];
         put?: never;
@@ -2639,7 +2658,8 @@ export interface paths {
          * @description Delete a session.
          *
          *     Deleting a session cascades its nodes. Clients observe HTTP 204 on
-         *     success and 404 when no session has this id.
+         *     success, 404 when no session has this id, and 409 when the session is
+         *     referenced by a cohort version, investigation, or replay.
          *
          *     Args:
          *         session_id: Id of the session.
@@ -2654,8 +2674,8 @@ export interface paths {
          * @description Update a session.
          *
          *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     409 when the update moves a terminal session back to in_progress, and
-         *     422 on invalid input, including an attempt to clear the status.
+         *     409 when the session is no longer in progress, and 422 on invalid
+         *     input, including an attempt to clear the status.
          *
          *     Args:
          *         session_id: Id of the session.
@@ -2684,7 +2704,8 @@ export interface paths {
          *
          *     A resent name overwrites its score, value, data type, and explanation.
          *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     and 422 when the request names the same evaluation twice.
+         *     409 when the session is not finished, and 422 when the request names
+         *     the same evaluation twice.
          *
          *     Args:
          *         session_id: Id of the session to merge evaluations into.
@@ -2778,8 +2799,8 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         Stored nodes in batch order, with inputs, outputs, and attributes
-         *         populated.
+         *         Stored nodes in batch order, with reasoning, inputs, outputs, and
+         *         attributes null.
          */
         post: operations["ingest_session_nodes_api_v1_sessions__session_id__nodes_post"];
         delete?: never;
@@ -2891,8 +2912,9 @@ export interface paths {
          * Create Tag Link
          * @description Link a tag to a resource.
          *
-         *     Clients observe HTTP 201 on success, 404 when no tag has this id, 409
-         *     when the link is already registered, and 422 on invalid input.
+         *     Clients observe HTTP 201 on success, 404 when no tag or no resource of
+         *     the given type and id exists, 409 when the link is already registered,
+         *     and 422 on invalid input.
          *
          *     Args:
          *         tag_id: Id of the tag.
@@ -4354,6 +4376,17 @@ export interface components {
              * @description New human-readable designator.
              */
             display_version?: string | null;
+        };
+        /**
+         * CopyWorkdirHook
+         * @description Copy workdir hook.
+         */
+        CopyWorkdirHook: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "copy_workdir";
         };
         /**
          * DeviceAuthorizationResponse
@@ -6264,6 +6297,19 @@ export interface components {
              */
             next_cursor: string | null;
         };
+        /** Page[SessionDetailResponse] */
+        Page_SessionDetailResponse_: {
+            /**
+             * Items
+             * @description Items on this page.
+             */
+            items: components["schemas"]["SessionDetailResponse"][];
+            /**
+             * Next Cursor
+             * @description Cursor for the next page, null on the last page.
+             */
+            next_cursor: string | null;
+        };
         /** Page[SessionNodeResponse] */
         Page_SessionNodeResponse_: {
             /**
@@ -6493,10 +6539,9 @@ export interface components {
             id: string;
             /**
              * Job Id
-             * Format: uuid
              * @description Job running the replay.
              */
-            job_id: string;
+            job_id?: string | null;
             /** @description Override applied. */
             override: components["schemas"]["ReplayOverride"] | null;
             /**
@@ -6537,6 +6582,11 @@ export interface components {
             env?: {
                 [key: string]: string;
             };
+            /**
+             * Hooks
+             * @description Hooks run around the task process.
+             */
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
             /**
              * Secret Ids
              * @description Secrets merged into the process environment.
@@ -6872,6 +6922,11 @@ export interface components {
              */
             imported_from?: string | null;
             /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session inputs.
+             */
+            input_text_selector?: string | null;
+            /**
              * Inputs
              * @description Session inputs.
              */
@@ -6891,6 +6946,11 @@ export interface components {
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
             /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session outputs.
+             */
+            output_text_selector?: string | null;
+            /**
              * Outputs
              * @description Session outputs.
              */
@@ -6902,6 +6962,157 @@ export interface components {
             started_at?: string | null;
             /** @description Initial session status. */
             status?: components["schemas"]["SessionStatus"] | null;
+        };
+        /**
+         * SessionDetailResponse
+         * @description Session detail response.
+         */
+        SessionDetailResponse: {
+            /**
+             * Adapter Version
+             * @description Recording adapter version.
+             */
+            adapter_version?: string | null;
+            /**
+             * Agent Id
+             * Format: uuid
+             * @description Agent the session belongs to.
+             */
+            agent_id: string;
+            /**
+             * Agent Version Id
+             * @description Agent version recorded for the session.
+             */
+            agent_version_id?: string | null;
+            /**
+             * Cost
+             * @description Total cost.
+             */
+            cost?: string | null;
+            /**
+             * Created
+             * Format: date-time
+             * @description Creation time.
+             */
+            created: string;
+            /**
+             * Ended At
+             * @description Time the session ended.
+             */
+            ended_at?: string | null;
+            /**
+             * Error
+             * @description Error from a failed session.
+             */
+            error?: string | null;
+            /**
+             * External Id
+             * @description Id from the source system.
+             */
+            external_id?: string | null;
+            /**
+             * Framework
+             * @description Agent framework used.
+             */
+            framework?: string | null;
+            /**
+             * Id
+             * Format: uuid
+             * @description Session id.
+             */
+            id: string;
+            /**
+             * Imported From
+             * @description Source system the session was imported from.
+             */
+            imported_from?: string | null;
+            /**
+             * Input Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session inputs.
+             */
+            input_text_selector?: string | null;
+            /**
+             * Inputs
+             * @description Session inputs.
+             */
+            inputs: unknown;
+            /**
+             * Llm Call Count
+             * @description Number of LLM call nodes.
+             */
+            llm_call_count: number;
+            /**
+             * Metadata
+             * @description Arbitrary metadata.
+             */
+            metadata: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description Session name.
+             */
+            name?: string | null;
+            /**
+             * Number
+             * @description Session number within the agent.
+             */
+            number: number;
+            /** @description How the session came to exist. */
+            origin: components["schemas"]["SessionOrigin"];
+            /**
+             * Output Text Selector
+             * @description RFC 6901 JSON Pointer selecting display text from session outputs.
+             */
+            output_text_selector?: string | null;
+            /**
+             * Outputs
+             * @description Session outputs.
+             */
+            outputs: unknown;
+            /**
+             * Owner Id
+             * Format: uuid
+             * @description Id of the owning account.
+             */
+            owner_id: string;
+            /**
+             * Started At
+             * @description Time the session started.
+             */
+            started_at?: string | null;
+            status: components["schemas"]["SessionStatus"];
+            /**
+             * Task Id
+             * @description Task the session was produced by.
+             */
+            task_id?: string | null;
+            /** @description Total token usage. */
+            tokens?: components["schemas"]["TokenUsage"] | null;
+            /**
+             * Tool Call Count
+             * @description Number of tool call nodes.
+             */
+            tool_call_count: number;
+            /**
+             * Updated
+             * Format: date-time
+             * @description Last modification time.
+             */
+            updated: string;
+        };
+        /**
+         * SessionDetailWithEvaluationsResponse
+         * @description Session detail with evaluations response.
+         */
+        SessionDetailWithEvaluationsResponse: {
+            /**
+             * Evaluations
+             * @description Every evaluation of the session, newest first.
+             */
+            evaluations: components["schemas"]["EvaluationResponse"][];
+            /** @description Session. */
+            session: components["schemas"]["SessionDetailResponse"];
         };
         /**
          * SessionEvaluationsRequest
@@ -7294,11 +7505,6 @@ export interface components {
              */
             imported_from?: string | null;
             /**
-             * Inputs
-             * @description Session inputs.
-             */
-            inputs: unknown;
-            /**
              * Llm Call Count
              * @description Number of LLM call nodes.
              */
@@ -7322,11 +7528,6 @@ export interface components {
             number: number;
             /** @description How the session came to exist. */
             origin: components["schemas"]["SessionOrigin"];
-            /**
-             * Outputs
-             * @description Session outputs.
-             */
-            outputs: unknown;
             /**
              * Owner Id
              * Format: uuid
@@ -7414,6 +7615,11 @@ export interface components {
              */
             name?: string | null;
             /**
+             * Output Text Selector
+             * @description New output text selector.
+             */
+            output_text_selector?: string | null;
+            /**
              * Outputs
              * @description New session outputs.
              */
@@ -7445,7 +7651,23 @@ export interface components {
              */
             nodes: components["schemas"]["SessionNodeResponse"][];
             /** @description Session. */
-            session: components["schemas"]["SessionResponse"];
+            session: components["schemas"]["SessionDetailResponse"];
+        };
+        /**
+         * SetupCommandHook
+         * @description Setup command hook.
+         */
+        SetupCommandHook: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "setup_command";
         };
         /**
          * StaticCase
@@ -7790,6 +8012,11 @@ export interface components {
             env: {
                 [key: string]: string;
             };
+            /**
+             * Hooks
+             * @description Hooks run around the task process.
+             */
+            hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
             /** @description Kind of work the task runs. */
             kind: components["schemas"]["TaskKind"];
             /** @description Command to run, unset for evaluator and importer tasks. */
@@ -7852,6 +8079,29 @@ export interface components {
              * @description Bearer token scoped to this task and attempt.
              */
             token: string;
+        };
+        /**
+         * TeardownCommandHook
+         * @description Teardown command hook.
+         */
+        TeardownCommandHook: {
+            /**
+             * Command
+             * @description Shell command to run.
+             */
+            command: string;
+            /**
+             * On
+             * @description Task process outcome the command runs on.
+             * @default success
+             * @enum {string}
+             */
+            on: "success" | "failure" | "always";
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "teardown_command";
         };
         /**
          * TokenErrorCode
@@ -11561,6 +11811,35 @@ export interface operations {
             };
         };
     };
+    delete_replay_api_v1_replays__replay_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                replay_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     tool_lookup_api_v1_replays__replay_id__tool_lookup_post: {
         parameters: {
             query?: never;
@@ -11882,6 +12161,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include inputs and outputs. */
+                include_payloads?: boolean;
             };
             header?: never;
             path?: never;
@@ -11895,7 +12176,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Page_SessionResponse_"];
+                    "application/json": components["schemas"]["Page_SessionDetailResponse_"] | components["schemas"]["Page_SessionResponse_"];
                 };
             };
             /** @description Validation Error */
@@ -11961,7 +12242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionResponse"];
+                    "application/json": components["schemas"]["SessionDetailResponse"];
                 };
             };
             /** @description Validation Error */
@@ -12624,6 +12905,8 @@ export interface operations {
                 sort?: string;
                 /** @description Filter expression, JSON-encoded in the query string. */
                 filter?: components["schemas"]["FilterCondition"] | components["schemas"]["AndFilter"] | components["schemas"]["OrFilter"] | components["schemas"]["NotFilter"] | null;
+                /** @description Include inputs and outputs. */
+                include_payloads?: boolean;
             };
             header?: never;
             path?: never;
@@ -12668,7 +12951,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SessionWithEvaluationsResponse"];
+                    "application/json": components["schemas"]["SessionDetailWithEvaluationsResponse"];
                 };
             };
             /** @description Validation Error */

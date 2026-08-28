@@ -20,6 +20,7 @@ from kitaru.server.adapters.db.orm.agent_version_secret import AgentVersionSecre
 from kitaru.server.adapters.db.orm.annotation import AnnotationORM
 from kitaru.server.adapters.db.orm.api_key import ApiKeyORM
 from kitaru.server.adapters.db.orm.blob import BlobORM
+from kitaru.server.adapters.db.orm.blob_content import BlobContentORM
 from kitaru.server.adapters.db.orm.cohort import CohortORM
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
 from kitaru.server.adapters.db.orm.cohort_version_session import (
@@ -52,6 +53,7 @@ __all__ = [
     "AgentVersionSecretORM",
     "AnnotationORM",
     "ApiKeyORM",
+    "BlobContentORM",
     "BlobORM",
     "CohortORM",
     "CohortVersionORM",

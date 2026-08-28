@@ -55,6 +55,21 @@ class AgentVersionRepository(Protocol):
         """
         ...
 
+    async def get_runnable(self, agent_version_id: uuid.UUID) -> AgentVersion:
+        """Load an agent version whose agent is not deleted.
+
+        Args:
+            agent_version_id: Id of the agent version.
+
+        Raises:
+            AgentVersionNotFound: No agent version has this id.
+            AgentNotFound: The version's agent is deleted.
+
+        Returns:
+            Stored agent version.
+        """
+        ...
+
     async def get_agent_id(self, agent_version_id: uuid.UUID) -> uuid.UUID:
         """Load the id of the agent a version belongs to.
 
@@ -107,5 +122,6 @@ class AgentVersionRepository(Protocol):
 
         Raises:
             AgentVersionNotFound: No agent version has this id.
+            AgentVersionInUse: The version is referenced by an experiment run.
         """
         ...

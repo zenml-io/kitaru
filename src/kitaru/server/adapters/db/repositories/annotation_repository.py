@@ -14,19 +14,25 @@
 """SQL annotation repository."""
 
 import uuid
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 
 from sqlalchemy import ColumnElement, select
 
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.server.adapters.db.filtering import FilterBinding, compile_filter_expression
-from kitaru.server.adapters.db.orm.annotation import AnnotationORM
+from kitaru.server.adapters.db.orm.annotation import (
+    ANNOTATION_INVESTIGATION_SESSION_ID_FOREIGN_KEY,
+    ANNOTATION_SESSION_ID_FOREIGN_KEY,
+    AnnotationORM,
+)
 from kitaru.server.adapters.db.orm.investigation_session import InvestigationSessionORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.models.annotation import AnnotationFilter
 from kitaru.server.domain.annotation import Annotation, AnnotationNotFound
-from kitaru.server.domain.base import NotFoundError
+from kitaru.server.domain.base import DomainError, NotFoundError
+from kitaru.server.domain.investigation import InvestigationSessionNotFound
+from kitaru.server.domain.session import SessionNotFound
 from kitaru.server.filtering import FilterCondition
 
 
@@ -87,12 +93,26 @@ class SQLAnnotationRepository(BaseSQLRepository[AnnotationORM]):
         Args:
             annotation: Annotation to store.
 
+        Raises:
+            SessionNotFound: No session has the annotation's session id.
+            InvestigationSessionNotFound: No investigation session has the
+                annotation's investigation session id.
+
         Returns:
             Stored annotation with timestamps set.
         """
         row = AnnotationORM.from_domain(annotation)
-        self._session.add(row)
-        await self._flush()
+        constraints: dict[str, Callable[[], DomainError]] = {
+            ANNOTATION_SESSION_ID_FOREIGN_KEY: lambda: SessionNotFound(
+                annotation.session_id
+            ),
+        }
+        investigation_session_id = annotation.investigation_session_id
+        if investigation_session_id is not None:
+            constraints[ANNOTATION_INVESTIGATION_SESSION_ID_FOREIGN_KEY] = lambda: (
+                InvestigationSessionNotFound(investigation_session_id)
+            )
+        await self._add(row, constraints)
         return row.to_domain()
 
     async def get(self, annotation_id: uuid.UUID) -> Annotation:

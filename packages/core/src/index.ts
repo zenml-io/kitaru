@@ -90,6 +90,8 @@ export type {
   ReplayOverride,
   ReplaySpec,
   ServerInfoResponse,
+  SessionDetailResponse,
+  SessionListParams,
   SessionNodeCreateRequest,
   SessionNodeListParams,
   SessionRunCreateRequest,

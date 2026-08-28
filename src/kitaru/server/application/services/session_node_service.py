@@ -30,18 +30,37 @@ from kitaru.server.application.models.session_node import (
     SessionNodeFilter,
     SessionNodeUpsert,
 )
+from kitaru.server.application.payload_store import PayloadStore
 from kitaru.server.application.services.resource_access import (
     check_task_attempt,
     check_task_session_read,
     check_task_session_write,
 )
 from kitaru.server.domain.ids import uuid7
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import combine_rollups, rollup_delta
 from kitaru.server.domain.session_node import (
     SessionNode,
     SessionNodeParentNotFound,
     node_rollup_contribution,
 )
+
+
+def _get_node_payloads(nodes: list[SessionNode]) -> list[Payload]:
+    """Gather the reasoning, inputs, outputs, and attributes payloads of a batch.
+
+    Args:
+        nodes: Nodes to gather payloads from.
+
+    Returns:
+        Non-None payloads across the batch.
+    """
+    return [
+        payload
+        for node in nodes
+        for payload in (node.reasoning, node.inputs, node.outputs, node.attributes)
+        if payload is not None
+    ]
 
 
 class SessionNodeService:
@@ -52,6 +71,7 @@ class SessionNodeService:
         repository: SessionNodeRepository,
         session_repository: SessionRepository,
         task_repository: TaskRepository,
+        payload_store: PayloadStore,
     ) -> None:
         """Initialize the service.
 
@@ -60,10 +80,13 @@ class SessionNodeService:
             session_repository: Session repository, for the ingest gate and
                 the rollup update.
             task_repository: Task repository, for the attempt fence.
+            payload_store: Payload store, for node payload offload and
+                resolve.
         """
         self._repository = repository
         self._sessions = session_repository
         self._tasks = task_repository
+        self._payload_store = payload_store
 
     async def ingest_nodes(
         self,
@@ -93,13 +116,15 @@ class SessionNodeService:
                 index does not match a stored or batched node.
 
         Returns:
-            Stored nodes in batch order.
+            Stored nodes in batch order, without payloads.
         """
         # Node ids are minted for indexes this read does not find, so two
         # concurrent batches for one index would both insert and collide on
         # the (session, index) key. The lock also stabilizes the pre-image
         # the rollup deltas are computed against.
-        session = await self._sessions.get(session_id, exclusive=True)
+        session = await self._sessions.get(
+            session_id, include_payloads=False, exclusive=True
+        )
         check_task_session_write(session_id, session.task_id, actor)
         await check_task_attempt(actor, self._tasks)
         session.check_node_ingest()
@@ -158,9 +183,15 @@ class SessionNodeService:
                 input_text_selector=item.input_text_selector,
                 output_text_selector=item.output_text_selector,
                 system_prompt_selector=item.system_prompt_selector,
-                reasoning=item.reasoning,
-                inputs=item.inputs,
-                outputs=item.outputs,
+                reasoning=Payload.from_text(item.reasoning)
+                if item.reasoning is not None
+                else None,
+                inputs=Payload.from_json(item.inputs)
+                if item.inputs is not None
+                else None,
+                outputs=Payload.from_json(item.outputs)
+                if item.outputs is not None
+                else None,
                 requested_model=item.requested_model,
                 model=item.model,
                 model_provider=item.model_provider,
@@ -170,7 +201,9 @@ class SessionNodeService:
                 tool_name=item.tool_name,
                 cache_key=cache_key,
                 subagent_id=item.subagent_id,
-                attributes=item.attributes,
+                attributes=Payload.from_json(item.attributes)
+                if item.attributes is not None
+                else None,
                 metadata=item.metadata,
             )
             resolved.append(node)
@@ -183,6 +216,9 @@ class SessionNodeService:
             )
             for node in resolved
         ]
+        await self._payload_store.offload(
+            _get_node_payloads(resolved), session.owner_id
+        )
         stored = await self._repository.upsert_batch(session_id, resolved)
         await self._sessions.apply_rollups(session_id, combine_rollups(deltas))
         return stored
@@ -209,9 +245,14 @@ class SessionNodeService:
             Page of matching nodes and the next cursor.
         """
         if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_node_filter.session_id)
+            session = await self._sessions.get(
+                session_node_filter.session_id, include_payloads=False
+            )
             check_task_session_read(session.id, session.task_id, actor)
-        return await self._repository.query(session_node_filter)
+        nodes, next_cursor = await self._repository.query(session_node_filter)
+        if session_node_filter.include_payloads:
+            await self._resolve_payloads(nodes)
+        return nodes, next_cursor
 
     async def list_all_nodes(
         self, session_id: uuid.UUID, include_payloads: bool, actor: AuthContext
@@ -237,9 +278,12 @@ class SessionNodeService:
             Every node of the session.
         """
         if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_id)
+            session = await self._sessions.get(session_id, include_payloads=False)
             check_task_session_read(session_id, session.task_id, actor)
-        return await self._repository.list_all(session_id, include_payloads)
+        nodes = await self._repository.list_all(session_id, include_payloads)
+        if include_payloads:
+            await self._resolve_payloads(nodes)
+        return nodes
 
     async def get_indexes_by_ids(
         self,
@@ -267,6 +311,14 @@ class SessionNodeService:
             Each requested node id mapped to its index, missing ids omitted.
         """
         if isinstance(actor.principal, TaskPrincipal):
-            session = await self._sessions.get(session_id)
+            session = await self._sessions.get(session_id, include_payloads=False)
             check_task_session_read(session_id, session.task_id, actor)
         return await self._repository.get_indexes_by_ids(session_id, node_ids)
+
+    async def _resolve_payloads(self, nodes: list[SessionNode]) -> None:
+        """Resolve reasoning, inputs, outputs, and attributes refs across nodes.
+
+        Args:
+            nodes: Nodes to resolve, mutated in place.
+        """
+        await self._payload_store.resolve(_get_node_payloads(nodes))

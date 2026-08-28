@@ -59,6 +59,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
+from kitaru.server.domain.payload import Payload
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.session_node import SessionNode
 
@@ -199,6 +200,15 @@ def _node(index: int, **overrides: Any) -> SessionNode:
         "status": NodeStatus.COMPLETED,
     }
     values.update(overrides)
+    for field in ("reasoning", "inputs", "outputs", "attributes"):
+        value = values.get(field)
+        if value is None or isinstance(value, Payload):
+            continue
+        values[field] = (
+            Payload.from_text(value)
+            if field == "reasoning"
+            else Payload.from_json(value)
+        )
     return SessionNode(**values)
 
 
@@ -366,9 +376,12 @@ async def test_query_include_payloads_true_populates_heavy_columns(
     nodes, _ = await repository.query(
         SessionNodeFilter(session_id=session_id, include_payloads=True)
     )
-    assert nodes[0].inputs == {"q": "hi"}
-    assert nodes[0].outputs == {"a": "there"}
-    assert nodes[0].attributes == {"k": 1}
+    assert nodes[0].inputs is not None
+    assert nodes[0].inputs.value == {"q": "hi"}
+    assert nodes[0].outputs is not None
+    assert nodes[0].outputs.value == {"a": "there"}
+    assert nodes[0].attributes is not None
+    assert nodes[0].attributes.value == {"k": 1}
 
 
 async def test_get_by_indexes_include_payloads_false_nulls_heavy_columns(
@@ -413,9 +426,12 @@ async def test_get_by_indexes_include_payloads_true_populates_heavy_columns(
         ],
     )
     loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
-    assert loaded[0].inputs == {"q": "hi"}
-    assert loaded[0].outputs == {"a": "there"}
-    assert loaded[0].attributes == {"k": 1}
+    assert loaded[0].inputs is not None
+    assert loaded[0].inputs.value == {"q": "hi"}
+    assert loaded[0].outputs is not None
+    assert loaded[0].outputs.value == {"a": "there"}
+    assert loaded[0].attributes is not None
+    assert loaded[0].attributes.value == {"k": 1}
 
 
 async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
@@ -435,7 +451,7 @@ async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
             )
         ],
     )
-    replaced = await repository.upsert_batch(
+    await repository.upsert_batch(
         session_id,
         [
             _node(
@@ -448,14 +464,14 @@ async def test_upsert_batch_replace_keeps_payloads_of_deferred_reload(
             )
         ],
     )
-    assert replaced[0].inputs == {"q": "new"}
-    assert replaced[0].outputs == {"a": "new"}
-    assert replaced[0].attributes == {"k": 1}
 
     loaded = await repository.get_by_indexes(session_id, [0], include_payloads=True)
-    assert loaded[0].inputs == {"q": "new"}
-    assert loaded[0].outputs == {"a": "new"}
-    assert loaded[0].attributes == {"k": 1}
+    assert loaded[0].inputs is not None
+    assert loaded[0].inputs.value == {"q": "new"}
+    assert loaded[0].outputs is not None
+    assert loaded[0].outputs.value == {"a": "new"}
+    assert loaded[0].attributes is not None
+    assert loaded[0].attributes.value == {"k": 1}
 
 
 async def test_query_scoped_to_session(setup: Setup) -> None:
@@ -548,7 +564,9 @@ async def test_find_nth_by_cache_key_in_session_walks_index_order(
         )
         for occurrence in range(3)
     ]
-    assert [node.outputs for node in found if node is not None] == [
+    assert [
+        node.outputs.value for node in found if node is not None and node.outputs
+    ] == [
         {"ticket": "a"},
         {"ticket": "b"},
         {"ticket": "c"},
@@ -611,7 +629,8 @@ async def test_find_nth_by_cache_key_in_session_skips_an_in_progress_node(
     )
     found = await repository.find_nth_by_cache_key_in_session(session_id, cache_key, 0)
     assert found is not None
-    assert found.outputs == {"ticket": "b"}
+    assert found.outputs is not None
+    assert found.outputs.value == {"ticket": "b"}
 
 
 async def test_find_nth_by_cache_key_in_session_counts_only_finished_nodes(
@@ -668,7 +687,10 @@ async def test_find_nth_by_cache_key_in_session_counts_only_finished_nodes(
         NodeStatus.COMPLETED,
         None,
     ]
-    assert [node.outputs if node is not None else None for node in found] == [
+    assert [
+        node.outputs.value if node is not None and node.outputs is not None else None
+        for node in found
+    ] == [
         None,
         {"ticket": "a"},
         {"ticket": "b"},
@@ -738,7 +760,8 @@ async def test_find_latest_by_cache_key_in_agent_scopes_to_agent(
     )
 
     assert found is not None
-    assert found.outputs == {"temperature": 18}
+    assert found.outputs is not None
+    assert found.outputs.value == {"temperature": 18}
 
 
 async def test_find_latest_by_cache_key_in_agent_skips_a_failed_node(
@@ -815,7 +838,8 @@ async def test_find_latest_by_cache_key_in_cohort_version_scopes_to_cohort_versi
     )
 
     assert found is not None
-    assert found.outputs == {"temperature": 18}
+    assert found.outputs is not None
+    assert found.outputs.value == {"temperature": 18}
 
 
 async def test_find_latest_by_cache_key_in_cohort_version_skips_a_failed_node(

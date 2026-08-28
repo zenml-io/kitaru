@@ -29,6 +29,11 @@ class AnnotationRepository(Protocol):
         Args:
             annotation: Annotation to store.
 
+        Raises:
+            SessionNotFound: No session has the annotation's session id.
+            InvestigationSessionNotFound: No investigation session has the
+                annotation's investigation session id.
+
         Returns:
             Stored annotation with timestamps set.
         """

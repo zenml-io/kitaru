@@ -18,7 +18,11 @@ from collections.abc import AsyncGenerator
 
 import pytest
 
-from conftest import FakeBlobRepository, asgi_api_client
+from conftest import (
+    FakeBlobDataStore,
+    FakeBlobRepository,
+    asgi_api_client,
+)
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -29,9 +33,11 @@ from kitaru.server.adapters.rest.dependencies import (
 )
 from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
+from kitaru.server.application.interfaces.blob_data_store import BlobDataStores
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
 from kitaru.server.domain.account import Account
+from kitaru.server.domain.blob import BlobStorageBackend
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
 
@@ -46,7 +52,14 @@ async def api_client() -> AsyncGenerator[KitaruAPIClient, None]:
             JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
         )
     )
-    service = BlobService(repository=FakeBlobRepository(), max_size_bytes=1024)
+    service = BlobService(
+        repository=FakeBlobRepository(),
+        data_stores=BlobDataStores(
+            {BlobStorageBackend.DATABASE: FakeBlobDataStore()},
+            BlobStorageBackend.DATABASE,
+        ),
+        max_size_bytes=1024,
+    )
     app.dependency_overrides[get_blob_service] = lambda: service
     app.dependency_overrides[authorize] = lambda: AuthContext(account=ACCOUNT)
     app.dependency_overrides[authorize_with_task] = lambda: AuthContext(account=ACCOUNT)
