@@ -370,3 +370,81 @@ jobs:
               -f ref="refs/heads/$MAINTENANCE_BRANCH" \
               -f sha="$release_sha" >/dev/null
           fi
+  create-development-reset-pr:
+    if: >-
+      github.event_name == 'push' &&
+      needs.build.outputs.is-prerelease == 'false'
+    needs: [build, create-release, advance-maintenance-branch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: develop
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          python-version: '3.12'
+          enable-cache: false
+      - name: Resolve development reset state
+        id: reset
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |-
+          set -euo pipefail
+          branch="automation/kitaru-$VERSION-development"
+          if gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" \
+            --state all --json number --jq 'length > 0' | grep -qx true; then
+            echo "action=skip" >> "$GITHUB_OUTPUT"
+          elif git ls-remote --exit-code --heads origin "$branch" >/dev/null; then
+            echo "action=open" >> "$GITHUB_OUTPUT"
+          else
+            echo "action=create" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Prepare development reset
+        if: steps.reset.outputs.action == 'create'
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |-
+          uv run --no-project --with packaging==26.2 \
+            python scripts/release_units.py prepare-core-development-reset \
+            --release-version "$VERSION"
+          uv lock --check
+          uv lock --project plugins --check
+          git diff --check
+      - name: Push development reset branch
+        if: steps.reset.outputs.action == 'create'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |-
+          set -euo pipefail
+          branch="automation/kitaru-$VERSION-development"
+          git config user.name "kitaru-release[bot]"
+          git config user.email "kitaru-release[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add pyproject.toml uv.lock plugins/uv.lock openapi/openapi.json CHANGELOG.md
+          git commit -m "Start Kitaru $VERSION development"
+          gh auth setup-git
+          git push origin "HEAD:refs/heads/$branch"
+      - name: Open draft development reset PR
+        if: steps.reset.outputs.action != 'skip'
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_GIT_TOKEN }}
+          RELEASE_SHA: ${{ github.sha }}
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |-
+          set -euo pipefail
+          branch="automation/kitaru-$VERSION-development"
+          # shellcheck disable=SC2016  # Markdown backticks are intentional.
+          printf -v body '## Summary\n\n- set the core development version to `%s+dev`\n- restore the `Unreleased` changelog section\n- update both core lockfile entries and generated OpenAPI version\n\n## Merge order\n\nMerge this PR only after `main` contains release commit `%s`, so `main` remains at the clean `%s` release state.\n\n## Reviewer Notes\n\nConfirm the diff contains only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, `openapi/openapi.json`, and `CHANGELOG.md`. Verify `main` contains `%s` before marking this draft ready.\n' "$VERSION" "$RELEASE_SHA" "$VERSION" "$RELEASE_SHA"
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base develop \
+            --head "$branch" \
+            --draft \
+            --title "Start Kitaru $VERSION development" \
+            --body "$body"

@@ -47,6 +47,20 @@ For core, collect requirements for frontend, plugins, skills, ZenML docs, websit
 
 Compare declared follow-ups with the actual diff and PR context. Report unknown, conflicting, or stale signals. The diff identifies direct units; labels record work that the Kitaru diff cannot show. Repository state decides what can be released.
 
+For core, collect every merged PR label in the range and use the latest published stable core version as the input to the deterministic version rule:
+
+```bash
+uv run --no-project --with packaging==26.2 \
+  python scripts/release_units.py propose-core-version \
+  --latest-version <latest-stable-version> \
+  --label <first-merged-pr-label> \
+  --label <second-merged-pr-label> ...
+```
+
+Pass every label occurrence; do not summarize or discard labels before running the command. A `Breaking Change` label advances a pre-1.0 core to the next minor version and a post-1.0 core to the next major version. Without that label, the command advances the patch version. The version in `pyproject.toml` may contain `+dev`; it is a development placeholder and is never the input or release proposal. PR prose about an expected dependency floor does not override the command result.
+
+Before editing, rerun the command with `--candidate <proposed-version>` and require it to pass. Do not prepare a different core version.
+
 Propose explicit versions and changelog entries after discovery. Check PyPI versions and Git tags before proposing a version, and never reuse a published version. Get the user's acceptance before editing release metadata.
 
 ## Apply version rules
@@ -234,6 +248,8 @@ RELEASE_SHA="$(gh pr view <release-pr> \
 
 For a coordinated release, order the hand-off as frontend tag and bundle, core tag and publication, dependent plugin tags and publication, then linked skills, docs, website, examples, and other follow-ups. Do not execute these commands during preparation.
 
+Push every release tag in its own `git push origin <tag>` command. GitHub does not create push events when more than three tags are pushed at once, which leaves immutable tags without release workflow runs. Do not batch release tags into one push, even when several point to the same commit. After each push, confirm the matching workflow run exists before pushing the next tag.
+
 ## Rehearse before publication
 
 Manual dispatch builds and validates without publishing.
@@ -293,6 +309,9 @@ The tag starts `.github/workflows/release.yml`. The workflow:
 5. publishes the Helm chart
 6. moves public Docker `latest` aliases only for a stable release
 7. creates the immutable GitHub Release
+8. creates a draft post-release PR that restores `## [Unreleased]`, sets core to `<version>+dev`, and updates both lockfiles and the generated OpenAPI version
+
+For a stable release, fast-forward `main` to the tagged release commit before merging the generated development-reset PR. The reset PR must leave `main` at the clean release version and change only `pyproject.toml`, `uv.lock`, `plugins/uv.lock`, `openapi/openapi.json`, and `CHANGELOG.md` on `develop`.
 8. creates or fast-forwards the stable maintenance branch
 
 Approve required environments only after checking the candidate evidence. A managed-image failure is reported as a warning and does not block public deployables.

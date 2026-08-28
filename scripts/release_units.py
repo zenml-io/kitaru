@@ -6,6 +6,7 @@ import json
 import re
 import sys
 import tomllib
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -25,6 +26,7 @@ MAINTENANCE_BRANCH_PREFIX_PATTERN = re.compile(
 REQUIRED_PLUGIN_PROJECT_URLS = frozenset(
     {"Homepage", "Documentation", "Repository", "Issues", "Changelog"}
 )
+BREAKING_CHANGE_LABEL = "Breaking Change"
 
 
 class ReleaseInventoryError(ValueError):
@@ -143,6 +145,115 @@ def validate_version(value: str) -> str:
             f"version must be canonical PEP 440: {value} normalizes to {canonical}"
         )
     return canonical
+
+
+def propose_core_version(latest_version: str, labels: Iterable[str]) -> str:
+    """Propose the next stable core version from merged change labels."""
+    latest = Version(validate_canonical_version(latest_version))
+    label_set = set(labels)
+    if (
+        len(latest.release) != 3
+        or latest.epoch != 0
+        or latest.is_prerelease
+        or latest.is_devrelease
+        or latest.post is not None
+        or latest.local is not None
+    ):
+        raise ReleaseInventoryError(
+            "latest stable core version must use X.Y.Z without pre, dev, post, "
+            f"epoch, or local segments: {latest_version}"
+        )
+
+    major, minor, patch = latest.release
+    if BREAKING_CHANGE_LABEL in label_set:
+        if major == 0:
+            return f"0.{minor + 1}.0"
+        return f"{major + 1}.0.0"
+    return f"{major}.{minor}.{patch + 1}"
+
+
+def prepare_core_development_reset(
+    release_version: str, repo_root: Path = REPO_ROOT
+) -> str:
+    """Prepare the deterministic post-release core development reset."""
+    version = Version(validate_canonical_version(release_version))
+    if (
+        len(version.release) != 3
+        or version.epoch != 0
+        or version.is_prerelease
+        or version.is_devrelease
+        or version.post is not None
+        or version.local is not None
+    ):
+        raise ReleaseInventoryError(
+            f"development reset requires a stable X.Y.Z core version: {release_version}"
+        )
+
+    development_version = f"{release_version}+dev"
+    paths = {
+        "project": repo_root / "pyproject.toml",
+        "changelog": repo_root / "CHANGELOG.md",
+        "OpenAPI": repo_root / "openapi" / "openapi.json",
+        "root lock": repo_root / "uv.lock",
+        "plugin lock": repo_root / "plugins" / "uv.lock",
+    }
+    try:
+        documents = {name: path.read_text() for name, path in paths.items()}
+    except FileNotFoundError as error:
+        raise ReleaseInventoryError(
+            f"missing release file: {error.filename}"
+        ) from error
+
+    replacements = {
+        "project": (
+            f'version = "{release_version}"',
+            f'version = "{development_version}"',
+        ),
+        "OpenAPI": (
+            '"info": {\n    "title": "Kitaru",\n'
+            f'    "version": "{release_version}"\n  }}',
+            '"info": {\n    "title": "Kitaru",\n'
+            f'    "version": "{development_version}"\n  }}',
+        ),
+        "root lock": (
+            f'name = "kitaru"\nversion = "{release_version}"\n'
+            'source = { editable = "." }',
+            f'name = "kitaru"\nversion = "{development_version}"\n'
+            'source = { editable = "." }',
+        ),
+        "plugin lock": (
+            f'name = "kitaru"\nversion = "{release_version}"\n'
+            'source = { editable = "../" }',
+            f'name = "kitaru"\nversion = "{development_version}"\n'
+            'source = { editable = "../" }',
+        ),
+    }
+    updated = dict(documents)
+    for name, (current, replacement) in replacements.items():
+        if documents[name].count(current) != 1:
+            raise ReleaseInventoryError(
+                f"{name} must contain exactly one core {release_version} entry"
+            )
+        updated[name] = documents[name].replace(current, replacement, 1)
+
+    unreleased_heading = "## [Unreleased]"
+    release_heading = f"## [{release_version}]"
+    if documents["changelog"].count(release_heading) != 1:
+        raise ReleaseInventoryError(
+            f"changelog must contain exactly one {release_heading} heading"
+        )
+    current_release_offset = documents["changelog"].index(release_heading)
+    if unreleased_heading in documents["changelog"][:current_release_offset]:
+        raise ReleaseInventoryError(
+            "changelog already contains an Unreleased section above the release"
+        )
+    updated["changelog"] = documents["changelog"].replace(
+        release_heading, f"{unreleased_heading}\n\n{release_heading}", 1
+    )
+
+    for name, path in paths.items():
+        path.write_text(updated[name])
+    return development_version
 
 
 def _read_toml(path: Path) -> dict[str, Any]:
@@ -628,6 +739,21 @@ def _parse_args() -> argparse.Namespace:
         "validate", help="Validate the inventory and repository manifests."
     )
     validate_parser.add_argument("--format", choices=("text", "json"), default="text")
+
+    propose_parser = subparsers.add_parser(
+        "propose-core-version",
+        help="Propose or validate the next stable core version.",
+    )
+    propose_parser.add_argument("--latest-version", required=True)
+    propose_parser.add_argument("--label", action="append", default=[])
+    propose_parser.add_argument("--candidate")
+    propose_parser.add_argument("--format", choices=("text", "json"), default="text")
+
+    reset_parser = subparsers.add_parser(
+        "prepare-core-development-reset",
+        help="Prepare the post-release core development reset.",
+    )
+    reset_parser.add_argument("--release-version", required=True)
     return parser.parse_args()
 
 
@@ -668,6 +794,30 @@ def main() -> int:
                 if args.format == "json"
                 else format_units((unit,))
             )
+        elif args.command == "propose-core-version":
+            proposed_version = propose_core_version(args.latest_version, args.label)
+            if args.candidate is not None:
+                candidate = validate_version(args.candidate)
+                if candidate != proposed_version:
+                    raise ReleaseInventoryError(
+                        f"candidate core version {candidate} does not match required "
+                        f"version {proposed_version}"
+                    )
+            output = (
+                json.dumps(
+                    {
+                        "schema_version": inventory.schema_version,
+                        "latest_version": args.latest_version,
+                        "proposed_version": proposed_version,
+                        "breaking_change": BREAKING_CHANGE_LABEL in args.label,
+                    },
+                    separators=(",", ":"),
+                )
+                if args.format == "json"
+                else proposed_version
+            )
+        elif args.command == "prepare-core-development-reset":
+            output = prepare_core_development_reset(args.release_version)
         else:
             output = (
                 json.dumps(
