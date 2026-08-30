@@ -28,6 +28,7 @@ from .fuzz_strategies import (
     encode_records,
     garbage_bytes,
     importer_params,
+    invalid_params,
     records_for,
 )
 
@@ -60,4 +61,13 @@ def test_parse_contract_on_garbage(
 def test_parse_contract_on_records(name: str, data: st.DataObject) -> None:
     records = data.draw(records_for(name))
     params = data.draw(importer_params())
+    _assert_contract(name, encode_records(name, records), params)
+
+
+@pytest.mark.parametrize("name", IMPORTER_NAMES)
+@given(data=st.data())
+def test_parse_contract_on_invalid_params(name: str, data: st.DataObject) -> None:
+    """Cover the parameter-validation branches `importer_params()` avoids."""
+    records = data.draw(records_for(name))
+    params = data.draw(invalid_params())
     _assert_contract(name, encode_records(name, records), params)

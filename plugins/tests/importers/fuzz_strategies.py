@@ -26,6 +26,8 @@ import kitaru_langfuse_importer.importer as langfuse
 import kitaru_langsmith_importer.importer as langsmith
 import kitaru_logfire_importer.importer as logfire
 import kitaru_phoenix_importer.importer as phoenix
+from kitaru.api_models.v1.session import SessionStatus
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 
 IMPORTERS: dict[str, ModuleType] = {
     "langfuse": langfuse,
@@ -58,6 +60,27 @@ _WEIRD_TEXT = st.one_of(
 )
 
 
+_IDS = st.sampled_from([f"id{i}" for i in range(12)])
+_TRACE_IDS = st.sampled_from(["trace0", "trace1", "trace2"])
+_PROJECT_IDS = st.sampled_from(["proj-a", "proj-b"])
+
+
+def _mostly(
+    main: SearchStrategy[Any], rare: SearchStrategy[Any], *, one_in: int = 8
+) -> SearchStrategy[Any]:
+    """Draw from `main`, falling back to `rare` about one draw in `one_in`.
+
+    Identity fields such as trace ids gate the whole import: when they are
+    drawn from a uniform mix of valid and hostile values, almost every
+    generated file dies at the front door and the deeper normalizing code
+    never runs. Weighting keeps hostile values in the search space while
+    letting most files reach the code the property is about.
+    """
+    return st.sampled_from([False] * (one_in - 1) + [True]).flatmap(
+        lambda use_rare: rare if use_rare else main
+    )
+
+
 def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
     """Generate JSON-compatible values biased toward parser edge cases.
 
@@ -86,6 +109,12 @@ def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
 def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
     # Token and cost numbers reach the importer under "usageDetails" and
     # "costDetails"; it reads no "usage" or "calculatedTotalCost" key at all.
+    #
+    # NEW-FINDING-3: "model" is deliberately kept out of the general key pool
+    # and drawn as a string or None below. The importer feeds it straight into
+    # `ImportedNode.requested_model` with no type check, so a non-string value
+    # such as `[]` escapes `parse()` as a pydantic `ValidationError` instead of
+    # a contained `ImportFailure`. See design/fuzzing/new-findings.md.
     keys = [
         "id",
         "traceId",
@@ -97,14 +126,24 @@ def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
         "input",
         "output",
         "metadata",
-        "model",
         "usageDetails",
         "costDetails",
         "level",
         "statusMessage",
         "sessionId",
     ]
-    return _records_with_keys(keys, id_key="id", parent_key="parentObservationId")
+    return _records_with_keys(
+        keys,
+        id_key="id",
+        parent_key="parentObservationId",
+        # Shape detection reads "traceId" on the first record and every later
+        # record must carry one too, so a uniformly hostile "traceId" rejects
+        # the whole file before any observation is normalized.
+        required={
+            "traceId": _mostly(_TRACE_IDS, _WEIRD_TEXT),
+            "model": st.none() | _WEIRD_TEXT,
+        },
+    )
 
 
 def _braintrust_records() -> SearchStrategy[list[dict[str, Any]]]:
@@ -132,7 +171,14 @@ def _braintrust_records() -> SearchStrategy[list[dict[str, Any]]]:
         "project_id",
     ]
     return _records_with_keys(
-        keys, id_key="span_id", parent_key="span_parents", parent_is_list=True
+        keys,
+        id_key="span_id",
+        parent_key="span_parents",
+        parent_is_list=True,
+        required={
+            "root_span_id": _mostly(_TRACE_IDS, _WEIRD_TEXT),
+            "project_id": _mostly(_PROJECT_IDS, _WEIRD_TEXT),
+        },
     )
 
 
@@ -154,7 +200,17 @@ def _langsmith_records() -> SearchStrategy[list[dict[str, Any]]]:
         "completion_tokens",
         "session_id",
     ]
-    return _records_with_keys(keys, id_key="id", parent_key="parent_run_id")
+    return _records_with_keys(
+        keys,
+        id_key="id",
+        parent_key="parent_run_id",
+        # A run without a trace id or a project identity is rejected before
+        # the run is turned into a node, so both need to be present usually.
+        required={
+            "trace_id": _mostly(_TRACE_IDS, _WEIRD_TEXT),
+            "session_id": _mostly(_PROJECT_IDS, _WEIRD_TEXT),
+        },
+    )
 
 
 def _logfire_records() -> SearchStrategy[list[dict[str, Any]]]:
@@ -173,7 +229,12 @@ def _logfire_records() -> SearchStrategy[list[dict[str, Any]]]:
         "otel_scope_name",
         "service_name",
     ]
-    return _records_with_keys(keys, id_key="span_id", parent_key="parent_span_id")
+    return _records_with_keys(
+        keys,
+        id_key="span_id",
+        parent_key="parent_span_id",
+        required={"trace_id": _mostly(_TRACE_IDS, _WEIRD_TEXT)},
+    )
 
 
 def _phoenix_records() -> SearchStrategy[list[dict[str, Any]]]:
@@ -217,7 +278,7 @@ def _phoenix_records() -> SearchStrategy[list[dict[str, Any]]]:
             "status_code": st.sampled_from(["OK", "ERROR", "UNSET", ""]),
         },
     )
-    return st.lists(span, max_size=20)
+    return st.lists(span, min_size=1, max_size=20)
 
 
 def _kitaru_jsonl_records() -> SearchStrategy[list[dict[str, Any]]]:
@@ -234,7 +295,54 @@ def _kitaru_jsonl_records() -> SearchStrategy[list[dict[str, Any]]]:
         "framework",
         "nodes",
     ]
-    return _records_with_keys(keys, id_key="external_id", parent_key=None)
+    # Every record is validated against ImportedSession, which forbids extra
+    # keys and requires status/inputs/outputs/external_id/nodes, so without
+    # these the whole file degrades into ImportFailure lines.
+    return _records_with_keys(
+        keys,
+        id_key="external_id",
+        parent_key=None,
+        required={
+            "status": _mostly(
+                st.sampled_from([status.value for status in SessionStatus]),
+                _WEIRD_TEXT,
+            ),
+            "inputs": adversarial_json_value(2),
+            "outputs": adversarial_json_value(2),
+            "nodes": _mostly(_kitaru_jsonl_nodes(), adversarial_json_value(2)),
+        },
+    )
+
+
+def _kitaru_jsonl_nodes() -> SearchStrategy[list[dict[str, Any]]]:
+    """Build flat indexed node lists that ImportedNode mostly accepts."""
+    node = st.fixed_dictionaries(
+        {
+            "node_type": _mostly(
+                st.sampled_from([node_type.value for node_type in NodeType]),
+                _WEIRD_TEXT,
+            ),
+            "name": _WEIRD_TEXT,
+            "status": _mostly(
+                st.sampled_from([status.value for status in NodeStatus]), _WEIRD_TEXT
+            ),
+            "inputs": adversarial_json_value(2),
+            "outputs": adversarial_json_value(2),
+            "attributes": adversarial_json_value(2),
+        },
+        optional={
+            "error": st.none() | _WEIRD_TEXT,
+            "started_at": _ISO_TIMES | _WEIRD_TEXT,
+            "ended_at": _ISO_TIMES | _WEIRD_TEXT,
+            "external_id": _IDS,
+            "model": _WEIRD_TEXT,
+            "tool_name": _WEIRD_TEXT,
+        },
+    )
+    # The importer rejects any node whose index is unset, so number them.
+    return st.lists(node, max_size=4).map(
+        lambda nodes: [dict(node, index=index) for index, node in enumerate(nodes)]
+    )
 
 
 def _records_with_keys(
@@ -243,14 +351,17 @@ def _records_with_keys(
     id_key: str,
     parent_key: str | None,
     parent_is_list: bool = False,
+    required: dict[str, SearchStrategy[Any]] | None = None,
 ) -> SearchStrategy[list[dict[str, Any]]]:
     """Build records that mostly use an importer's real keys with hostile values.
 
     Ids are drawn from a small pool so parent references sometimes resolve,
     sometimes dangle, and sometimes form short cycles. Chain length is bounded
-    by MAX_PARENT_CHAIN (see the known-bug note above).
+    by MAX_PARENT_CHAIN (see the known-bug note above). `required` names the
+    identity fields the importer needs before it will build a session; they
+    are drawn last so they override anything the optional key pool produced.
     """
-    ids = st.sampled_from([f"id{i}" for i in range(12)])
+    required_fields = required or {}
 
     @st.composite
     def record(draw: st.DrawFn) -> dict[str, Any]:
@@ -259,13 +370,17 @@ def _records_with_keys(
                 st.sampled_from(keys), adversarial_json_value(3), max_size=len(keys)
             )
         )
-        fields[id_key] = draw(ids | _WEIRD_TEXT)
+        fields[id_key] = draw(_mostly(_IDS, _WEIRD_TEXT))
         if parent_key is not None and draw(st.booleans()):
-            parent = draw(ids | st.none())
+            parent = draw(_IDS | st.none())
             fields[parent_key] = [parent] if parent_is_list and parent else parent
+        for key, strategy in required_fields.items():
+            fields[key] = draw(strategy)
         return fields
 
-    return st.lists(record(), max_size=min(MAX_PARENT_CHAIN, 30))
+    # An empty list is an empty file, which every importer rejects up front;
+    # `garbage_bytes()` already covers that, so spend these draws on records.
+    return st.lists(record(), min_size=1, max_size=min(MAX_PARENT_CHAIN, 30))
 
 
 _RECORD_STRATEGIES = {
@@ -295,26 +410,57 @@ _PATH_SELECTORS = st.from_regex(r"(/?[a-z_]{1,8}){1,4}", fullmatch=True)
 
 
 def importer_params() -> SearchStrategy[dict[str, Any]]:
-    """Generate the user-controlled parameter dict."""
+    """Generate the user-controlled parameter dict.
+
+    Values are weighted toward ones the importers accept. A parameter of the
+    wrong type is rejected before a single record is read, so an unweighted
+    mix spends the whole budget on parameter validation instead of on the
+    record-normalizing code these properties are about. `invalid_params()`
+    covers the rejection paths separately.
+    """
     return st.fixed_dictionaries(
         {},
         optional={
-            "source_instance": _WEIRD_TEXT,
-            "filename": _WEIRD_TEXT,
+            "source_instance": _mostly(_PROJECT_IDS, _WEIRD_TEXT),
+            "filename": _mostly(st.just("export.jsonl"), _WEIRD_TEXT),
             # Every importer treats join_on as a dotted path or JSON pointer,
             # not an enum, so mix path-shaped values in with the bare names.
-            "join_on": st.one_of(
-                st.sampled_from(["trace", "session", "user", "metadata", "bogus", ""]),
-                _PATH_SELECTORS,
-                st.sampled_from(
-                    ["metadata.x", "/metadata/x", "/bad~2escape", "metadata..x"]
+            "join_on": _mostly(
+                st.none(),
+                st.one_of(
+                    st.sampled_from(
+                        ["trace", "session", "user", "metadata", "bogus", ""]
+                    ),
+                    _PATH_SELECTORS,
+                    st.sampled_from(
+                        ["metadata.x", "/metadata/x", "/bad~2escape", "metadata..x"]
+                    ),
                 ),
             ),
-            "join_key": _WEIRD_TEXT,
-            "join_path": st.one_of(_WEIRD_TEXT, _PATH_SELECTORS),
-            "infer_tool_call_links": st.booleans() | _WEIRD_TEXT,
-            "framework": _WEIRD_TEXT,
-            "project_id": _WEIRD_TEXT,
+            "join_key": _mostly(st.none(), _WEIRD_TEXT),
+            "join_path": _mostly(st.none(), st.one_of(_WEIRD_TEXT, _PATH_SELECTORS)),
+            "infer_tool_call_links": st.booleans(),
+            "framework": _mostly(st.none(), _WEIRD_TEXT),
+            "project_id": _mostly(_PROJECT_IDS, _WEIRD_TEXT),
+        },
+    )
+
+
+def invalid_params() -> SearchStrategy[dict[str, Any]]:
+    """Generate parameter dicts whose values have the wrong type."""
+    return st.fixed_dictionaries(
+        {},
+        optional={
+            "source_instance": adversarial_json_value(2),
+            "filename": adversarial_json_value(2),
+            "join_on": adversarial_json_value(2),
+            "join_key": adversarial_json_value(2),
+            "join_path": adversarial_json_value(2),
+            "infer_tool_call_links": st.one_of(
+                _WEIRD_TEXT, st.integers(), st.none(), st.lists(st.booleans())
+            ),
+            "framework": adversarial_json_value(2),
+            "project_id": adversarial_json_value(2),
         },
     )
 
