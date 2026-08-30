@@ -33,9 +33,9 @@ _json = st.recursive(
     ),
     max_leaves=12,
 )
-# NEW-FINDING-8: "apiKey" and "x-api-key" are omitted here because only the CLI regex
-# spells the separator as `[_-]?`; the MCP copy accepts `_` only, so it leaves those two
-# key names untouched. `test_camel_and_hyphen_secret_keys_are_masked` pins that gap.
+# #906: "apiKey" and "x-api-key" are omitted here because only the CLI regex spells the
+# separator as `[_-]?`; the MCP copy accepts `_` only, so it leaves those two key names
+# untouched. `test_camel_and_hyphen_secret_keys_are_masked` pins that gap.
 _secret_keys = st.sampled_from(
     ["api_key", "token", "password", "secret", "authorization"]
 )
@@ -82,7 +82,7 @@ def test_inline_marker_never_survives(
         pytest.param(
             mcp_redact,
             id="mcp",
-            marks=pytest.mark.xfail(strict=True, reason="NEW-FINDING-8"),
+            marks=pytest.mark.xfail(strict=True, reason=_KNOWN),
         ),
     ],
 )

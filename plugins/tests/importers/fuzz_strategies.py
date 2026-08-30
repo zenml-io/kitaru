@@ -53,11 +53,11 @@ _WEIRD_TEXT = st.one_of(
     # Hypothesis's per-example entropy budget that the derandomized "ci"
     # profile fails the data_too_large health check before it finds anything.
     st.sampled_from(["x" * 1_000, "\u00e9" * 5_000, " " * 2_000]),
-    # NEW-FINDING-1: "\ud800" (a lone UTF-16 surrogate) survives into
+    # #905: "\ud800" (a lone UTF-16 surrogate) survives into
     # ImportedSession/ImportedNode string fields and then blows up
-    # model_dump_json() with a PydanticSerializationError. See
-    # design/fuzzing/new-findings.md. Excluded until an importer or the
-    # ImportedSession/ImportedNode models sanitize lone surrogates.
+    # model_dump_json() with a PydanticSerializationError, so it is excluded
+    # until the importers or those models sanitize lone surrogates.
+    # test_lone_surrogate_yields_serializable_session pins it.
     st.sampled_from(["", " ", "\x00", "null", "NaN", "Infinity", "-0", "1e999"]),
 )
 
@@ -83,6 +83,23 @@ def _mostly(
     )
 
 
+# Several importers re-parse string-valued fields as JSON (langfuse's
+# `input`/`output`, phoenix's `input.value`), so a document encoded inside a
+# string reaches a second parse that the outer `json.loads` never guarded.
+# #905: the encoded nesting is kept to a handful of levels, far below the depth
+# of about 50 at which the uncapped re-parse helpers (`_contains_tool_activity`,
+# `_tool_call_ids`) start to recurse; deep nesting is pinned separately by
+# test_deep_chain_yields_serializable_session_or_failure.
+_JSON_IN_STRING = st.recursive(
+    st.none() | st.booleans() | st.integers() | st.text(max_size=10),
+    lambda children: (
+        st.lists(children, max_size=3)
+        | st.dictionaries(st.text(max_size=8), children, max_size=3)
+    ),
+    max_leaves=6,
+).map(json.dumps)
+
+
 def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
     """Generate JSON-compatible values biased toward parser edge cases.
 
@@ -95,6 +112,7 @@ def adversarial_json_value(max_depth: int = 4) -> SearchStrategy[Any]:
         st.integers(min_value=-(2**63), max_value=2**63),
         st.floats(allow_nan=False, allow_infinity=False),
         _WEIRD_TEXT,
+        _JSON_IN_STRING,
         # #905: costs are read as strings; keep them finite until _decimal is fixed.
         _FINITE_DECIMAL_STRINGS,
     )
@@ -112,11 +130,12 @@ def _langfuse_records() -> SearchStrategy[list[dict[str, Any]]]:
     # Token and cost numbers reach the importer under "usageDetails" and
     # "costDetails"; it reads no "usage" or "calculatedTotalCost" key at all.
     #
-    # NEW-FINDING-3: "model" is deliberately kept out of the general key pool
-    # and drawn as a string or None below. The importer feeds it straight into
+    # #905: "model" is deliberately kept out of the general key pool and drawn
+    # as a string or None below. The importer feeds it straight into
     # `ImportedNode.requested_model` with no type check, so a non-string value
     # such as `[]` escapes `parse()` as a pydantic `ValidationError` instead of
-    # a contained `ImportFailure`. See design/fuzzing/new-findings.md.
+    # a contained `ImportFailure`. test_non_string_model_field_is_contained
+    # pins it.
     keys = [
         "id",
         "traceId",
@@ -152,13 +171,13 @@ def _braintrust_records() -> SearchStrategy[list[dict[str, Any]]]:
     # "project_id" is compared across the rows of one trace, and conflicting
     # values raise InvalidImport, so it belongs in the pool.
     #
-    # NEW-FINDING-2: "span_parents" is deliberately excluded from the general
-    # key pool below. importer.py does `row.get("span_parents") or []` and
-    # then iterates the result directly (no type check), so any truthy
-    # non-list value (bool, str, dict, number) crashes with `TypeError:
-    # 'bool' object is not iterable` instead of a contained ImportFailure.
-    # See design/fuzzing/new-findings.md. `parent_key="span_parents"` below
-    # still exercises it, but only ever with a list or an absent key.
+    # #905: "span_parents" is deliberately excluded from the general key pool
+    # below. importer.py does `row.get("span_parents") or []` and then iterates
+    # the result directly (no type check), so any truthy non-list value (bool,
+    # str, dict, number) crashes with `TypeError: 'bool' object is not
+    # iterable` instead of a contained ImportFailure;
+    # test_non_list_span_parents_is_contained pins it. `parent_key` below still
+    # exercises the key, but only ever with a list or an absent value.
     keys = [
         "id",
         "span_id",
@@ -198,10 +217,10 @@ _BRAINTRUST_MODEL_METADATA = (
 def _without_untyped_model_metadata(record: dict[str, Any]) -> dict[str, Any]:
     """Drop braintrust model metadata whose value is not a string.
 
-    NEW-FINDING-6: a non-string value under one of these keys escapes
-    `parse()` as a pydantic `ValidationError` instead of a contained
-    `ImportFailure`. See design/fuzzing/new-findings.md. Remove this map when
-    the importer type-checks those fields.
+    A non-string value under one of these keys escapes `parse()` as a pydantic
+    `ValidationError` instead of a contained `ImportFailure` (#905, pinned by
+    test_non_string_model_metadata_is_contained). Remove this map when the
+    importer type-checks those fields.
     """
     metadata = record.get("metadata")
     if not isinstance(metadata, dict):

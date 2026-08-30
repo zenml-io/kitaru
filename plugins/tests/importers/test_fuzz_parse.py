@@ -93,24 +93,26 @@ def _session_ids(name: str, content: bytes, params: dict[str, Any]) -> list[str]
     )
 
 
-# NEW-FINDING-4: braintrust takes a session's project identity from whichever
-# row of a trace it reads first, so rows that disagree about "project_id" give
-# that trace a different session external_id depending on record order.
+_KNOWN_IMPORTER_BUGS = "#905"
+
+# #905: braintrust takes a session's project identity from whichever row of a
+# trace it reads first, so rows that disagree about "project_id" give that
+# trace a different session external_id depending on record order.
 _ORDER_UNSTABLE_IDENTITY: dict[str, dict[str, Any]] = {
     "braintrust": {"project_id": "proj-a"}
 }
-# NEW-FINDING-5: when two langsmith runs share an id, the run that is read
-# first decides the parent links, and one order imports a session while the
-# other rejects the whole file.
+# #905: when two langsmith runs share an id, the run that is read first decides
+# the parent links, and one order imports a session while the other rejects the
+# whole file.
 _ORDER_UNSTABLE_ID_KEYS = {"langsmith": "id"}
 
 
 def _order_comparable(name: str, records: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Drop the record shapes whose grouping is known to depend on order.
 
-    Both exclusions are known bugs pinned by the regression tests below; see
-    design/fuzzing/new-findings.md. Without them the property keeps re-finding
-    those two bugs instead of searching for other order dependence.
+    Both exclusions are known bugs (#905) pinned by the regression tests below.
+    Without them the property keeps re-finding those two bugs instead of
+    searching for other order dependence.
     """
     pinned = _ORDER_UNSTABLE_IDENTITY.get(name, {})
     id_key = _ORDER_UNSTABLE_ID_KEYS.get(name)
@@ -151,7 +153,7 @@ def _assert_order_independent(name: str, rows: list[dict[str, Any]]) -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-FINDING-4")
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
 def test_conflicting_project_identity_is_order_independent() -> None:
     _assert_order_independent(
         "braintrust",
@@ -162,7 +164,7 @@ def test_conflicting_project_identity_is_order_independent() -> None:
     )
 
 
-@pytest.mark.xfail(strict=True, reason="NEW-FINDING-5")
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
 def test_duplicate_run_id_grouping_is_order_independent() -> None:
     _assert_order_independent(
         "langsmith",
@@ -178,7 +180,6 @@ def test_duplicate_run_id_grouping_is_order_independent() -> None:
     )
 
 
-_KNOWN_IMPORTER_BUGS = "#905"
 # Every importer below needs a project identity before it will build a
 # session; the records themselves are about cost and chain shape, not identity.
 _PROJECT_PARAMS = {"source_instance": "proj"}
@@ -322,3 +323,40 @@ def test_phoenix_superscript_index_does_not_escape() -> None:
         "attributes": {"llm.input_messages.\u00b2.role": "user"},
     }
     _assert_contract("phoenix", json.dumps(span).encode(), _PROJECT_PARAMS)
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_lone_surrogate_yields_serializable_session() -> None:
+    """A lone UTF-16 surrogate must not reach an unserializable session."""
+    content = json.dumps([{"span_id": "\ud800"}]).encode("utf-8", "surrogatepass")
+    _assert_contract("braintrust", content, {"source_instance": "0"})
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_non_list_span_parents_is_contained() -> None:
+    """A truthy non-list `span_parents` must not raise `TypeError` out of `parse()`."""
+    records = [{"project_id": [], "id": None, "span_parents": True}]
+    _assert_contract("braintrust", encode_records("braintrust", records), {})
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_non_string_model_field_is_contained() -> None:
+    """A non-string langfuse `model` must not escape `parse()`."""
+    records = [{"id": "id0", "traceId": "trace0", "model": []}]
+    _assert_contract(
+        "langfuse", encode_records("langfuse", records), {"source_instance": "p"}
+    )
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_non_string_model_metadata_is_contained() -> None:
+    """Non-string braintrust model metadata must not escape `parse()`."""
+    records = [
+        {
+            "span_id": "s0",
+            "root_span_id": "t1",
+            "project_id": "p",
+            "metadata": {"provider": False},
+        }
+    ]
+    _assert_contract("braintrust", encode_records("braintrust", records), {})
