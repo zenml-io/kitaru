@@ -39,6 +39,13 @@ _MARKER = re.compile(r"(KITKEY_|Bearer )FUZZ[0-9a-f]{8}")
 _FORMATS: dict[str, st.SearchStrategy[str]] = {"uuid": st.uuids().map(str)}
 
 
+# The per-tool schema properties run once per tool and draw from each tool's
+# full JSON schema, so the nightly profile's 2000 examples would keep them
+# going for over an hour. Cap them so `just fuzz-mcp` stays inside its nightly
+# budget; the smaller dev and ci profiles pass through unchanged.
+_NIGHTLY_CAP = min(500, settings().max_examples)
+
+
 @cache
 def request_adapter_for(name: str) -> TypeAdapter[Any]:
     """Return a validator for the request payload a named tool accepts."""
@@ -171,7 +178,7 @@ def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
 
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None)
+@settings(deadline=None, max_examples=_NIGHTLY_CAP)
 def test_schema_valid_request_yields_envelope(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
@@ -248,7 +255,7 @@ def _broken_request(draw: st.DrawFn, request: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None)
+@settings(deadline=None, max_examples=_NIGHTLY_CAP)
 def test_schema_valid_request_with_marker_never_leaks(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
@@ -267,7 +274,7 @@ _INTERNAL = "zenml-io/zenml-internal#139"
 @pytest.mark.xfail(strict=True, reason=_INTERNAL)
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None)
+@settings(deadline=None, max_examples=_NIGHTLY_CAP)
 def test_schema_invalid_request_never_raises(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
