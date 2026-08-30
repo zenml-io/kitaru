@@ -14,6 +14,7 @@
 """Hypothesis strategies for importer fuzzing."""
 
 import json
+from pathlib import Path
 from types import ModuleType
 from typing import Any
 
@@ -50,7 +51,11 @@ _FINITE_DECIMAL_STRINGS = st.decimals(
 _WEIRD_TEXT = st.one_of(
     st.text(),
     st.text(alphabet="²³¹٣٤۵", min_size=1, max_size=4),
-    st.text(min_size=1_000, max_size=5_000),
+    # Long strings are drawn from fixed samples rather than generated
+    # character by character: a random 5_000-character draw eats so much of
+    # Hypothesis's per-example entropy budget that the derandomized "ci"
+    # profile fails the data_too_large health check before it finds anything.
+    st.sampled_from(["x" * 1_000, "\u00e9" * 5_000, " " * 2_000]),
     # NEW-FINDING-1: "\ud800" (a lone UTF-16 surrogate) survives into
     # ImportedSession/ImportedNode string fields and then blows up
     # model_dump_json() with a PydanticSerializationError. See
@@ -484,3 +489,45 @@ def garbage_bytes() -> SearchStrategy[bytes]:
             ]
         ),
     )
+
+
+_SEED_PATH = (
+    Path(__file__).resolve().parents[3]
+    / "examples/python/pydantic_ai_ticket_resolver/traces/langfuse-traces.jsonl"
+)
+
+
+def _load_seed_lines() -> list[bytes]:
+    return [line for line in _SEED_PATH.read_bytes().splitlines() if line.strip()]
+
+
+_SEED_LINES = _load_seed_lines()
+
+
+@st.composite
+def mutated_seed_lines(draw: st.DrawFn) -> bytes:
+    """Take a slice of the real Langfuse export and apply one mutation."""
+    start = draw(st.integers(0, max(0, len(_SEED_LINES) - 1)))
+    lines = list(_SEED_LINES[start : start + draw(st.integers(1, 40))])
+    index = draw(st.integers(0, len(lines) - 1))
+    mutation = draw(
+        st.sampled_from(
+            ["drop_key", "replace_value", "duplicate", "truncate", "shuffle"]
+        )
+    )
+    if mutation == "truncate":
+        lines[index] = lines[index][: draw(st.integers(0, len(lines[index])))]
+    elif mutation == "duplicate":
+        lines.insert(index, lines[index])
+    elif mutation == "shuffle":
+        lines = draw(st.permutations(lines))
+    else:
+        record = json.loads(lines[index])
+        if record:
+            key = draw(st.sampled_from(sorted(record)))
+            if mutation == "drop_key":
+                del record[key]
+            else:
+                record[key] = draw(adversarial_json_value(3))
+        lines[index] = json.dumps(record).encode()
+    return b"\n".join(lines)
