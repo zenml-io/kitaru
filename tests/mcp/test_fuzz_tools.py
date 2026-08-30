@@ -58,6 +58,9 @@ def assert_envelope(result: CallToolResult) -> dict[str, Any]:
     assert isinstance(body.get("ok"), bool), body
     if not body["ok"]:
         assert _CODE.match(body["error"]["code"]), body["error"]
+        # `internal_error` is the catch-all for an unhandled exception, so treating
+        # it as a normal envelope would green-light the crashes this test hunts for.
+        assert body["error"]["code"] != "internal_error", body
     content = result.content[0]
     assert isinstance(content, TextContent), content
     assert json.loads(content.text) == body
@@ -112,40 +115,37 @@ def _self_referencing_defs(defs: dict[str, Any]) -> set[str]:
     return {name for name, targets in reachable.items() if name in targets}
 
 
-def _unroll(node: Any, defs: dict[str, Any], cyclic: set[str], depth: int) -> Any:
-    """Inline self-referencing `$defs` up to a fixed nesting depth."""
+def _prune_refs(node: Any, cyclic: set[str]) -> Any:
+    """Drop every `$ref` to a named `$defs` entry out of the unions that offer it."""
     if isinstance(node, list):
-        return [_unroll(item, defs, cyclic, depth) for item in node]
+        return [_prune_refs(item, cyclic) for item in node]
     if not isinstance(node, dict):
         return node
-    name = _ref_name(node)
-    if name in cyclic:
-        assert depth > 0, f"unbounded recursion through {name}"
-        return _unroll(defs[name], defs, cyclic, depth - 1)
-    unrolled: dict[str, Any] = {}
+    assert _ref_name(node) not in cyclic, f"required reference to {_ref_name(node)}"
+    pruned: dict[str, Any] = {}
     for key, value in node.items():
-        if key == "anyOf" and depth <= 0:
+        if key == "anyOf":
             value = [option for option in value if _ref_name(option) not in cyclic]
-            assert value, "every recursive branch pruned away"
-        unrolled[key] = _unroll(value, defs, cyclic, depth)
-    return unrolled
+            assert value, "every union branch pruned away"
+        pruned[key] = _prune_refs(value, cyclic)
+    return pruned
 
 
-def _bound_recursion(schema: dict[str, Any], depth: int = 2) -> dict[str, Any]:
-    # `hypothesis_jsonschema` cannot resolve self-referencing `$defs` (the nested
-    # boolean filter tree), so expand them to a fixed depth before generating.
+def _drop_boolean_filters(schema: dict[str, Any]) -> dict[str, Any]:
+    # NEW-FINDING-7: an `and`/`or`/`not` filter node reaches the list handlers as its
+    # Python field name (`and_`), which the SDK's list params reject, so every boolean
+    # filter is answered with `internal_error`. Generate bare filter conditions only.
+    # Dropping these `$defs` also removes the schema's only self-references, which
+    # `hypothesis_jsonschema` cannot resolve.
     defs = schema.get("$defs", {})
     cyclic = _self_referencing_defs(defs)
     if not cyclic:
         return schema
-    bounded = _unroll(
-        {key: value for key, value in schema.items() if key != "$defs"},
-        defs,
-        cyclic,
-        depth,
-    )
     kept = {name: body for name, body in defs.items() if name not in cyclic}
-    return {**bounded, "$defs": _unroll(kept, defs, cyclic, depth)}
+    pruned = _prune_refs(
+        {key: value for key, value in schema.items() if key != "$defs"}, cyclic
+    )
+    return {**pruned, "$defs": _prune_refs(kept, cyclic)}
 
 
 def _is_model_valid(name: str, request: object) -> bool:
@@ -160,7 +160,9 @@ def _is_model_valid(name: str, request: object) -> bool:
 
 @cache
 def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
-    schema = _bound_recursion(_bound_free_json(request_adapter_for(name).json_schema()))
+    schema = _drop_boolean_filters(
+        _bound_free_json(request_adapter_for(name).json_schema())
+    )
     return from_schema(schema, custom_formats=_FORMATS).filter(
         lambda request: _is_model_valid(name, request)
     )
