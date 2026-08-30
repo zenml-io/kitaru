@@ -90,16 +90,16 @@ fix:
 test *ARGS:
     uv run pytest {{ ARGS }}
 
-# Run property tests with the heavy nightly profile (importers + MCP)
+# Run all property tests with the heavy nightly profile
 fuzz: fuzz-importers fuzz-mcp
 
-# Heavy property-test run for the importer parse() contract
+# Heavy property-test run for the plugins tree (importer parse() contract, LangGraph capture)
 fuzz-importers:
-    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly uv run --project plugins pytest -c plugins/pyproject.toml plugins/tests/importers/test_fuzz_parse.py plugins/tests/adapters/langgraph/test_capture_properties.py --hypothesis-show-statistics
 
-# Heavy property-test run for the MCP tool boundary
+# Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
-    HYPOTHESIS_PROFILE=nightly uv run --extra mcp pytest tests/mcp/test_fuzz_tools.py --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py --hypothesis-show-statistics
 
 # Check Alembic migrations against the ORM schema (requires docker compose up -d db)
 migration-check:
