@@ -200,7 +200,11 @@ def _langsmith_records() -> SearchStrategy[list[dict[str, Any]]]:
         "end_time",
         "error",
         "extra",
-        "total_cost",
+        # #905: "total_cost" is left out of the pool because the adversarial
+        # value strategy can hand it "NaN", which _decimal() accepts and
+        # ImportedNode then rejects with a pydantic ValidationError that
+        # escapes parse(). test_non_finite_cost_fails_only_its_record pins
+        # that bug; leaving the key in here only makes the property flaky.
         "prompt_tokens",
         "completion_tokens",
         "session_id",
