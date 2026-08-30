@@ -13,6 +13,6 @@ rules:
   # but actionlint (through v1.7.12, run by `just check` and CI) rejects that
   # syntax, so release.yml keeps `./`. The job checks out the workflow's own
   # ref, so both spellings resolve to the same commit. Drop this exception and
-  # switch to `$/` once actionlint understands it.
+  # switch to `$/` once actionlint understands it (rhysd/actionlint#711).
   self-repository:
     ignore: [release.yml:248]
