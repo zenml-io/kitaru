@@ -25,6 +25,7 @@ import pytest
 from hypothesis import given, settings
 from hypothesis import strategies as st
 from hypothesis_jsonschema import from_schema
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
 from mcp_fakes import NullClient, build_server_context
 from pydantic import TypeAdapter, ValidationError
@@ -44,6 +45,18 @@ _FORMATS: dict[str, st.SearchStrategy[str]] = {"uuid": st.uuids().map(str)}
 # going for over an hour. Cap them so `just fuzz-mcp` stays inside its nightly
 # budget; the smaller dev and ci profiles pass through unchanged.
 _NIGHTLY_CAP = min(500, settings().max_examples)
+
+
+@cache
+def server_context_for(mode: CapabilityMode) -> tuple[Any, Any]:
+    """Return one reusable server and request context for a capability mode.
+
+    Building a server costs about 30ms, so rebuilding it inside every generated
+    example dominated the runtime of these properties. `NullClient` holds no
+    state and the handlers never write to the server, so one instance serves
+    every example.
+    """
+    return build_server_context(NullClient(), mode=mode)
 
 
 @cache
@@ -183,9 +196,7 @@ def test_schema_valid_request_yields_envelope(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
     request = data.draw(_schema_strategy(spec.name))
-    server, context = build_server_context(
-        NullClient(), mode=CapabilityMode.DESTRUCTIVE
-    )
+    server, context = server_context_for(CapabilityMode.DESTRUCTIVE)
     assert_envelope(call(server, context, spec.name, request))
 
 
@@ -200,8 +211,8 @@ def test_gated_tools_are_unlisted_and_uncallable(mode: CapabilityMode) -> None:
             continue
         try:
             result = call(server, context, spec.name, {})
-        except Exception:
-            continue  # The SDK refuses unknown tools by raising; that is also a pass.
+        except ToolError:
+            continue  # The SDK refuses unlisted tools by raising; that is also a pass.
         assert result.is_error, spec.name
 
 
@@ -262,9 +273,7 @@ def test_schema_valid_request_with_marker_never_leaks(
     request = data.draw(
         _with_marker_in_string_field(spec.name, data.draw(_schema_strategy(spec.name)))
     )
-    server, context = build_server_context(
-        NullClient(), mode=CapabilityMode.DESTRUCTIVE
-    )
+    server, context = server_context_for(CapabilityMode.DESTRUCTIVE)
     assert_envelope(call(server, context, spec.name, request))
 
 
@@ -280,16 +289,14 @@ def test_schema_invalid_request_never_raises(
 ) -> None:
     """The SDK must turn validation failures into an error result, not an exception."""
     request = data.draw(_broken_request(data.draw(_schema_strategy(spec.name))))
-    server, context = build_server_context(
-        NullClient(), mode=CapabilityMode.DESTRUCTIVE
-    )
+    server, context = server_context_for(CapabilityMode.DESTRUCTIVE)
     result = call(server, context, spec.name, request)
     assert result.is_error or result.structured_content is not None
 
 
 @pytest.mark.xfail(strict=True, reason=_INTERNAL)
 def test_invalid_request_response_is_enveloped() -> None:
-    server, context = build_server_context(NullClient())
+    server, context = server_context_for(CapabilityMode.READ_ONLY)
     request = {
         "operation": "list",
         "kind": "session",
@@ -312,5 +319,5 @@ def test_deep_free_form_value_is_enveloped() -> None:
         "session_id": str(uuid.uuid4()),
         "value": value,
     }
-    server, context = build_server_context(NullClient(), mode=CapabilityMode.STANDARD)
+    server, context = server_context_for(CapabilityMode.STANDARD)
     assert_envelope(call(server, context, "kitaru_review_manage", request))

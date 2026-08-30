@@ -39,9 +39,6 @@ IMPORTERS: dict[str, ModuleType] = {
     "jsonl": kitaru_jsonl,
 }
 
-# Known-bug exclusions. Widen these when the referenced issue is fixed.
-MAX_PARENT_CHAIN = 200  # #905: quadratic ancestor walk + RecursionError
-
 _ISO_TIMES = st.sampled_from(
     ["2026-01-01T00:00:00Z", "2026-01-01T00:00:00.123456+00:00", "1970-01-01T00:00:00Z"]
 )
@@ -395,8 +392,7 @@ def _records_with_keys(
     """Build records that mostly use an importer's real keys with hostile values.
 
     Ids are drawn from a small pool so parent references sometimes resolve,
-    sometimes dangle, and sometimes form short cycles. Chain length is bounded
-    by MAX_PARENT_CHAIN (see the known-bug note above). `required` names the
+    sometimes dangle, and sometimes form short cycles. `required` names the
     identity fields the importer needs before it will build a session; they
     are drawn last so they override anything the optional key pool produced.
     """
@@ -419,7 +415,10 @@ def _records_with_keys(
 
     # An empty list is an empty file, which every importer rejects up front;
     # `garbage_bytes()` already covers that, so spend these draws on records.
-    return st.lists(record(), min_size=1, max_size=min(MAX_PARENT_CHAIN, 30))
+    # The upper bound also keeps parent chains short: #905 makes the ancestor
+    # walk quadratic and deep enough chains hit a RecursionError, both of which
+    # the pinned regression tests cover on their own.
+    return st.lists(record(), min_size=1, max_size=30)
 
 
 _RECORD_STRATEGIES = {
@@ -531,11 +530,7 @@ _SEED_PATH = (
 )
 
 
-def _load_seed_lines() -> list[bytes]:
-    return [line for line in _SEED_PATH.read_bytes().splitlines() if line.strip()]
-
-
-_SEED_LINES = _load_seed_lines()
+_SEED_LINES = [line for line in _SEED_PATH.read_bytes().splitlines() if line.strip()]
 
 
 @st.composite
