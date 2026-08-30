@@ -37,6 +37,8 @@ import httpx
 import pytest
 from fastapi import FastAPI
 from fastapi.routing import iter_route_contexts
+from hypothesis import settings
+from hypothesis.database import DirectoryBasedExampleDatabase
 from pydantic import SecretStr
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import (
@@ -258,6 +260,22 @@ from kitaru.server.filtering import (
     OrExpression,
 )
 from kitaru.transport import RetryTransport
+
+_HYPOTHESIS_DB = DirectoryBasedExampleDatabase(".hypothesis/examples")
+settings.register_profile("dev", max_examples=100, database=_HYPOTHESIS_DB)
+# Hypothesis rejects derandomize=True together with a database (derandomize
+# replaces the database-driven search with a fixed pseudo-random seed). PR
+# runs need that determinism, so "ci" keeps the database off; only the
+# nightly run caches examples for replay across runs.
+settings.register_profile(
+    "ci", max_examples=50, derandomize=True, deadline=None, database=None
+)
+settings.register_profile(
+    "nightly", max_examples=2000, deadline=None, database=_HYPOTHESIS_DB
+)
+settings.load_profile(
+    os.environ.get("HYPOTHESIS_PROFILE", "ci" if os.environ.get("CI") else "dev")
+)
 
 # Why: test modules import shared fakes with a bare `from conftest import ...`.
 # A subdirectory conftest module would shadow that name on sys.path in subset
