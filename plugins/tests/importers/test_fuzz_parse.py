@@ -14,6 +14,7 @@
 """Property tests for the importer `parse()` contract."""
 
 import json
+import time
 from typing import Any
 
 import pytest
@@ -175,3 +176,149 @@ def test_duplicate_run_id_grouping_is_order_independent() -> None:
             },
         ],
     )
+
+
+_KNOWN_IMPORTER_BUGS = "#905"
+# Every importer below needs a project identity before it will build a
+# session; the records themselves are about cost and chain shape, not identity.
+_PROJECT_PARAMS = {"source_instance": "proj"}
+
+
+def _linear_chain(n: int) -> bytes:
+    records = [
+        {
+            "id": f"s{i}",
+            "traceId": "t1",
+            "type": "SPAN",
+            "name": f"n{i}",
+            "parentObservationId": f"s{i - 1}" if i else None,
+            "startTime": "2026-01-01T00:00:00Z",
+        }
+        for i in range(n)
+    ]
+    return encode_records("langfuse", records)
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_linear_chain_parses_in_linear_time() -> None:
+    start = time.perf_counter()
+    list(IMPORTERS["langfuse"].parse(_linear_chain(20_000), _PROJECT_PARAMS))
+    assert time.perf_counter() - start < 3.0
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_deep_chain_yields_serializable_session_or_failure() -> None:
+    _assert_contract("langfuse", _linear_chain(1_200), _PROJECT_PARAMS)
+
+
+# One good record and one whose cost field holds "NaN", in the record shape and
+# under the cost key each importer actually reads.
+_NON_FINITE_COST_RECORDS: dict[str, list[dict[str, Any]]] = {
+    "langfuse": [
+        {
+            "id": "a",
+            "traceId": "t1",
+            "type": "GENERATION",
+            "name": "ok",
+            "startTime": "2026-01-01T00:00:00Z",
+        },
+        {
+            "id": "b",
+            "traceId": "t2",
+            "type": "GENERATION",
+            "name": "poison",
+            "startTime": "2026-01-01T00:00:00Z",
+            "totalCost": "NaN",
+        },
+    ],
+    "braintrust": [
+        {
+            "span_id": "a",
+            "root_span_id": "t1",
+            "created": "2026-01-01T00:00:00Z",
+            "span_attributes": {"type": "llm"},
+        },
+        {
+            "span_id": "b",
+            "root_span_id": "t2",
+            "created": "2026-01-01T00:00:00Z",
+            "span_attributes": {"type": "llm"},
+            "metrics": {"estimated_cost": "NaN"},
+        },
+    ],
+    "langsmith": [
+        {
+            "id": "a",
+            "trace_id": "t1",
+            "run_type": "llm",
+            "name": "ok",
+            "start_time": "2026-01-01T00:00:00Z",
+        },
+        {
+            "id": "b",
+            "trace_id": "t2",
+            "run_type": "llm",
+            "name": "poison",
+            "start_time": "2026-01-01T00:00:00Z",
+            "total_cost": "NaN",
+        },
+    ],
+    "logfire": [
+        {
+            "span_id": "a",
+            "trace_id": "t1",
+            "span_name": "ok",
+            "start_timestamp": "2026-01-01T00:00:00Z",
+            "attributes": {"gen_ai.operation.name": "chat"},
+        },
+        {
+            "span_id": "b",
+            "trace_id": "t2",
+            "span_name": "poison",
+            "start_timestamp": "2026-01-01T00:00:00Z",
+            "attributes": {
+                "gen_ai.operation.name": "chat",
+                "gen_ai.usage.cost": "NaN",
+            },
+        },
+    ],
+    "phoenix": [
+        {
+            "context": {"trace_id": "t1", "span_id": "a"},
+            "name": "ok",
+            "span_kind": "LLM",
+            "start_time": "2026-01-01T00:00:00Z",
+            "attributes": {},
+        },
+        {
+            "context": {"trace_id": "t2", "span_id": "b"},
+            "name": "poison",
+            "span_kind": "LLM",
+            "start_time": "2026-01-01T00:00:00Z",
+            "attributes": {"gen_ai.usage.cost": "NaN"},
+        },
+    ],
+}
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+@pytest.mark.parametrize("name", sorted(_NON_FINITE_COST_RECORDS))
+def test_non_finite_cost_fails_only_its_record(name: str) -> None:
+    records = _NON_FINITE_COST_RECORDS[name]
+    items = list(IMPORTERS[name].parse(encode_records(name, records), _PROJECT_PARAMS))
+    assert any(
+        isinstance(item, ImportedSession) and item.external_id.endswith("t1")
+        for item in items
+    )
+
+
+@pytest.mark.xfail(strict=True, reason=_KNOWN_IMPORTER_BUGS)
+def test_phoenix_superscript_index_does_not_escape() -> None:
+    span = {
+        "context": {"trace_id": "t1", "span_id": "s1"},
+        "name": "llm",
+        "span_kind": "LLM",
+        "start_time": "2026-01-01T00:00:00Z",
+        "attributes": {"llm.input_messages.\u00b2.role": "user"},
+    }
+    _assert_contract("phoenix", json.dumps(span).encode(), _PROJECT_PARAMS)
