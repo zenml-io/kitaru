@@ -17,6 +17,7 @@ import asyncio
 import json
 import re
 import typing
+import uuid
 from functools import cache
 from typing import Any
 
@@ -195,3 +196,114 @@ def test_gated_tools_are_unlisted_and_uncallable(mode: CapabilityMode) -> None:
         except Exception:
             continue  # The SDK refuses unknown tools by raising; that is also a pass.
         assert result.is_error, spec.name
+
+
+def _marker() -> st.SearchStrategy[str]:
+    return st.builds(
+        lambda prefix, hexes: f"{prefix}FUZZ{hexes}",
+        st.sampled_from(["KITKEY_", "Bearer "]),
+        st.text(alphabet="0123456789abcdef", min_size=8, max_size=8),
+    )
+
+
+@st.composite
+def _with_marker_in_string_field(
+    draw: st.DrawFn, name: str, request: dict[str, Any]
+) -> dict[str, Any]:
+    """Put a secret-shaped marker into one free-form string field of a request."""
+    marker = draw(_marker())
+    # Most string fields are UUIDs or literals, so try each one and keep only the
+    # substitutions the model still accepts: the request must stay schema-valid.
+    keys = [
+        key
+        for key, value in request.items()
+        if isinstance(value, str) and _is_model_valid(name, {**request, key: marker})
+    ]
+    if not keys:
+        return request
+    return {**request, draw(st.sampled_from(keys)): marker}
+
+
+@st.composite
+def _broken_request(draw: st.DrawFn, request: dict[str, Any]) -> dict[str, Any]:
+    """Break schema validity in one of four ways."""
+    kind = draw(
+        st.sampled_from(["extra_key", "wrong_type", "bad_uuid", "bad_discriminator"])
+    )
+    broken = dict(request)
+    if kind == "extra_key":
+        broken[draw(st.text(min_size=1, max_size=12))] = draw(st.integers())
+    elif kind == "wrong_type" and broken:
+        key = draw(st.sampled_from(sorted(broken)))
+        broken[key] = [broken[key]]
+    elif kind == "bad_uuid":
+        for key, value in broken.items():
+            if isinstance(value, str) and len(value) == 36 and value.count("-") == 4:
+                broken[key] = "not-a-uuid"
+                break
+    elif kind == "bad_discriminator" and "operation" in broken:
+        broken["operation"] = "definitely_not_an_operation"
+    return broken
+
+
+@pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
+@given(data=st.data())
+@settings(deadline=None)
+def test_schema_valid_request_with_marker_never_leaks(
+    spec: ToolSpec, data: st.DataObject
+) -> None:
+    request = data.draw(
+        _with_marker_in_string_field(spec.name, data.draw(_schema_strategy(spec.name)))
+    )
+    server, context = build_server_context(
+        NullClient(), mode=CapabilityMode.DESTRUCTIVE
+    )
+    assert_envelope(call(server, context, spec.name, request))
+
+
+_INTERNAL = "zenml-io/zenml-internal#139"
+
+
+@pytest.mark.xfail(strict=True, reason=_INTERNAL)
+@pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
+@given(data=st.data())
+@settings(deadline=None)
+def test_schema_invalid_request_never_raises(
+    spec: ToolSpec, data: st.DataObject
+) -> None:
+    """The SDK must turn validation failures into an error result, not an exception."""
+    request = data.draw(_broken_request(data.draw(_schema_strategy(spec.name))))
+    server, context = build_server_context(
+        NullClient(), mode=CapabilityMode.DESTRUCTIVE
+    )
+    result = call(server, context, spec.name, request)
+    assert result.is_error or result.structured_content is not None
+
+
+@pytest.mark.xfail(strict=True, reason=_INTERNAL)
+def test_invalid_request_response_is_enveloped() -> None:
+    server, context = build_server_context(NullClient())
+    request = {
+        "operation": "list",
+        "kind": "session",
+        "agent_id": "Bearer FUZZdeadbeef",
+    }
+    assert_envelope(call(server, context, "kitaru_activity_read", request))
+
+
+@pytest.mark.xfail(strict=True, reason=_INTERNAL)
+def test_deep_free_form_value_is_enveloped() -> None:
+    value: dict[str, Any] = {}
+    cursor = value
+    # Twice the interpreter's default recursion limit is deep enough to blow an
+    # uncapped recursive walk and cheap enough to build on every run.
+    for _ in range(2_000):
+        cursor["k"] = {}
+        cursor = cursor["k"]
+    request = {
+        "operation": "create_annotation",
+        "session_id": str(uuid.uuid4()),
+        "value": value,
+    }
+    server, context = build_server_context(NullClient(), mode=CapabilityMode.STANDARD)
+    assert_envelope(call(server, context, "kitaru_review_manage", request))
