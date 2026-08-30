@@ -184,7 +184,37 @@ def _braintrust_records() -> SearchStrategy[list[dict[str, Any]]]:
             "root_span_id": _mostly(_TRACE_IDS, _WEIRD_TEXT),
             "project_id": _mostly(_PROJECT_IDS, _WEIRD_TEXT),
         },
-    )
+    ).map(lambda rows: [_without_untyped_model_metadata(row) for row in rows])
+
+
+# The importer reads these metadata keys straight into `ImportedNode`'s
+# `requested_model`/`model`/`model_provider`, all typed `str | None`.
+_BRAINTRUST_MODEL_METADATA = (
+    "gen_ai.request.model",
+    "gen_ai.response.model",
+    "gen_ai.provider.name",
+    "model",
+    "provider",
+)
+
+
+def _without_untyped_model_metadata(record: dict[str, Any]) -> dict[str, Any]:
+    """Drop braintrust model metadata whose value is not a string.
+
+    NEW-FINDING-6: a non-string value under one of these keys escapes
+    `parse()` as a pydantic `ValidationError` instead of a contained
+    `ImportFailure`. See design/fuzzing/new-findings.md. Remove this map when
+    the importer type-checks those fields.
+    """
+    metadata = record.get("metadata")
+    if not isinstance(metadata, dict):
+        return record
+    cleaned = {
+        key: value
+        for key, value in metadata.items()
+        if key not in _BRAINTRUST_MODEL_METADATA or isinstance(value, str)
+    }
+    return record if cleaned == metadata else {**record, "metadata": cleaned}
 
 
 def _langsmith_records() -> SearchStrategy[list[dict[str, Any]]]:
