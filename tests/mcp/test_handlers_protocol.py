@@ -11,6 +11,7 @@ import pytest
 from mcp.server import MCPServer, ServerRequestContext
 from mcp.server.mcpserver import Context
 from mcp.types import CallToolResult, TextContent
+from mcp_fakes import build_server_context
 from pydantic import ValidationError
 
 from kitaru.api_models.v1.agent import AgentResponse
@@ -277,15 +278,7 @@ def _get_worker() -> WorkerResponse:
 def _get_context(
     client: FakeClient, *, mode: CapabilityMode = CapabilityMode.READ_ONLY
 ) -> tuple[MCPServer[MCPServerState], Context[MCPServerState, Any]]:
-    state = _get_state(client)
-    server = create_server(MCPSettings(mode=mode))
-    request_context = ServerRequestContext(
-        session=cast(Any, None),
-        lifespan_context=state,
-        protocol_version="2026-07-28",
-        method="tools/call",
-    )
-    return server, Context(request_context=request_context, mcp_server=server)
+    return build_server_context(client, mode=mode)
 
 
 def _get_state(client: FakeClient) -> MCPServerState:
