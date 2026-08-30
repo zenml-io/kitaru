@@ -1,0 +1,75 @@
+---
+name: Fuzz nightly
+on:
+  schedule:
+    - cron: 0 3 * * *
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: importers
+            sync-command: uv sync --project plugins --frozen --all-packages
+            recipe: fuzz-importers
+          - name: mcp
+            sync-command: uv sync --frozen --extra server --extra mcp
+            recipe: fuzz-mcp
+    name: fuzz (${{ matrix.name }})
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d  # v10.0.1
+        with:
+          python-version: '3.12'
+      - name: Sync dependencies
+        env:
+          SYNC_COMMAND: ${{ matrix.sync-command }}
+        run: $SYNC_COMMAND
+      - name: Restore Hypothesis database
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: .hypothesis/
+          key: hypothesis-${{ matrix.name }}-${{ github.run_id }}
+          restore-keys: hypothesis-${{ matrix.name }}-
+      - name: Run fuzz recipe
+        id: fuzz
+        env:
+          RECIPE: ${{ matrix.recipe }}
+        run: uvx --from rust-just just "$RECIPE"
+      - name: Save Hypothesis database
+        if: always()
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
+        with:
+          path: .hypothesis/
+          key: hypothesis-${{ matrix.name }}-${{ github.run_id }}
+      - name: Upload failing examples
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
+        with:
+          name: hypothesis-examples-${{ matrix.name }}
+          path: .hypothesis/examples
+          if-no-files-found: ignore
+      - name: Open issue on scheduled failure
+        if: failure() && github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO_URL: ${{ github.server_url }}/${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SURFACE: ${{ matrix.name }}
+        run: |-
+          run_url="${REPO_URL}/actions/runs/${RUN_ID}"
+          existing=$(gh issue list --label fuzz-nightly --state open --search "in:title ${SURFACE}" --json number --jq 'length')
+          if [ "$existing" = "0" ]; then
+            gh issue create --label fuzz-nightly \
+              --title "Nightly fuzz run failed (${SURFACE})" \
+              --body "Run: ${run_url}. Download the hypothesis-examples-${SURFACE} artifact into .hypothesis/examples and rerun \`just fuzz-${SURFACE}\` to replay."
+          fi
