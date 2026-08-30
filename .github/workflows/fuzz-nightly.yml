@@ -9,6 +9,9 @@ permissions:
 jobs:
   fuzz:
     runs-on: ubuntu-latest
+    # The nightly profile draws 2000 examples per property across every MCP tool,
+    # so this job is expected to run long; the limit only catches a wedged run.
+    timeout-minutes: 120
     permissions:
       contents: read
       issues: write

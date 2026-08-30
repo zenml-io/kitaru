@@ -27,7 +27,7 @@ from hypothesis import strategies as st
 from hypothesis_jsonschema import from_schema
 from mcp.server.mcpserver.exceptions import ToolError
 from mcp.types import CallToolResult, TextContent
-from mcp_fakes import NullClient, build_server_context
+from mcp_fakes import EchoClient, NullClient, build_server_context
 from pydantic import TypeAdapter, ValidationError
 
 from kitaru.mcp.registry import TOOL_SPECS, ToolSpec, get_tool_specs
@@ -40,23 +40,18 @@ _MARKER = re.compile(r"(KITKEY_|Bearer )FUZZ[0-9a-f]{8}")
 _FORMATS: dict[str, st.SearchStrategy[str]] = {"uuid": st.uuids().map(str)}
 
 
-# The per-tool schema properties run once per tool and draw from each tool's
-# full JSON schema, so the nightly profile's 2000 examples would keep them
-# going for over an hour. Cap them so `just fuzz-mcp` stays inside its nightly
-# budget; the smaller dev and ci profiles pass through unchanged.
-_NIGHTLY_CAP = min(500, settings().max_examples)
-
-
 @cache
-def server_context_for(mode: CapabilityMode) -> tuple[Any, Any]:
+def server_context_for(
+    mode: CapabilityMode, client: type[NullClient] = NullClient
+) -> tuple[Any, Any]:
     """Return one reusable server and request context for a capability mode.
 
     Building a server costs about 30ms, so rebuilding it inside every generated
-    example dominated the runtime of these properties. `NullClient` holds no
-    state and the handlers never write to the server, so one instance serves
-    every example.
+    example dominated the runtime of these properties. Neither fake stores
+    anything and the handlers never write to the server, so one instance of
+    each serves every example.
     """
-    return build_server_context(NullClient(), mode=mode)
+    return build_server_context(client(), mode=mode)
 
 
 @cache
@@ -90,8 +85,8 @@ def assert_envelope(result: CallToolResult) -> dict[str, Any]:
 
 
 def _bound_free_json(schema: dict[str, Any]) -> dict[str, Any]:
-    # zenml-io/zenml-internal#139: `_check_finite` recurses without a depth cap;
-    # keep free-form JSON shallow.
+    # zenml-io/zenml-internal#139: keep free-form JSON shallow until the tracked
+    # issue is fixed.
     for name, prop in schema.get("properties", {}).items():
         if prop == {} or prop.get("title") in {"Value", "Metadata", "Params"}:
             schema["properties"][name] = {
@@ -153,11 +148,12 @@ def _prune_refs(node: Any, cyclic: set[str]) -> Any:
 
 
 def _drop_boolean_filters(schema: dict[str, Any]) -> dict[str, Any]:
-    # NEW-FINDING-7: an `and`/`or`/`not` filter node reaches the list handlers as its
-    # Python field name (`and_`), which the SDK's list params reject, so every boolean
-    # filter is answered with `internal_error`. Generate bare filter conditions only.
-    # Dropping these `$defs` also removes the schema's only self-references, which
-    # `hypothesis_jsonschema` cannot resolve.
+    # #908: an `and`/`or`/`not` filter node reaches the list handlers as its Python
+    # field name (`and_`), which the SDK's list params reject, so every boolean filter
+    # is answered with `internal_error`. Generate bare filter conditions only;
+    # `test_boolean_filter_reaches_the_sdk` pins the bug. Dropping these `$defs` also
+    # removes the schema's only self-references, which `hypothesis_jsonschema` cannot
+    # resolve.
     defs = schema.get("$defs", {})
     cyclic = _self_referencing_defs(defs)
     if not cyclic:
@@ -191,7 +187,7 @@ def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
 
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None, max_examples=_NIGHTLY_CAP)
+@settings(deadline=None)
 def test_schema_valid_request_yields_envelope(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
@@ -266,14 +262,14 @@ def _broken_request(draw: st.DrawFn, request: dict[str, Any]) -> dict[str, Any]:
 
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None, max_examples=_NIGHTLY_CAP)
+@settings(deadline=None)
 def test_schema_valid_request_with_marker_never_leaks(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
     request = data.draw(
         _with_marker_in_string_field(spec.name, data.draw(_schema_strategy(spec.name)))
     )
-    server, context = server_context_for(CapabilityMode.DESTRUCTIVE)
+    server, context = server_context_for(CapabilityMode.DESTRUCTIVE, EchoClient)
     assert_envelope(call(server, context, spec.name, request))
 
 
@@ -283,7 +279,7 @@ _INTERNAL = "zenml-io/zenml-internal#139"
 @pytest.mark.xfail(strict=True, reason=_INTERNAL)
 @pytest.mark.parametrize("spec", TOOL_SPECS, ids=lambda s: s.name)
 @given(data=st.data())
-@settings(deadline=None, max_examples=_NIGHTLY_CAP)
+@settings(deadline=None)
 def test_schema_invalid_request_never_raises(
     spec: ToolSpec, data: st.DataObject
 ) -> None:
@@ -309,8 +305,8 @@ def test_invalid_request_response_is_enveloped() -> None:
 def test_deep_free_form_value_is_enveloped() -> None:
     value: dict[str, Any] = {}
     cursor = value
-    # Twice the interpreter's default recursion limit is deep enough to blow an
-    # uncapped recursive walk and cheap enough to build on every run.
+    # Twice the interpreter's default recursion limit: deep enough to be
+    # interesting, cheap enough to build on every run.
     for _ in range(2_000):
         cursor["k"] = {}
         cursor = cursor["k"]
@@ -321,3 +317,52 @@ def test_deep_free_form_value_is_enveloped() -> None:
     }
     server, context = server_context_for(CapabilityMode.STANDARD)
     assert_envelope(call(server, context, "kitaru_review_manage", request))
+
+
+_LEAK_MARKER = "KITKEY_FUZZdeadbeef"
+
+
+def test_marker_in_an_echoed_name_comes_back_masked() -> None:
+    """A stored value that a tool reads back must be masked on the way out."""
+    server, context = server_context_for(CapabilityMode.STANDARD, EchoClient)
+    body = assert_envelope(
+        call(
+            server,
+            context,
+            "kitaru_review_manage",
+            {"operation": "create_tag", "name": _LEAK_MARKER},
+        )
+    )
+    assert body["ok"] is True, body
+    assert body["data"]["name"] == "KITKEY_***", body
+
+
+def test_marker_in_an_echoed_annotation_value_comes_back_masked() -> None:
+    """A marker buried in free-form JSON must be masked in the rendered payload."""
+    server, context = server_context_for(CapabilityMode.STANDARD, EchoClient)
+    body = assert_envelope(
+        call(
+            server,
+            context,
+            "kitaru_review_manage",
+            {
+                "operation": "create_annotation",
+                "session_id": str(uuid.uuid4()),
+                "value": {"note": f"use {_LEAK_MARKER} now"},
+            },
+        )
+    )
+    assert body["ok"] is True, body
+    assert body["data"]["value"] == {"note": "use KITKEY_*** now"}, body
+
+
+@pytest.mark.xfail(strict=True, reason="#908")
+def test_boolean_filter_reaches_the_sdk() -> None:
+    """A boolean `filter` is a valid request, not a server-side fault."""
+    server, context = server_context_for(CapabilityMode.READ_ONLY)
+    request = {
+        "kind": "worker",
+        "operation": "list",
+        "filter": {"and": [{"field": "name", "op": "eq", "value": "a"}]},
+    }
+    assert_envelope(call(server, context, "kitaru_registry_read", request))
