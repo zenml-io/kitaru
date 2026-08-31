@@ -290,6 +290,9 @@ async def test_evaluator_flow_end_to_end(
             "value": None,
             "explanation": None,
             "passed": None,
+            "min_score": None,
+            "max_score": None,
+            "target_score": None,
         }
     ]
 
