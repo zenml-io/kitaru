@@ -176,31 +176,40 @@ jobs:
         env:
           KITARU_VERSION: ${{ needs.build.outputs.version }}
         run: curl -fsS "https://pypi.org/pypi/kitaru/$KITARU_VERSION/json" >/dev/null
+      - uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8  # v4.2.0
+        with:
+          platforms: arm64
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4.3.0
       - name: Build and test client image
         env:
           KITARU_VERSION: ${{ needs.build.outputs.version }}
         run: |
-          docker build --load -f docker/release-client.Dockerfile \
-            --target client --build-arg KITARU_VERSION="$KITARU_VERSION" \
-            -t kitaru-bundle-client:test .
-          docker run --rm kitaru-bundle-client:test python -c "import kitaru"
+          for platform in linux/amd64 linux/arm64; do
+            docker buildx build --load --platform "$platform" -f docker/release-client.Dockerfile \
+              --target client --build-arg KITARU_VERSION="$KITARU_VERSION" \
+              -t kitaru-bundle-client:test .
+            docker run --rm --platform "$platform" kitaru-bundle-client:test python -c "import kitaru"
+          done
       - name: Build and test server image
         env:
           KITARU_VERSION: ${{ needs.build.outputs.version }}
         run: |
-          docker build --load -f docker/release-server.Dockerfile \
-            --target server --build-arg KITARU_VERSION="$KITARU_VERSION" \
-            -t kitaru-bundle-server:test .
-          docker run --rm kitaru-bundle-server:test python -c "import kitaru"
+          for platform in linux/amd64 linux/arm64; do
+            docker buildx build --load --platform "$platform" -f docker/release-server.Dockerfile \
+              --target server --build-arg KITARU_VERSION="$KITARU_VERSION" \
+              -t kitaru-bundle-server:test .
+            docker run --rm --platform "$platform" kitaru-bundle-server:test python -c "import kitaru"
+          done
       - name: Build and test worker image
         env:
           KITARU_VERSION: ${{ needs.build.outputs.version }}
         run: |
-          docker build --load -f docker/release-worker.Dockerfile \
-            --target worker --build-arg KITARU_VERSION="$KITARU_VERSION" \
-            -t kitaru-bundle-worker:test .
-          docker run --rm kitaru-bundle-worker:test python -c "import kitaru"
+          for platform in linux/amd64 linux/arm64; do
+            docker buildx build --load --platform "$platform" -f docker/release-worker.Dockerfile \
+              --target worker --build-arg KITARU_VERSION="$KITARU_VERSION" \
+              -t kitaru-bundle-worker:test .
+            docker run --rm --platform "$platform" kitaru-bundle-worker:test python -c "import kitaru"
+          done
       - uses: azure/setup-helm@9bc31f4ebc9c6b171d7bfbaa5d006ae7abdb4310  # v5.0.1
         with:
           version: v3.9.2
@@ -221,6 +230,7 @@ jobs:
           context: .
           file: docker/release-client.Dockerfile
           target: client
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
           tags: zenmldocker/kitaru:${{ needs.build.outputs.bundle-version }}
@@ -230,6 +240,7 @@ jobs:
           context: .
           file: docker/release-worker.Dockerfile
           target: worker
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
           tags: zenmldocker/kitaru-worker:${{ needs.build.outputs.bundle-version }}
@@ -239,6 +250,7 @@ jobs:
           context: .
           file: docker/release-server.Dockerfile
           target: server
+          platforms: linux/amd64,linux/arm64
           push: true
           build-args: KITARU_VERSION=${{ needs.build.outputs.version }}
           tags: zenmldocker/kitaru-server:${{ needs.build.outputs.bundle-version }}

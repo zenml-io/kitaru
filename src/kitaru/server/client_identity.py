@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Client identification parsed from request headers."""
 
+import uuid
 from dataclasses import dataclass
 
 from kitaru.analytics.source import AnalyticsSource
@@ -24,20 +25,30 @@ class ClientIdentity:
 
     source: AnalyticsSource
     version: str | None
+    analytics_id: uuid.UUID | None = None
 
 
 def parse_client_identity(value: str) -> ClientIdentity | None:
     """Parse a client identification header value.
 
     Args:
-        value: ``<source>/<version>`` header value.
+        value: ``<source>/<version>`` or ``<source>/<version>/<analytics_id>``
+            header value.
 
     Returns:
         Parsed identity, or None for an unknown client.
     """
-    name, _, client_version = value.partition("/")
+    name, _, remainder = value.partition("/")
     try:
         source = AnalyticsSource(name)
     except ValueError:
         return None
-    return ClientIdentity(source=source, version=client_version or None)
+    client_version, _, raw_analytics_id = remainder.partition("/")
+    analytics_id: uuid.UUID | None
+    try:
+        analytics_id = uuid.UUID(raw_analytics_id)
+    except ValueError:
+        analytics_id = None
+    return ClientIdentity(
+        source=source, version=client_version or None, analytics_id=analytics_id
+    )

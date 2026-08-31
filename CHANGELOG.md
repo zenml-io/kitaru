@@ -9,13 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Added native ARM64 support alongside AMD64 for the public client, server, and worker Docker images.
 - Added `DELETE /api/v1/replays/{replay_id}` to delete a standalone replay. A replay that belongs to an experiment run returns HTTP 409, since deleting the run removes its replays.
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
+- Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
 
 ### Changed
 
 - The Vercel AI SDK adapter is now developed and tested against `ai` 7.0.85. The supported peer range is unchanged (`>=7.0.60 <8.0.0`).
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.23 through 2.36 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.35.3 with `genai-prices` 0.1.4.
 - `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.20, 0.21, and 0.22 minor lines in addition to 0.19.3+. The 0.21 line moved the OpenAI provider to `openai>=3.0.0,<4`, so the plugin workspace lockfile now resolves `openai-agents` 0.22.0 with `openai` 3.5.0.
 - Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
 - Creating evaluations for a session that is not finished is now rejected with HTTP 409 on every path. This covers evaluation batches, merging manual evaluations into a session, and replays and experiment runs that score baseline sessions.
