@@ -17,7 +17,7 @@ import asyncio
 import uuid
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import (
@@ -45,7 +45,7 @@ class ImporterBackedAdapter:
 
     provider: str
     parser: Parser
-    parser_params: dict[str, Any] = {}
+    parser_params: ClassVar[dict[str, Any]] = {}
 
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
