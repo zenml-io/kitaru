@@ -10172,6 +10172,19 @@
               "title": "Evaluator Id",
               "type": "string"
             },
+            "idempotency_key": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Pass a fresh unique string per logical request. Reuse it only when retrying this exact call after a lost or failed response, so the retry returns the original result instead of acting twice.",
+              "title": "Idempotency Key"
+            },
             "operation": {
               "const": "create_version",
               "title": "Operation",

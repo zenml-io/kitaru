@@ -65,6 +65,10 @@ class EvaluatorVersionCreate(MCPModel):
     evaluator_id: uuid.UUID
     source: PluginSource
     display_version: str | None = None
+    idempotency_key: str | None = Field(
+        default=None,
+        description=IDEMPOTENCY_KEY_DESCRIPTION,
+    )
 
     @field_validator("source")
     @classmethod
