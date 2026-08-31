@@ -26,6 +26,14 @@ import pytest
 from conftest import imported_node, imported_session
 from kitaru import importer_adapter
 from kitaru.api_models.v1.imports import ImportFailure
+from kitaru.api_models.v1.replay_config import (
+    HistoryConfig,
+    HistoryScope,
+    PassthroughConfig,
+    ReplayOverride,
+    ToolPolicy,
+    ToolPolicyOnMiss,
+)
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionOrigin,
@@ -86,11 +94,24 @@ class _FakeSessionsResource:
         return []
 
 
+class _FakeReplaysResource:
+    """Replay API fake returning a scripted replay."""
+
+    def __init__(self) -> None:
+        self.replay: Any = None
+        self.requested: list[uuid.UUID] = []
+
+    async def get(self, replay_id: uuid.UUID) -> Any:
+        self.requested.append(replay_id)
+        return self.replay
+
+
 class _FakeClient:
-    """API client fake carrying the fake sessions resource."""
+    """API client fake carrying the fake resources."""
 
     def __init__(self) -> None:
         self.sessions = _FakeSessionsResource()
+        self.replays = _FakeReplaysResource()
 
     async def __aenter__(self) -> "_FakeClient":
         return self
@@ -146,6 +167,21 @@ def _adapter(
     monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
     adapter = _FakeAdapter(parser, completeness_timeout=completeness_timeout)
     return adapter, client, agent_id
+
+
+def _arm_replay(
+    monkeypatch: pytest.MonkeyPatch,
+    client: _FakeClient,
+    override: ReplayOverride | None = None,
+    tool_policy: ToolPolicy | None = None,
+) -> uuid.UUID:
+    replay_id = uuid.uuid4()
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay_id))
+    client.replays.replay = SimpleNamespace(
+        override=override,
+        tool_policy=tool_policy or ToolPolicy(default=PassthroughConfig()),
+    )
+    return replay_id
 
 
 def test_run_imports_the_trace_around_the_function(
@@ -301,3 +337,96 @@ def test_run_raises_an_ingest_error_after_the_function(
     assert "func" in adapter.events
     assert len(client.sessions.created) == 1
     assert client.sessions.batches == []
+
+
+def test_run_rejects_a_replay_with_an_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise RuntimeError before the function when the replay has an override."""
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    replay_id = _arm_replay(monkeypatch, client, override=ReplayOverride(model="gpt-5"))
+
+    with pytest.raises(RuntimeError, match="replay overrides"):
+        adapter.run(lambda: adapter.events.append("func"))
+
+    assert client.replays.requested == [replay_id]
+    assert adapter.events == []
+    assert client.sessions.created == []
+
+
+def test_run_rejects_a_replay_with_a_default_tool_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise RuntimeError when the replay's default tool config is not passthrough."""
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    _arm_replay(
+        monkeypatch,
+        client,
+        tool_policy=ToolPolicy(
+            default=HistoryConfig(
+                scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL
+            )
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="replay tool policies"):
+        adapter.run(lambda: adapter.events.append("func"))
+
+    assert adapter.events == []
+    assert client.sessions.created == []
+
+
+def test_run_rejects_a_replay_with_a_named_tool_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise RuntimeError when a per-tool config is not passthrough."""
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    _arm_replay(
+        monkeypatch,
+        client,
+        tool_policy=ToolPolicy(
+            default=PassthroughConfig(),
+            tools={
+                "search": HistoryConfig(
+                    scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL
+                )
+            },
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="replay tool policies"):
+        adapter.run(lambda: adapter.events.append("func"))
+
+    assert adapter.events == []
+    assert client.sessions.created == []
+
+
+def test_run_proceeds_with_a_passthrough_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Run and import normally when the replay is passthrough-only."""
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    _arm_replay(monkeypatch, client)
+
+    result = adapter.run(lambda: "done")
+
+    assert result == "done"
+    assert len(client.sessions.created) == 1
+    assert len(client.sessions.batches) == 1
+
+
+async def test_run_async_rejects_a_replay_with_an_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise RuntimeError before the async function when the replay has an override."""
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    _arm_replay(monkeypatch, client, override=ReplayOverride(prompt="new prompt"))
+
+    async def func() -> None:
+        adapter.events.append("func")
+
+    with pytest.raises(RuntimeError, match="replay overrides"):
+        await adapter.run_async(func)
+
+    assert adapter.events == []
+    assert client.sessions.created == []
