@@ -1142,6 +1142,7 @@ def test_evaluator_updates_require_explicit_non_conflicting_changes() -> None:
 async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
     calls: list[tuple[str, object]] = []
     create_idempotency_keys: list[str | None] = []
+    create_version_idempotency_keys: list[str | None] = []
 
     async def create(request: object, idempotency_key: str | None = None) -> object:
         calls.append(("create", request))
@@ -1152,8 +1153,11 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
         calls.append(("update", request))
         return SimpleNamespace()
 
-    async def create_version(_id: uuid.UUID, request: object) -> object:
+    async def create_version(
+        _id: uuid.UUID, request: object, idempotency_key: str | None = None
+    ) -> object:
         calls.append(("create_version", request))
+        create_version_idempotency_keys.append(idempotency_key)
         return SimpleNamespace()
 
     async def update_version(_id: uuid.UUID, _version: int, request: object) -> object:
@@ -1195,6 +1199,7 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
                 "requirement": "example==1.2.3",
                 "entrypoint": "example:evaluate",
             },
+            idempotency_key="retry-evaluator-version-1",
         ),
     )
     await handle_evaluators_manage(
@@ -1226,6 +1231,7 @@ async def test_evaluator_management_uses_only_typed_sdk_mutations() -> None:
         "display_version": None
     }
     assert create_idempotency_keys == ["retry-evaluator-1"]
+    assert create_version_idempotency_keys == ["retry-evaluator-version-1"]
 
 
 async def test_script_evaluator_version_requires_existing_exact_blob() -> None:
@@ -1236,7 +1242,9 @@ async def test_script_evaluator_version_requires_existing_exact_blob() -> None:
         calls.append("blob")
         return SimpleNamespace(id=item_id)
 
-    async def create_version(_id: uuid.UUID, _request: object) -> object:
+    async def create_version(
+        _id: uuid.UUID, _request: object, idempotency_key: str | None = None
+    ) -> object:
         calls.append("create_version")
         return SimpleNamespace()
 

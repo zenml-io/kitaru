@@ -241,6 +241,8 @@ async def _set_event_context(
     properties: dict[str, Any] = {}
     if identity is not None and identity.version is not None:
         properties["client_version"] = f"{source.value}/{identity.version}"
+    if identity is not None and identity.analytics_id is not None:
+        properties["client_id"] = str(identity.analytics_id)
     skill = request.headers.get(SKILL_HEADER)
     if skill:
         properties["skill"] = skill

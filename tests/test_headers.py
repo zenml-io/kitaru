@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the request header helpers."""
 
+import uuid
 from importlib.metadata import version
 
 from kitaru.analytics.source import AnalyticsSource
@@ -23,4 +24,13 @@ def test_format_client_header() -> None:
     """Format the source and package version into the header value."""
     assert format_client_header(AnalyticsSource.PYTHON) == (
         f"kitaru-python/{version('kitaru')}"
+    )
+
+
+def test_format_client_header_with_analytics_id() -> None:
+    """Append the analytics id as a third segment when given."""
+    analytics_id = uuid.uuid4()
+
+    assert format_client_header(AnalyticsSource.PYTHON, analytics_id) == (
+        f"kitaru-python/{version('kitaru')}/{analytics_id}"
     )

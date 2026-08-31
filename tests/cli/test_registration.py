@@ -34,6 +34,9 @@ from kitaru.cli.registration import (
     resolve_asset,
     validate_package_source,
 )
+from kitaru.client.resources.agents import AgentsResource
+from kitaru.client.resources.evaluators import EvaluatorsResource
+from kitaru.client.resources.importers import ImportersResource
 
 
 @dataclass
@@ -295,6 +298,16 @@ async def test_uploaded_blob_is_reported_when_version_registration_fails() -> No
     assert error.value.kind == "partial_failure"
     assert error.value.details["blob"]["id"] == str(client.blobs.blob.id)
     assert error.value.details["parent"]["id"] == str(parent.id)
+
+
+def test_real_create_version_methods_accept_forwarded_idempotency_key() -> None:
+    """The real SDK resources accept the idempotency_key the version paths forward."""
+    for resource_type in (AgentsResource, EvaluatorsResource, ImportersResource):
+        code = resource_type.create_version.__code__
+        names = code.co_varnames[: code.co_argcount + code.co_kwonlyargcount]
+        assert "idempotency_key" in names, (
+            f"{resource_type.__name__}.create_version does not accept idempotency_key"
+        )
 
 
 def test_cli_agent_register_uses_shared_runner_and_output_contract(

@@ -63,7 +63,7 @@ In Kitaru:
 - update `tests/server/test_route_manifest.py` when a route is added, removed, or renamed
 - add focused ASGI route tests beside `tests/server/test_ui_api.py` or `tests/server/test_ui_experiment_runs_api.py`
 - run the focused tests and `just openapi-check`
-- regenerate `openapi/openapi.json` with `uv run python scripts/generate_openapi.py` when a route or schema changes
+- regenerate `openapi/openapi.json` with `uv run python scripts/generate_openapi.py` when a route or schema changes, then the generated TypeScript types with `pnpm run generate`
 - run `just check` and the relevant broader server tests
 
 In `zenml-frontend-monorepo`, regenerate the OpenAPI declarations, then run the shared Kitaru package's typecheck and tests plus the affected Kitaru UI checks. Exercise the real UI flow against the changed backend when the environment is available.

@@ -159,13 +159,18 @@ class ImportersResource:
         await self._client.request("DELETE", f"/api/v1/importers/{importer_id}")
 
     async def create_version(
-        self, importer_id: uuid.UUID, request: ImporterVersionCreateRequest
+        self,
+        importer_id: uuid.UUID,
+        request: ImporterVersionCreateRequest,
+        idempotency_key: str | None = None,
     ) -> ImporterVersionResponse:
         """Create an importer version.
 
         Args:
             importer_id: Id of the importer.
             request: Importer version create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -178,6 +183,7 @@ class ImportersResource:
             "POST",
             f"/api/v1/importers/{importer_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return ImporterVersionResponse.model_validate(response.json())
 
