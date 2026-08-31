@@ -42,6 +42,6 @@ half-wired resource that still imports cleanly, so walk the whole list.
 11. `client/resources/orders.py`: SDK resource, registered in
     `client/api_client.py`.
 12. Regenerate `openapi/openapi.json` via `scripts/generate_openapi.py`, then
-    the generated TypeScript types via `pnpm install && pnpm run generate`.
+    the generated TypeScript types via `pnpm run generate`.
 13. Tests for all surfaces listed in `tests/AGENTS.md`, plus a fake repository
     in `tests/conftest.py`.

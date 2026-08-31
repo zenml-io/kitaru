@@ -185,7 +185,7 @@ def test_supports_locked_openai_agents_minor_line() -> None:
     installed = Version(version("openai-agents"))
 
     assert installed >= Version("0.19.3")
-    assert installed < Version("0.20")
+    assert installed < Version("0.23")
 
 
 def test_exports_public_recording_contract_from_canonical_package() -> None:

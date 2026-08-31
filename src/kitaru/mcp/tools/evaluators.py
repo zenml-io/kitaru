@@ -55,6 +55,7 @@ async def handle_evaluators_manage(
             EvaluatorVersionCreateRequest(
                 source=source, display_version=request.display_version
             ),
+            idempotency_key=request.idempotency_key,
         )
     display_version = None if request.clear_display_version else request.display_version
     return await state.client.evaluators.update_version(

@@ -159,6 +159,7 @@ async def delete_evaluator(
 
 
 @router.post("/{evaluator_id}/versions", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_evaluator_version(
     evaluator_id: uuid.UUID,
     body: EvaluatorVersionCreateRequest,

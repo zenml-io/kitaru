@@ -1185,7 +1185,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "openai-agents", specifier = ">=0.19.3,<0.20" },
+    { name = "openai-agents", specifier = ">=0.19.3,<0.23" },
 ]
 
 [[package]]
@@ -1218,8 +1218,8 @@ openai = [
 requires-dist = [
     { name = "genai-prices", specifier = ">=0.1.1,<0.2" },
     { name = "kitaru", editable = "../" },
-    { name = "pydantic-ai-slim", specifier = ">=2.14.1,<2.23" },
-    { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'openai'", specifier = ">=2.14.1,<2.23" },
+    { name = "pydantic-ai-slim", specifier = ">=2.14.1,<2.37" },
+    { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'openai'", specifier = ">=2.14.1,<2.37" },
 ]
 provides-extras = ["openai"]
 

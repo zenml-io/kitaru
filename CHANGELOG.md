@@ -9,13 +9,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Added native ARM64 support alongside AMD64 for the public client, server, and worker Docker images.
 - Added `DELETE /api/v1/replays/{replay_id}` to delete a standalone replay. A replay that belongs to an experiment run returns HTTP 409, since deleting the run removes its replays.
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
+- Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
 - Added Hypothesis property tests for the importer `parse()` contract, the MCP tool boundary, and credential redaction, plus a nightly `fuzz-nightly` workflow that runs them with a larger example budget and a cached example database.
 
 ### Changed
 
+- `kitaru-pydantic-ai` now supports the PydanticAI 2.23 through 2.36 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.35.3 with `genai-prices` 0.1.4.
+- `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.20, 0.21, and 0.22 minor lines in addition to 0.19.3+. The 0.21 line moved the OpenAI provider to `openai>=3.0.0,<4`, so the plugin workspace lockfile now resolves `openai-agents` 0.22.0 with `openai` 3.5.0.
 - Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
 - Creating evaluations for a session that is not finished is now rejected with HTTP 409 on every path. This covers evaluation batches, merging manual evaluations into a session, and replays and experiment runs that score baseline sessions.
 - Deleting an agent now hides the agent and retains its subtree instead of rejecting the delete with HTTP 409. The subtree stays readable through its own resources, creating a session, agent version, cohort, experiment, or investigation for a deleted agent returns HTTP 404, deleting individual child resources is unchanged, and a concurrent second delete of the same agent returns HTTP 404. Deleting a plugin or experiment cascades its versions, runs, and replays. Deleting an agent version, cohort, or secret can now return HTTP 409 when an experiment run or agent version still references it. Deleting a session can now return HTTP 409 when an investigation or replay references it, in addition to a cohort version, and is no longer blocked by a task. Tasks are deleted with the agent version, plugin version, session, or blob they take as input. Tag links are removed with the resource they point at. Creating a session, session node, experiment, experiment run, cohort, cohort version, investigation, replay, or annotation whose parent was deleted concurrently now returns HTTP 404 instead of HTTP 500.
@@ -25,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Deleting a job no longer deletes its replay, and is rejected with HTTP 409 until the job has settled. Cancel the job and let it settle first. Deleting an experiment or an experiment run cancels its replay jobs instead of deleting them, so those jobs outlive the experiment or run they came from.
 - Concurrent deletes of the same resource now give exactly one caller HTTP 204, every other caller gets HTTP 404. Previously several racing deletes could all report success.
 - Downgrading the database below migration `006_deletion_rules` is refused with an explicit error, since the earlier schema cannot hold an agent name reused after a delete. The refusal rolls back the whole downgrade, so the database stays at its current revision.
+
+### Fixed
+
+- Fixed `kitaru evaluator version register` and `kitaru importer version register`, which always failed with a `TypeError` after uploading the source. `POST /api/v1/evaluators/{evaluator_id}/versions` and `POST /api/v1/importers/{importer_id}/versions` now support idempotency keys, and the SDK `create_version` methods take an `idempotency_key` argument, matching agent and cohort version creation. The MCP evaluator management tool's `create_version` operation takes an optional `idempotency_key` field.
 
 ## [0.23.0]
 
