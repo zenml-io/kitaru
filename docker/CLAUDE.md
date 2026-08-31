@@ -16,13 +16,21 @@ main project `CLAUDE.md` links here for Docker-specific guidance.
 | `onboarding-sandbox.Dockerfile` | Onboarding sandbox | Published worker image |
 
 `onboarding-sandbox.Dockerfile` extends the published worker image with
-Node.js, npm, npx, Git, curl, the `cli` and `mcp` extras, the Kitaru repository
-cloned at the release tag to `/opt/kitaru`, and the published Kitaru skills.
+Node.js, npm, npx, Git, curl, jq, the `cli` and `mcp` extras, the Pydantic AI
+adapter with OpenAI support in `/app/.venv`, the Kitaru repository cloned at the
+release tag to `/opt/kitaru`, and the published Kitaru skills.
 Releases publish it to the private Amazon ECR registry as
 `kitaru-onboarding-sandbox` alongside the managed server image.
 
-All development and release builds resolve dependencies from the committed
-`uv.lock`. The release
+The adapter is pinned to the version validated for the hosted tour. Install it
+alongside the exact worker Kitaru version so dependency resolution cannot silently
+upgrade Kitaru away from the workspace version. Provider credentials are not baked
+into this image; installing the adapter does not enable funded model inference.
+
+The image bakes in the published `kitaru-skills` release. To refresh that baked copy during a manual build, use `--no-cache` so Docker reruns the remote skill installation. Once the frontend runtime-refresh change is deployed, newly created sandboxes also install published skills at startup, so skill-only releases no longer require an image rebuild. Dependency and bundled-example changes still require rebuilding the image. The frontend selects the ECR tag from the workspace version, and existing Modal sandboxes do not update when an image or skill release is published.
+
+The development and release client, server, and worker builds resolve dependencies
+from the committed `uv.lock`. The release
 builds then install the matching published Kitaru wheel without resolving its
 dependencies again. This keeps container releases reproducible while allowing
 the Python package and container publishing processes to be recovered or run
