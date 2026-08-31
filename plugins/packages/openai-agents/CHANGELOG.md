@@ -5,6 +5,7 @@
 - Add named history tool policies for replaying recorded direct function-tool results.
 - Record direct function-tool inputs as canonical JSON arguments so new sessions can supply history matches.
 - Replay completed `null` results and raise recorded tool failures without executing the live tool.
+- Support OpenAI Agents SDK 0.20, 0.21, and 0.22.
 
 ## 0.1.0
 
