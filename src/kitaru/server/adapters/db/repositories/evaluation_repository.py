@@ -21,6 +21,7 @@ from sqlalchemy import ColumnElement, func, select
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     build_scope_condition_binding,
+    compile_column_condition,
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
@@ -35,7 +36,6 @@ from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
 from kitaru.server.adapters.db.orm.replay_evaluation import ReplayEvaluationORM
 from kitaru.server.adapters.db.orm.session import SessionORM
-from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.interfaces.evaluation_repository import (
@@ -63,10 +63,10 @@ _scopes_to_cohort = build_scope_condition_binding(
     scope_column=CohortVersionORM.cohort_id,
 )
 
-# A replay's tasks share its job, and the run owns the replay.
+# A linked evaluation's run is the run of the replay it is linked to.
 _scopes_to_experiment_run = build_scope_condition_binding(
-    local_column=TaskORM.job_id,
-    related_key=ReplayORM.job_id,
+    local_column=ReplayEvaluationORM.replay_id,
+    related_key=ReplayORM.id,
     scope_column=ReplayORM.experiment_run_id,
 )
 
@@ -94,7 +94,7 @@ def _compile_cohort_condition(condition: FilterCondition) -> ColumnElement[bool]
 def _compile_experiment_run_condition(
     condition: FilterCondition,
 ) -> ColumnElement[bool]:
-    """Compile an experiment run scope condition into a task predicate.
+    """Compile an experiment run scope condition into a replay link predicate.
 
     Args:
         condition: Validated experiment run condition.
@@ -102,17 +102,37 @@ def _compile_experiment_run_condition(
     Returns:
         SQL predicate.
     """
-    # Scoped by producing task rather than by session, so a run's baseline and
-    # result evaluations both reach the same result set.
-    run_tasks = (
-        select(TaskORM.id)
+    # Scoped through the replay link table, so a linked adopted row matches
+    # and a standalone task-born row, never linked to a replay, does not.
+    linked_evaluations = (
+        select(ReplayEvaluationORM.evaluation_id)
         .where(
-            TaskORM.id == EvaluationORM.task_id,
+            ReplayEvaluationORM.evaluation_id == EvaluationORM.id,
             _scopes_to_experiment_run(condition),
         )
         .correlate(EvaluationORM)
     )
-    return run_tasks.exists()
+    return linked_evaluations.exists()
+
+
+def _compile_replay_condition(condition: FilterCondition) -> ColumnElement[bool]:
+    """Compile a replay condition into a replay link predicate.
+
+    Args:
+        condition: Validated replay condition.
+
+    Returns:
+        SQL predicate.
+    """
+    linked_evaluations = (
+        select(ReplayEvaluationORM.evaluation_id)
+        .where(
+            ReplayEvaluationORM.evaluation_id == EvaluationORM.id,
+            compile_column_condition(ReplayEvaluationORM.replay_id, condition),
+        )
+        .correlate(EvaluationORM)
+    )
+    return linked_evaluations.exists()
 
 
 EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
@@ -129,6 +149,7 @@ EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     ),
     "cohort_id": _compile_cohort_condition,
     "experiment_run_id": _compile_experiment_run_condition,
+    "replay_id": _compile_replay_condition,
 }
 
 
@@ -384,3 +405,42 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
             for replay_id, evaluation_id in links
         )
         await self._flush()
+
+    async def list_replay_evaluations(
+        self, replay_ids: Sequence[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, EvaluationWithEvaluator]]:
+        """Load the evaluations linked to a set of replays.
+
+        Args:
+            replay_ids: Ids of the replays.
+
+        Returns:
+            (replay_id, evaluation) pairs ordered by replay id then
+            evaluation id, each evaluation paired with its evaluator name
+            and version.
+        """
+        if not replay_ids:
+            return []
+        statement = (
+            select(ReplayEvaluationORM.replay_id, EvaluationORM)
+            .join(EvaluationORM, EvaluationORM.id == ReplayEvaluationORM.evaluation_id)
+            .where(ReplayEvaluationORM.replay_id.in_(replay_ids))
+            .order_by(ReplayEvaluationORM.replay_id, EvaluationORM.id)
+        )
+        rows = (await self._session.execute(statement)).all()
+        version_ids = {
+            row.evaluator_version_id
+            for _, row in rows
+            if row.evaluator_version_id is not None
+        }
+        evaluators = await self._load_evaluators(version_ids)
+        return [
+            (
+                replay_id,
+                EvaluationWithEvaluator(
+                    row.to_domain(),
+                    *evaluators.get(row.evaluator_version_id, (None, None)),
+                ),
+            )
+            for replay_id, row in rows
+        ]

@@ -1640,6 +1640,43 @@
             "$ref": "#/components/schemas/EvaluationDataType",
             "description": "Evaluation data type."
           },
+          "evaluator_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the evaluator that produced the group.",
+            "title": "Evaluator Name"
+          },
+          "evaluator_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the evaluator that produced the group.",
+            "title": "Evaluator Version"
+          },
+          "evaluator_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluator version that produced the group.",
+            "title": "Evaluator Version Id"
+          },
           "name": {
             "description": "Evaluation name.",
             "title": "Name",
@@ -16786,7 +16823,7 @@
     },
     "/api/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
       "get": {
-        "description": "Aggregate the evaluations of an experiment run's replays.\n\nBaseline and result sessions are aggregated separately, and each\naggregate carries the per-replay evaluation values of the 50 most\nrecent replays. Clients observe HTTP 200 on success and 404 when no\nexperiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair, sorted by\n    name.",
+        "description": "Aggregate the evaluations linked to an experiment run's replays.\n\nThe input set is the evaluations linked to the run's replays plus the\nmanual evaluations of their baseline and result sessions, grouped by\nname, evaluator version, and data type. Baseline and result sessions are\naggregated separately, and each aggregate carries the per-replay\nevaluation values of the 50 most recent replays. Clients observe HTTP\n200 on success and 404 when no experiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name, evaluator version, and data\n    type, sorted by name.",
         "operationId": "list_experiment_run_evaluation_aggregates_api_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
         "parameters": [
           {

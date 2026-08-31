@@ -5268,7 +5268,8 @@ class FakeEvaluationRepository:
             Page of matching evaluations and the next cursor.
         """
         _refuse_unresolvable_fields(
-            evaluation_filter.expression, ("agent_id", "cohort_id", "experiment_run_id")
+            evaluation_filter.expression,
+            ("agent_id", "cohort_id", "experiment_run_id", "replay_id"),
         )
         evaluations = list(self._evaluations.values())
         if evaluation_filter.expression is not None:
@@ -5418,6 +5419,38 @@ class FakeEvaluationRepository:
             links: (replay_id, evaluation_id) pairs to link.
         """
         self._replay_links.update(links)
+
+    async def list_replay_evaluations(
+        self, replay_ids: Sequence[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, EvaluationWithEvaluator]]:
+        """Load the evaluations linked to a set of replays.
+
+        Args:
+            replay_ids: Ids of the replays.
+
+        Returns:
+            (replay_id, evaluation) pairs ordered by replay id then
+            evaluation id, each evaluation paired with its evaluator name
+            and version.
+        """
+        replay_id_set = set(replay_ids)
+        links = sorted(
+            (replay_id, evaluation_id)
+            for replay_id, evaluation_id in self._replay_links
+            if replay_id in replay_id_set
+        )
+        return [
+            (
+                replay_id,
+                EvaluationWithEvaluator(
+                    self._evaluations[evaluation_id].model_copy(),
+                    *self._evaluator_info(
+                        self._evaluations[evaluation_id].evaluator_version_id
+                    ),
+                ),
+            )
+            for replay_id, evaluation_id in links
+        ]
 
 
 async def create_evaluation(

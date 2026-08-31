@@ -3116,12 +3116,14 @@ export interface paths {
         };
         /**
          * List Experiment Run Evaluation Aggregates
-         * @description Aggregate the evaluations of an experiment run's replays.
+         * @description Aggregate the evaluations linked to an experiment run's replays.
          *
-         *     Baseline and result sessions are aggregated separately, and each
-         *     aggregate carries the per-replay evaluation values of the 50 most
-         *     recent replays. Clients observe HTTP 200 on success and 404 when no
-         *     experiment run has this id.
+         *     The input set is the evaluations linked to the run's replays plus the
+         *     manual evaluations of their baseline and result sessions, grouped by
+         *     name, evaluator version, and data type. Baseline and result sessions are
+         *     aggregated separately, and each aggregate carries the per-replay
+         *     evaluation values of the 50 most recent replays. Clients observe HTTP
+         *     200 on success and 404 when no experiment run has this id.
          *
          *     Args:
          *         experiment_run_id: Id of the experiment run.
@@ -3131,8 +3133,8 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         One aggregate per evaluation name and data type pair, sorted by
-         *         name.
+         *         One aggregate per evaluation name, evaluator version, and data
+         *         type, sorted by name.
          */
         get: operations["list_experiment_run_evaluation_aggregates_api_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get"];
         put?: never;
@@ -4555,6 +4557,21 @@ export interface components {
             baseline: components["schemas"]["EvaluationStats"];
             /** @description Evaluation data type. */
             data_type: components["schemas"]["EvaluationDataType"];
+            /**
+             * Evaluator Name
+             * @description Name of the evaluator that produced the group.
+             */
+            evaluator_name?: string | null;
+            /**
+             * Evaluator Version
+             * @description Version of the evaluator that produced the group.
+             */
+            evaluator_version?: number | null;
+            /**
+             * Evaluator Version Id
+             * @description Evaluator version that produced the group.
+             */
+            evaluator_version_id?: string | null;
             /**
              * Name
              * @description Evaluation name.

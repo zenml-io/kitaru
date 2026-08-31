@@ -14,6 +14,7 @@
 """Evaluation use cases."""
 
 import uuid
+from collections.abc import Sequence
 
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
@@ -81,6 +82,22 @@ class EvaluationService:
         """
         _ = actor
         return await self._repository.query(evaluation_filter)
+
+    async def list_replay_evaluations(
+        self, replay_ids: Sequence[uuid.UUID], actor: AuthContext
+    ) -> list[tuple[uuid.UUID, EvaluationWithEvaluator]]:
+        """List the evaluations linked to a set of replays.
+
+        Args:
+            replay_ids: Ids of the replays.
+            actor: Caller context.
+
+        Returns:
+            (replay_id, evaluation) pairs, each evaluation paired with its
+            evaluator name and version.
+        """
+        _ = actor
+        return await self._repository.list_replay_evaluations(replay_ids)
 
     async def create_evaluations(
         self,

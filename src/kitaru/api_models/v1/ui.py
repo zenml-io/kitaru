@@ -78,6 +78,15 @@ class EvaluationAggregateResponse(ResponseModel):
     """Evaluation aggregate response."""
 
     name: str = Field(description="Evaluation name.")
+    evaluator_version_id: uuid.UUID | None = Field(
+        default=None, description="Evaluator version that produced the group."
+    )
+    evaluator_name: str | None = Field(
+        default=None, description="Name of the evaluator that produced the group."
+    )
+    evaluator_version: int | None = Field(
+        default=None, description="Version of the evaluator that produced the group."
+    )
     data_type: EvaluationDataType = Field(description="Evaluation data type.")
     baseline: EvaluationStats = Field(description="Stats over the baseline sessions.")
     result: EvaluationStats = Field(description="Stats over the result sessions.")

@@ -691,13 +691,14 @@ async def test_query_filters_by_cohort_spanning_versions() -> None:
 
 
 async def test_query_filters_by_experiment_run() -> None:
-    """Filter evaluations by the run whose jobs produced them.
+    """Filter evaluations by the run of the replay they are linked to.
 
-    Postgres-only: the run is three hops from the evaluation, reached through
-    the producing task's job and the replay that owns it.
+    Postgres-only: the run is reached through the replay link table.
 
-    Scoping by task rather than by session is what brings a run's baseline and
-    result evaluations into the same result set, so both are asserted here.
+    A row's producing task belonging to one of the run's replays is not
+    enough, only a replay link brings it into the result set, so a linked
+    row and an unlinked task-born row of the same run are both asserted
+    here.
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -757,9 +758,14 @@ async def test_query_filters_by_experiment_run() -> None:
         session_numbers = itertools.count(1)
 
         async def score_in_run(
-            experiment_run_id: uuid.UUID | None, name: str
+            experiment_run_id: uuid.UUID | None, name: str, linked: bool
         ) -> uuid.UUID:
             """Score one session through a replay's evaluator task.
+
+            Args:
+                experiment_run_id: Run the replay belongs to.
+                name: Evaluation name.
+                linked: Whether the stored row is linked to its replay.
 
             Returns:
                 Id of the scored session.
@@ -770,7 +776,7 @@ async def test_query_filters_by_experiment_run() -> None:
             baseline = await _create_session_row(
                 session, engine, owner_id, agent_id, next(session_numbers)
             )
-            await replays.create(
+            replay = await replays.create(
                 Replay(
                     owner_id=owner_id,
                     job_id=job.id,
@@ -794,13 +800,15 @@ async def test_query_filters_by_experiment_run() -> None:
                 evaluator_version_id=plugin_version.id,
             )
             await repository.create_task_evaluations(
-                [evaluation.model_copy(update={"task_id": task.id})], replay_id=None
+                [evaluation.model_copy(update={"task_id": task.id})],
+                replay_id=replay.id if linked else None,
             )
             return baseline
 
-        await score_in_run(run.id, "baseline")
-        await score_in_run(run.id, "result")
-        await score_in_run(None, "unrelated")
+        await score_in_run(run.id, "baseline", linked=True)
+        await score_in_run(run.id, "result", linked=True)
+        await score_in_run(run.id, "unlinked", linked=False)
+        await score_in_run(None, "unrelated", linked=True)
 
         items, _ = await repository.query(
             EvaluationFilter(
@@ -839,9 +847,88 @@ async def test_query_filters_by_experiment_run() -> None:
             )
         )
         assert {item.evaluation.name for item in items} == {
+            "unlinked",
             "unrelated",
             "session-scoped",
         }
+
+
+async def test_query_filters_by_replay() -> None:
+    """Filter evaluations by the replay they are linked to.
+
+    Postgres-only: the replay is reached through the replay link table.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner_id, agent_id = await _create_owner_and_agent(session)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
+        other_session_id = await _create_session_row(
+            session, engine, owner_id, agent_id, 2
+        )
+        jobs = SQLJobRepository(session)
+        job = await jobs.create(
+            Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+        )
+        config = await SQLExperimentRepository(session).create_replay_config(
+            ReplayConfig(
+                owner_id=owner_id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        replay = await SQLReplayRepository(session).create(
+            Replay(
+                owner_id=owner_id,
+                job_id=job.id,
+                replay_config_id=config.id,
+                baseline_session_id=session_id,
+            )
+        )
+        repository = SQLEvaluationRepository(session)
+        [linked] = await repository.create_task_evaluations(
+            [_evaluation(owner_id, session_id, "linked", score=1.0)],
+            replay_id=replay.id,
+        )
+        await repository.create_task_evaluations(
+            [_evaluation(owner_id, session_id, "unlinked", score=1.0)],
+            replay_id=None,
+        )
+        await repository.create_session_evaluations(
+            other_session_id,
+            [_evaluation(owner_id, other_session_id, "elsewhere", score=1.0)],
+        )
+
+        items, _ = await repository.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="replay_id", op=FilterOp.EQ, value=replay.id
+                )
+            )
+        )
+        assert [item.evaluation.id for item in items] == [linked.id]
+
+        items, _ = await repository.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="replay_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+        assert items == []
+
+
+async def test_fake_refuses_replay_id_filter() -> None:
+    """The fake evaluation repository cannot resolve a replay_id filter."""
+    repository = FakeEvaluationRepository()
+    with pytest.raises(NotImplementedError):
+        await repository.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="replay_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
 
 
 async def test_get_latest_evaluation_ids_by_identity_picks_the_latest(

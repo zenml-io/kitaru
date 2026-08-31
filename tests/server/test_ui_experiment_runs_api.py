@@ -39,6 +39,7 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.evaluation_service import EvaluationService
 from kitaru.server.domain.account import Account
 from kitaru.server.domain.evaluation import Evaluation
+from kitaru.server.domain.plugin import PackagePluginSource, Plugin, PluginKind
 from kitaru.server.domain.replay_config import ReplayConfig, default_tool_policy
 
 ACCOUNT = Account(id=uuid.uuid4(), name="ann")
@@ -144,6 +145,68 @@ async def _store_evaluation(
     await services.evaluations.create_session_evaluations(session_id, [evaluation])
 
 
+async def _create_evaluator_version(
+    services: ReplayServices, name: str = "accuracy-scorer"
+) -> uuid.UUID:
+    """Create an evaluator plugin version through the fake plugin repository."""
+    plugin = await services.plugins.create(
+        Plugin(owner_id=ACCOUNT.id, kind=PluginKind.EVALUATOR, name=name)
+    )
+    version = await services.plugins.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version="v1",
+    )
+    return version.id
+
+
+async def _store_linked_evaluation(
+    services: ReplayServices,
+    replay_id: uuid.UUID,
+    session_id: uuid.UUID,
+    name: str,
+    data_type: EvaluationDataType,
+    evaluator_version_id: uuid.UUID,
+    score: float | bool | None = None,
+    value: str | None = None,
+    passed: bool | None = None,
+) -> None:
+    """Store an evaluator-produced evaluation and link it to a replay."""
+    evaluation = Evaluation(
+        owner_id=ACCOUNT.id,
+        evaluator_version_id=evaluator_version_id,
+        session_id=session_id,
+        name=name,
+        data_type=data_type,
+        score=score,
+        value=value,
+        passed=passed,
+    )
+    await services.evaluations.create_task_evaluations(
+        [evaluation], replay_id=replay_id
+    )
+
+
+async def _store_standalone_evaluation(
+    services: ReplayServices,
+    session_id: uuid.UUID,
+    name: str,
+    data_type: EvaluationDataType,
+    evaluator_version_id: uuid.UUID,
+    score: float | bool | None = None,
+) -> None:
+    """Store an evaluator-produced evaluation that is not linked to a replay."""
+    evaluation = Evaluation(
+        owner_id=ACCOUNT.id,
+        evaluator_version_id=evaluator_version_id,
+        session_id=session_id,
+        name=name,
+        data_type=data_type,
+        score=score,
+    )
+    await services.evaluations.create_task_evaluations([evaluation], replay_id=None)
+
+
 async def test_aggregates_float_evaluations(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
@@ -175,6 +238,9 @@ async def test_aggregates_float_evaluations(
     assert response.json() == [
         {
             "name": "accuracy",
+            "evaluator_version_id": None,
+            "evaluator_name": None,
+            "evaluator_version": None,
             "data_type": "float",
             "baseline": {
                 "count": 1,
@@ -421,6 +487,299 @@ async def test_aggregates_include_baseline_only_names(
         "pass_rate": None,
         "value_counts": None,
     }
+
+
+async def test_aggregates_link_scoped_math(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Aggregate only the evaluations linked to the run's replays."""
+    run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
+    first_baseline, first_result = uuid.uuid4(), uuid.uuid4()
+    second_baseline, second_result = uuid.uuid4(), uuid.uuid4()
+    first_replay_id = await _add_replay_with_result_session(
+        services, run_id, first_baseline, first_result
+    )
+    second_replay_id = await _add_replay_with_result_session(
+        services, run_id, second_baseline, second_result
+    )
+    await _store_linked_evaluation(
+        services,
+        first_replay_id,
+        first_baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.1,
+    )
+    await _store_linked_evaluation(
+        services,
+        first_replay_id,
+        first_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.5,
+    )
+    await _store_linked_evaluation(
+        services,
+        second_replay_id,
+        second_baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.3,
+    )
+    await _store_linked_evaluation(
+        services,
+        second_replay_id,
+        second_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.7,
+    )
+    # A standalone evaluation job scored the same baseline session under the
+    # same evaluator, but was never linked to a replay, so it must not move
+    # the aggregate.
+    await _store_standalone_evaluation(
+        services,
+        first_baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        999.0,
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["name"] == "accuracy"
+    assert aggregate["evaluator_version_id"] == str(version_id)
+    assert aggregate["evaluator_name"] == "accuracy-scorer"
+    assert aggregate["evaluator_version"] == 1
+    assert aggregate["baseline"] == {
+        "count": 2,
+        "mean": 0.2,
+        "min": 0.1,
+        "max": 0.3,
+        "pass_rate": None,
+        "value_counts": None,
+    }
+    assert aggregate["result"] == {
+        "count": 2,
+        "mean": pytest.approx(0.6),
+        "min": 0.5,
+        "max": 0.7,
+        "pass_rate": None,
+        "value_counts": None,
+    }
+    replays_by_id = {entry["replay_id"]: entry for entry in aggregate["replays"]}
+    assert replays_by_id[str(first_replay_id)] == {
+        "replay_id": str(first_replay_id),
+        "baseline": {"score": 0.1, "value": None, "passed": None},
+        "result": {"score": 0.5, "value": None, "passed": None},
+    }
+    assert replays_by_id[str(second_replay_id)] == {
+        "replay_id": str(second_replay_id),
+        "baseline": {"score": 0.3, "value": None, "passed": None},
+        "result": {"score": 0.7, "value": None, "passed": None},
+    }
+
+
+async def test_aggregates_groups_by_evaluator_version(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Two evaluator versions of the same name produce two separate groups."""
+    run_id = await _create_run(services)
+    first_version_id = await _create_evaluator_version(services, name="accuracy-v1")
+    second_version_id = await _create_evaluator_version(services, name="accuracy-v2")
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    await _store_linked_evaluation(
+        services,
+        replay_id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        first_version_id,
+        score=0.2,
+    )
+    await _store_linked_evaluation(
+        services,
+        replay_id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        second_version_id,
+        score=0.4,
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    by_version = {entry["evaluator_version_id"]: entry for entry in body}
+    assert by_version.keys() == {str(first_version_id), str(second_version_id)}
+    first_group = by_version[str(first_version_id)]
+    assert first_group["evaluator_name"] == "accuracy-v1"
+    assert first_group["baseline"]["count"] == 1
+    assert first_group["baseline"]["mean"] == 0.2
+    second_group = by_version[str(second_version_id)]
+    assert second_group["evaluator_name"] == "accuracy-v2"
+    assert second_group["baseline"]["count"] == 1
+    assert second_group["baseline"]["mean"] == 0.4
+
+
+async def test_aggregates_manual_and_linked_groups_coexist(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """A manual group and a linked group of the same name appear side by side."""
+    run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    await _store_linked_evaluation(
+        services,
+        replay_id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.2,
+    )
+    await _store_evaluation(
+        services, baseline, "accuracy", EvaluationDataType.FLOAT, score=0.9
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 2
+    by_version = {entry["evaluator_version_id"]: entry for entry in body}
+    assert by_version.keys() == {str(version_id), None}
+    assert by_version[str(version_id)]["baseline"]["mean"] == 0.2
+    manual_group = by_version[None]
+    assert manual_group["evaluator_name"] is None
+    assert manual_group["evaluator_version"] is None
+    assert manual_group["baseline"]["mean"] == 0.9
+
+
+async def test_aggregates_dangling_evaluator_version(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """A linked row survives its evaluator's deletion, grouped under a null name."""
+    run_id = await _create_run(services)
+    plugin = await services.plugins.create(
+        Plugin(owner_id=ACCOUNT.id, kind=PluginKind.EVALUATOR, name="doomed")
+    )
+    version = await services.plugins.create_version(
+        plugin.id,
+        PackagePluginSource(requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"),
+        display_version="v1",
+    )
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    await _store_linked_evaluation(
+        services,
+        replay_id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version.id,
+        score=0.5,
+    )
+
+    await services.plugins.delete(plugin.id)
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["evaluator_version_id"] == str(version.id)
+    assert aggregate["evaluator_name"] is None
+    assert aggregate["evaluator_version"] is None
+    assert aggregate["baseline"]["count"] == 1
+    assert aggregate["baseline"]["mean"] == 0.5
+
+
+async def test_aggregates_adoption_pinning_ignores_newer_evaluation(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """A later same-identity evaluation not linked to the run leaves it unaffected."""
+    run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    await _store_linked_evaluation(
+        services,
+        replay_id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.2,
+    )
+
+    # A later run re-evaluates the same baseline session with the same
+    # evaluator, producing a new row that is never linked to this run.
+    await _store_standalone_evaluation(
+        services, baseline, "accuracy", EvaluationDataType.FLOAT, version_id, 0.9
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body) == 1
+    aggregate = body[0]
+    assert aggregate["baseline"]["count"] == 1
+    assert aggregate["baseline"]["mean"] == 0.2
+
+
+async def test_aggregates_standalone_unlinked_rows_invisible(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """A standalone evaluation job's rows never appear in run aggregates."""
+    run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
+    baseline, result = uuid.uuid4(), uuid.uuid4()
+    await _add_replay_with_result_session(services, run_id, baseline, result)
+    await _store_standalone_evaluation(
+        services, baseline, "orphan", EvaluationDataType.FLOAT, version_id, 0.5
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == []
 
 
 async def test_aggregates_empty_run(

@@ -130,3 +130,17 @@ class EvaluationRepository(Protocol):
             links: (replay_id, evaluation_id) pairs to link.
         """
         ...
+
+    async def list_replay_evaluations(
+        self, replay_ids: Sequence[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, EvaluationWithEvaluator]]:
+        """Load the evaluations linked to a set of replays.
+
+        Args:
+            replay_ids: Ids of the replays.
+
+        Returns:
+            (replay_id, evaluation) pairs, each evaluation paired with its
+            evaluator name and version.
+        """
+        ...

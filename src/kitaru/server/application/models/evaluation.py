@@ -44,6 +44,7 @@ class EvaluationFilter(ListFilter):
         "agent_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
         "cohort_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
         "experiment_run_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "replay_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
     }
 
 
