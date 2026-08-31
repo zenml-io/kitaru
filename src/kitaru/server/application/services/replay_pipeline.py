@@ -25,6 +25,9 @@ from kitaru.server.application.events import (
     ReplaysSettled,
     TaskTerminal,
 )
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationRepository,
+)
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
@@ -38,6 +41,7 @@ from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import AgentTask, EvaluationTask, Task
+from kitaru.server.utils import hash_params
 
 AGENT_VERSION_LABEL = "agent_version"
 
@@ -52,15 +56,17 @@ async def create_replay_pipelines(
     replay_repository: ReplayRepository,
     job_repository: JobRepository,
     task_repository: TaskRepository,
+    evaluation_repository: EvaluationRepository,
     payload_store: PayloadStore,
 ) -> list[Replay]:
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
     Each agent task carries its baseline session's inputs and the agent
     version as a label. With ``baseline_evaluation_mode`` other than
-    ``NONE``, one baseline evaluator task is appended per evaluator, skipping
-    evaluators that already scored the baseline session under
-    ``IF_MISSING``.
+    ``NONE``, one baseline evaluator task is appended per evaluator, unless
+    ``IF_MISSING`` finds a prior evaluation of the same identity (baseline
+    session, evaluator version, params) to adopt instead, linking the
+    baseline's replay to it.
 
     Args:
         baselines: Sessions being replayed.
@@ -73,6 +79,8 @@ async def create_replay_pipelines(
         replay_repository: Replay repository.
         job_repository: Job repository.
         task_repository: Task repository.
+        evaluation_repository: Evaluation repository, for the ``IF_MISSING``
+            adoption lookup and links.
         payload_store: Payload store, for the baseline sessions' inputs.
 
     Raises:
@@ -103,13 +111,14 @@ async def create_replay_pipelines(
         )
         for job, baseline in zip(jobs, baselines, strict=True)
     ]
-    scored_by_session: dict[uuid.UUID, set[uuid.UUID]] = {}
+    adoptable: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
     if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
-        scored_by_session = await task_repository.get_scored_evaluator_version_ids_many(
+        adoptable = await evaluation_repository.get_latest_evaluation_ids_by_identity(
             [baseline.id for baseline in baselines]
         )
     tasks: list[Task] = []
-    for job, baseline in zip(jobs, baselines, strict=True):
+    adopted_links: list[tuple[uuid.UUID, uuid.UUID]] = []
+    for job, baseline, replay in zip(jobs, baselines, replays, strict=True):
         tasks.append(
             AgentTask(
                 job_id=job.id,
@@ -121,13 +130,17 @@ async def create_replay_pipelines(
         )
         if not evaluate_baselines:
             continue
-        scored = scored_by_session.get(baseline.id, set())
         for evaluator in config.evaluators:
-            if (
-                baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING
-                and evaluator.evaluator_version_id in scored
-            ):
-                continue
+            if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
+                identity = (
+                    baseline.id,
+                    evaluator.evaluator_version_id,
+                    hash_params(evaluator.params),
+                )
+                evaluation_id = adoptable.get(identity)
+                if evaluation_id is not None:
+                    adopted_links.append((replay.id, evaluation_id))
+                    continue
             tasks.append(
                 EvaluationTask(
                     job_id=job.id,
@@ -140,6 +153,7 @@ async def create_replay_pipelines(
     await job_repository.create_many(jobs)
     stored_replays = await replay_repository.create_many(replays)
     await task_repository.create_many(tasks)
+    await evaluation_repository.add_replay_links(adopted_links)
     return stored_replays
 
 

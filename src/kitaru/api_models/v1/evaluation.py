@@ -22,6 +22,7 @@ from pydantic import AfterValidator, Field, field_validator, model_validator
 
 from kitaru.api_models.v1.base import (
     FiniteFloat,
+    JsonValue,
     OwnedResponseModel,
     RequestModel,
 )
@@ -167,6 +168,9 @@ class EvaluationResponse(OwnedResponseModel):
     )
     evaluator_version: int | None = Field(
         default=None, description="Version of the evaluator that produced the result."
+    )
+    evaluator_params: dict[str, JsonValue] | None = Field(
+        default=None, description="Params the evaluator ran with."
     )
     session_id: uuid.UUID = Field(description="Session being scored.")
     task_id: uuid.UUID | None = Field(

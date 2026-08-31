@@ -1735,6 +1735,19 @@
             "description": "Name of the evaluator that produced the result.",
             "title": "Evaluator Name"
           },
+          "evaluator_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Params the evaluator ran with.",
+            "title": "Evaluator Params"
+          },
           "evaluator_version": {
             "anyOf": [
               {
@@ -15877,8 +15890,8 @@
     },
     "/api/v1/sessions/{session_id}/evaluations": {
       "post": {
-        "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is not finished, and 422 when the request names\nthe same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
-        "operationId": "merge_session_evaluations_api_v1_sessions__session_id__evaluations_post",
+        "description": "Create manual evaluations on a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is not finished or an evaluation name already\nexists for the session, and 422 when the request names the same\nevaluation twice.\n\nArgs:\n    session_id: Id of the session to create evaluations on.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
+        "operationId": "create_session_evaluations_api_v1_sessions__session_id__evaluations_post",
         "parameters": [
           {
             "in": "path",
@@ -15909,7 +15922,7 @@
                   "items": {
                     "$ref": "#/components/schemas/EvaluationResponse"
                   },
-                  "title": "Response Merge Session Evaluations Api V1 Sessions  Session Id  Evaluations Post",
+                  "title": "Response Create Session Evaluations Api V1 Sessions  Session Id  Evaluations Post",
                   "type": "array"
                 }
               }
@@ -15927,7 +15940,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Merge Session Evaluations",
+        "summary": "Create Session Evaluations",
         "tags": [
           "sessions"
         ]

@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Evaluation filter and merge command models."""
+"""Evaluation filter and create command models."""
 
 import uuid
 from collections.abc import Mapping
@@ -47,8 +47,8 @@ class EvaluationFilter(ListFilter):
     }
 
 
-class EvaluationMerge(FrozenModel):
-    """Evaluation merge command."""
+class EvaluationCreate(FrozenModel):
+    """Evaluation create command."""
 
     name: str
     data_type: EvaluationDataType

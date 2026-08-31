@@ -2699,16 +2699,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Merge Session Evaluations
-         * @description Merge manual evaluations into a session.
+         * Create Session Evaluations
+         * @description Create manual evaluations on a session.
          *
-         *     A resent name overwrites its score, value, data type, and explanation.
          *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     409 when the session is not finished, and 422 when the request names
-         *     the same evaluation twice.
+         *     409 when the session is not finished or an evaluation name already
+         *     exists for the session, and 422 when the request names the same
+         *     evaluation twice.
          *
          *     Args:
-         *         session_id: Id of the session to merge evaluations into.
+         *         session_id: Id of the session to create evaluations on.
          *         body: Session evaluations request.
          *         service: Evaluation service.
          *         actor: Caller context.
@@ -2716,7 +2716,7 @@ export interface paths {
          *     Returns:
          *         Stored evaluations in request order.
          */
-        post: operations["merge_session_evaluations_api_v1_sessions__session_id__evaluations_post"];
+        post: operations["create_session_evaluations_api_v1_sessions__session_id__evaluations_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4608,6 +4608,13 @@ export interface components {
              * @description Name of the evaluator that produced the result.
              */
             evaluator_name?: string | null;
+            /**
+             * Evaluator Params
+             * @description Params the evaluator ran with.
+             */
+            evaluator_params?: {
+                [key: string]: unknown;
+            } | null;
             /**
              * Evaluator Version
              * @description Version of the evaluator that produced the result.
@@ -12342,7 +12349,7 @@ export interface operations {
             };
         };
     };
-    merge_session_evaluations_api_v1_sessions__session_id__evaluations_post: {
+    create_session_evaluations_api_v1_sessions__session_id__evaluations_post: {
         parameters: {
             query?: never;
             header?: never;

@@ -20,6 +20,9 @@ from kitaru.api_models.v1.replay_config import HistoryScope
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationRepository,
+)
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
@@ -74,6 +77,7 @@ class ReplayService:
         experiment_run_repository: ExperimentRunRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        evaluation_repository: EvaluationRepository,
         session_repository: SessionRepository,
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
@@ -90,6 +94,8 @@ class ReplayService:
                 lookup's cohort-version scope.
             job_repository: Job repository.
             task_repository: Task repository.
+            evaluation_repository: Evaluation repository, for the baseline
+                adoption lookup.
             session_repository: Session repository.
             session_node_repository: Session node repository, for tool
                 lookup.
@@ -104,6 +110,7 @@ class ReplayService:
         self._experiment_runs = experiment_run_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._evaluations = evaluation_repository
         self._sessions = session_repository
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
@@ -196,6 +203,7 @@ class ReplayService:
             replay_repository=self._repository,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
         )
         if self._analytics is not None:

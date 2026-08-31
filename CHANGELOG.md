@@ -16,11 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added Hypothesis property tests for the importer `parse()` contract, the MCP tool boundary, and credential redaction, plus a nightly `fuzz-nightly` workflow that runs them with a larger example budget and a cached example database.
 - Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
 - Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
+- Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
 
 ### Changed
 
 - The Vercel AI SDK adapter is now developed and tested against `ai` 7.0.85. The supported peer range is unchanged (`>=7.0.60 <8.0.0`).
 - `kitaru-pydantic-ai` now supports the PydanticAI 2.23 through 2.36 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.35.3 with `genai-prices` 0.1.4.
+- `client.sessions.merge_evaluations` is renamed to `create_evaluations`. Manual evaluation names are unique per session, resending a name already stored for the session now returns HTTP 409 instead of overwriting the existing row.
+- A row written by an evaluator run keeps its evaluator version id forever, even after that evaluator is deleted, rather than losing it and becoming indistinguishable from a manual row.
+- `if_missing` baseline scoring now matches a prior evaluation by evaluator version and params rather than by evaluator version alone, so a baseline scored again with different params always gets a fresh task instead of being skipped.
 - `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.20, 0.21, and 0.22 minor lines in addition to 0.19.3+. The 0.21 line moved the OpenAI provider to `openai>=3.0.0,<4`, so the plugin workspace lockfile now resolves `openai-agents` 0.22.0 with `openai` 3.5.0.
 - Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
 - Creating evaluations for a session that is not finished is now rejected with HTTP 409 on every path. This covers evaluation batches, merging manual evaluations into a session, and replays and experiment runs that score baseline sessions.

@@ -14,10 +14,13 @@
 """Evaluation repository interface."""
 
 import uuid
+from collections.abc import Sequence
 from typing import NamedTuple, Protocol
 
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.domain.evaluation import Evaluation
+
+EvaluationIdentity = tuple[uuid.UUID, uuid.UUID, str]
 
 
 class EvaluationWithEvaluator(NamedTuple):
@@ -60,19 +63,22 @@ class EvaluationRepository(Protocol):
         """
         ...
 
-    async def merge_session_evaluations(
+    async def create_session_evaluations(
         self, session_id: uuid.UUID, evaluations: list[Evaluation]
     ) -> list[Evaluation]:
-        """Insert or replace manual evaluations upserted on (session, name).
+        """Insert manual evaluations into a session.
 
-        A resent name overwrites its data type, score, value, and
-        explanation. ``evaluator_version_id`` and ``task_id`` stay null for
-        every row this writes.
+        ``evaluator_version_id`` and ``task_id`` stay null for every row this
+        writes.
 
         Args:
             session_id: Id of the session the evaluations belong to.
             evaluations: Fully resolved evaluations to store, in request
                 order.
+
+        Raises:
+            EvaluationNameConflict: A name in the batch already exists for
+                the session.
 
         Returns:
             Stored evaluations in request order.
@@ -80,14 +86,47 @@ class EvaluationRepository(Protocol):
         ...
 
     async def create_task_evaluations(
-        self, evaluations: list[Evaluation]
+        self, evaluations: list[Evaluation], replay_id: uuid.UUID | None
     ) -> list[Evaluation]:
         """Insert evaluation rows produced by a completed evaluator task.
 
         Args:
             evaluations: Fully resolved evaluations to store, in result order.
+            replay_id: Replay to link each stored row to, ``None`` for a
+                standalone evaluation batch.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has the evaluator
+                version id.
 
         Returns:
             Stored evaluations in result order.
+        """
+        ...
+
+    async def get_latest_evaluation_ids_by_identity(
+        self, session_ids: Sequence[uuid.UUID]
+    ) -> dict[EvaluationIdentity, uuid.UUID]:
+        """Read the latest evaluation id per (session, evaluator version, params hash).
+
+        Only rows carrying both an evaluator version id and a params hash
+        are considered.
+
+        Args:
+            session_ids: Ids of the candidate sessions.
+
+        Returns:
+            Latest evaluation id keyed by (session_id, evaluator_version_id,
+            params_hash), identities without a match omitted.
+        """
+        ...
+
+    async def add_replay_links(
+        self, links: Sequence[tuple[uuid.UUID, uuid.UUID]]
+    ) -> None:
+        """Link replays to evaluations they adopted instead of re-running.
+
+        Args:
+            links: (replay_id, evaluation_id) pairs to link.
         """
         ...

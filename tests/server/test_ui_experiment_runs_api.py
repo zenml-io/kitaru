@@ -141,7 +141,7 @@ async def _store_evaluation(
         value=value,
         passed=passed,
     )
-    await services.evaluations.merge_session_evaluations(session_id, [evaluation])
+    await services.evaluations.create_session_evaluations(session_id, [evaluation])
 
 
 async def test_aggregates_float_evaluations(

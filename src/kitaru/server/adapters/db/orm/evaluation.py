@@ -14,6 +14,7 @@
 """Evaluation ORM table."""
 
 import uuid
+from typing import Any
 
 from sqlalchemy import (
     CheckConstraint,
@@ -25,6 +26,7 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.evaluation import EvaluationDataType
@@ -45,6 +47,7 @@ from kitaru.server.domain.names import MAX_NAME_LENGTH
 DATA_TYPE_LENGTH = 16
 
 EVALUATION_OWNER_ID_FOREIGN_KEY = foreign_key_name("evaluation", ["owner_id"])
+# No longer a live constraint, kept for the migration that drops it.
 EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY = foreign_key_name(
     "evaluation", ["evaluator_version_id"]
 )
@@ -54,14 +57,21 @@ EVALUATION_TASK_ID_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
     "evaluation", ["task_id", "name"]
 )
 # A partial unique index, not a plain unique constraint, since Postgres only
-# supports a WHERE predicate on an index. It is the manual upsert's conflict
-# target.
+# supports a WHERE predicate on an index. It is the manual create's conflict
+# target, and the discriminator for a manual row is evaluator_version_id
+# being null rather than task_id, since an evaluator-born row keeps its
+# evaluator_version_id even after its producing task is pruned.
 EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX = unique_constraint_name(
     "evaluation", ["session_id", "name"]
 )
 EVALUATION_SESSION_ID_INDEX = index_name("evaluation", ["session_id"])
 EVALUATION_EVALUATOR_VERSION_ID_INDEX = index_name(
     "evaluation", ["evaluator_version_id"]
+)
+# Backs the identity lookup that finds a pre-existing row to adopt for a
+# baseline evaluation run under IF_MISSING.
+EVALUATION_SESSION_ID_EVALUATOR_VERSION_ID_PARAMS_HASH_INDEX = index_name(
+    "evaluation", ["session_id", "evaluator_version_id", "params_hash"]
 )
 EVALUATION_DATA_TYPE_CHECK_CONSTRAINT = check_constraint_name(
     "evaluation", ["data_type", "numerical_value", "string_value"]
@@ -125,12 +135,6 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             ["owner_id"], ["account.id"], name=EVALUATION_OWNER_ID_FOREIGN_KEY
         ),
         ForeignKeyConstraint(
-            ["evaluator_version_id"],
-            ["plugin_version.id"],
-            name=EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
-            ondelete="SET NULL",
-        ),
-        ForeignKeyConstraint(
             ["session_id"],
             ["session.id"],
             name=EVALUATION_SESSION_ID_FOREIGN_KEY,
@@ -150,16 +154,24 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "session_id",
             "name",
             unique=True,
-            postgresql_where=text("task_id IS NULL"),
+            postgresql_where=text("evaluator_version_id IS NULL"),
         ),
         Index(EVALUATION_SESSION_ID_INDEX, "session_id"),
         Index(EVALUATION_EVALUATOR_VERSION_ID_INDEX, "evaluator_version_id"),
+        Index(
+            EVALUATION_SESSION_ID_EVALUATOR_VERSION_ID_PARAMS_HASH_INDEX,
+            "session_id",
+            "evaluator_version_id",
+            "params_hash",
+        ),
         CheckConstraint(
             _EVALUATION_DATA_TYPE_CHECK_SQL, name=EVALUATION_DATA_TYPE_CHECK_CONSTRAINT
         ),
     )
 
     owner_id: Mapped[uuid.UUID]
+    # No foreign key, an evaluator-born row keeps this id forever, even after
+    # the plugin version it names is deleted.
     evaluator_version_id: Mapped[uuid.UUID | None]
     session_id: Mapped[uuid.UUID]
     task_id: Mapped[uuid.UUID | None]
@@ -169,13 +181,14 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     string_value: Mapped[str | None] = mapped_column(Text)
     explanation: Mapped[str | None] = mapped_column(Text)
     passed: Mapped[bool | None]
+    evaluator_params: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    params_hash: Mapped[str | None] = mapped_column(String(64))
 
     @classmethod
     def column_values(cls, evaluation: Evaluation) -> dict[str, object]:
         """Map a domain evaluation to its column values, id included.
-
-        Used by the upsert statement in
-        `SQLEvaluationRepository.merge_session_evaluations`.
 
         Args:
             evaluation: Evaluation to store.
@@ -198,6 +211,8 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "string_value": string_value,
             "explanation": evaluation.explanation,
             "passed": evaluation.passed,
+            "evaluator_params": evaluation.evaluator_params,
+            "params_hash": evaluation.params_hash,
         }
 
     def to_domain(self) -> Evaluation:
@@ -219,6 +234,8 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             value=self.string_value,
             explanation=self.explanation,
             passed=self.passed,
+            evaluator_params=self.evaluator_params,
+            params_hash=self.params_hash,
             created=self.created,
             updated=self.updated,
         )

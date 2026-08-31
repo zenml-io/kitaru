@@ -49,7 +49,7 @@ async def session_id(client: httpx.AsyncClient) -> str:
     return session["id"]
 
 
-async def test_merge_and_list_persist_across_requests(
+async def test_create_and_list_persist_across_requests(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
     """Prove the per-request commit through separate requests."""
@@ -74,36 +74,34 @@ async def test_merge_and_list_persist_across_requests(
     assert body["items"][0] == created
 
 
-async def test_merge_overwrite_persists_across_requests(
+async def test_create_rejects_a_name_already_stored_for_the_session(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Persist an overwrite of a resent evaluation name across requests."""
+    """Observe HTTP 409 when resending a name already stored for the session."""
     first = (
         await client.post(
             f"/api/v1/sessions/{session_id}/evaluations",
             json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
         )
     ).json()[0]
-    second = (
-        await client.post(
-            f"/api/v1/sessions/{session_id}/evaluations",
-            json={"evaluations": [{"name": "accuracy", "value": "high"}]},
-        )
-    ).json()[0]
-    assert second["id"] == first["id"]
+
+    response = await client.post(
+        f"/api/v1/sessions/{session_id}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "value": "high"}]},
+    )
+    assert response.status_code == 409
 
     response = await client.get(f"/api/v1/evaluations/{first['id']}")
     assert response.status_code == 200
     body = response.json()
-    assert body["value"] == "high"
-    assert body["score"] is None
-    assert body["data_type"] == "str"
+    assert body["score"] == 0.5
+    assert body["data_type"] == "float"
 
 
-async def test_merge_passed_persists_across_requests(
+async def test_create_round_trips_the_passed_flag(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
-    """Persist the pass flag and clear it when a resent name omits it."""
+    """Persist the pass flag across requests."""
     created = (
         await client.post(
             f"/api/v1/sessions/{session_id}/evaluations",
@@ -115,16 +113,8 @@ async def test_merge_passed_persists_across_requests(
     assert response.status_code == 200
     assert response.json()["passed"] is True
 
-    await client.post(
-        f"/api/v1/sessions/{session_id}/evaluations",
-        json={"evaluations": [{"name": "accuracy", "score": 0.9}]},
-    )
-    response = await client.get(f"/api/v1/evaluations/{created['id']}")
-    assert response.status_code == 200
-    assert response.json()["passed"] is None
 
-
-async def test_merge_not_found(client: httpx.AsyncClient) -> None:
+async def test_create_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(
         "/api/v1/sessions/019632fa-0000-7000-8000-000000000000/evaluations",
@@ -133,7 +123,7 @@ async def test_merge_not_found(client: httpx.AsyncClient) -> None:
     assert response.status_code == 404
 
 
-async def test_merge_rejects_duplicate_name_in_batch(
+async def test_create_rejects_duplicate_name_in_batch(
     client: httpx.AsyncClient, session_id: str
 ) -> None:
     """Observe HTTP 422 when the request names the same evaluation twice."""

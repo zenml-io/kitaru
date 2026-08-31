@@ -26,6 +26,9 @@ from kitaru.server.application.interfaces.agent_version_repository import (
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
 )
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationRepository,
+)
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
@@ -88,6 +91,7 @@ class ExperimentService:
         replay_repository: ReplayRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        evaluation_repository: EvaluationRepository,
         transitions: TaskTransitions,
         payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
@@ -109,6 +113,8 @@ class ExperimentService:
                 and job lookup on delete.
             job_repository: Job repository, for run fan-out.
             task_repository: Task repository, for run fan-out.
+            evaluation_repository: Evaluation repository, for run fan-out's
+                baseline adoption lookup.
             transitions: Task transition dispatch, for job cancellation.
             payload_store: Payload store, for run fan-out's baseline sessions.
             analytics: Analytics tracker, None skips tracking.
@@ -123,6 +129,7 @@ class ExperimentService:
         self._replays = replay_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._evaluations = evaluation_repository
         self._transitions = transitions
         self._payload_store = payload_store
         self._analytics = analytics
@@ -471,6 +478,7 @@ class ExperimentService:
             replay_repository=self._replays,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
         )
         counts = await self._replays.count_by_status(run.id)

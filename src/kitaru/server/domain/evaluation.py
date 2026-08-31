@@ -15,13 +15,18 @@
 
 import uuid
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import FiniteFloat
 from kitaru.api_models.v1.evaluation import EvaluationDataType
-from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
+from kitaru.server.domain.base import (
+    ConflictError,
+    DomainModel,
+    NotFoundError,
+    ValidationError,
+)
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import EvaluationName
 
@@ -56,6 +61,19 @@ class DuplicateEvaluationNameInBatch(ValidationError):
         )
 
 
+class EvaluationNameConflict(ConflictError):
+    """Raised when a manual evaluation name already exists for a session."""
+
+    def __init__(self, name: str, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            name: Evaluation name that already exists.
+            session_id: Id of the session.
+        """
+        super().__init__(f"Evaluation {name} already exists for session {session_id}")
+
+
 class Evaluation(DomainModel):
     """Evaluation."""
 
@@ -70,6 +88,8 @@ class Evaluation(DomainModel):
     value: str | None = None
     explanation: str | None = None
     passed: bool | None = None
+    evaluator_params: dict[str, Any] | None = None
+    params_hash: str | None = None
     created: datetime | None = None
     updated: datetime | None = None
 

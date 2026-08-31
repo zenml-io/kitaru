@@ -14,11 +14,9 @@
 """SQL evaluation repository."""
 
 import uuid
-from collections.abc import Callable, Mapping
-from datetime import UTC, datetime
+from collections.abc import Callable, Mapping, Sequence
 
-from sqlalchemy import ColumnElement, select, text
-from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy import ColumnElement, func, select
 
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
@@ -30,21 +28,27 @@ from kitaru.server.adapters.db.orm.cohort_version_session import (
     CohortVersionSessionORM,
 )
 from kitaru.server.adapters.db.orm.evaluation import (
-    EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
+    EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX,
     EvaluationORM,
 )
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.replay_evaluation import ReplayEvaluationORM
 from kitaru.server.adapters.db.orm.session import SessionORM
 from kitaru.server.adapters.db.orm.task import TaskORM
 from kitaru.server.adapters.db.pagination import paginate
 from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationIdentity,
     EvaluationWithEvaluator,
 )
 from kitaru.server.application.models.evaluation import EvaluationFilter
 from kitaru.server.domain.base import DomainError, NotFoundError
-from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
+from kitaru.server.domain.evaluation import (
+    Evaluation,
+    EvaluationNameConflict,
+    EvaluationNotFound,
+)
 from kitaru.server.domain.plugin import PluginVersionIdNotFound
 from kitaru.server.filtering import FilterCondition
 
@@ -236,64 +240,25 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
         ]
         return items, next_cursor
 
-    async def merge_session_evaluations(
+    async def create_session_evaluations(
         self, session_id: uuid.UUID, evaluations: list[Evaluation]
     ) -> list[Evaluation]:
-        """Insert or replace manual evaluations upserted on (session, name).
+        """Insert manual evaluations into a session.
 
-        One statement carries the whole batch. The conflict target is the
-        partial unique index on (session_id, name) where task_id is null, so
-        a resent name overwrites its data type, score, value, explanation,
-        and pass flag while leaving its id, owner, and creation time in
-        place.
+        ``evaluator_version_id`` and ``task_id`` stay null for every row this
+        writes.
 
         Args:
             session_id: Id of the session the evaluations belong to.
             evaluations: Fully resolved evaluations to store, in request
                 order.
 
+        Raises:
+            EvaluationNameConflict: A name in the batch already exists for
+                the session.
+
         Returns:
             Stored evaluations in request order.
-        """
-        _ = session_id
-        if not evaluations:
-            return []
-        values = [EvaluationORM.column_values(evaluation) for evaluation in evaluations]
-        statement = insert(EvaluationORM).values(values)
-        statement = statement.on_conflict_do_update(
-            index_elements=[EvaluationORM.session_id, EvaluationORM.name],
-            index_where=text("task_id IS NULL"),
-            set_={
-                "data_type": statement.excluded.data_type,
-                "numerical_value": statement.excluded.numerical_value,
-                "string_value": statement.excluded.string_value,
-                "explanation": statement.excluded.explanation,
-                "passed": statement.excluded.passed,
-                "updated": datetime.now(UTC),
-            },
-        ).returning(EvaluationORM)
-        rows = (
-            await self._session.scalars(
-                statement, execution_options={"populate_existing": True}
-            )
-        ).all()
-        by_name = {row.name: row for row in rows}
-        return [by_name[evaluation.name].to_domain() for evaluation in evaluations]
-
-    async def create_task_evaluations(
-        self, evaluations: list[Evaluation]
-    ) -> list[Evaluation]:
-        """Insert evaluation rows produced by a completed evaluator task.
-
-        Args:
-            evaluations: Fully resolved evaluations to store, in result order.
-
-        Raises:
-            PluginVersionIdNotFound: The evaluator version was deleted
-                concurrently with the task it scored.
-
-        Returns:
-            Stored evaluations in result order.
         """
         if not evaluations:
             return []
@@ -301,12 +266,121 @@ class SQLEvaluationRepository(BaseSQLRepository[EvaluationORM]):
             EvaluationORM(**EvaluationORM.column_values(evaluation))
             for evaluation in evaluations
         ]
-        constraints: dict[str, Callable[[], DomainError]] = {}
-        evaluator_version_id = evaluations[0].evaluator_version_id
-        if evaluator_version_id is not None:
-            missing_version_id = evaluator_version_id
-            constraints[EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY] = lambda: (
-                PluginVersionIdNotFound(missing_version_id)
-            )
+        constraints: dict[str, Callable[[], DomainError]] = {
+            EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX: lambda: EvaluationNameConflict(
+                evaluations[0].name, session_id
+            ),
+        }
         await self._add_all(rows, constraints)
         return [row.to_domain() for row in rows]
+
+    async def create_task_evaluations(
+        self, evaluations: list[Evaluation], replay_id: uuid.UUID | None
+    ) -> list[Evaluation]:
+        """Insert evaluation rows produced by a completed evaluator task.
+
+        Args:
+            evaluations: Fully resolved evaluations to store, in result order.
+            replay_id: Replay to link each stored row to, ``None`` for a
+                standalone evaluation batch.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has the evaluator
+                version id, including one deleted concurrently with the task
+                it scored.
+
+        Returns:
+            Stored evaluations in result order.
+        """
+        if not evaluations:
+            return []
+        evaluator_version_id = evaluations[0].evaluator_version_id
+        if evaluator_version_id is not None:
+            exists = await self._session.scalar(
+                select(PluginVersionORM.id).where(
+                    PluginVersionORM.id == evaluator_version_id
+                )
+            )
+            if exists is None:
+                raise PluginVersionIdNotFound(evaluator_version_id)
+        rows = [
+            EvaluationORM(**EvaluationORM.column_values(evaluation))
+            for evaluation in evaluations
+        ]
+        await self._add_all(rows)
+        if replay_id is not None:
+            self._session.add_all(
+                ReplayEvaluationORM(replay_id=replay_id, evaluation_id=row.id)
+                for row in rows
+            )
+            await self._flush()
+        return [row.to_domain() for row in rows]
+
+    async def get_latest_evaluation_ids_by_identity(
+        self, session_ids: Sequence[uuid.UUID]
+    ) -> dict[EvaluationIdentity, uuid.UUID]:
+        """Read the latest evaluation id per (session, evaluator version, params hash).
+
+        Only rows carrying both an evaluator version id and a params hash
+        are considered.
+
+        Args:
+            session_ids: Ids of the candidate sessions.
+
+        Returns:
+            Latest evaluation id keyed by (session_id, evaluator_version_id,
+            params_hash), identities without a match omitted.
+        """
+        if not session_ids:
+            return {}
+        ranked = (
+            select(
+                EvaluationORM.session_id,
+                EvaluationORM.evaluator_version_id,
+                EvaluationORM.params_hash,
+                EvaluationORM.id,
+                func.row_number()
+                .over(
+                    partition_by=(
+                        EvaluationORM.session_id,
+                        EvaluationORM.evaluator_version_id,
+                        EvaluationORM.params_hash,
+                    ),
+                    order_by=(EvaluationORM.created.desc(), EvaluationORM.id.desc()),
+                )
+                .label("rank"),
+            )
+            .where(
+                EvaluationORM.session_id.in_(session_ids),
+                EvaluationORM.evaluator_version_id.is_not(None),
+                EvaluationORM.params_hash.is_not(None),
+            )
+            .subquery()
+        )
+        statement = select(
+            ranked.c.session_id,
+            ranked.c.evaluator_version_id,
+            ranked.c.params_hash,
+            ranked.c.id,
+        ).where(ranked.c.rank == 1)
+        rows = (await self._session.execute(statement)).all()
+        return {
+            (session_id, evaluator_version_id, params_hash): evaluation_id
+            for session_id, evaluator_version_id, params_hash, evaluation_id in rows
+        }
+
+    async def add_replay_links(
+        self, links: Sequence[tuple[uuid.UUID, uuid.UUID]]
+    ) -> None:
+        """Link replays to evaluations they adopted instead of re-running.
+
+        Args:
+            links: (replay_id, evaluation_id) pairs to link.
+        """
+        if not links:
+            return
+        self._session.add_all(
+            ReplayEvaluationORM(replay_id=replay_id, evaluation_id=evaluation_id)
+            for replay_id, evaluation_id in links
+        )
+        await self._flush()

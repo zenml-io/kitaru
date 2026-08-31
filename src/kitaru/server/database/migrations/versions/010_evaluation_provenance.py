@@ -19,8 +19,23 @@ Create Date: 2026-08-31
 
 """
 
+import json
+import uuid
+from hashlib import sha256
+
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects import postgresql
+
+from kitaru.server.adapters.db.orm.evaluation import (
+    EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
+    EVALUATION_SESSION_ID_EVALUATOR_VERSION_ID_PARAMS_HASH_INDEX,
+    EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX,
+)
+from kitaru.server.adapters.db.orm.replay_evaluation import (
+    REPLAY_EVALUATION_EVALUATION_ID_FOREIGN_KEY,
+    REPLAY_EVALUATION_REPLAY_ID_FOREIGN_KEY,
+)
 
 # revision identifiers, used by Alembic.
 revision = "010_evaluation_provenance"
@@ -29,10 +44,110 @@ branch_labels = None
 depends_on = None
 
 BASELINE_EVALUATION_MODE_LENGTH = 16
+PARAMS_HASH_LENGTH = 64
 
 _BOOL_TO_MODE_SQL = (
     "CASE WHEN baseline_evaluation_mode THEN 'if_missing' ELSE 'none' END"
 )
+
+
+def _hash_params(params: dict) -> str:
+    """Hash a params dict into a stable hex digest over its canonical JSON.
+
+    Mirrors ``kitaru.server.utils.hash_params``, inlined since migrations do
+    not import application code.
+
+    Args:
+        params: Params to hash.
+
+    Returns:
+        Hex-encoded sha256 digest.
+    """
+    canonical = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    return sha256(canonical.encode()).hexdigest()
+
+
+def _backfill_evaluator_params() -> None:
+    """Set evaluator_params and params_hash from each row's producing task."""
+    connection = op.get_bind()
+    rows = connection.execute(
+        sa.text(
+            "SELECT evaluation.id, task.inputs FROM evaluation "
+            "JOIN task ON task.id = evaluation.task_id "
+            "WHERE evaluation.task_id IS NOT NULL AND task.kind = 'evaluator'"
+        )
+    ).all()
+    for evaluation_id, inputs in rows:
+        params = inputs if inputs is not None else {}
+        connection.execute(
+            sa.text(
+                "UPDATE evaluation SET evaluator_params = CAST(:params AS jsonb), "
+                "params_hash = :params_hash WHERE id = :id"
+            ),
+            {
+                "params": json.dumps(params),
+                "params_hash": _hash_params(params),
+                "id": evaluation_id,
+            },
+        )
+
+
+def _backfill_produced_links() -> None:
+    """Link each task-born evaluation to the replay of its producing job."""
+    connection = op.get_bind()
+    connection.execute(
+        sa.text(
+            "INSERT INTO replay_evaluation "
+            "(replay_id, evaluation_id, created, updated) "
+            "SELECT replay.id, evaluation.id, now(), now() FROM evaluation "
+            "JOIN task ON task.id = evaluation.task_id "
+            "JOIN replay ON replay.job_id = task.job_id "
+            "WHERE evaluation.task_id IS NOT NULL "
+            "ON CONFLICT DO NOTHING"
+        )
+    )
+
+
+def _backfill_adoption_links() -> None:
+    """Link IF_MISSING replays to the baseline rows their run would adopt."""
+    connection = op.get_bind()
+    replays = connection.execute(
+        sa.text(
+            "SELECT replay.id, replay.baseline_session_id, replay_config.evaluators "
+            "FROM replay "
+            "JOIN replay_config ON replay_config.id = replay.replay_config_id "
+            "WHERE replay.baseline_evaluation_mode = 'if_missing'"
+        )
+    ).all()
+    for replay_id, baseline_session_id, evaluators in replays:
+        for evaluator in evaluators:
+            evaluator_version_id = uuid.UUID(evaluator["evaluator_version_id"])
+            params_hash = _hash_params(evaluator["params"])
+            match = connection.execute(
+                sa.text(
+                    "SELECT id FROM evaluation "
+                    "WHERE session_id = :session_id "
+                    "AND evaluator_version_id = :evaluator_version_id "
+                    "AND params_hash = :params_hash "
+                    "ORDER BY created DESC, id DESC LIMIT 1"
+                ),
+                {
+                    "session_id": baseline_session_id,
+                    "evaluator_version_id": evaluator_version_id,
+                    "params_hash": params_hash,
+                },
+            ).one_or_none()
+            if match is None:
+                continue
+            connection.execute(
+                sa.text(
+                    "INSERT INTO replay_evaluation "
+                    "(replay_id, evaluation_id, created, updated) "
+                    "VALUES (:replay_id, :evaluation_id, now(), now()) "
+                    "ON CONFLICT DO NOTHING"
+                ),
+                {"replay_id": replay_id, "evaluation_id": match.id},
+            )
 
 
 def upgrade() -> None:
@@ -50,13 +165,83 @@ def upgrade() -> None:
                 postgresql_using=_BOOL_TO_MODE_SQL,
             )
 
+    with op.batch_alter_table("evaluation", schema=None) as batch_op:
+        batch_op.add_column(
+            sa.Column(
+                "evaluator_params",
+                postgresql.JSONB(none_as_null=True, astext_type=sa.Text()),
+                nullable=True,
+            )
+        )
+        batch_op.add_column(
+            sa.Column(
+                "params_hash", sa.String(length=PARAMS_HASH_LENGTH), nullable=True
+            )
+        )
+
+    op.create_table(
+        "replay_evaluation",
+        sa.Column("created", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("replay_id", sa.Uuid(), nullable=False),
+        sa.Column("evaluation_id", sa.Uuid(), nullable=False),
+        sa.ForeignKeyConstraint(
+            ["replay_id"],
+            ["replay.id"],
+            name=REPLAY_EVALUATION_REPLAY_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        sa.ForeignKeyConstraint(
+            ["evaluation_id"],
+            ["evaluation.id"],
+            name=REPLAY_EVALUATION_EVALUATION_ID_FOREIGN_KEY,
+            ondelete="CASCADE",
+        ),
+        sa.PrimaryKeyConstraint("replay_id", "evaluation_id"),
+    )
+
+    # A row left over from the SET-NULL-turns-evaluator-row-manual bug this
+    # revision fixes going forward. Its evaluator_version_id is already gone,
+    # so it now pattern-matches the new manual discriminator and could
+    # collide with a real manual name.
+    op.execute(
+        "DELETE FROM evaluation WHERE evaluator_version_id IS NULL "
+        "AND task_id IS NOT NULL"
+    )
+
+    with op.batch_alter_table("evaluation", schema=None) as batch_op:
+        batch_op.drop_index(
+            EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX,
+            postgresql_where=sa.text("task_id IS NULL"),
+        )
+        batch_op.create_index(
+            EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX,
+            ["session_id", "name"],
+            unique=True,
+            postgresql_where=sa.text("evaluator_version_id IS NULL"),
+        )
+        batch_op.drop_constraint(
+            EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY, type_="foreignkey"
+        )
+        batch_op.create_index(
+            EVALUATION_SESSION_ID_EVALUATOR_VERSION_ID_PARAMS_HASH_INDEX,
+            ["session_id", "evaluator_version_id", "params_hash"],
+        )
+
+    _backfill_evaluator_params()
+    _backfill_produced_links()
+    _backfill_adoption_links()
+
 
 def downgrade() -> None:
     """Downgrade database schema and/or data back to the previous revision."""
-    # A mode of "force" has no boolean representation, and later revisions
-    # build on this column, so downgrading below it is not supported.
+    # A mode of "force" has no boolean representation, the evaluator version
+    # foreign key is gone, and later revisions build on this column, so
+    # downgrading below it is not supported.
     raise RuntimeError(
         "010_evaluation_provenance cannot be downgraded. The baseline "
         "evaluation mode cannot be represented as a boolean once a value "
-        "other than none or if_missing exists."
+        "other than none or if_missing exists, and the dropped "
+        "evaluator_version_id foreign key cannot be restored without data "
+        "loss."
     )

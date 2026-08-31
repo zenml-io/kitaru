@@ -527,8 +527,8 @@ async def test_list_sessions_filters_by_has_evaluation(
     assert [item["id"] for item in response.json()["items"]] == [unscored["id"]]
 
 
-async def test_merge_session_evaluations(client: httpx.AsyncClient) -> None:
-    """Merge manual evaluations into a session."""
+async def test_create_session_evaluations(client: httpx.AsyncClient) -> None:
+    """Create manual evaluations on a session."""
     created = (
         await client.post("/api/v1/sessions", json=_session_body(status="completed"))
     ).json()
@@ -550,10 +550,10 @@ async def test_merge_session_evaluations(client: httpx.AsyncClient) -> None:
     assert body[1]["value"] == "good"
 
 
-async def test_merge_session_evaluations_carries_passed(
+async def test_create_session_evaluations_carries_passed(
     client: httpx.AsyncClient,
 ) -> None:
-    """Merge the optional pass flag, leaving it null when omitted."""
+    """Create the optional pass flag, leaving it null when omitted."""
     created = (
         await client.post("/api/v1/sessions", json=_session_body(status="completed"))
     ).json()
@@ -571,31 +571,25 @@ async def test_merge_session_evaluations_carries_passed(
     assert [item["passed"] for item in response.json()] == [True, False, None]
 
 
-async def test_merge_session_evaluations_overwrites_matching_name(
+async def test_create_session_evaluations_rejects_an_existing_name(
     client: httpx.AsyncClient,
 ) -> None:
-    """Resending a name overwrites its score, value, and data type."""
+    """Observe HTTP 409 when resending a name already stored for the session."""
     created = (
         await client.post("/api/v1/sessions", json=_session_body(status="completed"))
     ).json()
-    first = (
-        await client.post(
-            f"/api/v1/sessions/{created['id']}/evaluations",
-            json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
-        )
-    ).json()
-    second = (
-        await client.post(
-            f"/api/v1/sessions/{created['id']}/evaluations",
-            json={"evaluations": [{"name": "accuracy", "value": "high"}]},
-        )
-    ).json()
-    assert second[0]["id"] == first[0]["id"]
-    assert second[0]["value"] == "high"
-    assert second[0]["score"] is None
+    await client.post(
+        f"/api/v1/sessions/{created['id']}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "score": 0.5}]},
+    )
+    response = await client.post(
+        f"/api/v1/sessions/{created['id']}/evaluations",
+        json={"evaluations": [{"name": "accuracy", "value": "high"}]},
+    )
+    assert response.status_code == 409
 
 
-async def test_merge_session_evaluations_rejects_in_progress_session(
+async def test_create_session_evaluations_rejects_in_progress_session(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 409 when the session is not finished."""
@@ -607,7 +601,7 @@ async def test_merge_session_evaluations_rejects_in_progress_session(
     assert response.status_code == 409
 
 
-async def test_merge_session_evaluations_not_found(client: httpx.AsyncClient) -> None:
+async def test_create_session_evaluations_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(
         f"/api/v1/sessions/{uuid.uuid4()}/evaluations",
@@ -616,7 +610,7 @@ async def test_merge_session_evaluations_not_found(client: httpx.AsyncClient) ->
     assert response.status_code == 404
 
 
-async def test_merge_session_evaluations_rejects_duplicate_name(
+async def test_create_session_evaluations_rejects_duplicate_name_in_batch(
     client: httpx.AsyncClient,
 ) -> None:
     """Observe HTTP 422 when the request names the same evaluation twice."""

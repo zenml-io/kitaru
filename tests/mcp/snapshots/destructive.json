@@ -2838,6 +2838,20 @@
               "description": "Name of the evaluator that produced the result.",
               "title": "Evaluator Name"
             },
+            "evaluator_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Params the evaluator ran with.",
+              "title": "Evaluator Params"
+            },
             "evaluator_version": {
               "anyOf": [
                 {
