@@ -27,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Concurrent deletes of the same resource now give exactly one caller HTTP 204, every other caller gets HTTP 404. Previously several racing deletes could all report success.
 - Downgrading the database below migration `006_deletion_rules` is refused with an explicit error, since the earlier schema cannot hold an agent name reused after a delete. The refusal rolls back the whole downgrade, so the database stays at its current revision.
 
+### Fixed
+
+- Fixed `kitaru evaluator version register` and `kitaru importer version register`, which always failed with a `TypeError` after uploading the source. `POST /api/v1/evaluators/{evaluator_id}/versions` and `POST /api/v1/importers/{importer_id}/versions` now support idempotency keys, and the SDK `create_version` methods take an `idempotency_key` argument, matching agent and cohort version creation. The MCP evaluator management tool's `create_version` operation takes an optional `idempotency_key` field.
+
 ## [0.23.0]
 
 ### Added
