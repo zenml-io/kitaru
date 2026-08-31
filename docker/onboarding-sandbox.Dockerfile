@@ -21,7 +21,7 @@ ARG USER_GID
 USER root
 
 RUN apt-get update && \
-  apt-get install -y --no-install-recommends ca-certificates curl git && \
+  apt-get install -y --no-install-recommends ca-certificates curl git jq && \
   rm -rf /var/lib/apt/lists/*
 
 COPY --from=node /usr/local/bin/node /usr/local/bin/node
@@ -31,10 +31,12 @@ RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm && \
   ln -s ../lib/node_modules/npm/bin/npx-cli.js /usr/local/bin/npx && \
   node --version && npm --version && npx --version
 
-# The published worker image installs only the worker extra.
+# Install CLI tooling and the example's replay adapter in the worker's interpreter.
 RUN KITARU_VERSION="$(/app/.venv/bin/python -c 'import importlib.metadata as m; print(m.version("kitaru"))')" && \
   uv pip install --no-cache --python /app/.venv/bin/python \
-    "kitaru[cli,mcp,worker]==$KITARU_VERSION" && \
+    "kitaru[cli,mcp,worker]==$KITARU_VERSION" \
+    "kitaru-pydantic-ai[openai]==0.1.0" && \
+  /app/.venv/bin/python -c 'import kitaru_pydantic_ai; import openai' && \
   chown -R $USER_UID:$USER_GID /app/.venv
 
 # Clone the repository at the release tag matching the installed package.
