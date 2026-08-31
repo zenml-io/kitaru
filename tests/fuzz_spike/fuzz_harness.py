@@ -10,6 +10,7 @@ JSONL file plus an in-memory list keyed by method+path.
 
 import asyncio
 import json
+import os
 import socket
 import threading
 import time
@@ -24,10 +25,7 @@ from kitaru.server.api.app import create_app
 from kitaru.server.api.config import APISettings
 from kitaru.server.database.service import DatabaseService
 
-CAPTURE_PATH = (
-    "/private/tmp/claude-501/-Users-strickvl-coding-zenml-repos-kitaru/"
-    "8fef1504-cfce-47b1-a21f-e64ddb6dd446/scratchpad/fuzz-exceptions.jsonl"
-)
+CAPTURE_PATH = os.environ.get("KITARU_FUZZ_CAPTURE", "fuzz-exceptions.jsonl")
 
 
 class ExceptionCaptureApp:

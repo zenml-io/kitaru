@@ -33,10 +33,14 @@ SPEC_PATH = Path(__file__).parents[2] / "openapi" / "openapi.json"
 
 MAX_EXAMPLES = int(os.environ.get("KITARU_FUZZ_MAX_EXAMPLES", "25"))
 
+# Derandomized runs replay the same inputs every time, which is what a
+# reproducible gate wants. A deep exploratory run wants fresh inputs instead.
+DERANDOMIZE = os.environ.get("KITARU_FUZZ_RANDOM") is None
+
 FUZZ_SETTINGS = settings(
     max_examples=MAX_EXAMPLES,
     deadline=None,
-    derandomize=True,
+    derandomize=DERANDOMIZE,
     database=None,
     suppress_health_check=list(HealthCheck),
 )
@@ -87,7 +91,7 @@ schema_hunt.config.generation.modes = [
 HUNT_SETTINGS = settings(
     max_examples=int(os.environ.get("KITARU_FUZZ_HUNT_EXAMPLES", "50")),
     deadline=None,
-    derandomize=True,
+    derandomize=DERANDOMIZE,
     database=None,
     suppress_health_check=list(HealthCheck),
 )
