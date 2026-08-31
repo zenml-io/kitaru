@@ -26,6 +26,8 @@ from datetime import UTC, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from pydantic_core import PydanticSerializationError
+
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import SessionStatus, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
@@ -35,6 +37,7 @@ from kitaru.task.importer import (
 )
 
 MAX_UPLOAD_BYTES = 50 * 1024 * 1024
+_MAX_NESTED_DEPTH = 64
 _DEFAULT_JOIN_PATHS = (
     "extra.metadata.thread_id",
     "extra.metadata.session_id",
@@ -369,6 +372,11 @@ class InvalidImport(ValueError):
     """Raised when a LangSmith payload cannot be normalized."""
 
 
+def _safe_failure_text(value: str) -> str:
+    """Escape lone surrogates so failure diagnostics remain JSON serializable."""
+    return value.encode("utf-8", errors="backslashreplace").decode("utf-8")
+
+
 @dataclass(frozen=True, slots=True)
 class _Turn:
     """One LangSmith trace within a grouped session."""
@@ -389,8 +397,14 @@ def _decode_json(value: Any) -> Any:
         return value
     try:
         return json.loads(stripped)
+    except RecursionError as exc:
+        raise InvalidImport(
+            "Embedded JSON exceeds the supported nesting depth"
+        ) from exc
     except json.JSONDecodeError:
         return value
+    except ValueError as exc:
+        raise InvalidImport("Embedded JSON contains an invalid value") from exc
 
 
 def _dict(value: Any) -> dict[str, Any]:
@@ -424,19 +438,25 @@ def _integer(value: Any) -> int | None:
     if value in (None, ""):
         return None
     try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+        parsed = int(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise InvalidImport("Token count must be a nonnegative integer") from exc
+    if parsed < 0 or (isinstance(value, float) and value < 0):
+        raise InvalidImport("Token count must be a nonnegative integer")
+    return parsed
 
 
 def _decimal(value: Any) -> Decimal | None:
-    """Parse one decimal value."""
-    if value in (None, ""):
+    """Parse a finite, nonnegative cost."""
+    if value is None or value == "":
         return None
     try:
-        return Decimal(str(value))
-    except (InvalidOperation, TypeError, ValueError):
-        return None
+        parsed = Decimal(str(value))
+    except (InvalidOperation, ValueError) as exc:
+        raise InvalidImport("Cost must be a finite, nonnegative number") from exc
+    if not parsed.is_finite() or parsed < 0:
+        raise InvalidImport("Cost must be a finite, nonnegative number")
+    return parsed
 
 
 def _parse_records(content: bytes) -> list[dict[str, Any]]:
@@ -451,14 +471,16 @@ def _parse_records(content: bytes) -> list[dict[str, Any]]:
         raise InvalidImport("Import file contains no JSON records")
     try:
         decoded = json.loads(text)
-    except json.JSONDecodeError:
+    except RecursionError as exc:
+        raise InvalidImport("JSON exceeds the supported nesting depth") from exc
+    except ValueError:
         records: list[dict[str, Any]] = []
         for line_number, line in enumerate(text.splitlines(), start=1):
             if not line.strip():
                 continue
             try:
                 item = json.loads(line)
-            except json.JSONDecodeError as exc:
+            except (ValueError, RecursionError) as exc:
                 raise InvalidImport(f"Line {line_number} is not valid JSON") from exc
             if not isinstance(item, dict):
                 raise InvalidImport(
@@ -620,6 +642,11 @@ def _run_metadata(record: dict[str, Any]) -> dict[str, Any]:
     return _dict(extra.get("metadata")) or _dict(record.get("metadata"))
 
 
+def _get_first_nonempty(*values: Any) -> Any:
+    """Select the first populated value, preserving explicit zero counts."""
+    return next((value for value in values if value not in (None, "")), None)
+
+
 def _tokens(record: dict[str, Any]) -> TokenUsage | None:
     """Map token counts from bulk exports and SDK run payloads."""
     extra = _dict(record.get("extra"))
@@ -631,17 +658,23 @@ def _tokens(record: dict[str, Any]) -> TokenUsage | None:
         or _dict(outputs.get("usage_metadata"))
     )
     input_tokens = _integer(
-        record.get("prompt_tokens")
-        or usage.get("prompt_tokens")
-        or usage.get("input_tokens")
+        _get_first_nonempty(
+            record.get("prompt_tokens"),
+            usage.get("prompt_tokens"),
+            usage.get("input_tokens"),
+        )
     )
     output_tokens = _integer(
-        record.get("completion_tokens")
-        or usage.get("completion_tokens")
-        or usage.get("output_tokens")
+        _get_first_nonempty(
+            record.get("completion_tokens"),
+            usage.get("completion_tokens"),
+            usage.get("output_tokens"),
+        )
     )
     cached_tokens = _integer(
-        usage.get("cache_read_input_tokens") or usage.get("cached_input_tokens")
+        _get_first_nonempty(
+            usage.get("cache_read_input_tokens"), usage.get("cached_input_tokens")
+        )
     )
     if input_tokens is None and output_tokens is None and cached_tokens is None:
         return None
@@ -682,15 +715,19 @@ def _metadata(record: dict[str, Any]) -> dict[str, Any]:
     return selected
 
 
-def _contains_tool_activity(value: Any) -> bool:
-    """Detect model output containing tool calls without explicit tool runs."""
+def _contains_tool_activity(value: Any, depth: int = 0) -> bool:
+    """Detect tool activity within a bounded container and decoding depth."""
+    if depth > _MAX_NESTED_DEPTH:
+        raise InvalidImport("Tool payload exceeds the supported nesting depth of 64")
     decoded = _decode_json(value)
-    if isinstance(decoded, dict):
-        if any(key in decoded for key in ("tool_calls", "toolCalls")):
+    if decoded is not value:
+        return _contains_tool_activity(decoded, depth + 1)
+    if isinstance(value, dict):
+        if any(key in value for key in ("tool_calls", "toolCalls")):
             return True
-        return any(_contains_tool_activity(item) for item in decoded.values())
-    if isinstance(decoded, list):
-        return any(_contains_tool_activity(item) for item in decoded)
+        return any(_contains_tool_activity(item, depth + 1) for item in value.values())
+    if isinstance(value, list):
+        return any(_contains_tool_activity(item, depth + 1) for item in value)
     return False
 
 
@@ -713,14 +750,29 @@ def _build_node_tree(
         for node, parent in nodes_with_parents
         if node.external_id is not None and parent in converted
     }
-    for external_id in external_ids:
+    depths: dict[str, int] = {}
+    for external_id in converted:
+        chain: list[str] = []
         seen: set[str] = set()
-        current = external_id
-        while current in parents:
+        current: str | None = external_id
+        while current is not None and current not in depths:
             if current in seen:
                 raise InvalidImport("The imported node graph contains a parent cycle")
             seen.add(current)
-            current = parents[current]
+            chain.append(current)
+            if len(chain) > _MAX_NESTED_DEPTH:
+                raise InvalidImport(
+                    "The imported node graph exceeds the maximum depth of 64"
+                )
+            current = parents.get(current)
+        depth = depths[current] if current is not None else 0
+        for node_id in reversed(chain):
+            depth += 1
+            if depth > _MAX_NESTED_DEPTH:
+                raise InvalidImport(
+                    "The imported node graph exceeds the maximum depth of 64"
+                )
+            depths[node_id] = depth
     roots: list[ImportedNode] = []
     for node, parent in nodes_with_parents:
         if parent in converted:
@@ -753,16 +805,22 @@ class LangSmithRunImporter:
         )
         trace_records: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
         failures: list[ImportFailure] = []
+        duplicate_traces: set[str] = set()
         for line, record in enumerate(records, start=1):
             try:
                 trace_id = _trace_id(record)
                 run_id = _run_id(record)
             except InvalidImport as exc:
                 failures.append(
-                    ImportFailure(line=line, external_id=None, error=str(exc))
+                    ImportFailure(
+                        line=line, external_id=None, error=_safe_failure_text(str(exc))
+                    )
                 )
                 continue
-            trace_records[trace_id].setdefault(run_id, {}).update(record)
+            if run_id in trace_records[trace_id]:
+                duplicate_traces.add(trace_id)
+            else:
+                trace_records[trace_id][run_id] = record
 
         grouped: dict[tuple[str, str], list[tuple[str, list[dict[str, Any]]]]] = (
             defaultdict(list)
@@ -772,6 +830,10 @@ class LangSmithRunImporter:
         for trace_id, by_run_id in sorted(trace_records.items()):
             rows = list(by_run_id.values())
             try:
+                if trace_id in duplicate_traces:
+                    raise InvalidImport(
+                        f"Trace '{trace_id}' contains duplicate run ids"
+                    )
                 roots = self._get_roots(rows, trace_id)
                 source_instances = {_source_instance(row, params) for row in rows}
                 if len(source_instances) != 1:
@@ -794,29 +856,34 @@ class LangSmithRunImporter:
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
-                        line=len(failures) + 1, external_id=trace_id, error=str(exc)
+                        line=len(failures) + 1,
+                        external_id=_safe_failure_text(trace_id),
+                        error=_safe_failure_text(str(exc)),
                     )
                 )
 
         sessions: list[ImportedSession] = []
         for key, traces in sorted(grouped.items()):
             try:
-                sessions.append(
-                    self._parse_session(
-                        key[0],
-                        key[1],
-                        traces,
-                        join_paths=join_paths[key],
-                        trace_fallback=key in fallback_groups,
-                        file_framework=file_framework,
-                    )
+                session = self._parse_session(
+                    key[0],
+                    key[1],
+                    traces,
+                    join_paths=join_paths[key],
+                    trace_fallback=key in fallback_groups,
+                    file_framework=file_framework,
                 )
+                try:
+                    session.model_dump_json()
+                except PydanticSerializationError as exc:
+                    raise InvalidImport(f"Session cannot be serialized: {exc}") from exc
+                sessions.append(session)
             except InvalidImport as exc:
                 failures.append(
                     ImportFailure(
                         line=len(failures) + 1,
-                        external_id=key[1],
-                        error=str(exc),
+                        external_id=_safe_failure_text(key[1]),
+                        error=_safe_failure_text(str(exc)),
                     )
                 )
         return [*sessions, *failures]
@@ -831,6 +898,7 @@ class LangSmithRunImporter:
             for record in records
             if record.get("is_root") is True
             or record.get("parent_run_id") in (None, "")
+            or str(record.get("parent_run_id")) == _run_id(record)
             or str(record.get("parent_run_id")) not in ids
         ]
         if not roots:
@@ -898,6 +966,8 @@ class LangSmithRunImporter:
                 run_id = _run_id(record)
                 parent = record.get("parent_run_id")
                 parent_id = str(parent) if parent not in (None, "") else None
+                if parent_id == run_id:
+                    parent_id = None
                 if parent_id and parent_id not in ids:
                     warnings.append(f"Run '{run_id}' references a missing parent")
                     graph_complete = False

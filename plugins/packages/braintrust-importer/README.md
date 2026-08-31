@@ -15,6 +15,12 @@ The importer accepts Braintrust JSON and JSONL export shapes, preserves source h
 
 See the [Braintrust import guide](https://docs.zenml.io/kitaru/guides/import-braintrust-traces) for accepted formats, grouping parameters, deduplication behavior, and fidelity limits.
 
+## Validation limits
+
+Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Tool-activity scans have a separate limit of 64 container or embedded-JSON decoding steps. Costs must be finite and nonnegative, token counts must be nonnegative, and returned sessions must serialize as JSON.
+
+Conflicting project IDs reject the complete Braintrust trace before grouping. A single explicit project ID anywhere in a trace takes precedence over the source-instance or filename fallback. A failure discovered before grouping leaves other traces available, even when they share a session key. Invalid fields or serialization failures found after grouping reject that grouped session; unrelated sessions still import.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)

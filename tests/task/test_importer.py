@@ -182,6 +182,48 @@ def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
     assert flattened[1].parent_index == 4
 
 
+def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
+    """Flatten deep plugin trees without depending on Python recursion depth."""
+    root = _node("0")
+    parent = root
+    for index in range(1, 1_200):
+        child = _node(str(index))
+        parent.children.append(child)
+        parent = child
+
+    flattened = flatten_nodes([root])
+
+    assert len(flattened) == 1_200
+    assert [node.name for node in flattened] == [str(i) for i in range(1_200)]
+    assert [node.parent_index for node in flattened] == [None, *range(1_199)]
+    for node in flattened:
+        json.loads(node.model_dump_json())
+
+
+@pytest.mark.parametrize("cycle_length", [1, 2])
+def test_flatten_nodes_rejects_object_cycles(cycle_length: int) -> None:
+    """Reject cyclic plugin objects instead of traversing them forever."""
+    root = _node("root")
+    tail = root
+    if cycle_length == 2:
+        tail = _node("child")
+        root.children.append(tail)
+    tail.children.append(root)
+
+    with pytest.raises(SessionImportError, match="cycle"):
+        flatten_nodes([root])
+
+
+def test_flatten_nodes_allows_shared_child_outside_ancestor_path() -> None:
+    """Preserve repeated subtrees that do not form an ancestor cycle."""
+    child = _node("shared")
+
+    flattened = flatten_nodes([_node("left", [child]), _node("right", [child])])
+
+    assert [node.name for node in flattened] == ["left", "shared", "right", "shared"]
+    assert [node.parent_index for node in flattened] == [None, 0, None, 2]
+
+
 def test_session_request_maps_fields() -> None:
     """Build a session create request from importer details and a imported item."""
     agent_id = uuid.uuid4()

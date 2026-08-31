@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.2.0
+
+- Validate parent chains with memoized depths, limiting nested span paths to 64 levels.
+- Isolate malformed costs, token counts, embedded JSON, and invalid Unicode at the existing trace or grouped-session boundaries.
+
 ## 0.1.1
 
 - Keep same-named sessions from different Logfire projects separate.

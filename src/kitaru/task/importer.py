@@ -266,14 +266,22 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
 
     flattened: list[SessionNodeCreateRequest] = []
 
-    def _walk(node: ImportedNode, parent_index: int | None) -> None:
+    active: set[int] = set()
+    stack: list[tuple[ImportedNode, int | None, bool]] = [
+        (node, None, False) for node in reversed(nodes)
+    ]
+    while stack:
+        node, parent_index, exiting = stack.pop()
+        if exiting:
+            active.remove(id(node))
+            continue
+        if id(node) in active:
+            raise SessionImportError("Imported node tree contains a cycle")
+        active.add(id(node))
         index = len(flattened)
         flattened.append(_node_request(node, index=index, parent_index=parent_index))
-        for child in node.children:
-            _walk(child, index)
-
-    for node in nodes:
-        _walk(node, None)
+        stack.append((node, parent_index, True))
+        stack.extend((child, index, False) for child in reversed(node.children))
     return flattened
 
 

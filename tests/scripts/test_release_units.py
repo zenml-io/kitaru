@@ -137,13 +137,13 @@ def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
 
 def test_default_requirements_are_derived_from_release_units() -> None:
     assert set(default_requirements(load_inventory()).values()) == {
-        "kitaru-braintrust-importer==0.1.0",
+        "kitaru-braintrust-importer==0.2.0",
         "kitaru-evaluator==0.1.2",
-        "kitaru-jsonl-importer==0.1.0",
-        "kitaru-langfuse-importer==0.1.1",
-        "kitaru-langsmith-importer==0.1.0",
-        "kitaru-logfire-importer==0.1.1",
-        "kitaru-phoenix-importer==0.1.0",
+        "kitaru-jsonl-importer==0.1.1",
+        "kitaru-langfuse-importer==0.2.0",
+        "kitaru-langsmith-importer==0.2.0",
+        "kitaru-logfire-importer==0.2.0",
+        "kitaru-phoenix-importer==0.2.0",
     }
 
 
@@ -607,10 +607,10 @@ def test_inventory_rejects_an_adapter_in_the_default_catalog(
     ("old", "new"),
     [
         (
+            'requirement="kitaru-langfuse-importer==0.2.0"',
             'requirement="kitaru-langfuse-importer==0.1.1"',
-            'requirement="kitaru-langfuse-importer==0.1.0"',
         ),
-        ('display_version="0.1.1"', 'display_version="0.1.0"'),
+        ('display_version="0.2.0"', 'display_version="0.1.1"'),
     ],
 )
 def test_inventory_rejects_stale_server_default_versions(
@@ -621,7 +621,7 @@ def test_inventory_rejects_stale_server_default_versions(
 
     with pytest.raises(
         ReleaseInventoryError,
-        match=r"server default requirement and display version must match 0\.1\.1",
+        match=r"server default requirement and display version must match 0\.2\.0",
     ):
         load_inventory(release_repo)
 

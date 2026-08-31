@@ -998,3 +998,310 @@ def test_recovered_tool_failure_does_not_fail_session() -> None:
 
     assert session.status is SessionStatus.COMPLETED
     assert session.error is None
+
+
+def _parse_with_healthy_neighbors(
+    record: dict[str, Any],
+) -> list[ImportedSession | ImportFailure]:
+    """Parse one suspect record between unrelated healthy sessions."""
+    return list(
+        parse(
+            jsonl(
+                observation("good-before", "before", session_id="before"),
+                record,
+                observation("good-after", "after", session_id="after"),
+            ),
+            {},
+        )
+    )
+
+
+def _assert_isolated_failure(
+    results: list[ImportedSession | ImportFailure], message: str
+) -> None:
+    """Require local failure and preservation of both neighboring sessions."""
+    assert {
+        item.external_id for item in results if isinstance(item, ImportedSession)
+    } == {
+        "project-1:before",
+        "project-1:after",
+    }
+    rejected = [item for item in results if isinstance(item, ImportFailure)]
+    assert len(rejected) == 1
+    assert message in rejected[0].error
+    for item in results:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("value", ["NaN", "sNaN", "-NaN", "Infinity", "-Infinity", -1])
+def test_invalid_cost_isolated(value: Any) -> None:
+    """Reject unsafe accounting values without losing healthy sessions."""
+    _assert_isolated_failure(
+        _parse_with_healthy_neighbors(
+            observation(
+                "bad",
+                "bad",
+                totalCost=value,
+            )
+        ),
+        "cost",
+    )
+
+
+@pytest.mark.parametrize(
+    "field", ["input", "output", "input_cached_tokens", "reasoning_tokens"]
+)
+@pytest.mark.parametrize("value", [-1, float("inf"), float("-inf"), float("nan")])
+def test_invalid_token_count_isolated(field: str, value: Any) -> None:
+    """Reject all invalid token fields at the containing session."""
+    _assert_isolated_failure(
+        _parse_with_healthy_neighbors(
+            observation(
+                "bad",
+                "bad",
+                usageDetails={field: value},
+            )
+        ),
+        "token",
+    )
+
+
+@pytest.mark.parametrize("field", ["providedModelName", "model", "modelProvider"])
+@pytest.mark.parametrize("value", [False, 0, [], {}])
+def test_invalid_model_field_isolated(field: str, value: Any) -> None:
+    """Reject present non-string model fields, including falsy values."""
+    _assert_isolated_failure(
+        _parse_with_healthy_neighbors(
+            observation(
+                "bad",
+                "bad",
+                **{field: value},
+            )
+        ),
+        "string",
+    )
+
+
+@pytest.mark.parametrize("depth", [63, 64, 65, 1200])
+@pytest.mark.parametrize("infer_links", [False, True])
+def test_tree_depth_boundary(depth: int, infer_links: bool) -> None:
+    """Keep supported trees and isolate deeper trees before recursive work."""
+    rows = [
+        observation(str(i), "deep", parent_id=str(i - 1) if i else None)
+        for i in range(depth)
+    ]
+    rows.append(observation("healthy", "healthy", session_id="healthy"))
+    results = list(parse(jsonl(*rows), {"infer_tool_call_links": infer_links}))
+    accepted = [item for item in results if isinstance(item, ImportedSession)]
+    if depth <= 64:
+        assert len(accepted) == 2
+        deep = next(
+            item for item in accepted if item.external_id.endswith(":conversation-1")
+        )
+        assert len(flatten_imported_nodes(deep.nodes)) == depth
+    else:
+        assert [item.external_id for item in accepted] == ["project-1:healthy"]
+        assert any(
+            isinstance(item, ImportFailure) and "depth" in item.error
+            for item in results
+        )
+    for item in results:
+        item.model_dump_json()
+
+
+@pytest.mark.parametrize("field", ["id", "name", "input", "output", "sessionId"])
+@pytest.mark.parametrize("surrogate", ["\ud800", "\udfff"])
+def test_unserializable_session_isolated(field: str, surrogate: str) -> None:
+    """Escape failure diagnostics while refusing to alter successful identities."""
+    record = observation("bad", "bad")
+    record[field] = surrogate
+    _assert_isolated_failure(_parse_with_healthy_neighbors(record), "serializ")
+
+
+def test_deep_encoded_output_isolated() -> None:
+    """Contain a decoder recursion error within one grouped session."""
+    record = observation("bad", "bad", output="[" * 1500 + "0" + "]" * 1500)
+    _assert_isolated_failure(_parse_with_healthy_neighbors(record), "JSON")
+
+
+def test_tool_scan_depth_isolated() -> None:
+    """Nested decoded containers share the tool scanner's depth budget."""
+    output: Any = {"type": "tool_call", "id": "call-1"}
+    for _ in range(70):
+        output = {"child": output}
+    record = observation("bad", "bad", observation_type="GENERATION", output=output)
+    _assert_isolated_failure(_parse_with_healthy_neighbors(record), "depth")
+
+
+def test_deep_outer_document_rejected() -> None:
+    """Reject an undecodable upload using the public importer exception."""
+    with pytest.raises(InvalidImport, match="JSON"):
+        list(parse(b"[" * 1500 + b"0" + b"]" * 1500, {}))
+
+
+@pytest.mark.parametrize("value", [0, "0", "0.125"])
+def test_valid_cost_and_tokens_preserved(value: Any) -> None:
+    """Preserve zero costs instead of replacing them with a fallback total."""
+    results = list(
+        parse(
+            jsonl(
+                observation(
+                    "valid",
+                    "valid",
+                    totalCost=value,
+                    costDetails={"total": 99},
+                    usageDetails={
+                        "input": 0,
+                        "output": "2",
+                        "input_cached_tokens": 0,
+                        "reasoning_tokens": 1,
+                    },
+                    providedModelName="模型😀",
+                    model="réponse",
+                )
+            ),
+            {},
+        )
+    )
+    assert len(results) == 1
+    session = results[0]
+    assert isinstance(session, ImportedSession)
+    assert session.nodes[0].cost == Decimal(str(value))
+    assert session.nodes[0].tokens is not None
+    assert session.nodes[0].tokens.input_tokens == 0
+    assert session.nodes[0].tokens.output_tokens == 2
+    assert session.nodes[0].requested_model == "模型😀"
+    session.model_dump_json()
+
+
+@pytest.mark.parametrize("value", [False, 0, [], {}])
+def test_invalid_model_field_not_hidden_by_fallback(value: Any) -> None:
+    """Valid higher-priority metadata must not hide malformed model fields."""
+    _assert_isolated_failure(
+        _parse_with_healthy_neighbors(
+            observation(
+                "bad",
+                "bad",
+                providedModelName=value,
+                metadata={"gen_ai.request.model": "valid-model"},
+            )
+        ),
+        "string",
+    )
+
+
+def test_rejects_primary_graph_before_inference(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Do not scan model outputs when the primary graph is already too deep."""
+
+    def unexpected_inference(nodes: Any) -> Any:
+        pytest.fail("Inference must not run for an invalid primary graph")
+
+    monkeypatch.setattr(
+        langfuse_module, "_infer_tool_call_parents", unexpected_inference
+    )
+    rows = [
+        observation(str(i), "deep", parent_id=str(i - 1) if i else None)
+        for i in range(65)
+    ]
+    results = list(parse(jsonl(*rows), {}))
+    assert len(results) == 1
+    assert isinstance(results[0], ImportFailure)
+    assert "depth" in results[0].error
+
+
+def test_inferred_parent_depth_revalidated() -> None:
+    """Reject an inferred model-to-tool edge that would exceed supported depth."""
+    rows = [
+        observation(str(i), "deep", parent_id=str(i - 1) if i else None)
+        for i in range(63)
+    ]
+    rows.extend(
+        [
+            observation(
+                "model",
+                "deep",
+                parent_id="62",
+                observation_type="GENERATION",
+                output={"type": "tool_call", "id": "call-1"},
+            ),
+            observation(
+                "tool",
+                "deep",
+                parent_id="0",
+                observation_type="TOOL",
+                toolCallId="call-1",
+            ),
+            observation("healthy", "healthy", session_id="healthy"),
+        ]
+    )
+    results = list(parse(jsonl(*rows), {}))
+    assert len(results) == 2
+    assert isinstance(results[0], ImportedSession)
+    assert results[0].external_id == "project-1:healthy"
+    assert isinstance(results[1], ImportFailure)
+    assert "depth" in results[1].error
+    assert len(sessions(jsonl(*rows), {"infer_tool_call_links": False})) == 2
+
+
+def test_tool_scan_combines_decoded_and_container_depth() -> None:
+    """One shallow encoded chunk cannot reset an already-deep scan."""
+    output: Any = {"type": "tool_call", "id": "call-1"}
+    for _ in range(35):
+        output = {"child": output}
+    output = json.dumps(output)
+    for _ in range(35):
+        output = {"child": output}
+    record = observation("bad", "bad", observation_type="GENERATION", output=output)
+    _assert_isolated_failure(_parse_with_healthy_neighbors(record), "depth")
+
+
+def test_failure_with_surrogate_trace_id_is_serializable() -> None:
+    """Pre-grouping failures escape both their trace identifier and message."""
+    rows = [
+        observation("one", "\ud800", session_id="one"),
+        observation("two", "\ud800", session_id="two"),
+        observation("good", "good", session_id="good"),
+    ]
+    results = list(parse(jsonl(*rows), {}))
+    assert len(results) == 2
+    assert isinstance(results[0], ImportedSession)
+    assert results[0].external_id == "project-1:good"
+    assert isinstance(results[1], ImportFailure)
+    assert results[1].external_id == "\\ud800"
+    results[1].model_dump_json()
+
+
+def test_oversized_integer_in_embedded_json_is_isolated() -> None:
+    record = observation("bad", "bad", output='{"value":' + "9" * 5_000 + "}")
+    _assert_isolated_failure(_parse_with_healthy_neighbors(record), "JSON")
+
+
+def test_oversized_integer_in_outer_json_is_contained() -> None:
+    with pytest.raises(InvalidImport):
+        list(parse(b'{"value":' + b"9" * 5_000 + b"}", {}))
+
+
+def test_parent_validation_does_not_repeat_shared_ancestor_walks() -> None:
+    """Count graph lookups, avoiding a machine-dependent timing assertion."""
+    lookups = 0
+
+    class CountedId(str):
+        def __hash__(self) -> int:
+            nonlocal lookups
+            lookups += 1
+            return super().__hash__()
+
+    ids = [CountedId(str(index)) for index in range(2_000)]
+    parents: list[tuple[str, str | None]] = [
+        (
+            node_id,
+            ids[index - 1] if 0 < index < 63 else ids[62] if index >= 63 else None,
+        )
+        for index, node_id in enumerate(ids)
+    ]
+    langfuse_module._validate_node_graph(parents)
+    # A fresh 63-ancestor walk for each leaf needs far more than this generous
+    # per-node budget. Cached walks visit each parent relationship once.
+    assert lookups < 20 * len(ids)

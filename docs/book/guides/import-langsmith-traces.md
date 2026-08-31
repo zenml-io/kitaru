@@ -95,6 +95,12 @@ This is what makes "export the last 24 hours every night" safe. It also means th
 
 {% hint style="warning" %} Imported payloads contain whatever your runs contain: prompts, customer data, tool results. They are stored on your self-hosted server and parsed on your workers, but access and retention are yours to govern. {% endhint %}
 
+## Malformed records and depth limits
+
+Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Deeper trees, non-finite or negative costs, negative token counts, and payloads that cannot be serialized are reported as import failures. A normalization failure rejects the affected session, including any traces already grouped into it; unrelated sessions still import.
+
+Repeated run IDs within the same trace reject that trace before session grouping, including identical repeats. The same run ID in separate traces is allowed. A run that names itself as its parent is treated as a root.
+
 ## Next
 
 Evaluate the history you imported with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put your next change to the test with [Build a regression suite from production](regression-suite.md).

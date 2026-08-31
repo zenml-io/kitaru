@@ -15,6 +15,8 @@ The importer accepts Phoenix UI and CLI export shapes, preserves trace hierarchy
 
 See [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-your-traces) for the live import workflow. The [provider-specific guide in the Kitaru repository](https://github.com/zenml-io/kitaru/blob/develop/docs/book/guides/import-phoenix-traces.md) documents accepted Phoenix formats, deduplication behavior, and fidelity limits.
 
+Nested span paths support up to 64 levels, counting a root as level 1. Invalid costs, token counts, embedded JSON, and text that cannot serialize reject the affected trace; unrelated traces continue. Malformed indexed message keys are ignored while valid indexed messages remain available.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)

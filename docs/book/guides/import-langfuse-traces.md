@@ -64,6 +64,10 @@ Node identity works the same way inside a session: nodes upsert by index, so a r
 
 The importer contract is deliberately small, about a page of Python, and the shipped Langfuse importer is a reference implementation of it. See [No importer for your format](custom-importer.md) to scaffold, test, and register your own.
 
+## Malformed records and depth limits
+
+Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Deeper trees, non-finite or negative costs, negative token counts, and payloads that cannot be serialized are reported as import failures. A normalization failure rejects the affected session, including any traces already grouped into it; unrelated sessions still import.
+
 ## After the import
 
 Imported sessions are full Kitaru sessions: evaluate them with [evaluators](write-an-evaluator.md) (backfilling your history is a single batch call), freeze them into [cohorts](../concepts/cohorts.md), and [replay](replay-and-overrides.md) them. Replay re-runs your code, which no trace export contains, so the agent's code must be registered as an agent version with a run command.
