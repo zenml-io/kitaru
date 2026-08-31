@@ -33,6 +33,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Fixed boolean filters in the MCP list operations of `kitaru_registry_read`, `kitaru_activity_read`, and `kitaru_review_read`. An `and`, `or`, or `not` filter reached the SDK under its Python field name and was answered with `internal_error`; filters at any nesting depth now reach the Kitaru server, and an MCP request the handler cannot marshal is reported as `invalid_arguments` instead of a server-side fault.
 - Fixed `kitaru evaluator version register` and `kitaru importer version register`, which always failed with a `TypeError` after uploading the source. `POST /api/v1/evaluators/{evaluator_id}/versions` and `POST /api/v1/importers/{importer_id}/versions` now support idempotency keys, and the SDK `create_version` methods take an `idempotency_key` argument, matching agent and cohort version creation. The MCP evaluator management tool's `create_version` operation takes an optional `idempotency_key` field.
 
 ## [0.23.0]

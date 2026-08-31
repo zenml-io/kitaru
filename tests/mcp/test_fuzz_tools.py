@@ -131,38 +131,53 @@ def _self_referencing_defs(defs: dict[str, Any]) -> set[str]:
     return {name for name, targets in reachable.items() if name in targets}
 
 
-def _prune_refs(node: Any, cyclic: set[str]) -> Any:
-    """Drop every `$ref` to a named `$defs` entry out of the unions that offer it."""
+# `hypothesis_jsonschema` cannot follow a self-referencing `$ref`, so the boolean
+# filter recursion is unrolled into this many levels of depth-indexed `$defs`
+# copies. Two levels reach a boolean filter nested inside another one.
+_RECURSION_DEPTH = 2
+
+
+def _retarget_refs(node: Any, cyclic: set[str], level: int) -> Any:
+    """Point every `$ref` to a cyclic `$defs` entry at that entry's level copy.
+
+    Past the last level such a reference is dropped from the unions that offer
+    it, which terminates the unrolled recursion.
+    """
     if isinstance(node, list):
-        return [_prune_refs(item, cyclic) for item in node]
+        return [_retarget_refs(item, cyclic, level) for item in node]
     if not isinstance(node, dict):
         return node
-    assert _ref_name(node) not in cyclic, f"required reference to {_ref_name(node)}"
-    pruned: dict[str, Any] = {}
+    name = _ref_name(node)
+    if name in cyclic:
+        assert level < _RECURSION_DEPTH, f"required reference to {name}"
+        return {**node, "$ref": f"#/$defs/{name}__{level}"}
+    retargeted: dict[str, Any] = {}
     for key, value in node.items():
-        if key == "anyOf":
+        if key == "anyOf" and level >= _RECURSION_DEPTH:
             value = [option for option in value if _ref_name(option) not in cyclic]
             assert value, "every union branch pruned away"
-        pruned[key] = _prune_refs(value, cyclic)
-    return pruned
+        retargeted[key] = _retarget_refs(value, cyclic, level)
+    return retargeted
 
 
-def _drop_boolean_filters(schema: dict[str, Any]) -> dict[str, Any]:
-    # #908: an `and`/`or`/`not` filter node reaches the list handlers as its Python
-    # field name (`and_`), which the SDK's list params reject, so every boolean filter
-    # is answered with `internal_error`. Generate bare filter conditions only;
-    # `test_boolean_filter_reaches_the_sdk` pins the bug. Dropping these `$defs` also
-    # removes the schema's only self-references, which `hypothesis_jsonschema` cannot
-    # resolve.
+def _unroll_recursion(schema: dict[str, Any]) -> dict[str, Any]:
+    """Replace self-referencing `$defs` with a bounded chain of copies."""
     defs = schema.get("$defs", {})
     cyclic = _self_referencing_defs(defs)
     if not cyclic:
         return schema
-    kept = {name: body for name, body in defs.items() if name not in cyclic}
-    pruned = _prune_refs(
-        {key: value for key, value in schema.items() if key != "$defs"}, cyclic
+    kept = {
+        name: _retarget_refs(body, cyclic, 0)
+        for name, body in defs.items()
+        if name not in cyclic
+    }
+    for level in range(_RECURSION_DEPTH):
+        for name in cyclic:
+            kept[f"{name}__{level}"] = _retarget_refs(defs[name], cyclic, level + 1)
+    body = _retarget_refs(
+        {key: value for key, value in schema.items() if key != "$defs"}, cyclic, 0
     )
-    return {**pruned, "$defs": _prune_refs(kept, cyclic)}
+    return {**body, "$defs": kept}
 
 
 def _is_model_valid(name: str, request: object) -> bool:
@@ -177,7 +192,7 @@ def _is_model_valid(name: str, request: object) -> bool:
 
 @cache
 def _schema_strategy(name: str) -> st.SearchStrategy[Any]:
-    schema = _drop_boolean_filters(
+    schema = _unroll_recursion(
         _bound_free_json(request_adapter_for(name).json_schema())
     )
     return from_schema(schema, custom_formats=_FORMATS).filter(
@@ -356,7 +371,6 @@ def test_marker_in_an_echoed_annotation_value_comes_back_masked() -> None:
     assert body["data"]["value"] == {"note": "use KITKEY_*** now"}, body
 
 
-@pytest.mark.xfail(strict=True, reason="#908")
 def test_boolean_filter_reaches_the_sdk() -> None:
     """A boolean `filter` is a valid request, not a server-side fault."""
     server, context = server_context_for(CapabilityMode.READ_ONLY)

@@ -44,6 +44,7 @@ from kitaru.mcp.models.review import (
     TagLink,
     TagUpdate,
 )
+from kitaru.mcp.tools.params import build_list_params
 from kitaru.mcp.tools.registry import build_page_data
 
 _INFO_LOOKUP_MAX_SECONDS = 5.0
@@ -69,14 +70,13 @@ async def handle_review_read(
             request.investigation_id, params
         )
         return build_page_data(page, request.size, PageData[ReviewItem])
-    common = request.model_dump(include={"cursor", "size", "sort", "filter"})
     if request.kind == "investigation":
         page = await state.client.investigations.list(
-            InvestigationListParams.model_validate(common)
+            build_list_params(InvestigationListParams, request)
         )
     else:
         page = await state.client.annotations.list(
-            AnnotationListParams.model_validate(common)
+            build_list_params(AnnotationListParams, request)
         )
     return build_page_data(page, request.size, PageData[ReviewItem])
 
