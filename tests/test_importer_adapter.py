@@ -23,6 +23,7 @@ from typing import Any, cast
 import httpx
 import pytest
 
+from conftest import imported_node, imported_session
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -30,8 +31,6 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import (
-    NodeStatus,
-    NodeType,
     SessionNodeBatchRequest,
 )
 from kitaru.client.api_client import KitaruAPIClient
@@ -39,45 +38,15 @@ from kitaru.client.exceptions import APIError
 from kitaru.importer_adapter import ImporterBackedAdapter
 from kitaru.task.importer import (
     ImportedItem,
-    ImportedNode,
-    ImportedSession,
     Parser,
     SessionImportError,
 )
 
 
-def _node(name: str) -> ImportedNode:
-    return ImportedNode(
-        node_type=NodeType.LLM_CALL,
-        name=name,
-        status=NodeStatus.COMPLETED,
-        inputs=None,
-        outputs=None,
-        attributes=None,
-    )
-
-
-def _parsed_session(
-    external_id: str, nodes: list[ImportedNode] | None = None
-) -> ImportedSession:
-    return ImportedSession(
-        status=SessionStatus.COMPLETED,
-        name=external_id,
-        inputs=None,
-        outputs=None,
-        error=None,
-        started_at=None,
-        ended_at=None,
-        external_id=external_id,
-        metadata={},
-        nodes=nodes or [],
-    )
-
-
 def _single_session_parser(
     payload: bytes, params: dict[str, Any]
 ) -> Iterator[ImportedItem]:
-    yield _parsed_session("trace-1", nodes=[_node("call-1")])
+    yield imported_session("trace-1", nodes=[imported_node("call-1")])
 
 
 def _empty_parser(payload: bytes, params: dict[str, Any]) -> Iterator[ImportedItem]:
@@ -87,8 +56,8 @@ def _empty_parser(payload: bytes, params: dict[str, Any]) -> Iterator[ImportedIt
 def _two_session_parser(
     payload: bytes, params: dict[str, Any]
 ) -> Iterator[ImportedItem]:
-    yield _parsed_session("trace-1")
-    yield _parsed_session("trace-2")
+    yield imported_session("trace-1")
+    yield imported_session("trace-2")
 
 
 def _failure_parser(payload: bytes, params: dict[str, Any]) -> Iterator[ImportedItem]:

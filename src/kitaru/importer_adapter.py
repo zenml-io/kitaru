@@ -144,13 +144,13 @@ class ImporterBackedAdapter:
             await self._create_timed_out_session(external_id)
             return
         payload = await self.fetch(external_id)
-        items = list(call_parser(self.parser, payload, {}))
-        for item in items:
+        sessions: list[ImportedSession] = []
+        for item in call_parser(self.parser, payload, {}):
             if isinstance(item, ImportFailure):
                 raise SessionImportError(
                     f"Parser failed on trace {external_id}: {item.error}"
                 )
-        sessions = [item for item in items if isinstance(item, ImportedSession)]
+            sessions.append(item)
         if len(sessions) != 1:
             raise SessionImportError(
                 f"Parser yielded {len(sessions)} sessions for trace "

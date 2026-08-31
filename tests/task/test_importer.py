@@ -34,13 +34,13 @@ from conftest import (
     create_blob,
     create_import_task,
     create_job,
+    imported_node,
+    imported_session,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportFailure, ImportStats
 from kitaru.api_models.v1.session import SessionListParams, SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import (
-    NodeStatus,
-    NodeType,
     SessionNodeListParams,
 )
 from kitaru.client.exceptions import APIError
@@ -49,7 +49,6 @@ from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
     MAX_IMPORT_FAILURES,
     NODE_BATCH_SIZE,
-    ImportedNode,
     ImportedSession,
     SessionImportError,
     call_parser,
@@ -66,35 +65,6 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
         yield value
 
 
-def _node(name: str, children: list[ImportedNode] | None = None) -> ImportedNode:
-    return ImportedNode(
-        node_type=NodeType.LLM_CALL,
-        name=name,
-        status=NodeStatus.COMPLETED,
-        inputs=None,
-        outputs=None,
-        attributes=None,
-        children=children or [],
-    )
-
-
-def _parsed_session(
-    external_id: str, nodes: list[ImportedNode] | None = None
-) -> ImportedSession:
-    return ImportedSession(
-        status=SessionStatus.COMPLETED,
-        name=external_id,
-        inputs=None,
-        outputs=None,
-        error=None,
-        started_at=None,
-        ended_at=None,
-        external_id=external_id,
-        metadata={},
-        nodes=nodes or [],
-    )
-
-
 def test_call_parser_is_lazy() -> None:
     """Not advance the parser until the caller iterates."""
     started = False
@@ -102,7 +72,7 @@ def test_call_parser_is_lazy() -> None:
     def parser(payload: bytes, params: dict) -> Any:
         nonlocal started
         started = True
-        yield _parsed_session("a")
+        yield imported_session("a")
 
     iterator = call_parser(parser, b"", {})
     assert started is False
@@ -125,7 +95,7 @@ def test_call_parser_wraps_mid_stream_crash() -> None:
     """Yield items until the parser crashes, then wrap the crash."""
 
     def parser(payload: bytes, params: dict) -> Any:
-        yield _parsed_session("a")
+        yield imported_session("a")
         raise ValueError("boom")
 
     iterator = call_parser(parser, b"", {})
@@ -148,14 +118,14 @@ def test_call_parser_rejects_unknown_item() -> None:
 def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
     """Assign indexes and parent indexes in depth-first order."""
     tree = [
-        _node(
+        imported_node(
             "root",
             children=[
-                _node("child-1", children=[_node("grandchild")]),
-                _node("child-2"),
+                imported_node("child-1", children=[imported_node("grandchild")]),
+                imported_node("child-2"),
             ],
         ),
-        _node("second-root"),
+        imported_node("second-root"),
     ]
     flattened = flatten_nodes(tree)
     by_name = {request.name: request for request in flattened}
@@ -171,8 +141,8 @@ def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
 def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
     """Keep the flat Kitaru JSONL node representation unchanged."""
     nodes = [
-        _node("child").model_copy(update={"index": 7, "parent_index": 4}),
-        _node("root").model_copy(update={"index": 4}),
+        imported_node("child").model_copy(update={"index": 7, "parent_index": 4}),
+        imported_node("root").model_copy(update={"index": 4}),
     ]
 
     flattened = flatten_nodes(nodes)
