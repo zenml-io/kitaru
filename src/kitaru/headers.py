@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Kitaru request headers."""
 
+import uuid
 from importlib.metadata import version
 
 from kitaru.analytics.source import AnalyticsSource
@@ -21,13 +22,21 @@ CLIENT_HEADER = "X-Kitaru-Client"
 SKILL_HEADER = "X-Kitaru-Skill"
 
 
-def format_client_header(source: AnalyticsSource) -> str:
+def format_client_header(
+    source: AnalyticsSource, analytics_id: uuid.UUID | None = None
+) -> str:
     """Format the client identification header value.
 
     Args:
         source: Client sending the requests.
+        analytics_id: Anonymous analytics id, appended as a third segment
+            when given.
 
     Returns:
-        ``<source>/<version>`` header value.
+        ``<source>/<version>`` header value, or ``<source>/<version>/<analytics_id>``
+        when an analytics id is given.
     """
-    return f"{source.value}/{version('kitaru')}"
+    value = f"{source.value}/{version('kitaru')}"
+    if analytics_id is not None:
+        value = f"{value}/{analytics_id}"
+    return value

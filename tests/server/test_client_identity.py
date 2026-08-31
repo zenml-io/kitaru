@@ -13,6 +13,8 @@
 #  permissions and limitations under the License.
 """Tests for client identification parsing."""
 
+import uuid
+
 from kitaru.analytics.source import AnalyticsSource
 from kitaru.server.client_identity import parse_client_identity
 
@@ -23,6 +25,7 @@ def test_parse_client_identity() -> None:
     assert identity is not None
     assert identity.source is AnalyticsSource.PYTHON
     assert identity.version == "0.21.0"
+    assert identity.analytics_id is None
 
 
 def test_parse_client_identity_without_a_version() -> None:
@@ -38,3 +41,21 @@ def test_parse_client_identity_rejects_unknown_clients() -> None:
     assert parse_client_identity("") is None
     assert parse_client_identity("curl/8.0") is None
     assert parse_client_identity("python-httpx/0.27.0") is None
+
+
+def test_parse_client_identity_with_an_analytics_id() -> None:
+    """Read the analytics id out of the third segment."""
+    analytics_id = uuid.uuid4()
+
+    identity = parse_client_identity(f"kitaru-python/0.21.0/{analytics_id}")
+
+    assert identity is not None
+    assert identity.analytics_id == analytics_id
+
+
+def test_parse_client_identity_with_an_invalid_analytics_id() -> None:
+    """Report no analytics id for a third segment that is not a UUID."""
+    identity = parse_client_identity("kitaru-python/0.21.0/not-a-uuid")
+
+    assert identity is not None
+    assert identity.analytics_id is None
