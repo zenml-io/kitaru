@@ -33,6 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Unified CLI and MCP credential masking, including plural credential fields, while preserving numeric token usage. Output now preserves colliding mapping keys and safely bounds deep or cyclic data.
+- LangGraph capture now marks mapping-key coercion and collisions as non-replayable. Tool-result encoding preserves nested tuples, and replay rejects missing message status and malformed stored outcomes without running the live tool.
 - Fixed `kitaru evaluator version register` and `kitaru importer version register`, which always failed with a `TypeError` after uploading the source. `POST /api/v1/evaluators/{evaluator_id}/versions` and `POST /api/v1/importers/{importer_id}/versions` now support idempotency keys, and the SDK `create_version` methods take an `idempotency_key` argument, matching agent and cohort version creation. The MCP evaluator management tool's `create_version` operation takes an optional `idempotency_key` field.
 
 ## [0.23.0]

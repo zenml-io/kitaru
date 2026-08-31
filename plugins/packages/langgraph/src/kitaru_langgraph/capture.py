@@ -239,6 +239,10 @@ def _convert(
                     reasons.append("max_field_bytes")
                     break
                 output_key = str(key)
+                if not isinstance(key, str):
+                    reasons.append("non_string_key")
+                if output_key in result:
+                    reasons.append("key_collision")
                 if _key_is_sensitive(key):
                     work_remaining[0] -= 1
                     reasons.append("sensitive_key_redacted")

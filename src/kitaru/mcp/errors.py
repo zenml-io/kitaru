@@ -81,13 +81,27 @@ def error_result(result_type: type[ToolResult], error: BaseException) -> ToolRes
 
 def protocol_result(envelope: ToolResult) -> CallToolResult:
     """Render identical redacted canonical JSON as structured and text content."""
-    dumped = envelope.model_dump(mode="json")
-    structured = cast(dict[str, JsonValue], redact_data(dumped))
+    structured = redact_data(envelope)
+    if not isinstance(structured, dict):
+        # Whole-model normalization can fail before yielding any safe fields.
+        structured = {
+            "schema_version": "1",
+            "ok": False,
+            "data": None,
+            "warnings": [],
+            "error": {
+                "code": "internal_error",
+                "message": "The MCP result could not be serialized.",
+                "retryable": False,
+                "details": None,
+                "recovery": None,
+            },
+        }
     text = json.dumps(structured, sort_keys=True, separators=(",", ":"))
     return CallToolResult(
         content=[TextContent(type="text", text=text)],
         structured_content=structured,
-        is_error=not envelope.ok,
+        is_error=not structured["ok"],
     )
 
 

@@ -1,8 +1,12 @@
 #  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
 """Settings precedence, stable error mapping, and redaction tests."""
 
+import json
+from typing import Any
+
 import httpx
 import pytest
+from mcp.types import TextContent
 from pydantic import ValidationError
 
 from kitaru.analytics.source import AnalyticsSource
@@ -10,8 +14,65 @@ from kitaru.client.exceptions import APIError
 from kitaru.mcp import connection as mcp_connection
 from kitaru.mcp import server as mcp_server
 from kitaru.mcp.connection import ConnectionConfigurationError, MCPConnection
-from kitaru.mcp.errors import MCPOutputValidationError, MCPToolError, map_exception
+from kitaru.mcp.errors import (
+    MCPOutputValidationError,
+    MCPToolError,
+    map_exception,
+    protocol_result,
+)
+from kitaru.mcp.models.common import ToolResult
 from kitaru.mcp.settings import CapabilityMode, MCPSettings
+
+
+def test_protocol_preserves_model_mapping_keys() -> None:
+    """Model conversion must not erase distinct keys before redaction."""
+
+    class MappingResult(ToolResult):
+        data: Any = None
+
+    result = protocol_result(MappingResult(ok=True, data={1: "first", "1": "second"}))
+    structured = result.structured_content
+    assert structured is not None
+    assert len(structured["data"]) == 2
+    assert set(structured["data"].values()) == {"first", "second"}
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    assert json.loads(content.text) == structured
+
+
+def test_protocol_contains_model_serialization_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed model conversion returns a safe MCP error, never a raw cause."""
+
+    def fail_dump(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise ValueError("Bearer raw-secret")
+
+    monkeypatch.setattr(ToolResult, "model_dump", fail_dump)
+    result = protocol_result(ToolResult(ok=True, data={"value": "raw-secret"}))
+    assert result.is_error is True
+    structured = result.structured_content
+    assert structured is not None
+    assert structured["ok"] is False
+    assert structured["error"]["code"] == "internal_error"
+    assert "raw-secret" not in json.dumps(structured)
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    assert json.loads(content.text) == structured
+
+
+def test_protocol_contains_deep_model_data() -> None:
+    """Model serialization and JSON encoding both stay within safe bounds."""
+    value: Any = {"password": "deep-secret"}
+    for _ in range(3000):
+        value = {"nested": value}
+    envelope = ToolResult.model_construct(ok=True, data=value)
+    result = protocol_result(envelope)
+    assert result.structured_content is not None
+    content = result.content[0]
+    assert isinstance(content, TextContent)
+    assert json.loads(content.text) == result.structured_content
+    assert "deep-secret" not in content.text
 
 
 def test_settings_default_and_explicit_over_environment_precedence() -> None:

@@ -2,7 +2,7 @@
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import overload
+from typing import Any, overload
 
 import pytest
 
@@ -57,6 +57,43 @@ def test_capture_custom_redactor_marks_result_as_lossy() -> None:
     assert captured.value == {"private": "removed"}
     assert not captured.replayable
     assert captured.reasons == ("custom_redactor",)
+
+
+@pytest.mark.parametrize("key", [1, True, (1,)])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_capture_marks_nested_key_collisions_as_lossy(key: Any, reverse: bool) -> None:
+    items = [(key, "first"), (str(key), "second")]
+    if reverse:
+        items.reverse()
+    mapping = dict(items)
+
+    captured = capture_value({"nested": [mapping, mapping]}, CapturePolicy())
+
+    assert captured.value == {"nested": [{str(key): items[-1][1]}] * 2}
+    assert set(captured.reasons) == {"non_string_key", "key_collision"}
+    assert len(captured.reasons) == 2
+    assert captured.lossy and not captured.replayable
+    assert not captured.truncated
+    assert list(mapping.items()) == items
+
+
+@pytest.mark.parametrize("key", [1, True, (1,)])
+def test_capture_marks_noncolliding_key_coercion_as_lossy(key: Any) -> None:
+    captured = capture_value({key: "kept"}, CapturePolicy())
+
+    assert captured.value == {str(key): "kept"}
+    assert captured.reasons == ("non_string_key",)
+    assert not captured.replayable
+
+
+def test_capture_preserves_ordinary_string_mapping() -> None:
+    value = {"nested": [{"count": 1, "enabled": True}]}
+
+    captured = capture_value(value, CapturePolicy())
+
+    assert captured.value == value
+    assert captured.replayable
+    assert not captured.reasons
 
 
 @dataclass

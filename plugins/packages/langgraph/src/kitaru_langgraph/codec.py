@@ -94,7 +94,12 @@ def _encode_nested(
                 if work_remaining[0] <= 0:
                     reasons.append("max_field_bytes")
                     break
-                encoded[str(key)] = _encode_nested(
+                output_key = str(key)
+                if not isinstance(key, str):
+                    reasons.append("non_string_key")
+                if output_key in encoded:
+                    reasons.append("key_collision")
+                encoded[output_key] = _encode_nested(
                     item,
                     policy=policy,
                     depth=depth + 1,
@@ -138,6 +143,8 @@ def _encode_nested(
                         work_remaining=work_remaining,
                     )
                 )
+            if isinstance(value, tuple):
+                return {_NESTED_TYPE: "tuple", _NESTED_VALUE: encoded_items}
             return encoded_items
         finally:
             active_ids.remove(identity)
@@ -169,12 +176,23 @@ def _decode_nested(value: Any, *, tool_call_id: str, tool_name: str) -> Any:
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
             )
+        if nested_type == "tuple":
+            nested_value = value.get(_NESTED_VALUE)
+            if not isinstance(nested_value, list):
+                raise ToolPolicyError("Stored nested tuple payload is malformed")
+            return tuple(
+                _decode_nested(item, tool_call_id=tool_call_id, tool_name=tool_name)
+                for item in nested_value
+            )
         if nested_type == "tool_message":
             fields = _decode_mapping(
                 {key: item for key, item in value.items() if key != _NESTED_TYPE},
                 tool_call_id=tool_call_id,
                 tool_name=tool_name,
             )
+            status = fields.get("status")
+            if status not in ("success", "error"):
+                raise ToolPolicyError("Stored ToolMessage status is malformed")
             return ToolMessage(
                 content=fields.get("content"),
                 additional_kwargs=dict(fields.get("additional_kwargs") or {}),
@@ -183,7 +201,7 @@ def _decode_nested(value: Any, *, tool_call_id: str, tool_name: str) -> Any:
                 id=fields.get("id"),
                 tool_call_id=tool_call_id,
                 artifact=fields.get("artifact"),
-                status=fields.get("status", "success"),
+                status=status,
             )
         if nested_type is not None:
             raise ToolPolicyError("Stored nested value type is unsupported")
@@ -269,15 +287,15 @@ def decode_tool_outcome(
     tool_name: str,
 ) -> ToolMessage | Command[Any]:
     """Decode one exact tagged outcome and remap current call identity."""
-    if not isinstance(value, Mapping) or value.get("schema") != TOOL_OUTCOME_SCHEMA:
-        raise ToolPolicyError("Stored tool result has an unknown envelope")
-    if value.get("replayable") is not True:
-        raise ToolPolicyError("Stored tool result is not replayable")
-    payload = value.get("payload")
-    if not isinstance(payload, Mapping):
-        raise ToolPolicyError("Stored tool result payload is malformed")
-    kind = value.get("kind")
     try:
+        if not isinstance(value, Mapping) or value.get("schema") != TOOL_OUTCOME_SCHEMA:
+            raise ToolPolicyError("Stored tool result has an unknown envelope")
+        if value.get("replayable") is not True:
+            raise ToolPolicyError("Stored tool result is not replayable")
+        payload = value.get("payload")
+        if not isinstance(payload, Mapping):
+            raise ToolPolicyError("Stored tool result payload is malformed")
+        kind = value.get("kind")
         if kind == "tool_message":
             decoded = _decode_nested(
                 payload, tool_call_id=tool_call_id, tool_name=tool_name
@@ -286,27 +304,33 @@ def decode_tool_outcome(
                 raise ToolPolicyError("Stored ToolMessage payload is malformed")
             return decoded
         if kind == "command":
+            required_fields = ("graph", "update", "resume", "goto")
+            if not all(field in payload for field in required_fields):
+                raise ToolPolicyError("Stored Command payload is malformed")
             return Command(
-                graph=cast(str | None, payload.get("graph")),
+                graph=cast(str | None, payload["graph"]),
                 update=_decode_nested(
-                    payload.get("update"),
+                    payload["update"],
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
                 ),
                 resume=_decode_nested(
-                    payload.get("resume"),
+                    payload["resume"],
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
                 ),
                 goto=_decode_nested(
-                    payload.get("goto", ()),
+                    payload["goto"],
                     tool_call_id=tool_call_id,
                     tool_name=tool_name,
                 ),
             )
-    except (TypeError, ValueError) as exc:
-        raise ToolPolicyError("Stored tool result payload is malformed") from exc
-    raise ToolPolicyError("Stored tool result kind is unsupported")
+        raise ToolPolicyError("Stored tool result kind is unsupported")
+    except ToolPolicyError:
+        raise
+    except Exception:
+        # Validation and custom mappings can include stored secrets in their errors.
+        raise ToolPolicyError("Stored tool result payload is malformed") from None
 
 
 def coerce_static_tool_result(
