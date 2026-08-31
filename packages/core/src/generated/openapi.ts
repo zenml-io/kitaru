@@ -10400,7 +10400,9 @@ export interface operations {
     create_evaluator_version_api_v1_evaluators__evaluator_id__versions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 evaluator_id: string;
             };
@@ -11083,7 +11085,9 @@ export interface operations {
     create_importer_version_api_v1_importers__importer_id__versions_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+            };
             path: {
                 importer_id: string;
             };
