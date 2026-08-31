@@ -8,6 +8,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 
 | Directory | Distribution | Contents |
 |---|---|---|
+| `braintrust` | `kitaru-braintrust` | Braintrust importer-backed adapter |
 | `braintrust-importer` | `kitaru-braintrust-importer` | Braintrust importer |
 | `evaluator` | `kitaru-evaluator` | All built-in evaluators |
 | `jsonl-importer` | `kitaru-jsonl-importer` | Kitaru JSONL importer |

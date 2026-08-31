@@ -6,6 +6,8 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-braintrust = { workspace = true }
+kitaru-braintrust-importer = { workspace = true }
 kitaru-langfuse = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
@@ -15,6 +17,7 @@ kitaru-pydantic-ai = { workspace = true }
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "kitaru-braintrust",
     "kitaru-langfuse",
     "kitaru-langgraph[deepagents]",
     "kitaru-openai-agents",
@@ -41,6 +44,7 @@ convention = "google"
 known-first-party = [
     "kitaru",
     "kitaru_evaluator",
+    "kitaru_braintrust",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",
     "kitaru_langfuse",
