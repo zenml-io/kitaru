@@ -200,8 +200,9 @@ async def start_run(
     cohort version, or the resolved agent version does not exist, 409 when
     the baseline evaluation mode is not none and a cohort version session
     is not finished, and 422 when the cohort version has no sessions, the
-    cohort version or agent version belongs to another agent, or the
-    resolved agent version has no run spec.
+    cohort version or agent version belongs to another agent, the resolved
+    agent version has no run spec, or the config carries an override or
+    tool policy the agent version's replay capabilities do not declare.
 
     Args:
         experiment_id: Id of the experiment.

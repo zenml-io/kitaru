@@ -61,8 +61,9 @@ async def create_replay(
     when the baseline evaluation mode is not none and the baseline session
     is not finished, and 422 when the baseline session carries no agent
     version and none was given, the resolved agent version has no run spec,
-    the tool policy uses cohort-version-scoped history, or an evaluator
-    version repeats.
+    the tool policy uses cohort-version-scoped history, the config carries
+    an override or tool policy the agent version's replay capabilities do
+    not declare, or an evaluator version repeats.
 
     Args:
         body: Replay create request.
