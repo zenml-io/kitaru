@@ -44,3 +44,15 @@ Hypothesis tests live next to the surface they cover: `plugins/tests/importers/t
 Three profiles are registered in each root's `conftest.py` and selected with `HYPOTHESIS_PROFILE`: `dev` (100 examples, default locally), `ci` (50 examples, fixed seed; default when `CI` is set, so PR runs are deterministic), and `nightly` (2000 examples, random; used by `just fuzz` and the `fuzz-nightly` workflow — `fuzz-importers` covers the plugins-tree property files and `fuzz-mcp` the core-tree ones, so all four files run nightly). `@given` tests are sync; call async code with `asyncio.run` inside the body.
 
 Known bugs are pinned with `@pytest.mark.xfail(strict=True, reason="<issue>")` example tests, and the generators exclude the matching input class with a comment naming the same issue. Fixing the bug makes the xfail fail; remove the marker and the generator exclusion in the same PR. Failing examples are saved under `.hypothesis/examples` and replayed first on the next run.
+
+## API fuzzing
+
+`tests/server/test_fuzz_api.py` generates requests from `openapi/openapi.json` with Schemathesis and sends them to the real app. Opt in with `KITARU_FUZZ=1` (the suite skips otherwise) and start the database first with `docker compose up -d db`; `just fuzz-api` runs the deep nightly configuration. The `fuzz` dependency group carries `schemathesis`, so run under `uv run --extra server --group fuzz`.
+
+`tests/server/fuzz_server.py` boots one real server per session on its own disposable database, with real Alembic migrations and a real bearer token from `POST /api/v1/login`. It runs under uvicorn in a background thread rather than an in-process ASGI transport, because those transports rerun the lifespan — migrations included — for every generated example. An ASGI wrapper records unhandled exceptions so a failure names the exception and not just the endpoint; a 500 body carries no detail on its own.
+
+The only assertion is that the server never answers 5xx. One database is shared for the whole session, so an earlier operation's rows are visible to a later one, which makes "was this input rejected?" depend on run order while leaving "did the server crash?" well-posed. Schemathesis's `negative_data_rejection` is therefore deliberately not run. Negative generation is still on, so schema-violating input is still sent; only the rejection assertion is dropped.
+
+Known defects are listed in `KNOWN_FAILURES` keyed by method and path, with the issue number as the reason, and skip rather than mask everything behind them in the same operation. Delete an entry as part of closing its issue. `test_response_matches_schema` is gated behind `KITARU_FUZZ_SCHEMA_CONFORMANCE` until #930 lands, because every hand-raised 422 currently violates its own documented schema.
+
+`KITARU_FUZZ_MAX_EXAMPLES` sets depth (default 25) and `KITARU_FUZZ_RANDOM=1` turns off `derandomize` so a nightly explores fresh inputs; the default stays derandomized so a failure reproduces. `KITARU_FUZZ_CAPTURE` writes captured tracebacks to a JSONL file. Findings scale steeply with depth, so prefer nightly depth over a shallow gate.

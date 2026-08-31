@@ -91,7 +91,7 @@ test *ARGS:
     uv run pytest {{ ARGS }}
 
 # Run all property tests with the heavy nightly profile
-fuzz: fuzz-importers fuzz-mcp
+fuzz: fuzz-importers fuzz-mcp fuzz-api
 
 # Heavy property-test run for the plugins tree (importer parse() contract, LangGraph capture)
 fuzz-importers:
@@ -100,6 +100,10 @@ fuzz-importers:
 # Heavy property-test run for the core tree (MCP tool boundary, credential redaction)
 fuzz-mcp:
     HYPOTHESIS_PROFILE=nightly uv run --extra server --extra cli --extra mcp pytest tests/mcp/test_fuzz_tools.py tests/cli/test_redaction_properties.py --hypothesis-show-statistics
+
+# Heavy API fuzzing run against a live server (requires docker compose up -d db)
+fuzz-api:
+    KITARU_FUZZ=1 KITARU_FUZZ_RANDOM=1 KITARU_FUZZ_MAX_EXAMPLES=400 uv run --extra server --group fuzz pytest tests/server/test_fuzz_api.py -p no:randomly --hypothesis-show-statistics
 
 # Check Alembic migrations against the ORM schema (requires docker compose up -d db)
 migration-check:
