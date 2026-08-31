@@ -16,8 +16,9 @@
 import uuid
 from datetime import datetime
 from enum import StrEnum
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import (
     OwnedResponseModel,
@@ -25,6 +26,7 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 
 
 class ExperimentRunStatus(StrEnum):
@@ -56,8 +58,29 @@ class ExperimentRunCreateRequest(RequestModel):
     )
     agent_version_id: uuid.UUID = Field(description="Agent version to replay with.")
     evaluate_baselines: bool = Field(
-        default=False, description="Whether to also score each baseline session."
+        default=False,
+        deprecated="Use baseline_evaluation_mode instead.",
+        description="Whether to also score each baseline session.",
     )
+    baseline_evaluation_mode: BaselineEvaluationMode | None = Field(
+        default=None, description="How to score each baseline session."
+    )
+
+    @model_validator(mode="after")
+    def _evaluate_baselines_xor_mode(self) -> Self:
+        """Forbid setting both evaluate_baselines and baseline_evaluation_mode.
+
+        Raises:
+            ValueError: Both fields were explicitly set.
+
+        Returns:
+            The validated request.
+        """
+        if {"evaluate_baselines", "baseline_evaluation_mode"} <= self.model_fields_set:
+            raise ValueError(
+                "evaluate_baselines and baseline_evaluation_mode are mutually exclusive"
+            )
+        return self
 
 
 class ExperimentRunListParams(FilterableListParams):
@@ -80,7 +103,11 @@ class ExperimentRunResponse(OwnedResponseModel):
     )
     agent_version_id: uuid.UUID = Field(description="Agent version to replay with.")
     evaluate_baselines: bool = Field(
-        description="Whether baseline sessions are also scored."
+        deprecated="Use baseline_evaluation_mode instead.",
+        description="Whether baseline sessions are also scored.",
+    )
+    baseline_evaluation_mode: BaselineEvaluationMode = Field(
+        description="How baseline sessions are scored."
     )
     started_at: datetime | None = Field(
         default=None, description="Time the run started."

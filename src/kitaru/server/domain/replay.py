@@ -18,7 +18,7 @@ from datetime import datetime
 
 from pydantic import Field
 
-from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -126,7 +126,7 @@ class Replay(DomainModel):
     replay_config_id: uuid.UUID
     baseline_session_id: uuid.UUID
     result_session_id: uuid.UUID | None = None
-    evaluate_baselines: bool = False
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE
     status: ReplayStatus = ReplayStatus.PENDING
     error: str | None = None
     created: datetime | None = None

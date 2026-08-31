@@ -2791,6 +2791,16 @@
     "name": "kitaru_activity_read",
     "outputSchema": {
       "$defs": {
+        "BaselineEvaluationMode": {
+          "description": "Baseline evaluation mode.",
+          "enum": [
+            "none",
+            "if_missing",
+            "force"
+          ],
+          "title": "BaselineEvaluationMode",
+          "type": "string"
+        },
         "EvaluationDataType": {
           "description": "Data type an evaluation result carries.",
           "enum": [
@@ -3055,6 +3065,10 @@
               "title": "Agent Version Id",
               "type": "string"
             },
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode",
+              "description": "How baseline sessions are scored."
+            },
             "cohort_version_id": {
               "description": "Cohort version whose sessions are replayed.",
               "format": "uuid",
@@ -3095,6 +3109,7 @@
               "title": "Error"
             },
             "evaluate_baselines": {
+              "deprecated": true,
               "description": "Whether baseline sessions are also scored.",
               "title": "Evaluate Baselines",
               "type": "boolean"
@@ -3162,6 +3177,7 @@
             "cohort_version_id",
             "agent_version_id",
             "evaluate_baselines",
+            "baseline_evaluation_mode",
             "progress"
           ],
           "title": "ExperimentRunResponse",
@@ -3445,6 +3461,10 @@
         "ReplayResponse": {
           "description": "Replay response.",
           "properties": {
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode",
+              "description": "How the baseline session is scored."
+            },
             "baseline_session_id": {
               "description": "Session replayed.",
               "format": "uuid",
@@ -3471,6 +3491,7 @@
               "title": "Error"
             },
             "evaluate_baselines": {
+              "deprecated": true,
               "description": "Whether the baseline session is also scored.",
               "title": "Evaluate Baselines",
               "type": "boolean"
@@ -3565,6 +3586,7 @@
             "tool_policy",
             "evaluators",
             "evaluate_baselines",
+            "baseline_evaluation_mode",
             "status"
           ],
           "title": "ReplayResponse",
@@ -9364,6 +9386,16 @@
     "description": "Start an evaluation batch or experiment run and return immediately.",
     "inputSchema": {
       "$defs": {
+        "BaselineEvaluationMode": {
+          "description": "Baseline evaluation mode.",
+          "enum": [
+            "none",
+            "if_missing",
+            "force"
+          ],
+          "title": "BaselineEvaluationMode",
+          "type": "string"
+        },
         "EvaluationStart": {
           "additionalProperties": false,
           "description": "Start one bounded evaluation batch.",
@@ -9450,15 +9482,14 @@
               "title": "Agent Version Id",
               "type": "string"
             },
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode",
+              "default": "none"
+            },
             "cohort_version_id": {
               "format": "uuid",
               "title": "Cohort Version Id",
               "type": "string"
-            },
-            "evaluate_baselines": {
-              "default": false,
-              "title": "Evaluate Baselines",
-              "type": "boolean"
             },
             "experiment_id": {
               "format": "uuid",
@@ -9523,6 +9554,16 @@
     "name": "kitaru_workflow_start",
     "outputSchema": {
       "$defs": {
+        "BaselineEvaluationMode": {
+          "description": "Baseline evaluation mode.",
+          "enum": [
+            "none",
+            "if_missing",
+            "force"
+          ],
+          "title": "BaselineEvaluationMode",
+          "type": "string"
+        },
         "EvaluationSelectionReceipt": {
           "additionalProperties": false,
           "description": "Resolved evaluator identity used by an evaluation batch.",
@@ -9641,6 +9682,10 @@
               "title": "Agent Version Id",
               "type": "string"
             },
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode",
+              "description": "How baseline sessions are scored."
+            },
             "cohort_version_id": {
               "description": "Cohort version whose sessions are replayed.",
               "format": "uuid",
@@ -9681,6 +9726,7 @@
               "title": "Error"
             },
             "evaluate_baselines": {
+              "deprecated": true,
               "description": "Whether baseline sessions are also scored.",
               "title": "Evaluate Baselines",
               "type": "boolean"
@@ -9748,6 +9794,7 @@
             "cohort_version_id",
             "agent_version_id",
             "evaluate_baselines",
+            "baseline_evaluation_mode",
             "progress"
           ],
           "title": "ExperimentRunResponse",
@@ -9762,14 +9809,13 @@
               "title": "Agent Version Id",
               "type": "string"
             },
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode"
+            },
             "cohort_version_id": {
               "format": "uuid",
               "title": "Cohort Version Id",
               "type": "string"
-            },
-            "evaluate_baselines": {
-              "title": "Evaluate Baselines",
-              "type": "boolean"
             },
             "experiment_id": {
               "format": "uuid",
@@ -9790,7 +9836,7 @@
             "experiment_id",
             "cohort_version_id",
             "agent_version_id",
-            "evaluate_baselines",
+            "baseline_evaluation_mode",
             "result"
           ],
           "title": "ExperimentRunStartReceipt",

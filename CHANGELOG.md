@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
 - Added Hypothesis property tests for the importer `parse()` contract, the MCP tool boundary, and credential redaction, plus a nightly `fuzz-nightly` workflow that runs them with a larger example budget and a cached example database.
 - Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
+- Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
 
 ### Changed
 

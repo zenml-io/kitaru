@@ -46,6 +46,7 @@ from pydantic_ai.models.test import TestModel
 
 import kitaru_pydantic_ai.capability as capability_module
 from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
     ReplayResponse,
     ReplayStatus,
     ToolLookupMatch,
@@ -216,6 +217,7 @@ def _replay_spec(
             tool_policy=ToolPolicy(default=policy, tools=tools or {}),
             evaluators=[],
             evaluate_baselines=False,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
             status=ReplayStatus.PENDING,
             error=None,
             created=now,

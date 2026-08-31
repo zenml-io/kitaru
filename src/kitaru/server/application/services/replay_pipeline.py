@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Sequence
 
 from kitaru.api_models.v1.job import JobKind, JobStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.events import (
     EventDispatcher,
@@ -45,7 +46,7 @@ async def create_replay_pipelines(
     baselines: Sequence[Session],
     agent_version_id: uuid.UUID,
     config: ReplayConfig,
-    evaluate_baselines: bool,
+    baseline_evaluation_mode: BaselineEvaluationMode,
     experiment_run_id: uuid.UUID | None,
     actor: AuthContext,
     replay_repository: ReplayRepository,
@@ -56,15 +57,16 @@ async def create_replay_pipelines(
     """Create many replays' jobs, initial tasks, and replay rows in three bulk writes.
 
     Each agent task carries its baseline session's inputs and the agent
-    version as a label. With ``evaluate_baselines``, one baseline evaluator
-    task is appended per evaluator that has not already scored the baseline
-    session.
+    version as a label. With ``baseline_evaluation_mode`` other than
+    ``NONE``, one baseline evaluator task is appended per evaluator, skipping
+    evaluators that already scored the baseline session under
+    ``IF_MISSING``.
 
     Args:
         baselines: Sessions being replayed.
         agent_version_id: Agent version to replay with.
         config: Replay config every created replay points at.
-        evaluate_baselines: Whether to also score the baseline sessions.
+        baseline_evaluation_mode: How to score the baseline sessions.
         experiment_run_id: Run the replays belong to, ``None`` for
             standalone replays.
         actor: Caller context.
@@ -74,14 +76,15 @@ async def create_replay_pipelines(
         payload_store: Payload store, for the baseline sessions' inputs.
 
     Raises:
-        SessionNotEvaluatable: ``evaluate_baselines`` is set and a baseline
-            session is in progress.
+        SessionNotEvaluatable: ``baseline_evaluation_mode`` is not ``NONE``
+            and a baseline session is in progress.
 
     Returns:
         Created replays, in baseline order.
     """
     if not baselines:
         return []
+    evaluate_baselines = baseline_evaluation_mode is not BaselineEvaluationMode.NONE
     if evaluate_baselines:
         for baseline in baselines:
             baseline.check_evaluate()
@@ -96,12 +99,12 @@ async def create_replay_pipelines(
             experiment_run_id=experiment_run_id,
             replay_config_id=config.id,
             baseline_session_id=baseline.id,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
         )
         for job, baseline in zip(jobs, baselines, strict=True)
     ]
     scored_by_session: dict[uuid.UUID, set[uuid.UUID]] = {}
-    if evaluate_baselines:
+    if baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING:
         scored_by_session = await task_repository.get_scored_evaluator_version_ids_many(
             [baseline.id for baseline in baselines]
         )
@@ -120,7 +123,10 @@ async def create_replay_pipelines(
             continue
         scored = scored_by_session.get(baseline.id, set())
         for evaluator in config.evaluators:
-            if evaluator.evaluator_version_id in scored:
+            if (
+                baseline_evaluation_mode is BaselineEvaluationMode.IF_MISSING
+                and evaluator.evaluator_version_id in scored
+            ):
                 continue
             tasks.append(
                 EvaluationTask(

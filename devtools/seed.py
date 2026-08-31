@@ -38,6 +38,7 @@ from kitaru.api_models.v1.experiment_run import (
 from kitaru.api_models.v1.filter import AndFilter, FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportCreateRequest, ImportStats
 from kitaru.api_models.v1.job import JobResponse, JobStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.replay_config import (
     EvaluatorConfig,
     HistoryConfig,
@@ -269,7 +270,7 @@ async def _seed(args: argparse.Namespace) -> int:
                 ExperimentRunCreateRequest(
                     cohort_version_id=cohort_version.id,
                     agent_version_id=agent_version_id,
-                    evaluate_baselines=True,
+                    baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
                 ),
             )
             run_timeout = 120.0 + 2.0 * len(session_ids) / max(1, args.workers)

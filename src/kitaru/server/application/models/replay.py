@@ -17,7 +17,7 @@ import uuid
 from collections.abc import Mapping
 from typing import Any, ClassVar, NamedTuple
 
-from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.base import FrozenModel
 from kitaru.server.application.models.replay_config import EvaluatorConfigInput
@@ -56,7 +56,7 @@ class ReplayCreate(FrozenModel):
     override: ReplayOverride | None = None
     tool_policy: ToolPolicy | None = None
     evaluators: list[EvaluatorConfigInput]
-    evaluate_baselines: bool = False
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE
 
 
 class ToolLookupResult(NamedTuple):

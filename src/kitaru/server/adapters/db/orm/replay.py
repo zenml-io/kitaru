@@ -16,7 +16,6 @@
 import uuid
 
 from sqlalchemy import (
-    Boolean,
     ForeignKeyConstraint,
     Index,
     String,
@@ -25,7 +24,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -39,6 +38,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.replay import Replay
 
 STATUS_LENGTH = 16
+BASELINE_EVALUATION_MODE_LENGTH = 16
 
 REPLAY_OWNER_ID_FOREIGN_KEY = foreign_key_name("replay", ["owner_id"])
 REPLAY_JOB_ID_FOREIGN_KEY = foreign_key_name("replay", ["job_id"])
@@ -108,7 +108,9 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     replay_config_id: Mapped[uuid.UUID]
     baseline_session_id: Mapped[uuid.UUID]
     result_session_id: Mapped[uuid.UUID | None]
-    evaluate_baselines: Mapped[bool] = mapped_column(Boolean)
+    baseline_evaluation_mode: Mapped[str] = mapped_column(
+        String(BASELINE_EVALUATION_MODE_LENGTH)
+    )
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     error: Mapped[str | None] = mapped_column(Text)
 
@@ -130,7 +132,7 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             replay_config_id=replay.replay_config_id,
             baseline_session_id=replay.baseline_session_id,
             result_session_id=replay.result_session_id,
-            evaluate_baselines=replay.evaluate_baselines,
+            baseline_evaluation_mode=replay.baseline_evaluation_mode.value,
             status=replay.status.value,
             error=replay.error,
         )
@@ -159,7 +161,9 @@ class ReplayORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             replay_config_id=self.replay_config_id,
             baseline_session_id=self.baseline_session_id,
             result_session_id=self.result_session_id,
-            evaluate_baselines=self.evaluate_baselines,
+            baseline_evaluation_mode=BaselineEvaluationMode(
+                self.baseline_evaluation_mode
+            ),
             status=ReplayStatus(self.status),
             error=self.error,
             created=self.created,

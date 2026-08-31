@@ -54,7 +54,7 @@ from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.api_models.v1.tag import TagResourceType
@@ -4911,7 +4911,7 @@ async def create_replay(
     replay_config_id: uuid.UUID,
     baseline_session_id: uuid.UUID,
     experiment_run_id: uuid.UUID | None = None,
-    evaluate_baselines: bool = False,
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
     status: ReplayStatus = ReplayStatus.PENDING,
 ) -> Replay:
     """Store a replay in the fake repository.
@@ -4924,7 +4924,7 @@ async def create_replay(
         baseline_session_id: Id of the session replayed.
         experiment_run_id: Run this replay belongs to, ``None`` for a
             standalone replay.
-        evaluate_baselines: Whether the baseline session is also scored.
+        baseline_evaluation_mode: How the baseline session is scored.
         status: Replay status.
 
     Returns:
@@ -4937,7 +4937,7 @@ async def create_replay(
             experiment_run_id=experiment_run_id,
             replay_config_id=replay_config_id,
             baseline_session_id=baseline_session_id,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
             status=status,
         )
     )
@@ -5171,7 +5171,7 @@ async def create_experiment_run(
     cohort_version_id: uuid.UUID,
     agent_version_id: uuid.UUID,
     number: int = 1,
-    evaluate_baselines: bool = False,
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
     status: ExperimentRunStatus = ExperimentRunStatus.RUNNING,
 ) -> ExperimentRun:
     """Store an experiment run in the fake repository.
@@ -5184,7 +5184,7 @@ async def create_experiment_run(
             replayed.
         agent_version_id: Id of the agent version to replay with.
         number: Run number within the experiment.
-        evaluate_baselines: Whether baseline sessions are also scored.
+        baseline_evaluation_mode: How baseline sessions are scored.
         status: Run status.
 
     Returns:
@@ -5197,7 +5197,7 @@ async def create_experiment_run(
             number=number,
             cohort_version_id=cohort_version_id,
             agent_version_id=agent_version_id,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
             status=status,
         )
     )

@@ -410,8 +410,8 @@ class ExperimentService:
 
         Args:
             experiment_id: Id of the experiment.
-            command: Cohort version, agent version, and baseline scoring
-                flag for the run.
+            command: Cohort version, agent version, and baseline evaluation
+                mode for the run.
             actor: Caller context.
 
         Raises:
@@ -420,8 +420,8 @@ class ExperimentService:
             ValidationError: The cohort version has no sessions, belongs to
                 a cohort of another agent, or the resolved agent version has
                 no run spec.
-            SessionNotEvaluatable: ``evaluate_baselines`` is set and a
-                cohort version session is in progress.
+            SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
+                ``NONE`` and a cohort version session is in progress.
             AgentVersionNotFound: No agent version has the given id.
             AgentVersionAgentMismatch: The agent version belongs to another
                 agent.
@@ -456,7 +456,7 @@ class ExperimentService:
             number=number,
             cohort_version_id=cohort_version.id,
             agent_version_id=agent_version.id,
-            evaluate_baselines=command.evaluate_baselines,
+            baseline_evaluation_mode=command.baseline_evaluation_mode,
         )
         run.start(datetime.now(UTC))
         run = await self._experiment_runs.create(run)
@@ -465,7 +465,7 @@ class ExperimentService:
             baselines=sessions,
             agent_version_id=agent_version.id,
             config=config,
-            evaluate_baselines=command.evaluate_baselines,
+            baseline_evaluation_mode=command.baseline_evaluation_mode,
             experiment_run_id=run.id,
             actor=actor,
             replay_repository=self._replays,

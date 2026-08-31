@@ -9,6 +9,7 @@ from typing import Annotated, Literal
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import JsonValue
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.mcp.models.common import IDEMPOTENCY_KEY_DESCRIPTION, DeleteKind, MCPModel
 from kitaru.mcp.models.management import EvaluatorSelection
@@ -57,7 +58,7 @@ class ExperimentRunStart(MCPModel):
     experiment_id: uuid.UUID
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
-    evaluate_baselines: bool = False
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE
     idempotency_key: str | None = Field(
         default=None,
         description=IDEMPOTENCY_KEY_DESCRIPTION,

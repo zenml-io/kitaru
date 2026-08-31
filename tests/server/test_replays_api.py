@@ -31,7 +31,7 @@ from conftest import (
     create_session,
     override_idempotency,
 )
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
@@ -104,6 +104,7 @@ async def baseline_session_id(services: ReplayServices) -> uuid.UUID:
         agent_id=agent.id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
         inputs={"q": "hi"},
     )
     return session.id
@@ -126,7 +127,60 @@ async def test_create_replay(
     assert body["status"] == "pending"
     assert body["result_session_id"] is None
     assert body["evaluate_baselines"] is False
+    assert body["baseline_evaluation_mode"] == "none"
     assert body["evaluators"][0]["evaluator"] == "accuracy"
+
+
+async def test_create_replay_evaluate_baselines_true_normalizes_to_if_missing(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """The deprecated bool True normalizes to the if_missing mode."""
+    response = await client.post(
+        "/api/v1/replays",
+        json={
+            "baseline_session_id": str(baseline_session_id),
+            "evaluators": [{"evaluator": "accuracy"}],
+            "evaluate_baselines": True,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "if_missing"
+
+
+async def test_create_replay_baseline_evaluation_mode_wins_when_bool_unset(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """An explicit mode is honored when the deprecated bool is not set."""
+    response = await client.post(
+        "/api/v1/replays",
+        json={
+            "baseline_session_id": str(baseline_session_id),
+            "evaluators": [{"evaluator": "accuracy"}],
+            "baseline_evaluation_mode": "force",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "force"
+
+
+async def test_create_replay_rejects_both_evaluate_baselines_and_mode(
+    client: httpx.AsyncClient, baseline_session_id: uuid.UUID
+) -> None:
+    """Setting both the deprecated bool and the mode observes HTTP 422."""
+    response = await client.post(
+        "/api/v1/replays",
+        json={
+            "baseline_session_id": str(baseline_session_id),
+            "evaluators": [{"evaluator": "accuracy"}],
+            "evaluate_baselines": True,
+            "baseline_evaluation_mode": "force",
+        },
+    )
+    assert response.status_code == 422
 
 
 async def test_create_replay_unknown_baseline_session(

@@ -1582,10 +1582,10 @@ export interface paths {
          *
          *     Clients observe HTTP 201 on success, 404 when the experiment, the
          *     cohort version, or the resolved agent version does not exist, 409 when
-         *     evaluate_baselines is set and a cohort version session is not finished,
-         *     and 422 when the cohort version has no sessions, the cohort version or
-         *     agent version belongs to another agent, or the resolved agent version
-         *     has no run spec.
+         *     the baseline evaluation mode is not none and a cohort version session
+         *     is not finished, and 422 when the cohort version has no sessions, the
+         *     cohort version or agent version belongs to another agent, or the
+         *     resolved agent version has no run spec.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2279,10 +2279,10 @@ export interface paths {
          *
          *     Clients observe HTTP 201 on success, 404 when the baseline session or
          *     the resolved agent version or an evaluator config does not exist, 409
-         *     when evaluate_baselines is set and the baseline session is not
-         *     finished, and 422 when the baseline session carries no agent version
-         *     and none was given, the resolved agent version has no run spec, the
-         *     tool policy uses cohort-version-scoped history, or an evaluator
+         *     when the baseline evaluation mode is not none and the baseline session
+         *     is not finished, and 422 when the baseline session carries no agent
+         *     version and none was given, the resolved agent version has no run spec,
+         *     the tool policy uses cohort-version-scoped history, or an evaluator
          *     version repeats.
          *
          *     Args:
@@ -4118,6 +4118,12 @@ export interface components {
          */
         AuthScheme: "none" | "local" | "control_plane";
         /**
+         * BaselineEvaluationMode
+         * @description Baseline evaluation mode.
+         * @enum {string}
+         */
+        BaselineEvaluationMode: "none" | "if_missing" | "force";
+        /**
          * BlobResponse
          * @description Blob response.
          */
@@ -5100,6 +5106,8 @@ export interface components {
              * @description Agent version to replay with.
              */
             agent_version_id: string;
+            /** @description How to score each baseline session. */
+            baseline_evaluation_mode?: components["schemas"]["BaselineEvaluationMode"] | null;
             /**
              * Cohort Version Id
              * Format: uuid
@@ -5108,6 +5116,7 @@ export interface components {
             cohort_version_id: string;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether to also score each baseline session.
              * @default false
              */
@@ -5160,6 +5169,8 @@ export interface components {
              * @description Agent version to replay with.
              */
             agent_version_id: string;
+            /** @description How baseline sessions are scored. */
+            baseline_evaluation_mode: components["schemas"]["BaselineEvaluationMode"];
             /**
              * Cohort Version Id
              * Format: uuid
@@ -5184,6 +5195,7 @@ export interface components {
             error?: string | null;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether baseline sessions are also scored.
              */
             evaluate_baselines: boolean;
@@ -6426,6 +6438,8 @@ export interface components {
              * @description Agent version to replay with, the baseline session's recorded version when unset.
              */
             agent_version_id?: string | null;
+            /** @description How to score the baseline session. */
+            baseline_evaluation_mode?: components["schemas"]["BaselineEvaluationMode"] | null;
             /**
              * Baseline Session Id
              * Format: uuid
@@ -6434,6 +6448,7 @@ export interface components {
             baseline_session_id: string;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether to also score the baseline session.
              * @default false
              */
@@ -6499,6 +6514,8 @@ export interface components {
          * @description Replay response.
          */
         ReplayResponse: {
+            /** @description How the baseline session is scored. */
+            baseline_evaluation_mode: components["schemas"]["BaselineEvaluationMode"];
             /**
              * Baseline Session Id
              * Format: uuid
@@ -6518,6 +6535,7 @@ export interface components {
             error?: string | null;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether the baseline session is also scored.
              */
             evaluate_baselines: boolean;
