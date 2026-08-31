@@ -126,6 +126,8 @@ dev = [
     "pytest-asyncio>=1.4.0",
     "griffe>=1.13.0,<2.0.0",
     "griffe-typingdoc>=0.2.8,<1.0.0",
+    "hypothesis>=6.165",
+    "hypothesis-jsonschema>=0.23",
 ]
 
 [tool.ruff]
