@@ -59,7 +59,15 @@ MAPPING = {
     ("POST", "/api/v1/api-keys"): ("api_keys", "create"),
     ("POST", "/api/v1/api-keys/{api_key_id}/rotate"): ("api_keys", "rotate"),
     ("POST", "/api/v1/evaluators"): ("evaluators", "create"),
+    ("POST", "/api/v1/evaluators/{evaluator_id}/versions"): (
+        "evaluators",
+        "create_version",
+    ),
     ("POST", "/api/v1/importers"): ("importers", "create"),
+    ("POST", "/api/v1/importers/{importer_id}/versions"): (
+        "importers",
+        "create_version",
+    ),
     ("POST", "/api/v1/tags"): ("tags", "create"),
     ("POST", "/api/v1/secrets"): ("secrets", "create"),
     ("POST", "/api/v1/service-accounts"): ("service_accounts", "create"),

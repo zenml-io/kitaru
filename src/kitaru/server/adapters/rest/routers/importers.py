@@ -157,6 +157,7 @@ async def delete_importer(
 
 
 @router.post("/{importer_id}/versions", status_code=status.HTTP_201_CREATED)
+@idempotent
 async def create_importer_version(
     importer_id: uuid.UUID,
     body: ImporterVersionCreateRequest,
