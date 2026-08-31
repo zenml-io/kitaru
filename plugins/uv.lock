@@ -21,6 +21,7 @@ members = [
     "kitaru-langfuse",
     "kitaru-langfuse-importer",
     "kitaru-langgraph",
+    "kitaru-langsmith",
     "kitaru-langsmith-importer",
     "kitaru-logfire-importer",
     "kitaru-openai-agents",
@@ -35,6 +36,7 @@ dev = [
     { name = "kitaru-braintrust", editable = "packages/braintrust" },
     { name = "kitaru-langfuse", editable = "packages/langfuse" },
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
+    { name = "kitaru-langsmith", editable = "packages/langsmith" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
     { name = "pytest", specifier = ">=8.0" },
@@ -1253,6 +1255,23 @@ requires-dist = [
     { name = "langgraph", specifier = ">=1.2.10,<2" },
 ]
 provides-extras = ["deepagents"]
+
+[[package]]
+name = "kitaru-langsmith"
+version = "0.1.0"
+source = { editable = "packages/langsmith" }
+dependencies = [
+    { name = "kitaru" },
+    { name = "kitaru-langsmith-importer" },
+    { name = "langsmith" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "kitaru", editable = "../" },
+    { name = "kitaru-langsmith-importer", editable = "packages/langsmith-importer" },
+    { name = "langsmith", specifier = ">=0.3,<1" },
+]
 
 [[package]]
 name = "kitaru-langsmith-importer"

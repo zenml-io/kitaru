@@ -11,6 +11,8 @@ kitaru-braintrust-importer = { workspace = true }
 kitaru-langfuse = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
+kitaru-langsmith = { workspace = true }
+kitaru-langsmith-importer = { workspace = true }
 kitaru-openai-agents = { workspace = true }
 kitaru-pydantic-ai = { workspace = true }
 
@@ -20,6 +22,7 @@ dev = [
     "kitaru-braintrust",
     "kitaru-langfuse",
     "kitaru-langgraph[deepagents]",
+    "kitaru-langsmith",
     "kitaru-openai-agents",
     "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
@@ -51,6 +54,7 @@ known-first-party = [
     "kitaru_langfuse_importer",
     "kitaru_langgraph",
     "kitaru_logfire_importer",
+    "kitaru_langsmith",
     "kitaru_langsmith_importer",
     "kitaru_openai_agents",
     "kitaru_phoenix_importer",
