@@ -12,7 +12,9 @@ rules:
   # self-repository: zizmor v1.30 wants `uses: $/...` for same-repo actions,
   # but actionlint (through v1.7.12, run by `just check` and CI) rejects that
   # syntax, so release.yml keeps `./`. The job checks out the workflow's own
-  # ref, so both spellings resolve to the same commit. Drop this exception and
-  # switch to `$/` once actionlint understands it (rhysd/actionlint#711).
+  # ref, so both spellings resolve to the same commit. File-scoped rather than
+  # line-pinned: unrelated edits to release.yml shift line numbers and would
+  # silently un-suppress the finding. Drop this exception and switch to `$/`
+  # once actionlint understands it (rhysd/actionlint#711).
   self-repository:
-    ignore: [release.yml:248]
+    ignore: [release.yml]
