@@ -44,7 +44,7 @@
     "ai": ">=7.0.60 <8.0.0"
   },
   "devDependencies": {
-    "ai": "7.0.65"
+    "ai": "7.0.85"
   },
   "scripts": {
     "build": "node ../../scripts/clean-typescript-dist.mjs && tsc -p tsconfig.build.json",

@@ -151,7 +151,8 @@ describe("createKitaruGenerateText", () => {
     const result = await generate({
       model: new MockLanguageModelV4({
         doGenerate: {
-          ...textResponse('{"answer":"unfinished"}'),
+          ...textResponse(),
+          content: [],
           finishReason: { raw: "length", unified: "length" },
         },
       }),
