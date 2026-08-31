@@ -365,6 +365,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "Parser",
                 "call_parser",
                 "flatten_nodes",
+                "ingest_session",
                 "session_request",
                 "NODE_BATCH_SIZE",
             }
