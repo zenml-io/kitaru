@@ -114,6 +114,35 @@ async def test_create_round_trips_the_passed_flag(
     assert response.json()["passed"] is True
 
 
+async def test_create_round_trips_the_score_bounds(
+    client: httpx.AsyncClient, session_id: str
+) -> None:
+    """Persist min_score, max_score, and target_score across requests."""
+    created = (
+        await client.post(
+            f"/api/v1/sessions/{session_id}/evaluations",
+            json={
+                "evaluations": [
+                    {
+                        "name": "accuracy",
+                        "score": 0.9,
+                        "min_score": 0.0,
+                        "max_score": 1.0,
+                        "target_score": 0.95,
+                    }
+                ]
+            },
+        )
+    ).json()[0]
+
+    response = await client.get(f"/api/v1/evaluations/{created['id']}")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["min_score"] == 0.0
+    assert body["max_score"] == 1.0
+    assert body["target_score"] == 0.95
+
+
 async def test_create_not_found(client: httpx.AsyncClient) -> None:
     """Observe HTTP 404 for a missing session."""
     response = await client.post(

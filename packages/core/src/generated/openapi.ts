@@ -4654,6 +4654,16 @@ export interface components {
              */
             id: string;
             /**
+             * Max Score
+             * @description Upper bound of the score scale.
+             */
+            max_score?: number | null;
+            /**
+             * Min Score
+             * @description Lower bound of the score scale.
+             */
+            min_score?: number | null;
+            /**
              * Name
              * @description Evaluation name.
              */
@@ -4680,6 +4690,11 @@ export interface components {
              * @description Session being scored.
              */
             session_id: string;
+            /**
+             * Target Score
+             * @description Score to beat.
+             */
+            target_score?: number | null;
             /**
              * Task Id
              * @description Evaluator task that produced the result.
@@ -4708,6 +4723,16 @@ export interface components {
              */
             explanation?: string | null;
             /**
+             * Max Score
+             * @description Upper bound of the score scale.
+             */
+            max_score?: number | null;
+            /**
+             * Min Score
+             * @description Lower bound of the score scale.
+             */
+            min_score?: number | null;
+            /**
              * Name
              * @description Evaluation name.
              */
@@ -4722,6 +4747,11 @@ export interface components {
              * @description Numeric or boolean score.
              */
             score?: number | boolean | null;
+            /**
+             * Target Score
+             * @description Score to beat.
+             */
+            target_score?: number | null;
             /**
              * Value
              * @description Label or string value.
@@ -4744,6 +4774,11 @@ export interface components {
              */
             max?: number | null;
             /**
+             * Max Score
+             * @description Upper bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.
+             */
+            max_score?: number | null;
+            /**
              * Mean
              * @description Mean score of float evaluations, share of true results of bool evaluations, null for other data types.
              */
@@ -4754,10 +4789,20 @@ export interface components {
              */
             min?: number | null;
             /**
+             * Min Score
+             * @description Lower bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.
+             */
+            min_score?: number | null;
+            /**
              * Pass Rate
              * @description Share of passed evaluations among those carrying a passed flag, null when none do.
              */
             pass_rate?: number | null;
+            /**
+             * Target Score
+             * @description Score to beat shared by every aggregated evaluation, null when they differ or one lacks it.
+             */
+            target_score?: number | null;
             /**
              * Value Counts
              * @description Occurrences per value, only for categorical evaluations.
@@ -4806,6 +4851,16 @@ export interface components {
          */
         EvaluationValue: {
             /**
+             * Max Score
+             * @description Upper bound of the score scale.
+             */
+            max_score?: number | null;
+            /**
+             * Min Score
+             * @description Lower bound of the score scale.
+             */
+            min_score?: number | null;
+            /**
              * Passed
              * @description Pass or fail verdict.
              */
@@ -4815,6 +4870,11 @@ export interface components {
              * @description Numeric or boolean score.
              */
             score?: number | boolean | null;
+            /**
+             * Target Score
+             * @description Score to beat.
+             */
+            target_score?: number | null;
             /**
              * Value
              * @description Label or string value.

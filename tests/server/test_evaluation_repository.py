@@ -116,10 +116,20 @@ def _evaluation(
     explanation: str | None = None,
     evaluator_version_id: uuid.UUID | None = None,
     passed: bool | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    target_score: float | None = None,
 ) -> Evaluation:
     """Build an unstored evaluation, deriving data_type via EvaluationResult."""
     result = EvaluationResult(
-        name=name, score=score, value=value, explanation=explanation, passed=passed
+        name=name,
+        score=score,
+        value=value,
+        explanation=explanation,
+        passed=passed,
+        min_score=min_score,
+        max_score=max_score,
+        target_score=target_score,
     )
     return Evaluation(
         owner_id=owner_id,
@@ -131,6 +141,9 @@ def _evaluation(
         value=result.value,
         explanation=result.explanation,
         passed=result.passed,
+        min_score=result.min_score,
+        max_score=result.max_score,
+        target_score=result.target_score,
     )
 
 
@@ -238,6 +251,32 @@ async def test_create_round_trips_passed(setup: Setup) -> None:
         ],
     )
     assert [e.passed for e in stored] == [True, False, None]
+
+
+async def test_create_round_trips_score_bounds(setup: Setup) -> None:
+    """Round-trip min_score, max_score, and target_score, defaulting to null."""
+    repository, owner_id, session_id = setup
+    stored = await repository.create_session_evaluations(
+        session_id,
+        [
+            _evaluation(
+                owner_id,
+                session_id,
+                "a",
+                score=1.0,
+                min_score=0.0,
+                max_score=2.0,
+                target_score=1.5,
+            ),
+            _evaluation(owner_id, session_id, "b", score=1.0),
+        ],
+    )
+    assert stored[0].min_score == 0.0
+    assert stored[0].max_score == 2.0
+    assert stored[0].target_score == 1.5
+    assert stored[1].min_score is None
+    assert stored[1].max_score is None
+    assert stored[1].target_score is None
 
 
 async def test_create_preserves_request_order(setup: Setup) -> None:

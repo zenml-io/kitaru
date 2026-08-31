@@ -69,6 +69,9 @@ async def record_task_evaluations(
             value=result.value,
             explanation=result.explanation,
             passed=result.passed,
+            min_score=result.min_score,
+            max_score=result.max_score,
+            target_score=result.target_score,
             evaluator_params=task.params,
             params_hash=params_hash,
         )

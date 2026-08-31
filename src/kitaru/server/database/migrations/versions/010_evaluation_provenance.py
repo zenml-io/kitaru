@@ -178,6 +178,9 @@ def upgrade() -> None:
                 "params_hash", sa.String(length=PARAMS_HASH_LENGTH), nullable=True
             )
         )
+        batch_op.add_column(sa.Column("min_score", sa.Double(), nullable=True))
+        batch_op.add_column(sa.Column("max_score", sa.Double(), nullable=True))
+        batch_op.add_column(sa.Column("target_score", sa.Double(), nullable=True))
 
     op.create_table(
         "replay_evaluation",

@@ -1828,6 +1828,30 @@
             "title": "Id",
             "type": "string"
           },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale.",
+            "title": "Max Score"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale.",
+            "title": "Min Score"
+          },
           "name": {
             "description": "Evaluation name.",
             "title": "Name",
@@ -1871,6 +1895,18 @@
             "format": "uuid",
             "title": "Session Id",
             "type": "string"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat.",
+            "title": "Target Score"
           },
           "task_id": {
             "anyOf": [
@@ -1932,6 +1968,30 @@
             "description": "Free-form explanation.",
             "title": "Explanation"
           },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale.",
+            "title": "Max Score"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale.",
+            "title": "Min Score"
+          },
           "name": {
             "description": "Evaluation name.",
             "title": "Name",
@@ -1963,6 +2023,18 @@
             ],
             "description": "Numeric or boolean score.",
             "title": "Score"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat.",
+            "title": "Target Score"
           },
           "value": {
             "anyOf": [
@@ -2003,6 +2075,18 @@
             "description": "Highest score of float and bool evaluations, null for other data types.",
             "title": "Max"
           },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.",
+            "title": "Max Score"
+          },
           "mean": {
             "anyOf": [
               {
@@ -2027,6 +2111,18 @@
             "description": "Lowest score of float and bool evaluations, null for other data types.",
             "title": "Min"
           },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.",
+            "title": "Min Score"
+          },
           "pass_rate": {
             "anyOf": [
               {
@@ -2038,6 +2134,18 @@
             ],
             "description": "Share of passed evaluations among those carrying a passed flag, null when none do.",
             "title": "Pass Rate"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat shared by every aggregated evaluation, null when they differ or one lacks it.",
+            "title": "Target Score"
           },
           "value_counts": {
             "anyOf": [
@@ -2119,6 +2227,30 @@
       "EvaluationValue": {
         "description": "Evaluation value.",
         "properties": {
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale.",
+            "title": "Max Score"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale.",
+            "title": "Min Score"
+          },
           "passed": {
             "anyOf": [
               {
@@ -2145,6 +2277,18 @@
             ],
             "description": "Numeric or boolean score.",
             "title": "Score"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat.",
+            "title": "Target Score"
           },
           "value": {
             "anyOf": [

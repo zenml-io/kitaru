@@ -78,6 +78,13 @@ class EvaluationResult(RequestModel):
     value: str | None = Field(default=None, description="Label or string value.")
     explanation: str | None = Field(default=None, description="Free-form explanation.")
     passed: bool | None = Field(default=None, description="Pass or fail verdict.")
+    min_score: FiniteFloat | None = Field(
+        default=None, description="Lower bound of the score scale."
+    )
+    max_score: FiniteFloat | None = Field(
+        default=None, description="Upper bound of the score scale."
+    )
+    target_score: FiniteFloat | None = Field(default=None, description="Score to beat.")
 
     def __init__(self, value: float | bool | str | None = None, **data: Any) -> None:
         """Route a single positional score or value by type.
@@ -95,16 +102,25 @@ class EvaluationResult(RequestModel):
 
     @model_validator(mode="after")
     def _check_score_or_value(self) -> Self:
-        """Require at least one of score or value.
+        """Require at least one of score or value, and scale fields only on float.
 
         Raises:
-            ValueError: Neither score nor value is set.
+            ValueError: Neither score nor value is set, or a scale field is
+                set on a result whose data_type is not float.
 
         Returns:
             The validated result.
         """
         if self.score is None and self.value is None:
             raise ValueError("At least one of score or value must be set")
+        if self.data_type is not EvaluationDataType.FLOAT and (
+            self.min_score is not None
+            or self.max_score is not None
+            or self.target_score is not None
+        ):
+            raise ValueError(
+                "min_score, max_score, and target_score require data_type float"
+            )
         return self
 
     @property
@@ -184,3 +200,10 @@ class EvaluationResponse(OwnedResponseModel):
     value: str | None = Field(default=None, description="Label or string value.")
     explanation: str | None = Field(default=None, description="Free-form explanation.")
     passed: bool | None = Field(default=None, description="Pass or fail verdict.")
+    min_score: FiniteFloat | None = Field(
+        default=None, description="Lower bound of the score scale."
+    )
+    max_score: FiniteFloat | None = Field(
+        default=None, description="Upper bound of the score scale."
+    )
+    target_score: FiniteFloat | None = Field(default=None, description="Score to beat.")

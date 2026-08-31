@@ -131,6 +131,9 @@ async def _store_evaluation(
     score: float | bool | None = None,
     value: str | None = None,
     passed: bool | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    target_score: float | None = None,
 ) -> None:
     """Store an evaluation directly through the fake evaluation repository."""
     evaluation = Evaluation(
@@ -141,6 +144,9 @@ async def _store_evaluation(
         score=score,
         value=value,
         passed=passed,
+        min_score=min_score,
+        max_score=max_score,
+        target_score=target_score,
     )
     await services.evaluations.create_session_evaluations(session_id, [evaluation])
 
@@ -249,6 +255,9 @@ async def test_aggregates_float_evaluations(
                 "max": 0.1,
                 "pass_rate": None,
                 "value_counts": None,
+                "min_score": None,
+                "max_score": None,
+                "target_score": None,
             },
             "result": {
                 "count": 2,
@@ -257,21 +266,171 @@ async def test_aggregates_float_evaluations(
                 "max": 1.0,
                 "pass_rate": None,
                 "value_counts": None,
+                "min_score": None,
+                "max_score": None,
+                "target_score": None,
             },
             "replays": [
                 {
                     "replay_id": str(first_replay_id),
-                    "baseline": {"score": 0.1, "value": None, "passed": None},
-                    "result": {"score": 0.5, "value": None, "passed": None},
+                    "baseline": {
+                        "score": 0.1,
+                        "value": None,
+                        "passed": None,
+                        "min_score": None,
+                        "max_score": None,
+                        "target_score": None,
+                    },
+                    "result": {
+                        "score": 0.5,
+                        "value": None,
+                        "passed": None,
+                        "min_score": None,
+                        "max_score": None,
+                        "target_score": None,
+                    },
                 },
                 {
                     "replay_id": str(second_replay_id),
                     "baseline": None,
-                    "result": {"score": 1.0, "value": None, "passed": None},
+                    "result": {
+                        "score": 1.0,
+                        "value": None,
+                        "passed": None,
+                        "min_score": None,
+                        "max_score": None,
+                        "target_score": None,
+                    },
                 },
             ],
         }
     ]
+
+
+async def test_aggregates_score_bounds_when_uniform(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Carry the score bound fields when every row in a group agrees on them."""
+    run_id = await _create_run(services)
+    first_result, second_result = uuid.uuid4(), uuid.uuid4()
+    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), first_result)
+    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), second_result)
+    await _store_evaluation(
+        services,
+        first_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        score=0.5,
+        min_score=0.0,
+        max_score=1.0,
+        target_score=0.9,
+    )
+    await _store_evaluation(
+        services,
+        second_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        score=1.0,
+        min_score=0.0,
+        max_score=1.0,
+        target_score=0.9,
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    result = response.json()[0]["result"]
+    assert result["mean"] == 0.75
+    assert result["min"] == 0.5
+    assert result["max"] == 1.0
+    assert result["min_score"] == 0.0
+    assert result["max_score"] == 1.0
+    assert result["target_score"] == 0.9
+    replay_values = [entry["result"] for entry in response.json()[0]["replays"]]
+    assert all(value["min_score"] == 0.0 for value in replay_values)
+    assert all(value["max_score"] == 1.0 for value in replay_values)
+    assert all(value["target_score"] == 0.9 for value in replay_values)
+
+
+async def test_aggregates_score_bounds_null_when_mixed(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Null the score bound fields when rows in a group disagree on them."""
+    run_id = await _create_run(services)
+    first_result, second_result = uuid.uuid4(), uuid.uuid4()
+    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), first_result)
+    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), second_result)
+    await _store_evaluation(
+        services,
+        first_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        score=0.5,
+        min_score=0.0,
+        max_score=1.0,
+        target_score=0.9,
+    )
+    await _store_evaluation(
+        services,
+        second_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        score=1.0,
+        min_score=0.0,
+        max_score=2.0,
+        target_score=0.9,
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    result = response.json()[0]["result"]
+    assert result["mean"] == 0.75
+    assert result["min"] == 0.5
+    assert result["max"] == 1.0
+    assert result["min_score"] == 0.0
+    assert result["max_score"] is None
+    assert result["target_score"] == 0.9
+
+
+async def test_aggregates_score_bounds_null_when_one_row_lacks_it(
+    client: httpx.AsyncClient, services: ReplayServices
+) -> None:
+    """Null a score bound field when any row in the group has no value for it."""
+    run_id = await _create_run(services)
+    first_result, second_result = uuid.uuid4(), uuid.uuid4()
+    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), first_result)
+    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), second_result)
+    await _store_evaluation(
+        services,
+        first_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        score=0.5,
+        min_score=0.0,
+        max_score=1.0,
+        target_score=0.9,
+    )
+    await _store_evaluation(
+        services, second_result, "accuracy", EvaluationDataType.FLOAT, score=1.0
+    )
+
+    response = await client.get(
+        f"/api/v1/ui/experiment-runs/{run_id}/evaluation-aggregates"
+    )
+
+    assert response.status_code == 200
+    result = response.json()[0]["result"]
+    assert result["mean"] == 0.75
+    assert result["min"] == 0.5
+    assert result["max"] == 1.0
+    assert result["min_score"] is None
+    assert result["max_score"] is None
+    assert result["target_score"] is None
 
 
 async def test_aggregates_bool_and_pass_rate(
@@ -315,6 +474,9 @@ async def test_aggregates_bool_and_pass_rate(
         "max": None,
         "pass_rate": None,
         "value_counts": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     assert aggregate["result"]["count"] == 3
     assert aggregate["result"]["mean"] == pytest.approx(2 / 3)
@@ -364,6 +526,9 @@ async def test_aggregates_categorical_value_counts(
         "max": None,
         "pass_rate": None,
         "value_counts": {},
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     assert aggregate["result"] == {
         "count": 3,
@@ -372,6 +537,9 @@ async def test_aggregates_categorical_value_counts(
         "max": None,
         "pass_rate": None,
         "value_counts": {"good": 2, "bad": 1},
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     assert [entry["replay_id"] for entry in aggregate["replays"]] == [
         str(replay_id) for replay_id in replay_ids
@@ -411,9 +579,19 @@ async def test_aggregates_dedupes_shared_baseline_session(
         "max": 0.42,
         "pass_rate": None,
         "value_counts": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     replays_by_id = {entry["replay_id"]: entry for entry in aggregate["replays"]}
-    expected_baseline_value = {"score": 0.42, "value": None, "passed": None}
+    expected_baseline_value = {
+        "score": 0.42,
+        "value": None,
+        "passed": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
+    }
     assert replays_by_id[str(first_replay_id)]["baseline"] == expected_baseline_value
     assert replays_by_id[str(second_replay_id)]["baseline"] == expected_baseline_value
 
@@ -478,6 +656,9 @@ async def test_aggregates_include_baseline_only_names(
         "max": 0.3,
         "pass_rate": None,
         "value_counts": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     assert aggregate["result"] == {
         "count": 0,
@@ -486,6 +667,9 @@ async def test_aggregates_include_baseline_only_names(
         "max": None,
         "pass_rate": None,
         "value_counts": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
 
 
@@ -570,6 +754,9 @@ async def test_aggregates_link_scoped_math(
         "max": 0.3,
         "pass_rate": None,
         "value_counts": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     assert aggregate["result"] == {
         "count": 2,
@@ -578,17 +765,48 @@ async def test_aggregates_link_scoped_math(
         "max": 0.7,
         "pass_rate": None,
         "value_counts": None,
+        "min_score": None,
+        "max_score": None,
+        "target_score": None,
     }
     replays_by_id = {entry["replay_id"]: entry for entry in aggregate["replays"]}
     assert replays_by_id[str(first_replay_id)] == {
         "replay_id": str(first_replay_id),
-        "baseline": {"score": 0.1, "value": None, "passed": None},
-        "result": {"score": 0.5, "value": None, "passed": None},
+        "baseline": {
+            "score": 0.1,
+            "value": None,
+            "passed": None,
+            "min_score": None,
+            "max_score": None,
+            "target_score": None,
+        },
+        "result": {
+            "score": 0.5,
+            "value": None,
+            "passed": None,
+            "min_score": None,
+            "max_score": None,
+            "target_score": None,
+        },
     }
     assert replays_by_id[str(second_replay_id)] == {
         "replay_id": str(second_replay_id),
-        "baseline": {"score": 0.3, "value": None, "passed": None},
-        "result": {"score": 0.7, "value": None, "passed": None},
+        "baseline": {
+            "score": 0.3,
+            "value": None,
+            "passed": None,
+            "min_score": None,
+            "max_score": None,
+            "target_score": None,
+        },
+        "result": {
+            "score": 0.7,
+            "value": None,
+            "passed": None,
+            "min_score": None,
+            "max_score": None,
+            "target_score": None,
+        },
     }
 
 

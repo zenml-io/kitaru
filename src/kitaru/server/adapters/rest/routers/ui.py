@@ -163,6 +163,21 @@ async def _load_manual_session_evaluations(
     return grouped
 
 
+def _shared_value(values: list[float | None]) -> float | None:
+    """Return the value shared by every row, None when any differs or is missing.
+
+    Args:
+        values: Per-row optional values to compare.
+
+    Returns:
+        Shared value, or None when the rows differ or any value is missing.
+    """
+    if not values or any(value is None for value in values):
+        return None
+    first = values[0]
+    return first if all(value == first for value in values) else None
+
+
 def _evaluation_stats(
     data_type: EvaluationDataType, evaluations: list[Evaluation]
 ) -> EvaluationStats:
@@ -196,6 +211,11 @@ def _evaluation_stats(
         value_counts=dict(Counter(values))
         if data_type is EvaluationDataType.CATEGORICAL
         else None,
+        min_score=_shared_value([evaluation.min_score for evaluation in evaluations]),
+        max_score=_shared_value([evaluation.max_score for evaluation in evaluations]),
+        target_score=_shared_value(
+            [evaluation.target_score for evaluation in evaluations]
+        ),
     )
 
 
@@ -211,7 +231,12 @@ def _evaluation_value(evaluation: Evaluation | None) -> EvaluationValue | None:
     if evaluation is None:
         return None
     return EvaluationValue(
-        score=evaluation.score, value=evaluation.value, passed=evaluation.passed
+        score=evaluation.score,
+        value=evaluation.value,
+        passed=evaluation.passed,
+        min_score=evaluation.min_score,
+        max_score=evaluation.max_score,
+        target_score=evaluation.target_score,
     )
 
 

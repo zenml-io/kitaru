@@ -57,3 +57,6 @@ class EvaluationCreate(FrozenModel):
     value: str | None = None
     explanation: str | None = None
     passed: bool | None = None
+    min_score: float | None = None
+    max_score: float | None = None
+    target_score: float | None = None

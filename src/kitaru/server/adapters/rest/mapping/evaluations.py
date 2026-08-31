@@ -95,6 +95,9 @@ def evaluation_to_response(item: EvaluationWithEvaluator) -> EvaluationResponse:
         value=evaluation.value,
         explanation=evaluation.explanation,
         passed=evaluation.passed,
+        min_score=evaluation.min_score,
+        max_score=evaluation.max_score,
+        target_score=evaluation.target_score,
         evaluator_params=evaluation.evaluator_params,
         created=evaluation.created,
         updated=evaluation.updated,
@@ -132,6 +135,9 @@ def evaluation_result_to_create(result: EvaluationResult) -> EvaluationCreate:
         value=result.value,
         explanation=result.explanation,
         passed=result.passed,
+        min_score=result.min_score,
+        max_score=result.max_score,
+        target_score=result.target_score,
     )
 
 

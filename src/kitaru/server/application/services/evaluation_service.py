@@ -151,6 +151,9 @@ class EvaluationService:
                 value=command.value,
                 explanation=command.explanation,
                 passed=command.passed,
+                min_score=command.min_score,
+                max_score=command.max_score,
+                target_score=command.target_score,
             )
             for command in commands
         ]

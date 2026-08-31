@@ -128,3 +128,48 @@ def test_name_length_limit() -> None:
     EvaluationResult(name="a" * 255, score=1.0)
     with pytest.raises(ValidationError):
         EvaluationResult(name="a" * 256, score=1.0)
+
+
+def test_score_bounds_accepted_on_float() -> None:
+    """Accept min_score, max_score, and target_score on a float result."""
+    result = EvaluationResult(
+        name="accuracy", score=0.5, min_score=0.0, max_score=1.0, target_score=0.8
+    )
+    assert result.min_score == 0.0
+    assert result.max_score == 1.0
+    assert result.target_score == 0.8
+
+
+@pytest.mark.parametrize("field", ["min_score", "max_score", "target_score"])
+def test_score_bounds_independent(field: str) -> None:
+    """Accept any single one of the three score bound fields on its own."""
+    result = EvaluationResult(name="accuracy", score=0.5, **{field: 0.2})
+    assert getattr(result, field) == 0.2
+
+
+@pytest.mark.parametrize("field", ["min_score", "max_score", "target_score"])
+def test_score_bounds_rejected_on_bool(field: str) -> None:
+    """Reject a score bound field on a bool result."""
+    with pytest.raises(ValidationError):
+        EvaluationResult(name="is_correct", score=True, **{field: 0.2})
+
+
+@pytest.mark.parametrize("field", ["min_score", "max_score", "target_score"])
+def test_score_bounds_rejected_on_str(field: str) -> None:
+    """Reject a score bound field on a str result."""
+    with pytest.raises(ValidationError):
+        EvaluationResult(name="category", value="high", **{field: 0.2})
+
+
+@pytest.mark.parametrize("field", ["min_score", "max_score", "target_score"])
+def test_score_bounds_rejected_on_categorical(field: str) -> None:
+    """Reject a score bound field on a categorical result."""
+    with pytest.raises(ValidationError):
+        EvaluationResult(name="relevance", score=0.9, value="high", **{field: 0.2})
+
+
+@pytest.mark.parametrize("field", ["min_score", "max_score", "target_score"])
+def test_score_bounds_reject_non_finite(field: str) -> None:
+    """Reject a non-finite value on any of the three score bound fields."""
+    with pytest.raises(ValidationError):
+        EvaluationResult(name="accuracy", score=0.5, **{field: float("inf")})

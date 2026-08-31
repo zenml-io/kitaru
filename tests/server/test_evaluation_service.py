@@ -182,6 +182,35 @@ async def test_create_evaluations_carries_passed(
     assert [evaluation.passed for evaluation in stored] == [False, None]
 
 
+async def test_create_evaluations_carries_score_bounds(
+    service: EvaluationService, session_repository: FakeSessionRepository
+) -> None:
+    """Carry the score bound fields from the create command onto the stored row."""
+    session = await create_session(
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        status=SessionStatus.COMPLETED,
+    )
+    stored = await service.create_evaluations(
+        session.id,
+        [
+            EvaluationCreate(
+                name="a",
+                data_type=EvaluationDataType.FLOAT,
+                score=1.0,
+                min_score=0.0,
+                max_score=2.0,
+                target_score=1.5,
+            )
+        ],
+        actor=ACTOR,
+    )
+    assert stored[0].min_score == 0.0
+    assert stored[0].max_score == 2.0
+    assert stored[0].target_score == 1.5
+
+
 async def test_create_evaluations_owner_is_actor(
     service: EvaluationService, session_repository: FakeSessionRepository
 ) -> None:

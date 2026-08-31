@@ -181,6 +181,9 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     string_value: Mapped[str | None] = mapped_column(Text)
     explanation: Mapped[str | None] = mapped_column(Text)
     passed: Mapped[bool | None]
+    min_score: Mapped[float | None] = mapped_column(Double)
+    max_score: Mapped[float | None] = mapped_column(Double)
+    target_score: Mapped[float | None] = mapped_column(Double)
     evaluator_params: Mapped[dict[str, Any] | None] = mapped_column(
         JSONB(none_as_null=True)
     )
@@ -211,6 +214,9 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             "string_value": string_value,
             "explanation": evaluation.explanation,
             "passed": evaluation.passed,
+            "min_score": evaluation.min_score,
+            "max_score": evaluation.max_score,
+            "target_score": evaluation.target_score,
             "evaluator_params": evaluation.evaluator_params,
             "params_hash": evaluation.params_hash,
         }
@@ -234,6 +240,9 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             value=self.string_value,
             explanation=self.explanation,
             passed=self.passed,
+            min_score=self.min_score,
+            max_score=self.max_score,
+            target_score=self.target_score,
             evaluator_params=self.evaluator_params,
             params_hash=self.params_hash,
             created=self.created,

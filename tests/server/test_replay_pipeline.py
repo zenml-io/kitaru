@@ -216,7 +216,15 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         eval_task.id,
         TaskUpdate(
             status=TaskStatus.COMPLETED,
-            result=[{"name": "accuracy", "score": 0.9}],
+            result=[
+                {
+                    "name": "accuracy",
+                    "score": 0.9,
+                    "min_score": 0.0,
+                    "max_score": 1.0,
+                    "target_score": 0.95,
+                }
+            ],
         ),
         actor=build_task_actor(ACTOR.account, eval_task.id, 1, worker.id),
     )
@@ -233,6 +241,9 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert evaluations[0].evaluation.score == 0.9
     assert evaluations[0].evaluation.task_id == eval_task.id
     assert evaluations[0].evaluation.evaluator_version_id == evaluator.id
+    assert evaluations[0].evaluation.min_score == 0.0
+    assert evaluations[0].evaluation.max_score == 1.0
+    assert evaluations[0].evaluation.target_score == 0.95
 
     job_after = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job_after.status is JobStatus.COMPLETED

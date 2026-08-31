@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
 - Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
 - Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
+- Added `min_score`, `max_score`, and `target_score` to evaluation results and evaluation responses, for displaying a score against its scale and against the score it should beat. All three are only accepted on a float evaluation.
 
 ### Changed
 
