@@ -98,6 +98,21 @@ maintenance-branch-prefix = "release/jsonl/"
 checks = ["plugin package (jsonl-importer)"]
 
 [[units]]
+slug = "langfuse"
+path = "plugins/packages/langfuse"
+distribution = "kitaru-langfuse"
+registry = "pypi"
+version-source = "plugins/packages/langfuse/pyproject.toml"
+changelog = "plugins/packages/langfuse/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:langfuse-adapter"
+impact-paths = ["plugins/packages/langfuse/**"]
+tag-prefix = "python/kitaru-langfuse/v"
+maintenance-branch-prefix = "release/langfuse-adapter/"
+checks = ["plugin package (langfuse)"]
+
+[[units]]
 slug = "langfuse-importer"
 path = "plugins/packages/langfuse-importer"
 distribution = "kitaru-langfuse-importer"

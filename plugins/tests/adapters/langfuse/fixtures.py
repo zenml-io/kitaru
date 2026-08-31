@@ -1,0 +1,143 @@
+#  Copyright (c) ZenML GmbH 2026. All Rights Reserved.
+#
+#  Licensed under the Apache License, Version 2.0 (the "License");
+#  you may not use this file except in compliance with the License.
+#  You may obtain a copy of the License at:
+#
+#       https://www.apache.org/licenses/LICENSE-2.0
+#
+#  Unless required by applicable law or agreed to in writing, software
+#  distributed under the License is distributed on an "AS IS" BASIS,
+#  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
+#  or implied. See the License for the specific language governing
+#  permissions and limitations under the License.
+"""Shared Langfuse SDK fakes for the Langfuse adapter."""
+
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
+from types import SimpleNamespace
+from typing import Any
+
+import pytest
+from langfuse.api import TraceWithFullDetails
+from langfuse.types import TraceContext
+
+import kitaru_langfuse.adapter as adapter_module
+
+TraceBuilder = Callable[[str], TraceWithFullDetails]
+
+
+def build_observation(
+    observation_id: str,
+    trace_id: str,
+    *,
+    parent_id: str | None = None,
+    observation_type: str = "SPAN",
+    end_time: str | None = "2026-07-24T10:00:01Z",
+    **extra: Any,
+) -> dict[str, Any]:
+    """Build one Langfuse API observation record."""
+    record: dict[str, Any] = {
+        "id": observation_id,
+        "traceId": trace_id,
+        "type": observation_type,
+        "name": observation_id,
+        "startTime": "2026-07-24T10:00:00Z",
+        "usage": {"input": 3, "output": 5, "total": 8, "unit": "TOKENS"},
+        "level": "DEFAULT",
+        "usageDetails": {"input": 3, "output": 5},
+        "costDetails": {"total": 0.001},
+        "environment": "default",
+        **extra,
+    }
+    if end_time is not None:
+        record["endTime"] = end_time
+    if parent_id is not None:
+        record["parentObservationId"] = parent_id
+    return record
+
+
+def build_trace(
+    trace_id: str, observations: list[dict[str, Any]]
+) -> TraceWithFullDetails:
+    """Build one Langfuse API trace response with nested observations."""
+    return TraceWithFullDetails.parse_obj(
+        {
+            "id": trace_id,
+            "timestamp": "2026-07-24T10:00:00Z",
+            "projectId": "project-1",
+            "name": "run",
+            "input": {"prompt": "hello"},
+            "output": {"answer": "world"},
+            "tags": [],
+            "public": False,
+            "environment": "default",
+            "htmlPath": f"/project/project-1/traces/{trace_id}",
+            "latency": 1.0,
+            "totalCost": 0.001,
+            "observations": observations,
+            "scores": [],
+        }
+    )
+
+
+def build_complete_trace(trace_id: str) -> TraceWithFullDetails:
+    """Build one finished trace with a root span and a nested generation."""
+    return build_trace(
+        trace_id,
+        [
+            build_observation("obs-root", trace_id),
+            build_observation(
+                "obs-llm",
+                trace_id,
+                parent_id="obs-root",
+                observation_type="GENERATION",
+                model="gpt-5-nano",
+            ),
+        ],
+    )
+
+
+class FakeLangfuseClient:
+    """Langfuse client fake with a scripted trace API."""
+
+    def __init__(self) -> None:
+        self.trace_builders: list[TraceBuilder | Exception] = []
+        self.requested: list[str] = []
+        self.events: list[str] = []
+        self.trace_contexts: list[TraceContext] = []
+        self.async_api = SimpleNamespace(trace=SimpleNamespace(get=self._get))
+
+    async def _get(self, trace_id: str) -> TraceWithFullDetails:
+        self.requested.append(trace_id)
+        self.events.append("poll")
+        assert self.trace_builders, "unexpected trace poll"
+        builder = self.trace_builders.pop(0)
+        if isinstance(builder, Exception):
+            raise builder
+        return builder(trace_id)
+
+    @contextmanager
+    def start_as_current_span(
+        self, *, name: str, trace_context: TraceContext
+    ) -> Iterator[None]:
+        self.trace_contexts.append(trace_context)
+        self.events.append("span-enter")
+        yield
+        self.events.append("span-exit")
+
+    def flush(self) -> None:
+        self.events.append("flush")
+
+
+@pytest.fixture(autouse=True)
+def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(adapter_module, "_POLL_INTERVAL", 0.0)
+
+
+@pytest.fixture
+def fake_langfuse(monkeypatch: pytest.MonkeyPatch) -> FakeLangfuseClient:
+    """Create a fake Langfuse client and route the adapter to it."""
+    fake = FakeLangfuseClient()
+    monkeypatch.setattr(adapter_module, "get_client", lambda: fake)
+    return fake
