@@ -43,7 +43,6 @@ from kitaru.api_models.v1.session_node import (
     NodeType,
     SessionNodeListParams,
 )
-from kitaru.api_models.v1.task import ImportTaskDetails
 from kitaru.client.exceptions import APIError
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
@@ -183,19 +182,8 @@ def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
 
 
 def test_session_request_maps_fields() -> None:
-    """Build a session create request from importer details and a imported item."""
+    """Build a session create request from a imported item."""
     agent_id = uuid.uuid4()
-    importer = ImportTaskDetails(
-        plugin={
-            "type": "package",
-            "entrypoint": "acme.parser:parse",
-            "requirement": "acme==1.0",
-        },
-        payload={"blob_id": uuid.uuid4(), "sha256": "a" * 64},
-        provider="acme",
-        agent_id=agent_id,
-        params={},
-    )
     parsed = ImportedSession(
         status=SessionStatus.FAILED,
         name="imported-1",
@@ -210,7 +198,7 @@ def test_session_request_maps_fields() -> None:
         nodes=[],
     )
 
-    request = session_request(importer, parsed)
+    request = session_request(parsed, agent_id, "acme")
 
     assert request.agent_id == agent_id
     assert request.origin == SessionOrigin.IMPORTED

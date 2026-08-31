@@ -53,6 +53,7 @@ __all__ = [
     "SessionImportError",
     "call_parser",
     "flatten_nodes",
+    "ingest_session",
     "run",
     "session_request",
 ]
@@ -170,19 +171,20 @@ def call_parser(
 
 
 def session_request(
-    importer: ImportTaskDetails, parsed: ImportedSession
+    parsed: ImportedSession, agent_id: uuid.UUID, provider: str | None
 ) -> SessionCreateRequest:
     """Build a session create request for one parsed import item.
 
     Args:
-        importer: Importer task details.
         parsed: Imported session.
+        agent_id: Agent the session is created under.
+        provider: Source system named on the import.
 
     Returns:
         Session create request.
     """
     return SessionCreateRequest(
-        agent_id=importer.agent_id,
+        agent_id=agent_id,
         origin=SessionOrigin.IMPORTED,
         status=parsed.status,
         name=parsed.name,
@@ -195,7 +197,7 @@ def session_request(
         ended_at=parsed.ended_at,
         external_id=parsed.external_id,
         metadata=parsed.metadata,
-        imported_from=importer.provider,
+        imported_from=provider,
         framework=parsed.framework,
     )
 
@@ -277,6 +279,34 @@ def flatten_nodes(nodes: list[ImportedNode]) -> list[SessionNodeCreateRequest]:
     return flattened
 
 
+async def ingest_session(
+    client: KitaruAPIClient,
+    parsed: ImportedSession,
+    agent_id: uuid.UUID,
+    provider: str | None,
+) -> None:
+    """Create a session for one parsed import item and ingest its nodes.
+
+    Args:
+        client: API client.
+        parsed: Imported session.
+        agent_id: Agent the session is created under.
+        provider: Source system named on the import.
+
+    Raises:
+        APIError: Session creation or node ingestion failed.
+        SessionImportError: The imported node tree is invalid.
+    """
+    request = session_request(parsed, agent_id, provider)
+    session = await client.sessions.create(request)
+    nodes = flatten_nodes(parsed.nodes)
+    for start in range(0, len(nodes), NODE_BATCH_SIZE):
+        batch = nodes[start : start + NODE_BATCH_SIZE]
+        await client.sessions.ingest_nodes(
+            session.id, SessionNodeBatchRequest(nodes=batch)
+        )
+
+
 def _resolve_parser(details: ImportTaskDetails) -> Parser:
     """Load the parser callable named by a task's plugin spec.
 
@@ -341,10 +371,11 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
             if isinstance(item, ImportFailure):
                 _record_failure(item)
                 continue
-            request = session_request(details, item)
             try:
-                session = await client.sessions.create(request)
+                await ingest_session(client, item, details.agent_id, details.provider)
             except APIError as exc:
+                # A conflict can only come from the session create call, which
+                # runs before any node ingestion.
                 if exc.status_code == httpx.codes.CONFLICT:
                     skipped += 1
                 else:
@@ -353,20 +384,6 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                             line=line, external_id=item.external_id, error=str(exc)
                         )
                     )
-                continue
-            nodes = flatten_nodes(item.nodes)
-            try:
-                for start in range(0, len(nodes), NODE_BATCH_SIZE):
-                    batch = nodes[start : start + NODE_BATCH_SIZE]
-                    await client.sessions.ingest_nodes(
-                        session.id, SessionNodeBatchRequest(nodes=batch)
-                    )
-            except APIError as exc:
-                _record_failure(
-                    ImportFailure(
-                        line=line, external_id=item.external_id, error=str(exc)
-                    )
-                )
                 continue
             created += 1
     except SessionImportError as exc:
