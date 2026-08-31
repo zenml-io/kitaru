@@ -45,6 +45,7 @@ class ImporterBackedAdapter:
 
     provider: str
     parser: Parser
+    parser_params: dict[str, Any] = {}
 
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
@@ -141,7 +142,7 @@ class ImporterBackedAdapter:
             return
         payload = await self.fetch(external_id)
         sessions: list[ImportedSession] = []
-        for item in call_parser(self.parser, payload, {}):
+        for item in call_parser(self.parser, payload, self.parser_params):
             if isinstance(item, ImportFailure):
                 raise SessionImportError(
                     f"Parser failed on trace {external_id}: {item.error}"
