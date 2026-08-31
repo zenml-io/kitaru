@@ -73,7 +73,6 @@ class LangfuseAdapter(ImporterBackedAdapter):
             name=_ROOT_SPAN_NAME, trace_context=TraceContext(trace_id=trace_id)
         ):
             yield trace_id
-        client.flush()
 
     async def wait_until_complete(self, external_id: str) -> None:
         """Poll the Langfuse API until the trace is complete.
@@ -81,7 +80,11 @@ class LangfuseAdapter(ImporterBackedAdapter):
         Args:
             external_id: Langfuse trace id.
         """
-        api = get_client().async_api
+        client = get_client()
+        # Flush in a worker thread because the SDK call blocks on network
+        # delivery.
+        await asyncio.to_thread(client.flush)
+        api = client.async_api
         # The trace is complete when it is fetchable, every root observation
         # has an end time, and the observation count is stable across two
         # consecutive polls.
