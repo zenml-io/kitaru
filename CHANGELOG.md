@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
 - Added Hypothesis property tests for the importer `parse()` contract, the MCP tool boundary, and credential redaction, plus a nightly `fuzz-nightly` workflow that runs them with a larger example budget and a cached example database.
 - Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
+- Added replay capabilities to the agent version run spec: `overrides` and `tool_policies` declare whether the runtime can apply replay overrides and non-passthrough tool policies. Both default to true, and clients read them from the agent version response.
 
 ### Changed
 

@@ -5330,6 +5330,26 @@
         "title": "PayloadSpec",
         "type": "object"
       },
+      "ReplayCapabilities": {
+        "additionalProperties": false,
+        "description": "Replay capabilities.",
+        "properties": {
+          "overrides": {
+            "default": true,
+            "description": "Whether the runtime can apply replay overrides.",
+            "title": "Overrides",
+            "type": "boolean"
+          },
+          "tool_policies": {
+            "default": true,
+            "description": "Whether the runtime can apply non-passthrough tool policies.",
+            "title": "Tool Policies",
+            "type": "boolean"
+          }
+        },
+        "title": "ReplayCapabilities",
+        "type": "object"
+      },
       "ReplayCreateRequest": {
         "additionalProperties": false,
         "description": "Replay create request.",
@@ -5695,6 +5715,9 @@
             },
             "title": "Hooks",
             "type": "array"
+          },
+          "replay_capabilities": {
+            "$ref": "#/components/schemas/ReplayCapabilities"
           },
           "secret_ids": {
             "description": "Secrets merged into the process environment.",

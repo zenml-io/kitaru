@@ -6518,6 +6518,24 @@ export interface components {
             sha256: string;
         };
         /**
+         * ReplayCapabilities
+         * @description Replay capabilities.
+         */
+        ReplayCapabilities: {
+            /**
+             * Overrides
+             * @description Whether the runtime can apply replay overrides.
+             * @default true
+             */
+            overrides: boolean;
+            /**
+             * Tool Policies
+             * @description Whether the runtime can apply non-passthrough tool policies.
+             * @default true
+             */
+            tool_policies: boolean;
+        };
+        /**
          * ReplayCreateRequest
          * @description Replay create request.
          */
@@ -6694,6 +6712,7 @@ export interface components {
              * @description Hooks run around the task process.
              */
             hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
+            replay_capabilities?: components["schemas"]["ReplayCapabilities"];
             /**
              * Secret Ids
              * @description Secrets merged into the process environment.
