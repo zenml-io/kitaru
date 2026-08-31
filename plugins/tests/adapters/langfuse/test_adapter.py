@@ -15,17 +15,18 @@
 
 import uuid
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
+import pytest
 from langfuse.api import NotFoundError
 
+from kitaru import importer_adapter
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionOrigin,
     SessionStatus,
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
-from kitaru.client.api_client import KitaruAPIClient
 from kitaru.task.importer import ImportedSession
 from kitaru_langfuse import LangfuseAdapter
 from kitaru_langfuse_importer.importer import parse
@@ -63,19 +64,29 @@ class _FakeClient:
     def __init__(self) -> None:
         self.sessions = _FakeSessionsResource()
 
+    async def __aenter__(self) -> "_FakeClient":
+        return self
 
-def _adapter() -> tuple[LangfuseAdapter, _FakeClient, uuid.UUID]:
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
+
+def _adapter(
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[LangfuseAdapter, _FakeClient, uuid.UUID]:
     client = _FakeClient()
     agent_id = uuid.uuid4()
-    adapter = LangfuseAdapter(cast(KitaruAPIClient, client), agent_id)
+    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
+    monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
+    adapter = LangfuseAdapter()
     return adapter, client, agent_id
 
 
 def test_run_imports_the_langfuse_trace_around_the_function(
-    fake_langfuse: FakeLangfuseClient,
+    fake_langfuse: FakeLangfuseClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Run the function inside a Langfuse trace, then import the trace."""
-    adapter, client, agent_id = _adapter()
+    adapter, client, agent_id = _adapter(monkeypatch)
     fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
 
     def func(value: int) -> int:
@@ -114,7 +125,7 @@ async def test_wait_polls_until_the_root_observation_has_ended(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
     """Keep polling while the root observation has no end time."""
-    adapter, _, _ = _adapter()
+    adapter = LangfuseAdapter()
 
     def unended(trace_id: str) -> Any:
         return build_trace(
@@ -135,7 +146,7 @@ async def test_wait_polls_until_the_observation_count_is_stable(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
     """Keep polling until two consecutive polls return the same count."""
-    adapter, _, _ = _adapter()
+    adapter = LangfuseAdapter()
 
     def one_observation(trace_id: str) -> Any:
         return build_trace(trace_id, [build_observation("obs-root", trace_id)])
@@ -155,7 +166,7 @@ async def test_wait_keeps_polling_while_the_trace_is_not_fetchable(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
     """Restart the stability check when a poll does not find the trace."""
-    adapter, _, _ = _adapter()
+    adapter = LangfuseAdapter()
     fake_langfuse.trace_builders = [
         build_complete_trace,
         NotFoundError("trace not found"),
@@ -172,7 +183,7 @@ async def test_fetch_round_trips_through_the_real_parser(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
     """Serialize the polled trace into a payload the real parser accepts."""
-    adapter, _, _ = _adapter()
+    adapter = LangfuseAdapter()
     fake_langfuse.trace_builders = [build_complete_trace, build_complete_trace]
     await adapter.wait_until_complete("trace-1")
 
@@ -194,7 +205,7 @@ async def test_fetch_refetches_a_trace_missing_from_the_poll_state(
     fake_langfuse: FakeLangfuseClient,
 ) -> None:
     """Fetch the trace from the API when no poll state is available."""
-    adapter, _, _ = _adapter()
+    adapter = LangfuseAdapter()
     fake_langfuse.trace_builders = [build_complete_trace]
 
     payload = await adapter.fetch("trace-1")

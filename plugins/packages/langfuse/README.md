@@ -10,19 +10,12 @@ uv add kitaru-langfuse
 
 ## Use
 
-The adapter uses the Langfuse client already configured in your process. Wrap your agent entrypoint in a `LangfuseAdapter` and run it through the adapter.
+The adapter uses the Langfuse client already configured in your process and the Kitaru connection from your environment. Set `KITARU_AGENT_ID` to the agent imported sessions are created under, then wrap your agent entrypoint in a `LangfuseAdapter` and run it through the adapter.
 
 ```python
-import uuid
-
-from kitaru.client.api_client import KitaruAPIClient
-
 from kitaru_langfuse import LangfuseAdapter
 
-adapter = LangfuseAdapter(
-    KitaruAPIClient(),
-    agent_id=uuid.UUID("018f0000-0000-7000-8000-000000000100"),
-)
+adapter = LangfuseAdapter()
 result = adapter.run(my_agent, "Hello")
 ```
 

@@ -14,7 +14,6 @@
 """Langfuse importer-backed adapter."""
 
 import asyncio
-import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 
@@ -22,7 +21,6 @@ from langfuse import Langfuse, get_client
 from langfuse.api import NotFoundError, ObservationsView, TraceWithFullDetails
 from langfuse.types import TraceContext
 
-from kitaru.client.api_client import KitaruAPIClient
 from kitaru.importer_adapter import ImporterBackedAdapter
 from kitaru_langfuse_importer.importer import parse
 
@@ -52,21 +50,14 @@ class LangfuseAdapter(ImporterBackedAdapter):
     provider = "langfuse"
     parser = staticmethod(parse)
 
-    def __init__(
-        self,
-        client: KitaruAPIClient,
-        agent_id: uuid.UUID,
-        completeness_timeout: float = 120.0,
-    ) -> None:
+    def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
 
         Args:
-            client: API client.
-            agent_id: Agent imported sessions are created under.
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        super().__init__(client, agent_id, completeness_timeout)
+        super().__init__(completeness_timeout)
         self._completed_traces: dict[str, TraceWithFullDetails] = {}
 
     @contextmanager

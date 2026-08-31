@@ -18,12 +18,13 @@ import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import httpx
 import pytest
 
 from conftest import imported_node, imported_session
+from kitaru import importer_adapter
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -33,7 +34,6 @@ from kitaru.api_models.v1.session import (
 from kitaru.api_models.v1.session_node import (
     SessionNodeBatchRequest,
 )
-from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError
 from kitaru.importer_adapter import ImporterBackedAdapter
 from kitaru.task.importer import (
@@ -92,6 +92,12 @@ class _FakeClient:
     def __init__(self) -> None:
         self.sessions = _FakeSessionsResource()
 
+    async def __aenter__(self) -> "_FakeClient":
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> None:
+        return None
+
 
 class _FakeAdapter(ImporterBackedAdapter):
     """Adapter subclass with scripted hooks."""
@@ -100,12 +106,10 @@ class _FakeAdapter(ImporterBackedAdapter):
 
     def __init__(
         self,
-        client: KitaruAPIClient,
-        agent_id: uuid.UUID,
         parser: Parser,
         completeness_timeout: float = 120.0,
     ) -> None:
-        super().__init__(client, agent_id, completeness_timeout)
+        super().__init__(completeness_timeout)
         self.parser = parser
         self.events: list[str] = []
         self.wait_seconds = 0.0
@@ -132,22 +136,23 @@ class _FakeAdapter(ImporterBackedAdapter):
 
 
 def _adapter(
-    parser: Parser, completeness_timeout: float = 120.0
+    monkeypatch: pytest.MonkeyPatch,
+    parser: Parser,
+    completeness_timeout: float = 120.0,
 ) -> tuple[_FakeAdapter, _FakeClient, uuid.UUID]:
     client = _FakeClient()
     agent_id = uuid.uuid4()
-    adapter = _FakeAdapter(
-        cast(KitaruAPIClient, client),
-        agent_id,
-        parser,
-        completeness_timeout=completeness_timeout,
-    )
+    monkeypatch.setenv("KITARU_AGENT_ID", str(agent_id))
+    monkeypatch.setattr(importer_adapter, "KitaruAPIClient", lambda: client)
+    adapter = _FakeAdapter(parser, completeness_timeout=completeness_timeout)
     return adapter, client, agent_id
 
 
-def test_run_imports_the_trace_around_the_function() -> None:
+def test_run_imports_the_trace_around_the_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Run the function inside the trace, then import the finished trace."""
-    adapter, client, agent_id = _adapter(_single_session_parser)
+    adapter, client, agent_id = _adapter(monkeypatch, _single_session_parser)
 
     def func(value: int) -> int:
         adapter.events.append("func")
@@ -173,9 +178,11 @@ def test_run_imports_the_trace_around_the_function() -> None:
     assert client.sessions.batches[0].nodes[0].name == "call-1"
 
 
-async def test_run_async_imports_the_trace_around_the_function() -> None:
+async def test_run_async_imports_the_trace_around_the_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Run the async function inside the trace, then import the finished trace."""
-    adapter, client, _ = _adapter(_single_session_parser)
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
 
     async def func(value: int) -> int:
         adapter.events.append("func")
@@ -195,9 +202,9 @@ async def test_run_async_imports_the_trace_around_the_function() -> None:
     assert len(client.sessions.batches) == 1
 
 
-def test_run_rejects_a_parse_without_sessions() -> None:
+def test_run_rejects_a_parse_without_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     """Raise SessionImportError when the parse yields no session."""
-    adapter, client, _ = _adapter(_empty_parser)
+    adapter, client, _ = _adapter(monkeypatch, _empty_parser)
 
     with pytest.raises(SessionImportError, match="0 sessions"):
         adapter.run(lambda: None)
@@ -205,9 +212,11 @@ def test_run_rejects_a_parse_without_sessions() -> None:
     assert client.sessions.created == []
 
 
-def test_run_rejects_a_parse_with_several_sessions() -> None:
+def test_run_rejects_a_parse_with_several_sessions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Raise SessionImportError when the parse yields more than one session."""
-    adapter, client, _ = _adapter(_two_session_parser)
+    adapter, client, _ = _adapter(monkeypatch, _two_session_parser)
 
     with pytest.raises(SessionImportError, match="2 sessions"):
         adapter.run(lambda: None)
@@ -215,9 +224,9 @@ def test_run_rejects_a_parse_with_several_sessions() -> None:
     assert client.sessions.created == []
 
 
-def test_run_rejects_a_parse_with_a_failure() -> None:
+def test_run_rejects_a_parse_with_a_failure(monkeypatch: pytest.MonkeyPatch) -> None:
     """Raise SessionImportError when the parse yields a failure."""
-    adapter, client, _ = _adapter(_failure_parser)
+    adapter, client, _ = _adapter(monkeypatch, _failure_parser)
 
     with pytest.raises(SessionImportError, match="unparsable item"):
         adapter.run(lambda: None)
@@ -225,10 +234,12 @@ def test_run_rejects_a_parse_with_a_failure() -> None:
     assert client.sessions.created == []
 
 
-def test_run_creates_a_failed_session_on_timeout() -> None:
+def test_run_creates_a_failed_session_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Create a failed session and return the result on a completeness timeout."""
     adapter, client, agent_id = _adapter(
-        _single_session_parser, completeness_timeout=0.01
+        monkeypatch, _single_session_parser, completeness_timeout=0.01
     )
     adapter.wait_seconds = 10.0
 
@@ -247,9 +258,11 @@ def test_run_creates_a_failed_session_on_timeout() -> None:
     assert client.sessions.batches == []
 
 
-def test_run_creates_a_failed_session_on_hook_timeout() -> None:
+def test_run_creates_a_failed_session_on_hook_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Treat a TimeoutError raised by the wait hook like an elapsed timeout."""
-    adapter, client, _ = _adapter(_single_session_parser)
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
     adapter.wait_error = TimeoutError("provider gave up")
 
     result = adapter.run(lambda: "done")
@@ -259,9 +272,11 @@ def test_run_creates_a_failed_session_on_hook_timeout() -> None:
     assert client.sessions.created[0].status == SessionStatus.FAILED
 
 
-def test_run_raises_a_fetch_error_after_the_function() -> None:
+def test_run_raises_a_fetch_error_after_the_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Raise the fetch error after the function has completed."""
-    adapter, client, _ = _adapter(_single_session_parser)
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
     adapter.fetch_error = RuntimeError("fetch failed")
 
     with pytest.raises(RuntimeError, match="fetch failed"):
@@ -271,9 +286,11 @@ def test_run_raises_a_fetch_error_after_the_function() -> None:
     assert client.sessions.created == []
 
 
-def test_run_raises_an_ingest_error_after_the_function() -> None:
+def test_run_raises_an_ingest_error_after_the_function(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """Raise the ingest error after the function has completed."""
-    adapter, client, _ = _adapter(_single_session_parser)
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
     client.sessions.ingest_error = APIError(
         httpx.codes.UNPROCESSABLE_ENTITY, "invalid nodes"
     )

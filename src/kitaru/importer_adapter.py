@@ -26,6 +26,7 @@ from kitaru.api_models.v1.session import (
     SessionStatus,
 )
 from kitaru.client.api_client import KitaruAPIClient
+from kitaru.env import get_required_env
 from kitaru.task.importer import (
     ImportedSession,
     Parser,
@@ -45,22 +46,13 @@ class ImporterBackedAdapter:
     provider: str
     parser: Parser
 
-    def __init__(
-        self,
-        client: KitaruAPIClient,
-        agent_id: uuid.UUID,
-        completeness_timeout: float = 120.0,
-    ) -> None:
+    def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
 
         Args:
-            client: API client.
-            agent_id: Agent imported sessions are created under.
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        self._client = client
-        self._agent_id = agent_id
         self._completeness_timeout = completeness_timeout
 
     def trace(self) -> AbstractContextManager[str]:
@@ -104,9 +96,10 @@ class ImporterBackedAdapter:
         Returns:
             The function's result.
         """
+        agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
         with self.trace() as external_id:
             result = func(*args, **kwargs)
-        asyncio.run(self._import_trace(external_id))
+        asyncio.run(self._import_trace(external_id, agent_id))
         return result
 
     async def run_async(
@@ -122,16 +115,18 @@ class ImporterBackedAdapter:
         Returns:
             The function's result.
         """
+        agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
         with self.trace() as external_id:
             result = await func(*args, **kwargs)
-        await self._import_trace(external_id)
+        await self._import_trace(external_id, agent_id)
         return result
 
-    async def _import_trace(self, external_id: str) -> None:
+    async def _import_trace(self, external_id: str, agent_id: uuid.UUID) -> None:
         """Wait for the provider trace, then fetch, parse, and ingest it.
 
         Args:
             external_id: Provider trace id.
+            agent_id: Agent the imported session is created under.
 
         Raises:
             SessionImportError: The parse yielded a failure or anything but
@@ -141,7 +136,8 @@ class ImporterBackedAdapter:
             async with asyncio.timeout(self._completeness_timeout):
                 await self.wait_until_complete(external_id)
         except TimeoutError:
-            await self._create_timed_out_session(external_id)
+            async with KitaruAPIClient() as client:
+                await self._create_timed_out_session(client, external_id, agent_id)
             return
         payload = await self.fetch(external_id)
         sessions: list[ImportedSession] = []
@@ -156,16 +152,21 @@ class ImporterBackedAdapter:
                 f"Parser yielded {len(sessions)} sessions for trace "
                 f"{external_id}, expected exactly one"
             )
-        await ingest_session(self._client, sessions[0], self._agent_id, self.provider)
+        async with KitaruAPIClient() as client:
+            await ingest_session(client, sessions[0], agent_id, self.provider)
 
-    async def _create_timed_out_session(self, external_id: str) -> None:
+    async def _create_timed_out_session(
+        self, client: KitaruAPIClient, external_id: str, agent_id: uuid.UUID
+    ) -> None:
         """Create a failed session for a trace that did not complete in time.
 
         Args:
+            client: API client.
             external_id: Provider trace id.
+            agent_id: Agent the failed session is created under.
         """
         request = SessionCreateRequest(
-            agent_id=self._agent_id,
+            agent_id=agent_id,
             origin=SessionOrigin.IMPORTED,
             status=SessionStatus.FAILED,
             inputs=None,
@@ -175,4 +176,4 @@ class ImporterBackedAdapter:
             external_id=external_id,
             imported_from=self.provider,
         )
-        await self._client.sessions.create(request)
+        await client.sessions.create(request)
