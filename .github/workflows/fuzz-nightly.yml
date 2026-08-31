@@ -41,7 +41,8 @@ jobs:
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: .hypothesis/
-          key: hypothesis-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: hypothesis-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt
+            }}
           restore-keys: hypothesis-${{ matrix.name }}-
       - name: Run fuzz recipe
         id: fuzz
@@ -53,7 +54,8 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
           path: .hypothesis/
-          key: hypothesis-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          key: hypothesis-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt
+            }}
       - name: Upload failing examples
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7.0.1
