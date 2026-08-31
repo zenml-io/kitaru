@@ -13,6 +13,7 @@
 #  permissions and limitations under the License.
 """Tests for the analytics event context middleware."""
 
+import uuid
 from collections.abc import AsyncGenerator
 from importlib.metadata import version as package_version
 from typing import Any
@@ -109,7 +110,10 @@ async def test_sdk_client_reports_python_source() -> None:
     """Attribute SDK requests to the Python source via the default headers."""
     api_client = asgi_api_client(create_app_with_event_context_probe())
     response = await api_client.request("GET", "/probe-event-context")
-    assert response.json() == {
+    body = response.json()
+    analytics_id = body["properties"].pop("client_id")
+    assert uuid.UUID(analytics_id)
+    assert body == {
         "source": "kitaru-python",
         "properties": {"client_version": f"kitaru-python/{package_version('kitaru')}"},
     }
@@ -122,7 +126,10 @@ async def test_sdk_client_reports_configured_source() -> None:
         create_app_with_event_context_probe(), analytics_source=AnalyticsSource.CLI
     )
     response = await api_client.request("GET", "/probe-event-context")
-    assert response.json() == {
+    body = response.json()
+    analytics_id = body["properties"].pop("client_id")
+    assert uuid.UUID(analytics_id)
+    assert body == {
         "source": "kitaru-cli",
         "properties": {"client_version": f"kitaru-cli/{package_version('kitaru')}"},
     }
@@ -136,7 +143,10 @@ async def test_sdk_client_reports_active_skill(
     monkeypatch.setenv("KITARU_ACTIVE_SKILL", "data-analysis")
     api_client = asgi_api_client(create_app_with_event_context_probe())
     response = await api_client.request("GET", "/probe-event-context")
-    assert response.json() == {
+    body = response.json()
+    analytics_id = body["properties"].pop("client_id")
+    assert uuid.UUID(analytics_id)
+    assert body == {
         "source": "kitaru-python",
         "properties": {
             "client_version": f"kitaru-python/{package_version('kitaru')}",
@@ -156,4 +166,22 @@ async def test_client_version_parsed_from_client_header(
     assert response.json() == {
         "source": "kitaru-cli",
         "properties": {"client_version": "kitaru-cli/1.2.3"},
+    }
+
+
+async def test_analytics_id_parsed_from_client_header(
+    client: httpx.AsyncClient,
+) -> None:
+    """Attribute requests to the analytics id the client header reports."""
+    analytics_id = uuid.uuid4()
+    response = await client.get(
+        "/probe-event-context",
+        headers={"X-Kitaru-Client": f"kitaru-cli/1.2.3/{analytics_id}"},
+    )
+    assert response.json() == {
+        "source": "kitaru-cli",
+        "properties": {
+            "client_version": "kitaru-cli/1.2.3",
+            "client_id": str(analytics_id),
+        },
     }

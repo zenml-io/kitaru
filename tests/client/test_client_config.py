@@ -26,7 +26,10 @@ from kitaru.client.client import KitaruClient
 from kitaru.client.config import (
     ENV_CLIENT_ID,
     ENV_CONFIG_DIR,
+    ENV_DISABLE_CLIENT_ANALYTICS,
+    ENV_DO_NOT_TRACK,
     ClientConfig,
+    get_analytics_id,
     get_client_id,
     get_server_url,
     load_config,
@@ -197,3 +200,44 @@ def test_client_id_shares_the_file_with_the_server_url() -> None:
 
     assert get_server_url() == "http://stored"
     assert get_client_id() == client_id
+
+
+def test_generated_analytics_id_is_reused_across_calls(tmp_path: Path) -> None:
+    """Write a generated id once and read it back on the next call."""
+    first = get_analytics_id()
+
+    assert (tmp_path / "config" / "kitaru" / "config.json").exists()
+    assert get_analytics_id() == first
+
+
+def test_analytics_id_is_disabled_through_kitaru_disable_client_analytics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Report no analytics id and skip the write when disabled through Kitaru."""
+    monkeypatch.setenv(ENV_DISABLE_CLIENT_ANALYTICS, "1")
+
+    assert get_analytics_id() is None
+    assert not (tmp_path / "config" / "kitaru" / "config.json").exists()
+
+
+def test_analytics_id_is_disabled_through_do_not_track(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Report no analytics id and skip the write when DO_NOT_TRACK is set."""
+    monkeypatch.setenv(ENV_DO_NOT_TRACK, "1")
+
+    assert get_analytics_id() is None
+    assert not (tmp_path / "config" / "kitaru" / "config.json").exists()
+
+
+def test_analytics_id_is_omitted_when_the_write_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Report no analytics id when the generated id cannot be written."""
+
+    def fail_save(config: ClientConfig) -> None:
+        raise OSError
+
+    monkeypatch.setattr("kitaru.client.config.save_config", fail_save)
+
+    assert get_analytics_id() is None

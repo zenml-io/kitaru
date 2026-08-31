@@ -29,7 +29,7 @@ from kitaru.client.auth import (
     StaticTokenAuth,
     TokenAuth,
 )
-from kitaru.client.config import get_server_url
+from kitaru.client.config import get_analytics_id, get_server_url
 from kitaru.client.credential_store import CredentialStore
 from kitaru.client.exceptions import (
     InvalidServerResponseError,
@@ -113,7 +113,10 @@ class KitaruAPIClient:
         self._owns_auth = True
         self._request_headers: dict[str, str] = {}
         identification = format_client_header(analytics_source)
-        headers = {"User-Agent": identification, CLIENT_HEADER: identification}
+        client_identification = format_client_header(
+            analytics_source, get_analytics_id()
+        )
+        headers = {"User-Agent": identification, CLIENT_HEADER: client_identification}
         if skill := os.environ.get("KITARU_ACTIVE_SKILL"):
             headers[SKILL_HEADER] = skill
         self._http = build_async_client(

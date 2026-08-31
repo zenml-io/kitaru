@@ -583,6 +583,8 @@ def isolated_client_environment(
         "KITARU_CLIENT_ID",
         "KITARU_CONFIG_DIR",
         "KITARU_DISABLE_CREDENTIALS_CACHE",
+        "KITARU_DISABLE_CLIENT_ANALYTICS",
+        "DO_NOT_TRACK",
     ):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))

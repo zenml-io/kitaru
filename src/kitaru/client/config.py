@@ -27,6 +27,8 @@ logger = logging.getLogger(__name__)
 
 ENV_CONFIG_DIR = "KITARU_CONFIG_DIR"
 ENV_CLIENT_ID = "KITARU_CLIENT_ID"
+ENV_DISABLE_CLIENT_ANALYTICS = "KITARU_DISABLE_CLIENT_ANALYTICS"
+ENV_DO_NOT_TRACK = "DO_NOT_TRACK"
 
 CONFIG_FILE_NAME = "config.json"
 # Only the owner may read the files or list the directory holding them.
@@ -108,6 +110,7 @@ class ClientConfig(BaseModel):
 
     server_url: str | None = None
     client_id: uuid.UUID | None = None
+    analytics_id: uuid.UUID | None = None
     cli: CLISettings = Field(default_factory=CLISettings)
 
 
@@ -187,3 +190,35 @@ def get_client_id() -> uuid.UUID:
     with contextlib.suppress(OSError):
         save_config(config)
     return config.client_id
+
+
+def get_analytics_id() -> uuid.UUID | None:
+    """Return the id anonymous analytics events are attributed to.
+
+    Analytics events aggregate by this id to measure usage without
+    identifying the caller, so the same machine should present the same one
+    across runs.
+
+    Returns:
+        The id read from the configuration file, or newly generated and
+        written there. None when analytics are disabled through
+        ``KITARU_DISABLE_CLIENT_ANALYTICS`` or ``DO_NOT_TRACK``, or when a
+        generated id cannot be written.
+    """
+    disabled = os.environ.get(ENV_DISABLE_CLIENT_ANALYTICS, "").lower() in (
+        "1",
+        "true",
+        "yes",
+    ) or os.environ.get(ENV_DO_NOT_TRACK, "").lower() in ("1", "true", "yes")
+    if disabled:
+        return None
+    config = load_config()
+    if config.analytics_id is not None:
+        return config.analytics_id
+    config.analytics_id = uuid.uuid4()
+    # An id that cannot be persisted would change on every run.
+    try:
+        save_config(config)
+    except OSError:
+        return None
+    return config.analytics_id

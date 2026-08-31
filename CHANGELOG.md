@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added `DELETE /api/v1/replays/{replay_id}` to delete a standalone replay. A replay that belongs to an experiment run returns HTTP 409, since deleting the run removes its replays.
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
+- Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
 
 ### Changed
 
