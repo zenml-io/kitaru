@@ -24,6 +24,9 @@ docs/                 # Three docs surfaces — see "Documentation surfaces" bel
   worker/             # Cloudflare worker: redirect.mjs (kitaru.ai/docs) + routing maps
 scripts/              # OpenAPI generation, doc generation, and UI bundle scripts
   generate_openapi.py        # Writes openapi/openapi.json from the FastAPI app
+                             # After regenerating, also regenerate the TypeScript
+                             # types via `pnpm run generate`
+                             # (the typescript CI job fails otherwise)
   check_openapi.sh           # Fails when openapi/openapi.json is out of date
   download-ui.sh             # Bundles stable/prerelease Kitaru UI releases into the package tree
 FRONTEND-TESTING.md   # Read first for Kitaru UI bundle/frontend testing,

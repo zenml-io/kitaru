@@ -161,13 +161,18 @@ class EvaluatorsResource:
         await self._client.request("DELETE", f"/api/v1/evaluators/{evaluator_id}")
 
     async def create_version(
-        self, evaluator_id: uuid.UUID, request: EvaluatorVersionCreateRequest
+        self,
+        evaluator_id: uuid.UUID,
+        request: EvaluatorVersionCreateRequest,
+        idempotency_key: str | None = None,
     ) -> EvaluatorVersionResponse:
         """Create an evaluator version.
 
         Args:
             evaluator_id: Id of the evaluator.
             request: Evaluator version create request.
+            idempotency_key: Idempotency key overriding the transport's
+                random default.
 
         Raises:
             APIError: The request failed, including 404 for a missing
@@ -180,6 +185,7 @@ class EvaluatorsResource:
             "POST",
             f"/api/v1/evaluators/{evaluator_id}/versions",
             json=request.model_dump(mode="json", exclude_unset=True),
+            idempotency_key=idempotency_key,
         )
         return EvaluatorVersionResponse.model_validate(response.json())
 
