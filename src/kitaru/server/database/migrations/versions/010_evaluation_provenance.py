@@ -77,19 +77,25 @@ def _backfill_evaluator_params() -> None:
             "WHERE evaluation.task_id IS NOT NULL AND task.kind = 'evaluator'"
         )
     ).all()
+    if not rows:
+        return
+    values = []
     for evaluation_id, inputs in rows:
         params = inputs if inputs is not None else {}
-        connection.execute(
-            sa.text(
-                "UPDATE evaluation SET evaluator_params = CAST(:params AS jsonb), "
-                "params_hash = :params_hash WHERE id = :id"
-            ),
+        values.append(
             {
                 "params": json.dumps(params),
                 "params_hash": _hash_params(params),
                 "id": evaluation_id,
-            },
+            }
         )
+    connection.execute(
+        sa.text(
+            "UPDATE evaluation SET evaluator_params = CAST(:params AS jsonb), "
+            "params_hash = :params_hash WHERE id = :id"
+        ),
+        values,
+    )
 
 
 def _backfill_produced_links() -> None:
@@ -119,35 +125,46 @@ def _backfill_adoption_links() -> None:
             "WHERE replay.baseline_evaluation_mode = 'if_missing'"
         )
     ).all()
+    if not replays:
+        return
+    latest_by_identity: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
+    matches = connection.execute(
+        sa.text(
+            "SELECT DISTINCT ON (session_id, evaluator_version_id, params_hash) "
+            "session_id, evaluator_version_id, params_hash, id FROM evaluation "
+            "WHERE session_id IN :session_ids "
+            "AND evaluator_version_id IS NOT NULL AND params_hash IS NOT NULL "
+            "ORDER BY session_id, evaluator_version_id, params_hash, "
+            "created DESC, id DESC"
+        ).bindparams(sa.bindparam("session_ids", expanding=True)),
+        {"session_ids": [row.baseline_session_id for row in replays]},
+    ).all()
+    for session_id, evaluator_version_id, params_hash, evaluation_id in matches:
+        latest_by_identity[(session_id, evaluator_version_id, params_hash)] = (
+            evaluation_id
+        )
+    links = []
     for replay_id, baseline_session_id, evaluators in replays:
         for evaluator in evaluators:
-            evaluator_version_id = uuid.UUID(evaluator["evaluator_version_id"])
-            params_hash = _hash_params(evaluator["params"])
-            match = connection.execute(
-                sa.text(
-                    "SELECT id FROM evaluation "
-                    "WHERE session_id = :session_id "
-                    "AND evaluator_version_id = :evaluator_version_id "
-                    "AND params_hash = :params_hash "
-                    "ORDER BY created DESC, id DESC LIMIT 1"
-                ),
-                {
-                    "session_id": baseline_session_id,
-                    "evaluator_version_id": evaluator_version_id,
-                    "params_hash": params_hash,
-                },
-            ).one_or_none()
-            if match is None:
-                continue
-            connection.execute(
-                sa.text(
-                    "INSERT INTO replay_evaluation "
-                    "(replay_id, evaluation_id, created, updated) "
-                    "VALUES (:replay_id, :evaluation_id, now(), now()) "
-                    "ON CONFLICT DO NOTHING"
-                ),
-                {"replay_id": replay_id, "evaluation_id": match.id},
+            identity = (
+                baseline_session_id,
+                uuid.UUID(evaluator["evaluator_version_id"]),
+                _hash_params(evaluator["params"]),
             )
+            evaluation_id = latest_by_identity.get(identity)
+            if evaluation_id is not None:
+                links.append({"replay_id": replay_id, "evaluation_id": evaluation_id})
+    if not links:
+        return
+    connection.execute(
+        sa.text(
+            "INSERT INTO replay_evaluation "
+            "(replay_id, evaluation_id, created, updated) "
+            "VALUES (:replay_id, :evaluation_id, now(), now()) "
+            "ON CONFLICT DO NOTHING"
+        ),
+        links,
+    )
 
 
 def upgrade() -> None:

@@ -26,7 +26,10 @@ from kitaru.api_models.v1.base import (
     ResponseModel,
 )
 from kitaru.api_models.v1.filter import FilterableListParams
-from kitaru.api_models.v1.replay import BaselineEvaluationMode
+from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
+    check_baseline_evaluation_fields,
+)
 
 
 class ExperimentRunStatus(StrEnum):
@@ -76,10 +79,7 @@ class ExperimentRunCreateRequest(RequestModel):
         Returns:
             The validated request.
         """
-        if {"evaluate_baselines", "baseline_evaluation_mode"} <= self.model_fields_set:
-            raise ValueError(
-                "evaluate_baselines and baseline_evaluation_mode are mutually exclusive"
-            )
+        check_baseline_evaluation_fields(self.model_fields_set)
         return self
 
 

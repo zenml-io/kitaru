@@ -51,6 +51,21 @@ class BaselineEvaluationMode(StrEnum):
     FORCE = "force"
 
 
+def check_baseline_evaluation_fields(fields_set: set[str]) -> None:
+    """Forbid setting both evaluate_baselines and baseline_evaluation_mode.
+
+    Args:
+        fields_set: Names of the fields the caller explicitly set.
+
+    Raises:
+        ValueError: Both fields were explicitly set.
+    """
+    if {"evaluate_baselines", "baseline_evaluation_mode"} <= fields_set:
+        raise ValueError(
+            "evaluate_baselines and baseline_evaluation_mode are mutually exclusive"
+        )
+
+
 class ReplayCreateRequest(RequestModel):
     """Replay create request."""
 
@@ -88,10 +103,7 @@ class ReplayCreateRequest(RequestModel):
         Returns:
             The validated request.
         """
-        if {"evaluate_baselines", "baseline_evaluation_mode"} <= self.model_fields_set:
-            raise ValueError(
-                "evaluate_baselines and baseline_evaluation_mode are mutually exclusive"
-            )
+        check_baseline_evaluation_fields(self.model_fields_set)
         return self
 
 

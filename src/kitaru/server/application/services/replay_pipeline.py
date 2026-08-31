@@ -116,6 +116,10 @@ async def create_replay_pipelines(
         adoptable = await evaluation_repository.get_latest_evaluation_ids_by_identity(
             [baseline.id for baseline in baselines]
         )
+    evaluator_hashes = {
+        evaluator.evaluator_version_id: hash_params(evaluator.params)
+        for evaluator in config.evaluators
+    }
     tasks: list[Task] = []
     adopted_links: list[tuple[uuid.UUID, uuid.UUID]] = []
     for job, baseline, replay in zip(jobs, baselines, replays, strict=True):
@@ -135,7 +139,7 @@ async def create_replay_pipelines(
                 identity = (
                     baseline.id,
                     evaluator.evaluator_version_id,
-                    hash_params(evaluator.params),
+                    evaluator_hashes[evaluator.evaluator_version_id],
                 )
                 evaluation_id = adoptable.get(identity)
                 if evaluation_id is not None:

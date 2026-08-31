@@ -92,6 +92,7 @@ async def _load_session_evaluations(
     service: EvaluationService,
     session_ids: list[uuid.UUID],
     actor: AuthContext,
+    extra_condition: FilterCondition | None = None,
 ) -> dict[uuid.UUID, list[EvaluationWithEvaluator]]:
     """Load the evaluations of the given sessions, grouped by session id.
 
@@ -99,6 +100,7 @@ async def _load_session_evaluations(
         service: Evaluation service.
         session_ids: Ids of the sessions to load evaluations for.
         actor: Caller context.
+        extra_condition: Additional condition applied to every chunk.
 
     Returns:
         Evaluations of each session, newest first.
@@ -112,8 +114,11 @@ async def _load_session_evaluations(
             op=FilterOp.IN,
             value=session_ids[start : start + MAX_FILTER_IN_VALUES],
         )
+        expression: FilterCondition | AndExpression = membership
+        if extra_condition is not None:
+            expression = AndExpression(operands=(membership, extra_condition))
         items = await paginate_all(
-            lambda cursor, expression=membership: service.list_evaluations(
+            lambda cursor, expression=expression: service.list_evaluations(
                 EvaluationFilter(expression=expression, cursor=cursor, size=1000),
                 actor=actor,
             )
@@ -138,29 +143,14 @@ async def _load_manual_session_evaluations(
     Returns:
         Manual evaluations of each session, newest first.
     """
-    grouped: dict[uuid.UUID, list[EvaluationWithEvaluator]] = {
-        session_id: [] for session_id in session_ids
-    }
-    for start in range(0, len(session_ids), MAX_FILTER_IN_VALUES):
-        expression = AndExpression(
-            operands=(
-                FilterCondition(
-                    field="session_id",
-                    op=FilterOp.IN,
-                    value=session_ids[start : start + MAX_FILTER_IN_VALUES],
-                ),
-                FilterCondition(field="evaluator_version_id", op=FilterOp.IS_NULL),
-            )
-        )
-        items = await paginate_all(
-            lambda cursor, expression=expression: service.list_evaluations(
-                EvaluationFilter(expression=expression, cursor=cursor, size=1000),
-                actor=actor,
-            )
-        )
-        for item in items:
-            grouped[item.evaluation.session_id].append(item)
-    return grouped
+    return await _load_session_evaluations(
+        service,
+        session_ids,
+        actor,
+        extra_condition=FilterCondition(
+            field="evaluator_version_id", op=FilterOp.IS_NULL
+        ),
+    )
 
 
 def _shared_value(values: list[float | None]) -> float | None:
@@ -375,23 +365,15 @@ async def list_experiment_run_evaluation_aggregates(
     # duplicate name within a task is rejected at write time.
     session_evaluations: dict[uuid.UUID, dict[GroupKey, Evaluation]] = defaultdict(dict)
     evaluator_info: dict[uuid.UUID | None, tuple[str | None, int | None]] = {}
-    for _, item in linked:
+    items = [item for _, item in linked]
+    items += [item for group in manual.values() for item in group]
+    for item in items:
         evaluation = item.evaluation
         session_evaluations[evaluation.session_id][_group_key(evaluation)] = evaluation
         evaluator_info[evaluation.evaluator_version_id] = (
             item.evaluator_name,
             item.evaluator_version,
         )
-    for items in manual.values():
-        for item in items:
-            evaluation = item.evaluation
-            session_evaluations[evaluation.session_id][_group_key(evaluation)] = (
-                evaluation
-            )
-            evaluator_info[evaluation.evaluator_version_id] = (
-                item.evaluator_name,
-                item.evaluator_version,
-            )
 
     baseline_groups: dict[GroupKey, list[Evaluation]] = defaultdict(list)
     for session_id in baseline_session_ids:

@@ -21,7 +21,6 @@ from sqlalchemy import ColumnElement, func, select
 from kitaru.server.adapters.db.filtering import (
     FilterBinding,
     build_scope_condition_binding,
-    compile_column_condition,
     compile_filter_expression,
 )
 from kitaru.server.adapters.db.orm.cohort_version import CohortVersionORM
@@ -70,6 +69,12 @@ _scopes_to_experiment_run = build_scope_condition_binding(
     scope_column=ReplayORM.experiment_run_id,
 )
 
+_scopes_to_replay = build_scope_condition_binding(
+    local_column=EvaluationORM.id,
+    related_key=ReplayEvaluationORM.evaluation_id,
+    scope_column=ReplayEvaluationORM.replay_id,
+)
+
 
 def _compile_cohort_condition(condition: FilterCondition) -> ColumnElement[bool]:
     """Compile a cohort scope condition into a session membership predicate.
@@ -115,26 +120,6 @@ def _compile_experiment_run_condition(
     return linked_evaluations.exists()
 
 
-def _compile_replay_condition(condition: FilterCondition) -> ColumnElement[bool]:
-    """Compile a replay condition into a replay link predicate.
-
-    Args:
-        condition: Validated replay condition.
-
-    Returns:
-        SQL predicate.
-    """
-    linked_evaluations = (
-        select(ReplayEvaluationORM.evaluation_id)
-        .where(
-            ReplayEvaluationORM.evaluation_id == EvaluationORM.id,
-            compile_column_condition(ReplayEvaluationORM.replay_id, condition),
-        )
-        .correlate(EvaluationORM)
-    )
-    return linked_evaluations.exists()
-
-
 EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     "id": EvaluationORM.id,
     "session_id": EvaluationORM.session_id,
@@ -149,7 +134,7 @@ EVALUATION_FILTER_BINDINGS: Mapping[str, FilterBinding] = {
     ),
     "cohort_id": _compile_cohort_condition,
     "experiment_run_id": _compile_experiment_run_condition,
-    "replay_id": _compile_replay_condition,
+    "replay_id": _scopes_to_replay,
 }
 
 
