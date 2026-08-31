@@ -13,7 +13,7 @@
 #  permissions and limitations under the License.
 """Agent version replay capabilities Alembic revision.
 
-Revision ID: 010_agent_version_replay_caps
+Revision ID: 010_agent_replay_capabilities
 Revises: 009_agent_version_run_hooks
 Create Date: 2026-08-31
 
@@ -24,7 +24,7 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "010_agent_version_replay_caps"
+revision = "010_agent_replay_capabilities"
 down_revision = "009_agent_version_run_hooks"
 branch_labels = None
 depends_on = None
