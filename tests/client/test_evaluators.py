@@ -175,6 +175,27 @@ async def test_create_and_get_version(api_client: KitaruAPIClient) -> None:
     assert loaded == version
 
 
+async def test_create_version_is_idempotent(api_client: KitaruAPIClient) -> None:
+    """Replay evaluator version creation with a caller-supplied key."""
+    created = await api_client.evaluators.create(
+        EvaluatorCreateRequest(name="accuracy")
+    )
+    request = EvaluatorVersionCreateRequest(
+        source=PackagePluginSource(
+            requirement="kitaru-scorer==1.0.0", entrypoint="pkg:score"
+        )
+    )
+
+    first = await api_client.evaluators.create_version(
+        created.id, request, idempotency_key="evaluator-version"
+    )
+    second = await api_client.evaluators.create_version(
+        created.id, request, idempotency_key="evaluator-version"
+    )
+
+    assert second == first
+
+
 async def test_list_and_iter_versions(api_client: KitaruAPIClient) -> None:
     """List and iterate an evaluator's versions through the SDK."""
     created = await api_client.evaluators.create(
