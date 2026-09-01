@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 ### Fixed
 
 - A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
+- Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
 
 ## [0.24.0]
 
