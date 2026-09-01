@@ -82,7 +82,7 @@ EXPECTED_ONDELETE: dict[tuple[str, str], str | None] = {
     ("task", "job_id"): "CASCADE",
     ("task", "worker_id"): "SET NULL",
     # evaluator_version_id carries no constraint, an evaluator-born row keeps
-    # this id forever, even after the plugin version it names is deleted.
+    # this id forever, even after the plugin version it references is deleted.
     ("evaluation", "owner_id"): None,
     ("evaluation", "session_id"): "CASCADE",
     ("evaluation", "task_id"): "SET NULL",

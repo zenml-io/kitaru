@@ -167,7 +167,7 @@ class EvaluationORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
 
     owner_id: Mapped[uuid.UUID]
     # No foreign key, an evaluator-born row keeps this id forever, even after
-    # the plugin version it names is deleted.
+    # the plugin version it references is deleted.
     evaluator_version_id: Mapped[uuid.UUID | None]
     session_id: Mapped[uuid.UUID]
     task_id: Mapped[uuid.UUID | None]
