@@ -15,13 +15,10 @@
 
 from typing import Any
 
-import pytest
 from hypothesis import given
 from hypothesis import strategies as st
 
 from kitaru_langgraph.capture import CapturePolicy, capture_value
-
-_KNOWN = "#906"
 
 # The string spellings are drawn alongside the non-string keys so that a draw can hold
 # two distinct keys that `str()` maps onto the same name. Purely random text keys
@@ -56,17 +53,15 @@ def test_string_keyed_mapping_is_captured_exactly_or_flagged(
     assert result.lossy or result.value == value
 
 
-@pytest.mark.xfail(strict=True, reason=_KNOWN)
 @given(value=st.dictionaries(_keys, _values, max_size=6))
 def test_key_collapse_is_reported_as_lossy(value: dict[Any, Any]) -> None:
     result = capture_value(value, CapturePolicy())
-    if len({str(k) for k in value}) < len(value):
+    if any(not isinstance(key, str) for key in value):
         assert result.lossy and result.reasons and not result.replayable
-    else:
+    if len({str(k) for k in value}) == len(value):
         assert len(result.value) == len(value)
 
 
-@pytest.mark.xfail(strict=True, reason=_KNOWN)
 def test_colliding_keys_example() -> None:
     result = capture_value({1: "a", "1": "b"}, CapturePolicy())
     assert len(result.value) == 2 or result.lossy

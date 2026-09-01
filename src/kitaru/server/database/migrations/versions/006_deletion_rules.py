@@ -35,7 +35,6 @@ from kitaru.server.adapters.db.orm.cohort_version import (
     COHORT_VERSION_OWNER_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.evaluation import (
-    EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
     EVALUATION_TASK_ID_FOREIGN_KEY,
 )
 from kitaru.server.adapters.db.orm.experiment import (
@@ -226,10 +225,10 @@ def upgrade() -> None:
 
     with op.batch_alter_table("evaluation", schema=None) as batch_op:
         batch_op.drop_constraint(
-            EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY, type_="foreignkey"
+            "fk_evaluation_evaluator_version_id", type_="foreignkey"
         )
         batch_op.create_foreign_key(
-            EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
+            "fk_evaluation_evaluator_version_id",
             "plugin_version",
             ["evaluator_version_id"],
             ["id"],

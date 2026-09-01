@@ -20,7 +20,9 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunProgress,
     ExperimentRunResponse,
 )
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
+from kitaru.server.adapters.rest.mapping.replays import resolve_baseline_evaluation_mode
 from kitaru.server.application.models.experiment_run import (
     ExperimentRunCreate,
     ExperimentRunFilter,
@@ -44,7 +46,7 @@ def experiment_run_create_to_command(
     return ExperimentRunCreate(
         cohort_version_id=body.cohort_version_id,
         agent_version_id=body.agent_version_id,
-        evaluate_baselines=body.evaluate_baselines,
+        baseline_evaluation_mode=resolve_baseline_evaluation_mode(body),
     )
 
 
@@ -89,7 +91,9 @@ def experiment_run_to_response(
         status=run.status,
         cohort_version_id=run.cohort_version_id,
         agent_version_id=run.agent_version_id,
-        evaluate_baselines=run.evaluate_baselines,
+        evaluate_baselines=run.baseline_evaluation_mode
+        is not BaselineEvaluationMode.NONE,
+        baseline_evaluation_mode=run.baseline_evaluation_mode,
         started_at=run.started_at,
         ended_at=run.ended_at,
         error=run.error,

@@ -34,6 +34,7 @@ from kitaru.api_models.v1.auth import (
     TokenErrorResponse,
     TokenResponse,
 )
+from kitaru.api_models.v1.base import PlainStr
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
@@ -110,7 +111,7 @@ class LoginRequestForm:
             device_code: Device code, required by the device grant type.
 
         Raises:
-            HTTPException: The grant type is unknown, is not accepted by this
+            TokenGrantError: The grant type is unknown, is not accepted by this
                 server's auth scheme, or is missing a required field.
         """
         self.grant_type = self._resolve_grant_type(
@@ -120,9 +121,9 @@ class LoginRequestForm:
             if settings.AUTH_SCHEME is not AuthScheme.LOCAL:
                 raise self._unsupported_grant_type(self.grant_type)
             if not username:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid request: username is required.",
+                raise TokenGrantError(
+                    TokenErrorCode.INVALID_REQUEST,
+                    "Invalid request: username is required.",
                 )
         elif self.grant_type is GrantType.API_KEY:
             if settings.AUTH_SCHEME is not AuthScheme.LOCAL:
@@ -134,9 +135,9 @@ class LoginRequestForm:
             if settings.AUTH_SCHEME is AuthScheme.NONE:
                 raise self._unsupported_grant_type(self.grant_type)
             if device_id is None or not device_code:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Invalid request: device_id and device_code are required.",
+                raise TokenGrantError(
+                    TokenErrorCode.INVALID_REQUEST,
+                    "Invalid request: device_id and device_code are required.",
                 )
         self.username = username or ""
         self.password = password or ""
@@ -163,28 +164,28 @@ class LoginRequestForm:
             return GrantType.CONTROL_PLANE
         if settings.AUTH_SCHEME is AuthScheme.LOCAL:
             return GrantType.PASSWORD
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid request: grant type is required.",
+        raise TokenGrantError(
+            TokenErrorCode.INVALID_REQUEST,
+            "Invalid request: grant type is required.",
         )
 
     @staticmethod
-    def _unsupported_grant_type(grant_type: str) -> HTTPException:
-        return HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Unsupported grant type: {grant_type}",
+    def _unsupported_grant_type(grant_type: str) -> TokenGrantError:
+        return TokenGrantError(
+            TokenErrorCode.UNSUPPORTED_GRANT_TYPE,
+            f"Unsupported grant type: {grant_type}",
         )
 
 
-@router.post("/device_authorization")
+@router.post("/device_authorization", responses={400: {"model": TokenErrorResponse}})
 async def device_authorization(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     service: Annotated[DeviceService, Depends(get_device_service)],
-    hostname: Annotated[str | None, Form()] = None,
-    os: Annotated[str | None, Form()] = None,
-    python_version: Annotated[str | None, Form()] = None,
-    client_version: Annotated[str | None, Form()] = None,
+    hostname: Annotated[PlainStr | None, Form()] = None,
+    os: Annotated[PlainStr | None, Form()] = None,
+    python_version: Annotated[PlainStr | None, Form()] = None,
+    client_version: Annotated[PlainStr | None, Form()] = None,
 ) -> DeviceAuthorizationResponse:
     """Start a device authorization and receive its codes.
 
@@ -204,15 +205,15 @@ async def device_authorization(
         client_version: Kitaru version the caller runs.
 
     Raises:
-        HTTPException: This server does not authenticate requests.
+        TokenGrantError: This server does not authenticate requests.
 
     Returns:
         Device authorization carrying the plaintext codes.
     """
     if settings.AUTH_SCHEME is AuthScheme.NONE:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="This server does not authenticate requests.",
+        raise TokenGrantError(
+            TokenErrorCode.UNSUPPORTED_GRANT_TYPE,
+            "This server does not authenticate requests.",
         )
     fingerprint = DeviceFingerprint(
         hostname=hostname,
@@ -252,9 +253,9 @@ async def login(
 
     Clients observe HTTP 200 on success, 400 when the grant type is not
     accepted by this server or a device authorization is not ready, and 401
-    when the credentials cannot be validated. A 400 for the device grant type
-    carries an OAuth 2.0 ``error`` code, of which ``authorization_pending``
-    means the caller should poll again.
+    when the credentials cannot be validated. A 400 carries an OAuth 2.0
+    ``error`` code, of which ``authorization_pending`` means the caller
+    should poll again.
 
     Args:
         request: Incoming request.

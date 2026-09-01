@@ -2791,6 +2791,16 @@
     "name": "kitaru_activity_read",
     "outputSchema": {
       "$defs": {
+        "BaselineEvaluationMode": {
+          "description": "Baseline evaluation mode.",
+          "enum": [
+            "none",
+            "if_missing",
+            "force"
+          ],
+          "title": "BaselineEvaluationMode",
+          "type": "string"
+        },
         "EvaluationDataType": {
           "description": "Data type an evaluation result carries.",
           "enum": [
@@ -2827,6 +2837,20 @@
               "default": null,
               "description": "Name of the evaluator that produced the result.",
               "title": "Evaluator Name"
+            },
+            "evaluator_params": {
+              "anyOf": [
+                {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Params the evaluator ran with.",
+              "title": "Evaluator Params"
             },
             "evaluator_version": {
               "anyOf": [
@@ -2874,6 +2898,32 @@
               "title": "Id",
               "type": "string"
             },
+            "max_score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Upper bound of the score scale.",
+              "title": "Max Score"
+            },
+            "min_score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Lower bound of the score scale.",
+              "title": "Min Score"
+            },
             "name": {
               "description": "Evaluation name.",
               "title": "Name",
@@ -2919,6 +2969,19 @@
               "format": "uuid",
               "title": "Session Id",
               "type": "string"
+            },
+            "target_score": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Score to beat.",
+              "title": "Target Score"
             },
             "task_id": {
               "anyOf": [
@@ -3055,6 +3118,10 @@
               "title": "Agent Version Id",
               "type": "string"
             },
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode",
+              "description": "How baseline sessions are scored."
+            },
             "cohort_version_id": {
               "description": "Cohort version whose sessions are replayed.",
               "format": "uuid",
@@ -3095,6 +3162,7 @@
               "title": "Error"
             },
             "evaluate_baselines": {
+              "deprecated": true,
               "description": "Whether baseline sessions are also scored.",
               "title": "Evaluate Baselines",
               "type": "boolean"
@@ -3162,6 +3230,7 @@
             "cohort_version_id",
             "agent_version_id",
             "evaluate_baselines",
+            "baseline_evaluation_mode",
             "progress"
           ],
           "title": "ExperimentRunResponse",
@@ -3445,6 +3514,10 @@
         "ReplayResponse": {
           "description": "Replay response.",
           "properties": {
+            "baseline_evaluation_mode": {
+              "$ref": "#/$defs/BaselineEvaluationMode",
+              "description": "How the baseline session is scored."
+            },
             "baseline_session_id": {
               "description": "Session replayed.",
               "format": "uuid",
@@ -3471,6 +3544,7 @@
               "title": "Error"
             },
             "evaluate_baselines": {
+              "deprecated": true,
               "description": "Whether the baseline session is also scored.",
               "title": "Evaluate Baselines",
               "type": "boolean"
@@ -3565,6 +3639,7 @@
             "tool_policy",
             "evaluators",
             "evaluate_baselines",
+            "baseline_evaluation_mode",
             "status"
           ],
           "title": "ReplayResponse",

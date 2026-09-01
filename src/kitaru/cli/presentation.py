@@ -479,7 +479,7 @@ _VIEWS: dict[str, HumanView] = {
                     HumanField("experiment_id", "Experiment ID"),
                     HumanField("cohort_version_id", "Cohort version ID"),
                     HumanField("agent_version_id", "Agent version ID"),
-                    HumanField("evaluate_baselines", "Evaluate baselines"),
+                    HumanField("baseline_evaluation_mode", "Baseline evaluation mode"),
                 ),
             ),
             HumanSection("Error", (HumanField("error", "Error"),)),

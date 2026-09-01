@@ -38,6 +38,7 @@ from kitaru.server.adapters.db.orm.investigation_session import (
 from kitaru.server.adapters.db.orm.job import JobORM
 from kitaru.server.adapters.db.orm.plugin import PluginORM, PluginVersionORM
 from kitaru.server.adapters.db.orm.replay import ReplayORM
+from kitaru.server.adapters.db.orm.replay_evaluation import ReplayEvaluationORM
 from kitaru.server.adapters.db.orm.secret import SecretORM
 from kitaru.server.adapters.db.orm.server_settings import ServerSettingsORM
 from kitaru.server.adapters.db.orm.session import SessionORM
@@ -69,6 +70,7 @@ __all__ = [
     "PluginORM",
     "PluginVersionORM",
     "ReplayConfigORM",
+    "ReplayEvaluationORM",
     "ReplayORM",
     "SecretORM",
     "ServerSettingsORM",

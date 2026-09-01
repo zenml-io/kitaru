@@ -25,11 +25,15 @@ import {
   ThreePlanesDiagram,
   WaitResumeDiagram,
 } from "@/components/diagrams";
+import { PySourceCode } from "@/components/py-source-code";
 
 export function getMDXComponents(components?: MDXComponents): MDXComponents {
   return {
     ...defaultMdxComponents,
     ...Python,
+    // Shadow the broken PySourceCode from fumadocs-python 0.1.1; see the
+    // comment in components/py-source-code.tsx.
+    PySourceCode,
     Accordion,
     Accordions,
     Callout,

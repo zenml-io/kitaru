@@ -14,6 +14,7 @@
 """Evaluation use cases."""
 
 import uuid
+from collections.abc import Sequence
 
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
@@ -24,8 +25,8 @@ from kitaru.server.application.interfaces.session_repository import (
 )
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.evaluation import (
+    EvaluationCreate,
     EvaluationFilter,
-    EvaluationMerge,
 )
 from kitaru.server.application.services.resource_access import check_task_session_read
 from kitaru.server.domain.evaluation import DuplicateEvaluationNameInBatch, Evaluation
@@ -43,7 +44,7 @@ class EvaluationService:
 
         Args:
             repository: Evaluation repository.
-            session_repository: Session repository, for the merge existence
+            session_repository: Session repository, for the create existence
                 check.
         """
         self._repository = repository
@@ -82,22 +83,37 @@ class EvaluationService:
         _ = actor
         return await self._repository.query(evaluation_filter)
 
-    async def merge_evaluations(
-        self,
-        session_id: uuid.UUID,
-        commands: list[EvaluationMerge],
-        actor: AuthContext,
-    ) -> list[Evaluation]:
-        """Upsert manual evaluations into a session on (session, name).
-
-        A resent name overwrites its data type, score, value, explanation,
-        and pass flag. The stored rows carry no evaluator_version_id or
-        task_id. A task principal merges into a session it owns or holds as
-        its task's input session.
+    async def list_replay_evaluations(
+        self, replay_ids: Sequence[uuid.UUID], actor: AuthContext
+    ) -> list[tuple[uuid.UUID, EvaluationWithEvaluator]]:
+        """List the evaluations linked to a set of replays.
 
         Args:
-            session_id: Id of the session to merge evaluations into.
-            commands: Evaluations to merge, in request order.
+            replay_ids: Ids of the replays.
+            actor: Caller context.
+
+        Returns:
+            (replay_id, evaluation) pairs, each evaluation paired with its
+            evaluator name and version.
+        """
+        _ = actor
+        return await self._repository.list_replay_evaluations(replay_ids)
+
+    async def create_evaluations(
+        self,
+        session_id: uuid.UUID,
+        commands: list[EvaluationCreate],
+        actor: AuthContext,
+    ) -> list[Evaluation]:
+        """Create manual evaluations on a session.
+
+        The stored rows carry no evaluator_version_id or task_id. A task
+        principal creates into a session it owns or holds as its task's
+        input session.
+
+        Args:
+            session_id: Id of the session to create evaluations on.
+            commands: Evaluations to create, in request order.
             actor: Caller context.
 
         Raises:
@@ -107,12 +123,14 @@ class EvaluationService:
             SessionNotEvaluatable: The session is in progress.
             DuplicateEvaluationNameInBatch: The request names the same
                 evaluation twice.
+            EvaluationNameConflict: A name in the batch already exists for
+                the session.
 
         Returns:
             Stored evaluations in request order.
         """
         # Lock the session so a concurrent delete cannot land between this
-        # read and the merge insert, whose foreign key would otherwise fail.
+        # read and the create insert, whose foreign key would otherwise fail.
         session = await self._sessions.get(
             session_id, include_payloads=False, exclusive=True
         )
@@ -133,7 +151,12 @@ class EvaluationService:
                 value=command.value,
                 explanation=command.explanation,
                 passed=command.passed,
+                min_score=command.min_score,
+                max_score=command.max_score,
+                target_score=command.target_score,
             )
             for command in commands
         ]
-        return await self._repository.merge_session_evaluations(session_id, evaluations)
+        return await self._repository.create_session_evaluations(
+            session_id, evaluations
+        )

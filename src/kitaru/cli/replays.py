@@ -9,7 +9,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Any
 
-from kitaru.api_models.v1.replay import ReplayCreateRequest
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayCreateRequest
 from kitaru.cli.output import CommandResult
 from kitaru.cli.registration import (
     get_agent_version,
@@ -30,7 +30,7 @@ async def create_replay(
     agent: str | None,
     override: str | None,
     tool_policy: str | None,
-    evaluate_baselines: bool,
+    baseline_evaluation_mode: BaselineEvaluationMode,
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one standalone replay with exact evaluator versions."""
@@ -46,7 +46,7 @@ async def create_replay(
         client, evaluators, evaluator_params or []
     )
     fields["evaluators"] = configs
-    fields["evaluate_baselines"] = evaluate_baselines
+    fields["baseline_evaluation_mode"] = baseline_evaluation_mode
 
     replay = await client.replays.create(
         ReplayCreateRequest(**fields), idempotency_key=idempotency_key

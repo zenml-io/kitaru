@@ -614,7 +614,10 @@ async def test_history_non_baseline_scope_sends_no_occurrence() -> None:
 
 
 @pytest.mark.parametrize("sync", [False, True], ids=["async", "sync"])
-@pytest.mark.parametrize("invalid_result", ["null", "malformed"])
+@pytest.mark.parametrize(
+    "invalid_result",
+    ["null", "malformed", "missing-status", "malformed-tuple", "missing-command"],
+)
 async def test_invalid_completed_history_match_fails_closed_under_passthrough(
     sync: bool,
     invalid_result: str,
@@ -627,11 +630,22 @@ async def test_invalid_completed_history_match_fails_closed_under_passthrough(
     )
     recorder = _Recorder(override=None, policy=policy)
     result: Any = None
-    if invalid_result == "malformed":
+    if invalid_result == "missing-command":
+        result = encode_tool_outcome(Command(update={"value": 1}))
+        result["payload"].pop("goto")
+    elif invalid_result != "null":
         result = encode_tool_outcome(
             ToolMessage(content="history", tool_call_id="old", name="old")
         )
-        result["payload"]["additional_kwargs"] = 1
+        if invalid_result == "malformed":
+            result["payload"]["additional_kwargs"] = 1
+        elif invalid_result == "missing-status":
+            result["payload"].pop("status")
+        else:
+            result["payload"]["artifact"] = {
+                "__kitaru_langgraph_type__": "tuple",
+                "value": "not a list",
+            }
 
     async def lookup(*_: Any) -> Any:
         return _history_match(result)
@@ -663,10 +677,21 @@ async def test_invalid_completed_history_match_fails_closed_under_passthrough(
             CapturePolicy(max_field_bytes=64),
             id="truncated",
         ),
+        pytest.param(
+            {"nested": {1: "first", "1": "second"}},
+            CapturePolicy(),
+            id="colliding-keys",
+        ),
+        pytest.param(
+            {1: "kept"},
+            CapturePolicy(),
+            id="non-string-key",
+        ),
     ],
 )
+@pytest.mark.parametrize("sync", [False, True], ids=["async", "sync"])
 async def test_lossy_history_result_fails_closed(
-    artifact: dict[str, Any], capture_policy: CapturePolicy
+    artifact: dict[Any, Any], capture_policy: CapturePolicy, sync: bool
 ) -> None:
     policy = ToolPolicy(
         default=HistoryConfig(
@@ -693,7 +718,7 @@ async def test_lossy_history_result_fails_closed(
 
     assert envelope["replayable"] is False
     with pytest.raises(ToolPolicyError, match="not replayable"):
-        await _invoke_history_tool(recorder, live_calls, sync=False)
+        await _invoke_history_tool(recorder, live_calls, sync=sync)
     assert live_calls == []
 
 

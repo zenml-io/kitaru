@@ -122,3 +122,20 @@ async def test_create_unknown_agent_not_found(client: httpx.AsyncClient) -> None
         json={"name": "accuracy", "agent_id": str(uuid.uuid4())},
     )
     assert response.status_code == 404
+
+
+async def test_get_evaluator_version_out_of_int32_range(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422, not 500, for a version outside PostgreSQL's int32 range."""
+    created = (
+        await client.post("/api/v1/evaluators", json={"name": "accuracy"})
+    ).json()
+
+    response = await client.get(f"/api/v1/evaluators/{created['id']}/versions/{2**31}")
+    assert response.status_code == 422
+
+    response = await client.get(
+        f"/api/v1/evaluators/{created['id']}/versions/{-(2**31) - 1}"
+    )
+    assert response.status_code == 422

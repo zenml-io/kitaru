@@ -92,7 +92,7 @@ Before an evaluator gates anything, check that it agrees with the human it stand
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionEvaluationsRequest
 
-await client.sessions.merge_evaluations(
+await client.sessions.create_evaluations(
     session_id,
     SessionEvaluationsRequest(
         evaluations=[
