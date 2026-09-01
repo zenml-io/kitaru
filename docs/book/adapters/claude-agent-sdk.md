@@ -74,11 +74,7 @@ from kitaru_claude_agent_sdk import replayable_sdk_mcp_server
 
 
 async def lookup(arguments: dict[str, object]) -> dict[str, object]:
-    return {
-        "content": [
-            {"type": "text", "text": f"Result for {arguments['query']}"}
-        ]
-    }
+    return {"content": [{"type": "text", "text": f"Result for {arguments['query']}"}]}
 
 
 support_server = replayable_sdk_mcp_server(
