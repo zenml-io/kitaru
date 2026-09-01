@@ -22,6 +22,15 @@ Implement `parse(payload: bytes, params: dict[str, Any])` as an iterator of `Imp
 
 Use representative provider exports as fixtures. Cover malformed records, missing or duplicate IDs, grouping, ordering, parent links, model and tool normalization, reasoning visibility, selector escaping, and stable re-import behavior as applicable.
 
+## Importer-backed adapter
+
+An importer package for a provider with a live read API can also ship an importer-backed adapter: a class subclassing `kitaru.importer_adapter.ImporterBackedAdapter` that wraps the user's agent entrypoint, waits for the provider to ingest the trace, fetches it, and imports it through the package's own parser. Read `src/kitaru/importer_adapter.py` and the langfuse importer package as the reference implementation before adding one.
+
+- Split the code into `adapter.py` (the subclass: trace pinning, SDK buffer flush, per-run cache) and `api.py` (the provider read layer: credential and client resolution, the completeness poll, single fetch, serialization to parser payload bytes). Keep `api.py` adapter-free so future direct-from-API imports can reuse it.
+- Run blocking SDK calls inside the async hooks via `asyncio.to_thread`, never in `trace()` teardown.
+- Provider SDK dependencies belong on the importer package. Adapter tests live under `plugins/tests/adapters/<slug>/` and run the real parser against a faked provider SDK.
+- Agent versions whose run spec command uses such an adapter must declare `runtime_capabilities` with `overrides: false` and `tool_policies: false`, since the runtime cannot intercept model or tool calls. Replay and experiment run creation reject configs the declaration cannot apply, and the adapter raises on such configs as a backstop.
+
 ## Package, register, and version
 
 An importer distribution lives under `plugins/packages/<slug>-importer/`, with its source, `pyproject.toml`, changelog, and focused tests under `plugins/tests/importers/`. Export `parse` through the package `__all__`. Add the package to `plugins/README.md`, `release/release-units.toml`, the exact inventory in `tests/scripts/test_release_units.py`, and `plugins/uv.lock`. A non-default package also declares `tool.kitaru.artifact.import-module` so artifact smoke can import it without a default-catalog entry.
