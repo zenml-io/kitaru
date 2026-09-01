@@ -17,7 +17,7 @@ import json
 import traceback as traceback_module
 import unicodedata
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from types import TracebackType
 from typing import Any, Literal, TextIO
 
@@ -250,7 +250,7 @@ def emit_event(event: str, item: Any = None) -> None:
             },
         )
         return
-    suffix = "" if item is None else f": {_display_value(item)}"
+    suffix = "" if item is None else f": {_display_value(redact_data(item))}"
     print(f"{event}{suffix}", file=context.stdout, flush=True)
 
 
@@ -328,6 +328,16 @@ def write_interaction(message: str) -> None:
 
 def _emit_text(context: OutputContext, result: CommandResult) -> None:
     """Render one result as rich or plain text."""
+    # Sanitize before field selection loses the containing credential key.
+    result = replace(
+        result,
+        item=redact_data(result.item),
+        items=redact_data(result.items),
+        page=redact_data(result.page),
+        warnings=redact_data(result.warnings),
+        links=redact_data(result.links),
+        next_actions=redact_data(result.next_actions),
+    )
     value = result.items if result.items is not None else result.item
     if context.rich:
         console = _get_console(context, context.stdout)
@@ -596,7 +606,7 @@ def _human_field_value(
     if item is _MISSING:
         return "-"
     if field.formatter is not None:
-        return field.formatter(redact_data(item))
+        return field.formatter(item)
     if detail:
         return _detail_value(item)
     return _display_value(item)
@@ -604,7 +614,6 @@ def _human_field_value(
 
 def _detail_value(value: Any) -> str:
     """Format nested detail data as readable indented JSON."""
-    value = redact_data(value)
     if isinstance(value, (dict, list)):
         return json.dumps(value, indent=2, sort_keys=True)
     return _display_value(value)
@@ -612,7 +621,6 @@ def _detail_value(value: Any) -> str:
 
 def _display_value(value: Any) -> str:
     """Format a value for a human-oriented cell or line."""
-    value = redact_data(value)
     if isinstance(value, (dict, list)):
         return json.dumps(value, sort_keys=True)
     if value is None:
