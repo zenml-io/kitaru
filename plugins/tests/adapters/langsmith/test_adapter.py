@@ -28,7 +28,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_langsmith import LangSmithAdapter
+from kitaru_langsmith_importer import LangSmithAdapter
 from kitaru_langsmith_importer.importer import parse
 
 from .fixtures import PROJECT_ID, FakeLangSmith, build_complete_runs, build_run

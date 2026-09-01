@@ -158,21 +158,6 @@ maintenance-branch-prefix = "release/logfire/"
 checks = ["plugin package (logfire-importer)"]
 
 [[units]]
-slug = "langsmith"
-path = "plugins/packages/langsmith"
-distribution = "kitaru-langsmith"
-registry = "pypi"
-version-source = "plugins/packages/langsmith/pyproject.toml"
-changelog = "plugins/packages/langsmith/CHANGELOG.md"
-lock-source = "plugins/uv.lock"
-default-catalog = false
-release-label = "requires:plugin:langsmith-adapter"
-impact-paths = ["plugins/packages/langsmith/**"]
-tag-prefix = "python/kitaru-langsmith/v"
-maintenance-branch-prefix = "release/langsmith-adapter/"
-checks = ["plugin package (langsmith)"]
-
-[[units]]
 slug = "langsmith-importer"
 path = "plugins/packages/langsmith-importer"
 distribution = "kitaru-langsmith-importer"

@@ -9,7 +9,6 @@ kitaru = { path = "..", editable = true }
 kitaru-braintrust-importer = { workspace = true }
 kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
-kitaru-langsmith = { workspace = true }
 kitaru-langsmith-importer = { workspace = true }
 kitaru-logfire = { workspace = true }
 kitaru-logfire-importer = { workspace = true }
@@ -24,7 +23,7 @@ dev = [
     "kitaru-braintrust-importer",
     "kitaru-langfuse-importer",
     "kitaru-langgraph[deepagents]",
-    "kitaru-langsmith",
+    "kitaru-langsmith-importer",
     "kitaru-logfire",
     "kitaru-openai-agents",
     "kitaru-phoenix",
@@ -57,7 +56,6 @@ known-first-party = [
     "kitaru_langgraph",
     "kitaru_logfire",
     "kitaru_logfire_importer",
-    "kitaru_langsmith",
     "kitaru_langsmith_importer",
     "kitaru_openai_agents",
     "kitaru_phoenix",

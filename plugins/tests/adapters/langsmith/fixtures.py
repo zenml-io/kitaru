@@ -22,7 +22,8 @@ from typing import Any
 import pytest
 from langsmith.schemas import Run
 
-import kitaru_langsmith.adapter as adapter_module
+import kitaru_langsmith_importer.adapter as adapter_module
+import kitaru_langsmith_importer.api as api_module
 
 RunsBuilder = Callable[[str], list[Run]]
 
@@ -130,7 +131,7 @@ class FakeLangSmith:
 
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adapter_module, "_POLL_INTERVAL", 0.0)
+    monkeypatch.setattr(api_module, "_POLL_INTERVAL", 0.0)
 
 
 @pytest.fixture

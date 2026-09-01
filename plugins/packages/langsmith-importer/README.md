@@ -15,6 +15,19 @@ The importer accepts LangSmith JSON and JSONL export shapes, reconstructs run hi
 
 See the [LangSmith import guide](https://docs.zenml.io/kitaru/guides/import-langsmith-traces) for accepted formats, grouping parameters, deduplication behavior, and fidelity limits.
 
+## Adapter
+
+The package also ships an adapter that imports LangSmith traces of wrapped agent runs. The adapter uses the LangSmith SDK already configured in your process and the Kitaru connection from your environment. Set `KITARU_AGENT_ID` to the agent imported sessions are created under and `LANGSMITH_API_KEY` (plus `LANGSMITH_ENDPOINT` for a self-hosted instance) to the credentials the trace fetch authenticates with, then wrap your agent entrypoint in a `LangSmithAdapter` and run it through the adapter.
+
+```python
+from kitaru_langsmith_importer import LangSmithAdapter
+
+adapter = LangSmithAdapter()
+result = adapter.run(my_agent, "Hello")
+```
+
+The adapter runs the function inside a LangSmith trace, waits for LangSmith to finish ingesting the trace, fetches it, and imports it as one Kitaru session. Use `run_async` for async functions. When the trace does not complete within the completeness timeout, the adapter creates a failed session carrying the trace id.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)
