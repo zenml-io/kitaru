@@ -15,6 +15,9 @@
 
 from importlib.metadata import version
 
+from .capability import KitaruRecordingError
+from .recording import InvocationRecorder
+
 ADAPTER_VERSION = version("kitaru-claude-agent-sdk")
 
-__all__ = ["ADAPTER_VERSION"]
+__all__ = ["ADAPTER_VERSION", "InvocationRecorder", "KitaruRecordingError"]
