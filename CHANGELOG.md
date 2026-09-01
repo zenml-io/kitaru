@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
 - Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.
 - `POST /api/v1/login` validation failures now carry the OAuth 2.0 `error` code their declared 400 response requires, `invalid_request` for a missing field and `unsupported_grant_type` for an unknown or rejected grant type. `POST /api/v1/device_authorization` declares its 400 response and returns the same shape when the server does not authenticate requests.
+- Fixed boolean filters in the MCP list operations of `kitaru_registry_read`, `kitaru_activity_read`, and `kitaru_review_read`. An `and`, `or`, or `not` filter reached the SDK under its Python field name and was answered with `internal_error`; filters at any nesting depth now reach the Kitaru server, and an MCP request the handler cannot marshal is reported as `invalid_arguments` instead of a server-side fault.
 
 ## [0.24.0]
 
@@ -57,7 +58,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
-- Fixed boolean filters in the MCP list operations of `kitaru_registry_read`, `kitaru_activity_read`, and `kitaru_review_read`. An `and`, `or`, or `not` filter reached the SDK under its Python field name and was answered with `internal_error`; filters at any nesting depth now reach the Kitaru server, and an MCP request the handler cannot marshal is reported as `invalid_arguments` instead of a server-side fault.
 - Unified CLI and MCP credential masking, including plural credential fields, while preserving numeric token usage. Output now preserves colliding mapping keys and safely bounds deep or cyclic data.
 - LangGraph capture now marks mapping-key coercion and collisions as non-replayable. Tool-result encoding preserves nested tuples, and replay rejects missing message status and malformed stored outcomes without running the live tool.
 - Fixed `kitaru evaluator version register` and `kitaru importer version register`, which always failed with a `TypeError` after uploading the source. `POST /api/v1/evaluators/{evaluator_id}/versions` and `POST /api/v1/importers/{importer_id}/versions` now support idempotency keys, and the SDK `create_version` methods take an `idempotency_key` argument, matching agent and cohort version creation. The MCP evaluator management tool's `create_version` operation takes an optional `idempotency_key` field.
