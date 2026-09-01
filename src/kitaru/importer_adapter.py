@@ -157,7 +157,8 @@ class ImporterBackedAdapter:
 
         Raises:
             SessionImportError: The parse yielded a failure or anything but
-                exactly one session.
+                exactly one session, or a session with the external id
+                already exists.
         """
         try:
             async with asyncio.timeout(self._completeness_timeout):
@@ -180,7 +181,11 @@ class ImporterBackedAdapter:
                 f"{external_id}, expected exactly one"
             )
         async with KitaruAPIClient() as client:
-            await ingest_session(client, sessions[0], agent_id, self.provider)
+            session = await ingest_session(client, sessions[0], agent_id, self.provider)
+        if session is None:
+            raise SessionImportError(
+                f"A session with external id {sessions[0].external_id} already exists"
+            )
 
     async def _create_timed_out_session(
         self, client: KitaruAPIClient, external_id: str, agent_id: uuid.UUID

@@ -26,6 +26,7 @@ from kitaru.api_models.v1.imports import MAX_IMPORT_FAILURES, ImportFailure, Imp
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
     SessionOrigin,
+    SessionResponse,
     SessionStatus,
     TokenUsage,
 )
@@ -284,7 +285,7 @@ async def ingest_session(
     parsed: ImportedSession,
     agent_id: uuid.UUID,
     provider: str | None,
-) -> None:
+) -> SessionResponse | None:
     """Create a session for one parsed import item and ingest its nodes.
 
     Args:
@@ -296,15 +297,25 @@ async def ingest_session(
     Raises:
         APIError: Session creation or node ingestion failed.
         SessionImportError: The imported node tree is invalid.
+
+    Returns:
+        Created session, None when a session with the external id already
+        exists.
     """
     request = session_request(parsed, agent_id, provider)
-    session = await client.sessions.create(request)
+    try:
+        session = await client.sessions.create(request)
+    except APIError as exc:
+        if exc.status_code == httpx.codes.CONFLICT:
+            return None
+        raise
     nodes = flatten_nodes(parsed.nodes)
     for start in range(0, len(nodes), NODE_BATCH_SIZE):
         batch = nodes[start : start + NODE_BATCH_SIZE]
         await client.sessions.ingest_nodes(
             session.id, SessionNodeBatchRequest(nodes=batch)
         )
+    return session
 
 
 def _resolve_parser(details: ImportTaskDetails) -> Parser:
@@ -372,20 +383,20 @@ async def run(client: KitaruAPIClient, task_id: str) -> None:
                 _record_failure(item)
                 continue
             try:
-                await ingest_session(client, item, details.agent_id, details.provider)
+                session = await ingest_session(
+                    client, item, details.agent_id, details.provider
+                )
             except APIError as exc:
-                # A conflict can only come from the session create call, which
-                # runs before any node ingestion.
-                if exc.status_code == httpx.codes.CONFLICT:
-                    skipped += 1
-                else:
-                    _record_failure(
-                        ImportFailure(
-                            line=line, external_id=item.external_id, error=str(exc)
-                        )
+                _record_failure(
+                    ImportFailure(
+                        line=line, external_id=item.external_id, error=str(exc)
                     )
+                )
                 continue
-            created += 1
+            if session is None:
+                skipped += 1
+            else:
+                created += 1
     except SessionImportError as exc:
         _record_failure(ImportFailure(line=line + 1, external_id=None, error=str(exc)))
         write_task_result(_stats())

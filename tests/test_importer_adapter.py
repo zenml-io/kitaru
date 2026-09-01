@@ -79,9 +79,12 @@ class _FakeSessionsResource:
         self.session_id = uuid.uuid4()
         self.created: list[SessionCreateRequest] = []
         self.batches: list[SessionNodeBatchRequest] = []
+        self.create_error: APIError | None = None
         self.ingest_error: APIError | None = None
 
     async def create(self, request: SessionCreateRequest) -> Any:
+        if self.create_error is not None:
+            raise self.create_error
         self.created.append(request)
         return SimpleNamespace(id=self.session_id)
 
@@ -336,6 +339,20 @@ def test_run_raises_an_ingest_error_after_the_function(
 
     assert "func" in adapter.events
     assert len(client.sessions.created) == 1
+    assert client.sessions.batches == []
+
+
+def test_run_rejects_an_already_imported_trace(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Raise SessionImportError when the session external id already exists."""
+    adapter, client, _ = _adapter(monkeypatch, _single_session_parser)
+    client.sessions.create_error = APIError(httpx.codes.CONFLICT, "conflict")
+
+    with pytest.raises(SessionImportError, match="already exists"):
+        adapter.run(lambda: adapter.events.append("func"))
+
+    assert "func" in adapter.events
     assert client.sessions.batches == []
 
 
