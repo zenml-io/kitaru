@@ -15,9 +15,16 @@
 
 from importlib.metadata import version
 
-from .capability import KitaruRecordingError
+from .capability import KitaruRecordingError, UnsupportedReplayError
 from .recording import InvocationRecorder
+from .runner import KitaruClaudeRunner
 
 ADAPTER_VERSION = version("kitaru-claude-agent-sdk")
 
-__all__ = ["ADAPTER_VERSION", "InvocationRecorder", "KitaruRecordingError"]
+__all__ = [
+    "ADAPTER_VERSION",
+    "InvocationRecorder",
+    "KitaruClaudeRunner",
+    "KitaruRecordingError",
+    "UnsupportedReplayError",
+]

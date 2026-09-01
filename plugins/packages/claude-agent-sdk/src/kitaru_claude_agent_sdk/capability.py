@@ -14,7 +14,7 @@ class KitaruRecordingError(RuntimeError):
     def __init__(
         self,
         *,
-        terminal_message: ResultMessage,
+        terminal_message: ResultMessage | None,
         session_id: uuid.UUID | None,
         phase: str,
     ) -> None:
@@ -30,4 +30,8 @@ class KitaruRecordingError(RuntimeError):
         )
 
 
-__all__ = ["KitaruRecordingError"]
+class UnsupportedReplayError(ValueError):
+    """Reject a replay request that the public Claude boundary cannot enforce."""
+
+
+__all__ = ["KitaruRecordingError", "UnsupportedReplayError"]
