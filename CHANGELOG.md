@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/),
 and this project adheres to [Semantic Versioning](https://semver.org/).
 
+## [Unreleased]
+
+### Added
+
+- Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. A request that sets neither `baseline_evaluation_mode` nor the deprecated `evaluate_baselines` defaults to `if_missing`. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
+- Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
+- Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
+- Added `min_score`, `max_score`, and `target_score` to evaluation results and evaluation responses, for displaying a score against its scale and against the score it should beat. All three are only accepted on a float evaluation.
+
+### Changed
+
+- `client.sessions.merge_evaluations` is renamed to `create_evaluations`. Manual evaluation names are unique per session, resending a name already stored for the session now returns HTTP 409 instead of overwriting the existing row.
+- A row written by an evaluator run keeps its evaluator version id forever, even after that evaluator is deleted, rather than losing it and becoming indistinguishable from a manual row.
+- `if_missing` baseline scoring now matches a prior evaluation by evaluator version and params rather than by evaluator version alone, so a baseline scored again with different params always gets a fresh task instead of being skipped.
+- Evaluation aggregates for an experiment run now read the replay links written at creation time, so a run's aggregate is pinned to the evaluations that scored its replays and a later evaluation of the same session no longer changes it. Aggregates now group by evaluator version in addition to name and data type, and `EvaluationAggregateResponse` exposes `evaluator_version_id`, `evaluator_name`, and `evaluator_version` per group. Manual evaluations no longer appear in run aggregates, they stay visible in listings and session views.
+- The evaluation `experiment_run_id` filter now matches through the replay link table instead of the producing task's job, so a standalone evaluation job's rows no longer match a run's filter and an evaluation adopted into a run through `if_missing` does.
+
 ## [0.24.0]
 
 ### Added
@@ -15,20 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
 - Added Hypothesis property tests for the importer `parse()` contract, the MCP tool boundary, and credential redaction, plus a nightly `fuzz-nightly` workflow that runs them with a larger example budget and a cached example database.
 - Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
-- Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. A request that sets neither `baseline_evaluation_mode` nor the deprecated `evaluate_baselines` defaults to `if_missing`. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
-- Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
-- Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
-- Added `min_score`, `max_score`, and `target_score` to evaluation results and evaluation responses, for displaying a score against its scale and against the score it should beat. All three are only accepted on a float evaluation.
 
 ### Changed
 
 - The Vercel AI SDK adapter is now developed and tested against `ai` 7.0.85. The supported peer range is unchanged (`>=7.0.60 <8.0.0`).
 - `kitaru-pydantic-ai` now supports the PydanticAI 2.23 through 2.36 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.35.3 with `genai-prices` 0.1.4.
-- `client.sessions.merge_evaluations` is renamed to `create_evaluations`. Manual evaluation names are unique per session, resending a name already stored for the session now returns HTTP 409 instead of overwriting the existing row.
-- A row written by an evaluator run keeps its evaluator version id forever, even after that evaluator is deleted, rather than losing it and becoming indistinguishable from a manual row.
-- `if_missing` baseline scoring now matches a prior evaluation by evaluator version and params rather than by evaluator version alone, so a baseline scored again with different params always gets a fresh task instead of being skipped.
-- Evaluation aggregates for an experiment run now read the replay links written at creation time, so a run's aggregate is pinned to the evaluations that scored its replays and a later evaluation of the same session no longer changes it. Aggregates now group by evaluator version in addition to name and data type, and `EvaluationAggregateResponse` exposes `evaluator_version_id`, `evaluator_name`, and `evaluator_version` per group. Manual evaluations no longer appear in run aggregates, they stay visible in listings and session views.
-- The evaluation `experiment_run_id` filter now matches through the replay link table instead of the producing task's job, so a standalone evaluation job's rows no longer match a run's filter and an evaluation adopted into a run through `if_missing` does.
 - `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.20, 0.21, and 0.22 minor lines in addition to 0.19.3+. The 0.21 line moved the OpenAI provider to `openai>=3.0.0,<4`, so the plugin workspace lockfile now resolves `openai-agents` 0.22.0 with `openai` 3.5.0.
 - Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
 - Creating evaluations for a session that is not finished is now rejected with HTTP 409 on every path. This covers evaluation batches, merging manual evaluations into a session, and replays and experiment runs that score baseline sessions.
