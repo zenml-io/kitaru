@@ -1,6 +1,6 @@
 # Kitaru Claude Agent SDK adapter
 
-Record one-shot Claude Agent SDK queries as Kitaru sessions, then rerun recorded inputs with bounded prompt, model, and in-process SDK MCP tool overrides.
+Record one-shot Claude Agent SDK queries as Kitaru sessions, then rerun the same inputs with prompt, model, and SDK MCP tool overrides.
 
 ## Install
 
@@ -12,7 +12,7 @@ This package currently supports `claude-agent-sdk>=0.2.149,<0.3` and Python 3.11
 
 ## Record a query
 
-`KitaruClaudeRunner.query()` delegates to the Claude Agent SDK's public `query()` function and yields the exact native messages it produces:
+`KitaruClaudeRunner.query()` calls the Claude Agent SDK's public `query()` function and yields its message objects unchanged:
 
 ```python
 import contextlib
@@ -38,11 +38,11 @@ Use `contextlib.aclosing()` whenever the consumer may stop before the terminal m
 
 Standalone queries require either `agent_id` or `agent_version_id`. A Kitaru worker supplies the task-bound identity automatically.
 
-The public facade is `KitaruClaudeRunner(agent_id=None, agent_version_id=None, session_name=None)`. Its `query(*, prompt, options=None, replayable_servers=(), transport=None)` method accepts the same optional transport injection as the underlying SDK, but deliberately restricts `prompt` to a string.
+Create the runner with `KitaruClaudeRunner(agent_id=None, agent_version_id=None, session_name=None)`. Its `query(*, prompt, options=None, replayable_servers=(), transport=None)` method accepts the same optional transport injection as the underlying SDK. This adapter only accepts string prompts.
 
 ## Declare replayable SDK MCP tools
 
-Only in-process SDK MCP tools declared with `replayable_sdk_mcp_server()` are eligible for static or history substitution. Declaring a server is provider-free and does not execute the handler:
+Only in-process SDK MCP tools declared with `replayable_sdk_mcp_server()` can use static or history substitution. Creating the definition does not call Claude or run the handler:
 
 ```python
 from claude_agent_sdk import SdkMcpTool
@@ -84,9 +84,9 @@ messages = runner.query(
 )
 ```
 
-The adapter creates a fresh SDK MCP server for each query, so handler and history state are not shared across concurrent runs.
+The adapter creates a new SDK MCP server for each query, so concurrent runs do not share handler or history state.
 
-`replayable_sdk_mcp_server(name=..., tools=..., version="1.0.0")` returns the frozen `ReplayableSdkMcpServer` definition accepted by `query()`. The helper is the preferred construction API.
+`replayable_sdk_mcp_server(name=..., tools=..., version="1.0.0")` returns the frozen `ReplayableSdkMcpServer` definition accepted by `query()`. Most code should use the helper rather than construct the dataclass directly.
 
 ## Replay boundary
 
@@ -99,9 +99,9 @@ Supported replay changes are:
 - direct or current-model-keyed model replacement; and
 - `static`, `history`, `error_result`, and `passthrough` behavior for exact adapter-wrapped SDK MCP tool identities such as `mcp__support__lookup`.
 
-Static and history replay results use a versioned, bounded envelope containing text MCP content blocks and an optional boolean `is_error`. Other result shapes are recorded as non-replayable.
+Static and history results use a versioned format with text MCP content blocks and an optional boolean `is_error`. Kitaru records other result shapes but cannot substitute them during replay.
 
-Substituting tools requires an isolated `ClaudeAgentOptions(tools=[])` configuration. Pre-existing MCP servers, unwrapped allowed tools, explicit inline or filesystem settings, plugins, skills, agents, and extra CLI arguments are rejected because they can introduce tools that the public SDK boundary cannot safely deny. The adapter also sets `setting_sources=[]` and `strict_mcp_config=True` on its copied options so default user or project settings and `.mcp.json` files cannot add an unwrapped server; the caller's options remain unchanged. An all-passthrough replay does not require that isolation.
+Tool substitution requires `ClaudeAgentOptions(tools=[])`. The adapter rejects existing MCP servers, unwrapped allowed tools, explicit settings, plugins, skills, agents, and extra CLI arguments because they can add tools outside Kitaru's wrappers. It also sets `setting_sources=[]` and `strict_mcp_config=True` on a copy of the options, which stops user settings, project settings, and `.mcp.json` files from adding an unwrapped server. Your original options stay unchanged. An all-passthrough replay does not need this isolation.
 
 `passthrough`, including a static or history `on_miss="passthrough"`, calls the original handler. Treat it as a real side effect.
 
@@ -118,13 +118,13 @@ Baseline history consumes matching results by occurrence. Concurrent calls with 
 
 ## Data and quality
 
-Prompts, tool arguments, tool results, model output, reasoning text, and failure summaries are ordinary Kitaru trace data. The adapter bounds recorded values and excludes some provider-only fields, but it does not provide an adapter-specific redaction policy. Redact or filter data in your application before it reaches the model or tool when needed, and apply suitable access and retention rules to the Kitaru server.
+Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. The adapter limits the size of recorded values and excludes some provider-only fields. It does not add its own redaction policy. Filter data in your application when needed, and set suitable access and retention rules on the Kitaru server.
 
 Replay proves that the new run completed under the selected inputs and policies. It does not prove that the answer is better. Add an evaluator for the behavior you need to measure.
 
 ## Optional live smoke test
 
-After configuring your normal Anthropic credentials and a Kitaru agent identity, run the recording example above with a harmless prompt and no side-effecting tools. This is deliberately opt-in because it sends a real provider request and may incur cost. The package test suite itself uses public SDK types and local fakes, so it requires no provider credential.
+After configuring your normal Anthropic credentials and a Kitaru agent identity, run the recording example above with a harmless prompt and no side-effecting tools. The live test is opt-in because it sends a real provider request and may incur cost. The package test suite uses public SDK types and local fakes, so it requires no provider credential.
 
 ## Links
 

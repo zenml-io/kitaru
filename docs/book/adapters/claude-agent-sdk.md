@@ -1,11 +1,11 @@
 ---
-description: Record one-shot Claude Agent SDK queries and rerun them with bounded prompt, model, and in-process SDK MCP tool overrides
+description: Record one-shot Claude Agent SDK queries and rerun them with prompt, model, and SDK MCP tool overrides
 icon: robot
 ---
 
 # Claude Agent SDK
 
-The Kitaru Claude Agent SDK adapter records one public, one-shot `query()` invocation as a Kitaru session. It yields the exact native Claude messages, while Kitaru records the root input, model calls, tool calls, subagent events, terminal usage, cost, and failures exposed by the SDK message stream.
+The Kitaru Claude Agent SDK adapter records a one-shot `query()` call as a Kitaru session. Your code still receives the original Claude message objects. In parallel, Kitaru records the input and the model, tool, subagent, usage, cost, and failure data exposed by the SDK message stream.
 
 {% hint style="warning" %}
 The adapter ships as the separately versioned `kitaru-claude-agent-sdk` distribution. It is not exported by the `kitaru` package and is not installed in the Kitaru server's default plugin catalog.
@@ -43,17 +43,17 @@ async def run() -> None:
             print(message)
 ```
 
-The adapter delegates to the Claude Agent SDK's public `query()` function and preserves each returned message object. It copies `ClaudeAgentOptions` before adding recording hooks, so the caller's options and hook collections are not mutated.
+The adapter calls the Claude Agent SDK's public `query()` function and yields each message unchanged. It copies `ClaudeAgentOptions` before adding recording hooks, so it does not modify the options or hook collections you passed in.
 
-Use `contextlib.aclosing()` whenever the consumer may stop before the terminal `ResultMessage`. Without it, cleanup depends on when Python closes the asynchronous generator. With it, the Claude iterator closes and the partial Kitaru session is finalized as soon as the consumer exits.
+Use `contextlib.aclosing()` if the consumer may stop before the terminal `ResultMessage`. Otherwise, cleanup has to wait for Python to close the asynchronous generator. `aclosing()` closes the Claude iterator and finalizes the partial Kitaru session when the consumer exits.
 
 A standalone query must set either `agent_id` or `agent_version_id`. You may also set `session_name`; otherwise it falls back to `KITARU_SESSION_NAME`. Under a Kitaru worker, `KITARU_TASK_ID` links the result session to the task and supplies the agent identity.
 
-The public facade is `KitaruClaudeRunner(agent_id=None, agent_version_id=None, session_name=None)`. Its `query(*, prompt, options=None, replayable_servers=(), transport=None)` method accepts the same optional transport injection as the underlying SDK, but deliberately restricts `prompt` to a string.
+Create the runner with `KitaruClaudeRunner(agent_id=None, agent_version_id=None, session_name=None)`. Its `query(*, prompt, options=None, replayable_servers=(), transport=None)` method accepts the same optional transport injection as the underlying SDK. This adapter only accepts string prompts.
 
 ## What replay means here
 
-Replay starts a fresh Claude query with the recorded root input. It does not feed the original assistant messages back into Claude, resume the provider session, reproduce the original scheduling order, or play the recorded trajectory forward.
+Replay starts a new Claude query with the recorded root input. It does not send the old assistant messages back to Claude or resume the provider session. Claude can take a different path through the new run.
 
 When a worker runs the same program with a selected replay, the adapter can apply these changes before Claude starts:
 
@@ -94,7 +94,7 @@ support_server = replayable_sdk_mcp_server(
 )
 ```
 
-This construction is provider-free: it defines `ReplayableSdkMcpServer` and the tool handler but does not call Claude or execute the handler. Pass the definition to each query that can use it:
+Creating this definition does not call Claude or run the handler. Pass it to each query that can use the tool:
 
 ```python
 stream = runner.query(
@@ -108,9 +108,9 @@ stream = runner.query(
 )
 ```
 
-The exact policy identity is `mcp__<server name>__<tool name>`, which is `mcp__support__lookup` in this example. The adapter creates a fresh SDK MCP server for each query, so wrapped handlers, occurrence counters, and concurrency state do not leak between runs.
+The policy identity is `mcp__<server name>__<tool name>`, or `mcp__support__lookup` in this example. The adapter creates a new SDK MCP server for each query. Wrapped handlers and replay state are therefore not shared between runs.
 
-`replayable_sdk_mcp_server(name=..., tools=..., version="1.0.0")` returns the frozen `ReplayableSdkMcpServer` definition accepted by `query()`. You may construct that public dataclass directly, but the helper is the preferred API.
+`replayable_sdk_mcp_server(name=..., tools=..., version="1.0.0")` returns the frozen `ReplayableSdkMcpServer` definition accepted by `query()`. You can construct the dataclass directly, though most code should use the helper.
 
 ## Tool replay policies
 
@@ -123,9 +123,9 @@ The adapter supports the shared Kitaru tool-policy behavior only for tools decla
 | `error_result` | On a static or history miss, return a valid Claude MCP result with text content and `is_error: true`. |
 | `passthrough` | Call the original handler. This includes `on_miss: passthrough` and can perform real, irreversible side effects. |
 
-Static and recorded history results are replayable only when they fit the adapter's versioned result envelope: a mapping containing text MCP `content` blocks and an optional boolean `is_error`. The envelope is bounded to 100 text blocks and 64 KiB. Images, embedded resources, audio, arbitrary extra fields, and oversized results cannot be substituted by this release.
+Static and history results must fit the adapter's versioned result format: a mapping with text MCP `content` blocks and an optional boolean `is_error`. A result may contain up to 100 text blocks and 64 KiB. This release cannot substitute images, embedded resources, audio, extra fields, or larger results.
 
-A failed history match raises `ToolPolicyError` instead of recreating the original exception class. A missing static or history result with `on_miss: fail` raises `ToolPolicyMissError`. The SDK MCP server converts handler exceptions into tool error results, so the adapter retains these policy failures and raises them from the outer query as soon as the SDK returns control; the Kitaru session is finalized as failed.
+A failed history match raises `ToolPolicyError` rather than trying to recreate the original exception class. A missing static or history result with `on_miss: fail` raises `ToolPolicyMissError`. The SDK MCP server normally converts handler exceptions into tool error results for Claude. Kitaru remembers these policy failures and raises them again from the outer query, then marks the session as failed.
 
 Baseline history cannot assign a deterministic occurrence when two identical calls are in flight at once. The adapter rejects that case instead of guessing which recorded result belongs to which call. Use static replay or give the calls distinct tool identities or arguments.
 
@@ -141,9 +141,9 @@ The adapter rejects these configurations before it creates a Kitaru session or c
 - plugins, skills, or agent definitions; and
 - extra CLI arguments.
 
-Those options can introduce tools through another route, and the public SDK does not provide a broad per-run guard that can prove they stayed disabled. Remove them for substituting replay, or use an all-passthrough tool policy. Recording-only runs and all-passthrough replays preserve caller tool configuration.
+Each of those options can add a tool outside Kitaru's wrappers. The public SDK has no single per-run switch that lets Kitaru inspect and deny every such tool. Remove the options for substituting replay, or use an all-passthrough policy. Recording-only runs and all-passthrough replays keep your tool configuration unchanged.
 
-For substituting replay, the adapter also sets `setting_sources=[]` and `strict_mcp_config=True` on its copied options before calling Claude. This prevents default user or project settings and `.mcp.json` files from loading an unwrapped MCP server without mutating the caller's `ClaudeAgentOptions`.
+Before a substituting replay calls Claude, the adapter sets `setting_sources=[]` and `strict_mcp_config=True` on its private copy of the options. User settings, project settings, and `.mcp.json` files cannot add an unwrapped MCP server. Your original `ClaudeAgentOptions` object is unchanged.
 
 {% hint style="danger" %}
 Passthrough is a live call, not a simulation or transaction. A database write, message send, filesystem change, or external API call can happen again during replay. Put side-effecting tools in a disposable sandbox or choose a substituting policy when rerunning production failures.
@@ -173,13 +173,13 @@ The exception carries the Kitaru `session_id` when available, the failing `phase
 
 ## Data and evaluation
 
-Prompts, tool arguments, tool results, model output, reasoning text, and failure summaries are ordinary Kitaru trace data. Values are bounded before storage, and the adapter excludes some provider-only fields such as thinking signatures, but it does not provide an adapter-specific redaction hook or privacy policy. Decide what your application may send to the model and tools, then apply the same access and retention controls to Kitaru that you apply to the source data.
+Kitaru stores prompts, tool arguments and results, model output, reasoning text, and failure summaries as trace data. The adapter limits the size of recorded values and excludes provider-only fields such as thinking signatures. It does not add its own redaction policy. Decide what your application may send to Claude and its tools, and give the resulting Kitaru data the same access and retention controls as the source data.
 
 Replay tells you what the changed program did on the same recorded input under the selected tool policy. It does not tell you whether the new answer is correct or better. Add an [evaluator](../guides/write-an-evaluator.md) for the behavior that matters, freeze the relevant sessions into a cohort, and compare the resulting evaluations.
 
 ## Fit for production-failure replay
 
-This adapter can support a workflow that selects a failed production run, changes code, prompt, or model, and executes a fresh comparison in a sandbox. Support is conditional on the application's actual topology:
+You can use this adapter to select a failed production run, change the code, prompt, or model, and run the case again in a sandbox. Whether tool replay works depends on how the application is built:
 
 1. The production entrypoint must use the one-shot string `query()` API rather than `ClaudeSDKClient`, an async prompt, resume, continue, or fork.
 2. Each tool that must be substituted must originate as an in-process `SdkMcpTool` that can be declared through `replayable_sdk_mcp_server()`. Claude built-ins and external MCP tools can be observed, but not safely substituted.
@@ -187,7 +187,7 @@ This adapter can support a workflow that selects a failed production run, change
 4. Credentials and the worker command must be available in the rerun environment. Kitaru does not move provider or application secrets into the sandbox for you.
 5. Any passthrough tool must be safe to execute again in that sandbox.
 
-Verify those five facts against the customer's code and deployment before promising replay coverage. When they hold, Kitaru can rerun the same root case against changed code, prompt, or model and compare it with a separate evaluator. When they do not, recording is still useful evidence, but this adapter cannot turn the run into a faithful substituting replay by itself.
+Check these points against the application's code and deployment before promising replay coverage. If they hold, Kitaru can rerun the same root case with changed code, prompt, or model and compare the runs with an evaluator. If they do not, the recording is still useful for diagnosis, but Kitaru cannot safely substitute every dependency in the run.
 
 ## Optional live smoke
 
