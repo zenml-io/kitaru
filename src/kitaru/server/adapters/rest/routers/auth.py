@@ -34,7 +34,7 @@ from kitaru.api_models.v1.auth import (
     TokenErrorResponse,
     TokenResponse,
 )
-from kitaru.api_models.v1.base import PlainStr
+from kitaru.api_models.v1.base import PlainStr, ValidationErrorBody
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
@@ -177,7 +177,13 @@ class LoginRequestForm:
         )
 
 
-@router.post("/device_authorization", responses={400: {"model": TokenErrorResponse}})
+@router.post(
+    "/device_authorization",
+    responses={
+        400: {"model": TokenErrorResponse},
+        422: {"model": ValidationErrorBody, "description": "Validation Error"},
+    },
+)
 async def device_authorization(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
@@ -232,7 +238,13 @@ async def device_authorization(
     )
 
 
-@router.post("/login", responses={400: {"model": TokenErrorResponse}})
+@router.post(
+    "/login",
+    responses={
+        400: {"model": TokenErrorResponse},
+        422: {"model": ValidationErrorBody, "description": "Validation Error"},
+    },
+)
 async def login(
     request: Request,
     response: Response,
