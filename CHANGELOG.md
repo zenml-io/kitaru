@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Evaluation aggregates for an experiment run now read the replay links written at creation time, so a run's aggregate is pinned to the evaluations that scored its replays and a later evaluation of the same session no longer changes it. Aggregates now group by evaluator version in addition to name and data type, and `EvaluationAggregateResponse` exposes `evaluator_version_id`, `evaluator_name`, and `evaluator_version` per group. Manual evaluations no longer appear in run aggregates, they stay visible in listings and session views.
 - The evaluation `experiment_run_id` filter now matches through the replay link table instead of the producing task's job, so a standalone evaluation job's rows no longer match a run's filter and an evaluation adopted into a run through `if_missing` does.
 
+### Fixed
+
+- A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
+
 ## [0.24.0]
 
 ### Added

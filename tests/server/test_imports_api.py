@@ -115,6 +115,23 @@ async def test_create_import(
     }
 
 
+async def test_create_import_rejects_nul_byte_in_importer(
+    client: httpx.AsyncClient, services: JobAndTaskServices
+) -> None:
+    """Observe HTTP 422 for a NUL byte in the importer name."""
+    payload = await create_blob(services.blobs, ACCOUNT.id, content=b"csv-data")
+    agent = await create_agent(services.agents, ACCOUNT.id)
+    response = await client.post(
+        "/api/v1/imports",
+        json={
+            "importer": "csv\x00",
+            "agent_id": str(agent.id),
+            "payload_blob_id": str(payload.id),
+        },
+    )
+    assert response.status_code == 422
+
+
 async def test_create_import_not_found_for_unknown_importer(
     client: httpx.AsyncClient, services: JobAndTaskServices
 ) -> None:

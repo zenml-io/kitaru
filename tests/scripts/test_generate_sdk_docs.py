@@ -206,6 +206,7 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
             "PlainSerializedSecretStr",
             "FiniteFloat",
             "JsonValue",
+            "PlainStr",
             "ItemT",
         }
     ),

@@ -83,6 +83,18 @@ def is_connection_unavailable(exc: DBAPIError) -> bool:
     )
 
 
+def is_invalid_value(exc: DBAPIError) -> bool:
+    """Report whether a database error is a value the database cannot store.
+
+    Args:
+        exc: Database error to inspect.
+
+    Returns:
+        Whether the driver reports the value as invalid for its column.
+    """
+    return _has_driver_cause(exc, asyncpg.exceptions.DataError)
+
+
 def violated_constraint(exc: IntegrityError) -> str | None:
     """Return the name of the constraint an integrity error violated.
 
