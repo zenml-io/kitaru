@@ -3916,6 +3916,13 @@ _WORKER_START_PARAMETERS = (
     ParameterSpec(
         "--metadata", "KEY=VALUE[]", "option", False, "Worker registration metadata."
     ),
+    ParameterSpec(
+        "--log-level",
+        "string",
+        "option",
+        False,
+        "Log level for worker runtime logs: debug, info, warning, or error.",
+    ),
 )
 
 
@@ -3962,12 +3969,20 @@ async def worker_start(
     blob_cache_root: Path | None = None,
     payload_cache_root: Path | None = None,
     metadata: list[str] | None = None,
+    log_level: Annotated[
+        str | None,
+        Parameter(
+            name="--log-level",
+            help="Log level for worker runtime logs: debug, info, warning, or error.",
+        ),
+    ] = None,
 ) -> CommandResult:
     """Launch the existing generic worker as one foreground process."""
     invocation = _invocation()
     target = invocation.resolve_target()
     return await workers.start_worker(
         target,
+        log_level=log_level,
         name=name,
         claims=claims,
         selectors=selectors,
