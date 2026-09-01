@@ -14,7 +14,7 @@ MAX_TOOL_RESULT_BYTES = 64 * 1024
 MAX_TEXT_BLOCKS = 100
 
 
-def _validated_payload(value: Any) -> dict[str, Any]:
+def normalize_tool_result(value: Any) -> dict[str, Any]:
     """Return the exact replayable text-only MCP result subset."""
     if not isinstance(value, Mapping):
         raise ToolPolicyError("Claude SDK MCP tool result must be a mapping")
@@ -59,7 +59,7 @@ def _validated_payload(value: Any) -> dict[str, Any]:
 def encode_tool_result(value: Any) -> dict[str, Any]:
     """Encode a result, marking unsupported values as non-replayable."""
     try:
-        payload = _validated_payload(value)
+        payload = normalize_tool_result(value)
     except ToolPolicyError as error:
         return {
             "schema": TOOL_RESULT_SCHEMA,
@@ -82,7 +82,7 @@ def decode_tool_result(value: Any) -> dict[str, Any]:
         raise ToolPolicyError("Stored Claude SDK MCP result is not replayable")
     if set(value) != {"schema", "replayable", "payload"}:
         raise ToolPolicyError("Stored Claude SDK MCP result envelope is malformed")
-    return _validated_payload(value.get("payload"))
+    return normalize_tool_result(value.get("payload"))
 
 
 __all__ = [
@@ -91,4 +91,5 @@ __all__ = [
     "TOOL_RESULT_SCHEMA",
     "decode_tool_result",
     "encode_tool_result",
+    "normalize_tool_result",
 ]

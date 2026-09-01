@@ -19,6 +19,7 @@ from claude_agent_sdk import (
     ToolUseBlock,
     UserMessage,
 )
+from mcp import types as mcp_types
 
 import kitaru_claude_agent_sdk.runner as runner_module
 from kitaru.api_models.v1.replay import (
@@ -105,7 +106,7 @@ def _server(name: str, handler: Any) -> Any:
             SdkMcpTool(
                 name="lookup",
                 description="Look up an answer.",
-                input_schema={"type": "object"},
+                input_schema={"query": str},
                 handler=handler,
             )
         ],
@@ -845,7 +846,57 @@ async def test_materializes_fresh_servers_without_mutating_options_or_permission
         item.disallowed_tools is options.disallowed_tools for item in seen_options
     )
     assert options.mcp_servers == {}
+    assert options.setting_sources is None
+    assert options.strict_mcp_config is False
     assert all(item.mcp_servers is not options.mcp_servers for item in seen_options)
+    assert all(item.setting_sources == [] for item in seen_options)
+    assert all(item.strict_mcp_config is True for item in seen_options)
+
+
+async def test_real_sdk_server_propagates_swallowed_policy_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def original(_: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("live handler must not run")
+
+    replay = _replay(
+        _policy(
+            "mcp__support__lookup",
+            StaticConfig(cases=[], on_miss=ToolPolicyOnMiss.FAIL),
+        )
+    )
+    client = FakeClient()
+    client.replay = replay
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay.id))
+
+    async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
+        instance = kwargs["options"].mcp_servers["support"]["instance"]
+        request = mcp_types.CallToolRequest(
+            params=mcp_types.CallToolRequestParams(
+                name="lookup", arguments={"query": "missing"}
+            )
+        )
+        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
+        assert result.root.isError is True
+        yield _terminal()
+
+    monkeypatch.setattr(runner_module, "sdk_query", query)
+
+    with pytest.raises(ToolPolicyMissError, match="No static result"):
+        async for _ in KitaruClaudeRunner(agent_id=uuid.uuid4()).query(
+            prompt="hello",
+            options=ClaudeAgentOptions(tools=[]),
+            replayable_servers=[_server("support", original)],
+        ):
+            pass
+
+    assert client.sessions.updated[-1][1].status.value == "failed"
+    assert client.sessions.updated[-1][1].error == (
+        "No static result for tool 'mcp__support__lookup'"
+    )
 
 
 async def test_explicit_passthrough_is_recorded_as_live_behavior(

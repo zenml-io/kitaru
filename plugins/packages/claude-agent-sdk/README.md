@@ -50,11 +50,7 @@ from kitaru_claude_agent_sdk import replayable_sdk_mcp_server
 
 
 async def lookup(arguments: dict[str, object]) -> dict[str, object]:
-    return {
-        "content": [
-            {"type": "text", "text": f"Result for {arguments['query']}"}
-        ]
-    }
+    return {"content": [{"type": "text", "text": f"Result for {arguments['query']}"}]}
 
 
 support_server = replayable_sdk_mcp_server(
@@ -105,7 +101,7 @@ Supported replay changes are:
 
 Static and history replay results use a versioned, bounded envelope containing text MCP content blocks and an optional boolean `is_error`. Other result shapes are recorded as non-replayable.
 
-Substituting tools requires an isolated `ClaudeAgentOptions(tools=[])` configuration. Pre-existing MCP servers, unwrapped allowed tools, inline or filesystem settings, plugins, skills, agents, and extra CLI arguments are rejected because they can introduce tools that the public SDK boundary cannot safely deny. An all-passthrough replay does not require that isolation.
+Substituting tools requires an isolated `ClaudeAgentOptions(tools=[])` configuration. Pre-existing MCP servers, unwrapped allowed tools, explicit inline or filesystem settings, plugins, skills, agents, and extra CLI arguments are rejected because they can introduce tools that the public SDK boundary cannot safely deny. The adapter also sets `setting_sources=[]` and `strict_mcp_config=True` on its copied options so default user or project settings and `.mcp.json` files cannot add an unwrapped server; the caller's options remain unchanged. An all-passthrough replay does not require that isolation.
 
 `passthrough`, including a static or history `on_miss="passthrough"`, calls the original handler. Treat it as a real side effect.
 

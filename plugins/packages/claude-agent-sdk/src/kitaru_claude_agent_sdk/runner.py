@@ -8,7 +8,7 @@ import contextlib
 import json
 import os
 import uuid
-from collections.abc import AsyncGenerator, AsyncIterable, Mapping, Sequence
+from collections.abc import AsyncGenerator, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
@@ -52,7 +52,7 @@ from .capability import (
     ToolPolicyMissError,
     UnsupportedReplayError,
 )
-from .codec import decode_tool_result, encode_tool_result
+from .codec import decode_tool_result, normalize_tool_result
 from .recording import (
     InvocationRecorder,
     finalize_failure,
@@ -73,6 +73,23 @@ class _HistoryState:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
+@dataclass
+class _ReplayAbortState:
+    """Retain the first policy failure hidden by the SDK MCP boundary."""
+
+    error: ToolPolicyError | None = None
+
+    def capture(self, error: ToolPolicyError) -> None:
+        """Retain the first policy failure for the outer query boundary."""
+        if self.error is None:
+            self.error = error
+
+    def raise_if_captured(self) -> None:
+        """Raise a policy failure after the SDK returns control to Kitaru."""
+        if self.error is not None:
+            raise self.error
+
+
 class KitaruClaudeRunner:
     """Run one-shot Claude queries while recording native message streams."""
 
@@ -91,7 +108,7 @@ class KitaruClaudeRunner:
     async def query(
         self,
         *,
-        prompt: str | AsyncIterable[dict[str, Any]],
+        prompt: str,
         options: ClaudeAgentOptions | None = None,
         replayable_servers: Sequence[ReplayableSdkMcpServer] = (),
         transport: Any = None,
@@ -111,6 +128,7 @@ class KitaruClaudeRunner:
         client = recording_module.KitaruAPIClient()
         recorder: InvocationRecorder | None = None
         inner: AsyncGenerator[Message, None] | None = None
+        replay_abort = _ReplayAbortState()
         primary_error: BaseException | None = None
         try:
             try:
@@ -124,7 +142,7 @@ class KitaruClaudeRunner:
                     copied_options,
                     resolved.replay,
                 )
-                safe_options = _safe_options(copied_options)
+                safe_options = _get_safe_options(copied_options)
                 recorder = await InvocationRecorder.start(
                     client=client,
                     inputs=resolved.recorded,
@@ -150,6 +168,7 @@ class KitaruClaudeRunner:
                     resolved.replay,
                     client,
                     recorder,
+                    replay_abort,
                 )
                 copied_options.hooks = _compose_hooks(copied_options.hooks, recorder)
                 inner = cast(
@@ -161,6 +180,7 @@ class KitaruClaudeRunner:
                     ),
                 )
                 async for message in inner:
+                    replay_abort.raise_if_captured()
                     try:
                         await recorder.record_message(message)
                     except asyncio.CancelledError:
@@ -183,6 +203,7 @@ class KitaruClaudeRunner:
                     if isinstance(message, ResultMessage):
                         await finalize_terminal(recorder, message)
                     yield message
+                replay_abort.raise_if_captured()
                 if not recorder.finalized:
                     raise RuntimeError(
                         "Claude query ended without a terminal ResultMessage."
@@ -271,7 +292,7 @@ def _resolve_model_override(
     return None
 
 
-def _qualified_tool_name(server_name: str, tool_name: str) -> str:
+def _get_qualified_tool_name(server_name: str, tool_name: str) -> str:
     """Build Claude's exact public MCP tool identity."""
     return f"mcp__{server_name}__{tool_name}"
 
@@ -304,7 +325,7 @@ def _preflight_replayable_servers(
             )
         server_names.add(server.name)
         for tool in server.tools:
-            identity = _qualified_tool_name(server.name, tool.name)
+            identity = _get_qualified_tool_name(server.name, tool.name)
             if identity in tools:
                 raise UnsupportedReplayError(
                     f"Replayable SDK MCP tool '{identity}' is duplicated."
@@ -390,6 +411,8 @@ def _preflight_replayable_servers(
                 f"introduced through ClaudeAgentOptions.{name}; set {name}="
                 f"{safe_value} or use an all-passthrough tool policy."
             )
+    options.setting_sources = []
+    options.strict_mcp_config = True
     return tools
 
 
@@ -399,6 +422,7 @@ def _materialize_replayable_servers(
     replay: ReplayResponse | None,
     client: Any,
     recorder: InvocationRecorder,
+    replay_abort: _ReplayAbortState,
 ) -> Any:
     """Create fresh handler-bound public SDK MCP servers for one query."""
     if not definitions:
@@ -410,12 +434,13 @@ def _materialize_replayable_servers(
             replace(
                 tool,
                 handler=_wrap_tool_handler(
-                    identity=_qualified_tool_name(definition.name, tool.name),
+                    identity=_get_qualified_tool_name(definition.name, tool.name),
                     original=tool.handler,
                     replay=replay,
                     client=client,
                     history=history,
                     recorder=recorder,
+                    replay_abort=replay_abort,
                 ),
             )
             for tool in definition.tools
@@ -465,12 +490,12 @@ def _case_matches(case: StaticCase, arguments: dict[str, Any]) -> bool:
     )
 
 
-def _tool_policy(replay: ReplayResponse, identity: str) -> ToolConfig:
+def _get_tool_policy(replay: ReplayResponse, identity: str) -> ToolConfig:
     """Resolve one exact identity against the shared Kitaru policy."""
     return replay.tool_policy.tools.get(identity, replay.tool_policy.default)
 
 
-def _error_result(policy_name: str, identity: str) -> dict[str, Any]:
+def _create_error_result(policy_name: str, identity: str) -> dict[str, Any]:
     """Return a valid Claude-readable MCP error result."""
     return {
         "content": [
@@ -493,28 +518,17 @@ async def _handle_miss(
     recorder: InvocationRecorder,
 ) -> dict[str, Any]:
     """Apply the exact shared miss behavior at the handler boundary."""
-    if on_miss is ToolPolicyOnMiss.PASSTHROUGH:
-        await recorder.record_tool_policy(
-            tool_name=identity,
-            arguments=arguments,
-            policy=policy_name,
-            live=True,
-        )
-        return cast(dict[str, Any], await original(arguments))
-    if on_miss is ToolPolicyOnMiss.ERROR_RESULT:
-        await recorder.record_tool_policy(
-            tool_name=identity,
-            arguments=arguments,
-            policy=policy_name,
-            live=False,
-        )
-        return _error_result(policy_name, identity)
+    passthrough = on_miss is ToolPolicyOnMiss.PASSTHROUGH
     await recorder.record_tool_policy(
         tool_name=identity,
         arguments=arguments,
         policy=policy_name,
-        live=False,
+        live=passthrough,
     )
+    if passthrough:
+        return cast(dict[str, Any], await original(arguments))
+    if on_miss is ToolPolicyOnMiss.ERROR_RESULT:
+        return _create_error_result(policy_name, identity)
     raise ToolPolicyMissError(f"No {policy_name} result for tool '{identity}'")
 
 
@@ -526,63 +540,68 @@ def _wrap_tool_handler(
     client: Any,
     history: _HistoryState,
     recorder: InvocationRecorder,
+    replay_abort: _ReplayAbortState,
 ) -> Any:
     """Bind one original public handler to one query's replay state."""
 
     async def handler(arguments: Any) -> dict[str, Any]:
-        normalized = _normalize_arguments(identity, arguments)
-        if replay is None:
-            await recorder.record_tool_policy(
-                tool_name=identity,
-                arguments=normalized,
-                policy="passthrough",
-                live=True,
-            )
-            return cast(dict[str, Any], await original(normalized))
-        policy = _tool_policy(replay, identity)
-        if isinstance(policy, PassthroughConfig):
-            await recorder.record_tool_policy(
-                tool_name=identity,
-                arguments=normalized,
-                policy=policy.type,
-                live=True,
-            )
-            return cast(dict[str, Any], await original(normalized))
-        if isinstance(policy, StaticConfig):
-            matching = next(
-                (case for case in policy.cases if _case_matches(case, normalized)),
-                None,
-            )
-            if matching is not None:
+        try:
+            normalized = _normalize_arguments(identity, arguments)
+            if replay is None:
+                await recorder.record_tool_policy(
+                    tool_name=identity,
+                    arguments=normalized,
+                    policy="passthrough",
+                    live=True,
+                )
+                return cast(dict[str, Any], await original(normalized))
+            policy = _get_tool_policy(replay, identity)
+            if isinstance(policy, PassthroughConfig):
                 await recorder.record_tool_policy(
                     tool_name=identity,
                     arguments=normalized,
                     policy=policy.type,
-                    live=False,
+                    live=True,
                 )
-                return decode_tool_result(encode_tool_result(matching.result))
-            return await _handle_miss(
-                policy_name=policy.type,
-                on_miss=policy.on_miss,
-                identity=identity,
-                arguments=normalized,
-                original=original,
-                recorder=recorder,
+                return cast(dict[str, Any], await original(normalized))
+            if isinstance(policy, StaticConfig):
+                matching = next(
+                    (case for case in policy.cases if _case_matches(case, normalized)),
+                    None,
+                )
+                if matching is not None:
+                    await recorder.record_tool_policy(
+                        tool_name=identity,
+                        arguments=normalized,
+                        policy=policy.type,
+                        live=False,
+                    )
+                    return normalize_tool_result(matching.result)
+                return await _handle_miss(
+                    policy_name=policy.type,
+                    on_miss=policy.on_miss,
+                    identity=identity,
+                    arguments=normalized,
+                    original=original,
+                    recorder=recorder,
+                )
+            if isinstance(policy, HistoryConfig):
+                return await _history_result(
+                    identity=identity,
+                    arguments=normalized,
+                    original=original,
+                    policy=policy,
+                    replay=replay,
+                    client=client,
+                    state=history,
+                    recorder=recorder,
+                )
+            raise ToolPolicyError(
+                f"Tool policy '{policy.type}' is not supported for '{identity}'"
             )
-        if isinstance(policy, HistoryConfig):
-            return await _history_result(
-                identity=identity,
-                arguments=normalized,
-                original=original,
-                policy=policy,
-                replay=replay,
-                client=client,
-                state=history,
-                recorder=recorder,
-            )
-        raise ToolPolicyError(
-            f"Tool policy '{policy.type}' is not supported for '{identity}'"
-        )
+        except ToolPolicyError as error:
+            replay_abort.capture(error)
+            raise
 
     return handler
 
@@ -645,20 +664,7 @@ async def _history_result(
                 original=original,
                 recorder=recorder,
             )
-        if match.status is NodeStatus.FAILED:
-            if track_occurrence:
-                async with state.lock:
-                    state.occurrences[cache_key] = cast(int, occurrence) + 1
-            await recorder.record_tool_policy(
-                tool_name=identity,
-                arguments=arguments,
-                policy=policy.type,
-                live=False,
-            )
-            raise ToolPolicyError(
-                match.error or f"Recorded tool call '{identity}' failed"
-            )
-        if match.status is not NodeStatus.COMPLETED:
+        if match.status not in {NodeStatus.COMPLETED, NodeStatus.FAILED}:
             raise ToolPolicyError(
                 f"History lookup for tool '{identity}' returned unexpected status "
                 f"'{match.status.value}'"
@@ -672,6 +678,10 @@ async def _history_result(
             policy=policy.type,
             live=False,
         )
+        if match.status is NodeStatus.FAILED:
+            raise ToolPolicyError(
+                match.error or f"Recorded tool call '{identity}' failed"
+            )
         return decode_tool_result(match.result)
     finally:
         if track_occurrence:
@@ -679,7 +689,7 @@ async def _history_result(
                 state.active_keys.discard(cache_key)
 
 
-def _safe_options(options: ClaudeAgentOptions) -> dict[str, Any]:
+def _get_safe_options(options: ClaudeAgentOptions) -> dict[str, Any]:
     """Select the option fields the recorder's bounded capture permits."""
     return {
         "allowed_tools": options.allowed_tools,

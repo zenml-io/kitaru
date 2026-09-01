@@ -125,7 +125,7 @@ The adapter supports the shared Kitaru tool-policy behavior only for tools decla
 
 Static and recorded history results are replayable only when they fit the adapter's versioned result envelope: a mapping containing text MCP `content` blocks and an optional boolean `is_error`. The envelope is bounded to 100 text blocks and 64 KiB. Images, embedded resources, audio, arbitrary extra fields, and oversized results cannot be substituted by this release.
 
-A failed history match raises `ToolPolicyError` instead of recreating the original exception class. A missing static or history result with `on_miss: fail` raises `ToolPolicyMissError`. Both stop at the wrapped handler unless application code catches them.
+A failed history match raises `ToolPolicyError` instead of recreating the original exception class. A missing static or history result with `on_miss: fail` raises `ToolPolicyMissError`. The SDK MCP server converts handler exceptions into tool error results, so the adapter retains these policy failures and raises them from the outer query as soon as the SDK returns control; the Kitaru session is finalized as failed.
 
 Baseline history cannot assign a deterministic occurrence when two identical calls are in flight at once. The adapter rejects that case instead of guessing which recorded result belongs to which call. Use static replay or give the calls distinct tool identities or arguments.
 
@@ -142,6 +142,8 @@ The adapter rejects these configurations before it creates a Kitaru session or c
 - extra CLI arguments.
 
 Those options can introduce tools through another route, and the public SDK does not provide a broad per-run guard that can prove they stayed disabled. Remove them for substituting replay, or use an all-passthrough tool policy. Recording-only runs and all-passthrough replays preserve caller tool configuration.
+
+For substituting replay, the adapter also sets `setting_sources=[]` and `strict_mcp_config=True` on its copied options before calling Claude. This prevents default user or project settings and `.mcp.json` files from loading an unwrapped MCP server without mutating the caller's `ClaudeAgentOptions`.
 
 {% hint style="danger" %}
 Passthrough is a live call, not a simulation or transaction. A database write, message send, filesystem change, or external API call can happen again during replay. Put side-effecting tools in a disposable sandbox or choose a substituting policy when rerunning production failures.

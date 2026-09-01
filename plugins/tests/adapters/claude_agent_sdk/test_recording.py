@@ -250,6 +250,32 @@ async def test_hook_and_stream_views_do_not_duplicate_tool_node(
     assert tools[0].attributes["hook_events"] == ["before", "after"]
 
 
+async def test_stream_tool_use_reparents_hook_created_node(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_tool_hook(
+        {"tool_use_id": "tool-1", "tool_name": "lookup", "tool_input": {"q": 1}},
+        event="before",
+    )
+    await recorder.record_message(
+        AssistantMessage(
+            content=[ToolUseBlock("tool-1", "lookup", {"q": 1})],
+            model="claude-test",
+            message_id="message-1",
+        )
+    )
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    model = next(
+        node for node in latest.values() if node.node_type is NodeType.LLM_CALL
+    )
+    tool = next(
+        node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
+    )
+    assert tool.parent_index == model.index
+
+
 async def test_unknown_message_is_bounded_and_opaque_fields_are_not_persisted(
     fake_client: FakeClient,
 ) -> None:
@@ -312,6 +338,82 @@ async def test_native_error_is_primary_when_finalization_also_fails(
     secondary = await finalize_failure(recorder, native_error)
 
     assert secondary is persistence_error
+    assert fake_client.close_count == 1
+
+
+async def test_root_ingest_failure_marks_created_session_failed(
+    fake_client: FakeClient,
+) -> None:
+    fake_client.ingest_error = OSError("root ingest failed")
+
+    with pytest.raises(OSError, match="root ingest failed"):
+        await InvocationRecorder.start(
+            client=cast(KitaruAPIClient, fake_client),
+            inputs="hello",
+            agent_id=uuid.uuid4(),
+            agent_version_id=None,
+            session_name=None,
+            replay=False,
+        )
+
+    assert len(fake_client.sessions.created) == 1
+    assert len(fake_client.sessions.updated) == 1
+    update = fake_client.sessions.updated[0][1]
+    assert update.status is SessionStatus.FAILED
+    assert update.error == "root ingest failed"
+
+
+async def test_terminal_result_and_error_are_bounded(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    terminal = _terminal()
+    terminal.result = "x" * (16 * 1024 + 1)
+
+    await finalize_terminal(recorder, terminal)
+
+    root = {node.index: node for node in nodes(fake_client)}[0]
+    assert root.outputs == {"value": "x" * (16 * 1024), "truncated": True}
+    assert fake_client.sessions.updated[-1][1].outputs == root.outputs
+
+    error_recorder = await _recorder(fake_client)
+    error = RuntimeError("y" * (16 * 1024 + 1))
+    await error_recorder.finalize(error=error)
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    assert latest[0].error == "y" * (16 * 1024)
+    assert fake_client.sessions.updated[-1][1].error == "y" * (16 * 1024)
+
+
+async def test_finalization_timeout_eventually_closes_client_once(
+    fake_client: FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = await _recorder(fake_client)
+    started = asyncio.Event()
+    closed = asyncio.Event()
+
+    async def slow_ingest(*_: Any) -> list[Any]:
+        started.set()
+        await asyncio.Event().wait()
+        return []
+
+    original_close = fake_client.close
+
+    async def close() -> None:
+        await original_close()
+        closed.set()
+
+    monkeypatch.setattr(fake_client.sessions, "ingest_nodes", slow_ingest)
+    monkeypatch.setattr(fake_client, "close", close)
+    monkeypatch.setattr(
+        "kitaru_claude_agent_sdk.recording.FINALIZATION_TIMEOUT_SECONDS", 0.01
+    )
+
+    failure = await finalize_failure(recorder, RuntimeError("native failure"))
+
+    assert isinstance(failure, TimeoutError)
+    await asyncio.wait_for(started.wait(), timeout=1)
+    await asyncio.wait_for(closed.wait(), timeout=1)
     assert fake_client.close_count == 1
 
 

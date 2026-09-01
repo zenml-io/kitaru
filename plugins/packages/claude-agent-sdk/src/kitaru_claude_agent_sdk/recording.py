@@ -4,6 +4,8 @@
 """Invocation-local recording for the public Claude Agent SDK message stream."""
 
 import asyncio
+import contextlib
+import itertools
 import json
 import math
 import os
@@ -115,7 +117,15 @@ async def resolve_run_input(
 
 def _error_text(error: BaseException) -> str:
     """Return the native failure without including persistence diagnostics."""
-    return str(error) or type(error).__name__
+    return _captured_text(str(error) or type(error).__name__)
+
+
+def _captured_text(value: str) -> str:
+    """Bound a string while preserving fields that require string values."""
+    captured = _capture(value)
+    if isinstance(captured, str):
+        return captured
+    return cast(dict[str, str], captured)["value"]
 
 
 def _capture(value: Any, *, depth: int = 0) -> Any:
@@ -125,8 +135,9 @@ def _capture(value: Any, *, depth: int = 0) -> Any:
     if isinstance(value, float):
         return value if math.isfinite(value) else {"unsupported": "non_finite_float"}
     if isinstance(value, str):
-        encoded = value.encode()
-        if len(encoded) <= MAX_STRING_BYTES:
+        candidate = value[:MAX_STRING_BYTES]
+        encoded = candidate.encode()
+        if len(value) <= MAX_STRING_BYTES and len(encoded) <= MAX_STRING_BYTES:
             return value
         return {
             "value": encoded[:MAX_STRING_BYTES].decode(errors="ignore"),
@@ -136,7 +147,7 @@ def _capture(value: Any, *, depth: int = 0) -> Any:
         return {"truncated": "max_depth"}
     if isinstance(value, Mapping):
         captured: dict[str, Any] = {}
-        for key, item in list(value.items())[:MAX_COLLECTION_ITEMS]:
+        for key, item in itertools.islice(value.items(), MAX_COLLECTION_ITEMS):
             if isinstance(key, str):
                 captured[key] = _capture(item, depth=depth + 1)
         if len(value) > MAX_COLLECTION_ITEMS:
@@ -154,7 +165,7 @@ def _capture(value: Any, *, depth: int = 0) -> Any:
     return {"unsupported_type": type(value).__name__}
 
 
-def _usage(value: Mapping[str, Any] | None) -> TokenUsage | None:
+def _get_token_usage(value: Mapping[str, Any] | None) -> TokenUsage | None:
     """Map Claude's public usage dictionary to Kitaru token fields."""
     if not value:
         return None
@@ -173,7 +184,7 @@ def _usage(value: Mapping[str, Any] | None) -> TokenUsage | None:
     )
 
 
-def _terminal_metadata(message: ResultMessage) -> dict[str, Any]:
+def _get_terminal_metadata(message: ResultMessage) -> dict[str, Any]:
     """Select safe terminal fields without retaining arbitrary result internals."""
     terminal: dict[str, Any] = {
         "session_id": message.session_id,
@@ -201,16 +212,13 @@ class InvocationRecorder:
     safe_options: dict[str, Any]
     replayable_tool_names: frozenset[str] = frozenset()
     next_index: int = 1
-    closed: bool = False
     finalized: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _message_indexes: dict[str, int] = field(default_factory=dict, repr=False)
-    _tool_indexes: dict[str, int] = field(default_factory=dict, repr=False)
     _tool_cache_keys: dict[str, str] = field(default_factory=dict, repr=False)
     _tool_nodes: dict[str, SessionNodeCreateRequest] = field(
         default_factory=dict, repr=False
     )
-    _task_indexes: dict[str, int] = field(default_factory=dict, repr=False)
     _task_nodes: dict[str, SessionNodeCreateRequest] = field(
         default_factory=dict, repr=False
     )
@@ -263,19 +271,34 @@ class InvocationRecorder:
             safe_options=selected_options,
             replayable_tool_names=replayable_tool_names,
         )
-        await recorder._persist(
-            SessionNodeCreateRequest(
-                index=0,
-                parent_index=None,
-                node_type=NodeType.SPAN,
-                name="query",
-                status=NodeStatus.IN_PROGRESS,
-                started_at=started_at,
-                inputs=captured_inputs,
-                outputs=None,
-                attributes={"options": selected_options},
+        try:
+            await recorder._persist(
+                SessionNodeCreateRequest(
+                    index=0,
+                    parent_index=None,
+                    node_type=NodeType.SPAN,
+                    name="query",
+                    status=NodeStatus.IN_PROGRESS,
+                    started_at=started_at,
+                    inputs=captured_inputs,
+                    outputs=None,
+                    attributes={"options": selected_options},
+                )
             )
-        )
+        except BaseException as error:
+            # The root-ingest failure remains the caller-visible failure; the
+            # runner closes this preflight client after start() re-raises.
+            with contextlib.suppress(BaseException):
+                await client.sessions.update(
+                    session.id,
+                    SessionUpdateRequest(
+                        status=SessionStatus.FAILED,
+                        outputs=None,
+                        error=_error_text(error),
+                        ended_at=datetime.now(UTC),
+                    ),
+                )
+            raise
         return recorder
 
     async def record_message(self, message: Any) -> None:
@@ -334,7 +357,6 @@ class InvocationRecorder:
                     tool_name=name if isinstance(name, str) else None,
                     attributes={"hook_events": list(events)},
                 )
-                self._tool_indexes[tool_id] = node.index
                 self._tool_nodes[tool_id] = node
             else:
                 node = node.model_copy(
@@ -398,48 +420,60 @@ class InvocationRecorder:
             if error is not None:
                 error_text = _error_text(error)
             elif terminal is not None and terminal.is_error:
-                error_text = "; ".join(terminal.errors or []) or terminal.subtype
-            outputs = terminal.result if terminal is not None and not failed else None
-            metadata = _terminal_metadata(terminal) if terminal is not None else {}
+                error_text = _captured_text(
+                    "; ".join(terminal.errors or []) or terminal.subtype
+                )
+            outputs = (
+                _capture(terminal.result)
+                if terminal is not None and not failed
+                else None
+            )
+            metadata = _get_terminal_metadata(terminal) if terminal is not None else {}
             first_failure: BaseException | None = None
             try:
-                await self._persist(
-                    SessionNodeCreateRequest(
-                        index=0,
-                        parent_index=None,
-                        node_type=NodeType.SPAN,
-                        name="query",
-                        status=NodeStatus.FAILED if failed else NodeStatus.COMPLETED,
-                        error=error_text,
-                        started_at=self.started_at,
-                        ended_at=ended_at,
-                        inputs=self.captured_inputs,
-                        outputs=outputs,
-                        attributes={"options": self.safe_options},
-                        metadata=metadata,
+                try:
+                    await self._persist(
+                        SessionNodeCreateRequest(
+                            index=0,
+                            parent_index=None,
+                            node_type=NodeType.SPAN,
+                            name="query",
+                            status=(
+                                NodeStatus.FAILED if failed else NodeStatus.COMPLETED
+                            ),
+                            error=error_text,
+                            started_at=self.started_at,
+                            ended_at=ended_at,
+                            inputs=self.captured_inputs,
+                            outputs=outputs,
+                            attributes={"options": self.safe_options},
+                            metadata=metadata,
+                        )
                     )
-                )
-            except BaseException as persistence_error:
-                first_failure = persistence_error
-            try:
-                await self.client.sessions.update(
-                    self.session_id,
-                    SessionUpdateRequest(
-                        status=(
-                            SessionStatus.FAILED if failed else SessionStatus.COMPLETED
+                except Exception as persistence_error:
+                    first_failure = persistence_error
+                try:
+                    await self.client.sessions.update(
+                        self.session_id,
+                        SessionUpdateRequest(
+                            status=(
+                                SessionStatus.FAILED
+                                if failed
+                                else SessionStatus.COMPLETED
+                            ),
+                            outputs=outputs,
+                            error=error_text,
+                            ended_at=ended_at,
+                            metadata=metadata,
                         ),
-                        outputs=outputs,
-                        error=error_text,
-                        ended_at=ended_at,
-                        metadata=metadata,
-                    ),
-                )
-            except BaseException as persistence_error:
-                first_failure = first_failure or persistence_error
-            try:
-                await self._close()
-            except BaseException as persistence_error:
-                first_failure = first_failure or persistence_error
+                    )
+                except Exception as persistence_error:
+                    first_failure = first_failure or persistence_error
+            finally:
+                try:
+                    await self.client.close()
+                except Exception as persistence_error:
+                    first_failure = first_failure or persistence_error
             if first_failure is not None:
                 raise first_failure
 
@@ -447,8 +481,14 @@ class InvocationRecorder:
         identity = message.message_id or message.uuid
         model_index = self._message_indexes.get(identity) if identity else None
         if model_index is None:
-            model_index = self.next_index
-            self.next_index += 1
+            provisional_indexes = [
+                self._tool_nodes[block.id].index
+                for block in message.content
+                if isinstance(block, ToolUseBlock) and block.id in self._tool_nodes
+            ]
+            model_index = min(provisional_indexes, default=self.next_index)
+            if model_index == self.next_index:
+                self.next_index += 1
             if identity:
                 self._message_indexes[identity] = model_index
         texts = [
@@ -474,7 +514,7 @@ class InvocationRecorder:
             reasoning="\n".join(thoughts) or None,
             model=message.model,
             model_provider="anthropic",
-            tokens=_usage(message.usage),
+            tokens=_get_token_usage(message.usage),
             attributes={
                 "session_id": message.session_id,
                 "stop_reason": message.stop_reason,
@@ -524,7 +564,7 @@ class InvocationRecorder:
         if replay_event is not None:
             attributes["replay"] = replay_event
         node = self._tool_nodes.get(block.id)
-        if node is None:
+        if node is None or node.index == parent_index:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
                 name=block.name,
@@ -534,13 +574,20 @@ class InvocationRecorder:
                 inputs=_capture(block.input),
                 outputs=None,
                 tool_name=block.name,
-                attributes=attributes,
+                attributes=(
+                    {
+                        **cast(dict[str, Any], node.attributes),
+                        **attributes,
+                    }
+                    if node is not None
+                    else attributes
+                ),
             )
-            self._tool_indexes[block.id] = node.index
         else:
             node = node.model_copy(
                 update={
                     "name": block.name,
+                    "parent_index": parent_index,
                     "inputs": _capture(block.input),
                     "tool_name": block.name,
                     "attributes": {
@@ -555,7 +602,6 @@ class InvocationRecorder:
     async def _record_tool_result(self, block: ToolResultBlock) -> None:
         node = self._tool_nodes.get(block.tool_use_id)
         tool_name = node.tool_name if node is not None else None
-        outputs = _capture(block.content)
         if tool_name in self.replayable_tool_names:
             content = (
                 [{"type": "text", "text": block.content}]
@@ -565,6 +611,8 @@ class InvocationRecorder:
             outputs = encode_tool_result(
                 {"content": content, "is_error": bool(block.is_error)}
             )
+        else:
+            outputs = _capture(block.content)
         if node is None:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
@@ -580,7 +628,6 @@ class InvocationRecorder:
                 else None,
                 attributes={"orphaned": True},
             )
-            self._tool_indexes[block.tool_use_id] = node.index
         else:
             node = node.model_copy(
                 update={
@@ -613,7 +660,6 @@ class InvocationRecorder:
             subagent_id=message.task_id,
             attributes={"task_type": message.task_type},
         )
-        self._task_indexes[message.task_id] = node.index
         self._task_nodes[message.task_id] = node
         await self._persist(node)
 
@@ -669,7 +715,6 @@ class InvocationRecorder:
             subagent_id=message.task_id,
             attributes={"orphaned": True},
         )
-        self._task_indexes[message.task_id] = node.index
         return node
 
     async def _record_framework_event(
@@ -705,20 +750,13 @@ class InvocationRecorder:
     def _parent_for(self, external_id: str | None) -> int:
         if external_id is None:
             return 0
-        return self._tool_indexes.get(
-            external_id, self._task_indexes.get(external_id, 0)
-        )
+        node = self._tool_nodes.get(external_id) or self._task_nodes.get(external_id)
+        return node.index if node is not None else 0
 
     async def _persist(self, node: SessionNodeCreateRequest) -> None:
         await self.client.sessions.ingest_nodes(
             self.session_id, SessionNodeBatchRequest(nodes=[node])
         )
-
-    async def _close(self) -> None:
-        if self.closed:
-            return
-        await self.client.close()
-        self.closed = True
 
 
 async def _run_finalization(

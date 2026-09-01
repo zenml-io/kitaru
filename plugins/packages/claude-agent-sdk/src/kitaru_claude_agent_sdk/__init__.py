@@ -23,14 +23,12 @@ from .capability import (
     UnsupportedReplayError,
     replayable_sdk_mcp_server,
 )
-from .recording import InvocationRecorder
 from .runner import KitaruClaudeRunner
 
 ADAPTER_VERSION = version("kitaru-claude-agent-sdk")
 
 __all__ = [
     "ADAPTER_VERSION",
-    "InvocationRecorder",
     "KitaruClaudeRunner",
     "KitaruRecordingError",
     "ReplayableSdkMcpServer",
