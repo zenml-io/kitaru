@@ -13,9 +13,11 @@
 #  permissions and limitations under the License.
 """Generic helpers shared across server layers."""
 
+import hashlib
+import json
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import UTC, datetime, tzinfo
-from typing import TypeVar
+from typing import Any, TypeVar
 
 ItemT = TypeVar("ItemT")
 
@@ -55,6 +57,19 @@ def is_stale(value: datetime | None, max_age_seconds: float, now: datetime) -> b
     if value is None:
         return True
     return (now - to_tz_aware(value)).total_seconds() >= max_age_seconds
+
+
+def hash_params(params: dict[str, Any]) -> str:
+    """Hash a params dict into a stable hex digest over its canonical JSON.
+
+    Args:
+        params: Params to hash.
+
+    Returns:
+        Hex-encoded sha256 digest.
+    """
+    canonical = json.dumps(params, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode()).hexdigest()
 
 
 def to_tz_aware(value: datetime, tz: tzinfo = UTC) -> datetime:

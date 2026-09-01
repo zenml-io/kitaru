@@ -577,28 +577,3 @@ class SQLTaskRepository(BaseSQLRepository[TaskORM]):
         )
         rows = (await self._session.scalars(statement)).all()
         return {row for row in rows if row is not None}
-
-    async def get_scored_evaluator_version_ids_many(
-        self, input_session_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, set[uuid.UUID]]:
-        """Read the evaluator versions that already completed against each session.
-
-        Args:
-            input_session_ids: Ids of the scored sessions.
-
-        Returns:
-            Plugin version ids of every completed evaluator task scoring the
-            session, keyed by session id, sessions without one omitted.
-        """
-        if not input_session_ids:
-            return {}
-        statement = select(TaskORM.input_session_id, TaskORM.plugin_version_id).where(
-            TaskORM.input_session_id.in_(input_session_ids),
-            TaskORM.status == TaskStatus.COMPLETED.value,
-            TaskORM.plugin_version_id.is_not(None),
-        )
-        rows = (await self._session.execute(statement)).all()
-        scored: dict[uuid.UUID, set[uuid.UUID]] = {}
-        for session_id, plugin_version_id in rows:
-            scored.setdefault(session_id, set()).add(plugin_version_id)
-        return scored

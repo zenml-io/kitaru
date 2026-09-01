@@ -95,6 +95,7 @@ def register_subscribers(
             evaluation_recording.record_task_evaluations,
             evaluation_repository=evaluation_repository,
             job_repository=job_repository,
+            replay_repository=replay_repository,
             session_repository=session_repository,
         ),
     )

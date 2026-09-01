@@ -24,7 +24,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionResponse,
 )
 from kitaru.api_models.v1.job import JobResponse
-from kitaru.api_models.v1.replay import ReplayResponse
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayResponse
 from kitaru.api_models.v1.session import SessionDetailResponse, SessionResponse
 from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.api_models.v1.tag import TagLinkResponse, TagResourceType, TagResponse
@@ -223,7 +223,7 @@ class ExperimentRunStartReceipt(MCPModel):
     experiment_id: uuid.UUID
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
-    evaluate_baselines: bool
+    baseline_evaluation_mode: BaselineEvaluationMode
     result: ExperimentRunResponse
 
 

@@ -112,6 +112,7 @@ async def test_start_run_fans_out_one_replay_per_session(
         json={
             "cohort_version_id": setup["cohort_version_id"],
             "agent_version_id": setup["agent_version_id"],
+            "baseline_evaluation_mode": "none",
         },
     )
     assert response.status_code == 201
@@ -152,6 +153,7 @@ async def test_list_run_jobs_scoped_to_the_run(
                 json={
                     "cohort_version_id": setup["cohort_version_id"],
                     "agent_version_id": setup["agent_version_id"],
+                    "baseline_evaluation_mode": "none",
                 },
             )
         ).json()
@@ -185,6 +187,7 @@ async def test_cancel_run_drains_pending_replicas_immediately(
             json={
                 "cohort_version_id": setup["cohort_version_id"],
                 "agent_version_id": setup["agent_version_id"],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()
@@ -210,6 +213,7 @@ async def test_delete_run_cascades_its_replays_and_cancels_its_jobs(
             json={
                 "cohort_version_id": setup["cohort_version_id"],
                 "agent_version_id": setup["agent_version_id"],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()
@@ -249,6 +253,7 @@ async def test_experiment_config_update_conflicts_once_it_has_runs(
         json={
             "cohort_version_id": setup["cohort_version_id"],
             "agent_version_id": setup["agent_version_id"],
+            "baseline_evaluation_mode": "none",
         },
     )
     response = await client.patch(
@@ -268,6 +273,7 @@ async def test_agent_version_update_allowed_once_tasks_reference_it(
         json={
             "cohort_version_id": setup["cohort_version_id"],
             "agent_version_id": setup["agent_version_id"],
+            "baseline_evaluation_mode": "none",
         },
     )
     response = await client.patch(

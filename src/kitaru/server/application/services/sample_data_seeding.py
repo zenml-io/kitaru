@@ -28,7 +28,7 @@ from kitaru.api_models.v1.investigation import (
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.cohort import CohortCreate, CohortVersionCreate
-from kitaru.server.application.models.evaluation import EvaluationMerge
+from kitaru.server.application.models.evaluation import EvaluationCreate
 from kitaru.server.application.models.experiment import ExperimentCreate
 from kitaru.server.application.models.investigation import (
     InvestigationCreate,
@@ -247,10 +247,10 @@ class SampleDataSeeder:
                 item.session.model_copy(update={"agent_id": agent.id}), actor
             )
             nodes = await self._nodes.ingest_nodes(session.id, item.nodes, actor)
-            await self._evaluations.merge_evaluations(
+            await self._evaluations.create_evaluations(
                 session.id,
                 [
-                    EvaluationMerge(
+                    EvaluationCreate(
                         name=result.name,
                         data_type=result.data_type,
                         score=result.score,

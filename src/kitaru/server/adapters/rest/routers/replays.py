@@ -55,10 +55,10 @@ async def create_replay(
 
     Clients observe HTTP 201 on success, 404 when the baseline session or
     the resolved agent version or an evaluator config does not exist, 409
-    when evaluate_baselines is set and the baseline session is not
-    finished, and 422 when the baseline session carries no agent version
-    and none was given, the resolved agent version has no run spec, the
-    tool policy uses cohort-version-scoped history, or an evaluator
+    when the baseline evaluation mode is not none and the baseline session
+    is not finished, and 422 when the baseline session carries no agent
+    version and none was given, the resolved agent version has no run spec,
+    the tool policy uses cohort-version-scoped history, or an evaluator
     version repeats.
 
     Args:

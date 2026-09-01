@@ -54,7 +54,7 @@ from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
 from kitaru.api_models.v1.session_node import NodeStatus
 from kitaru.api_models.v1.tag import TagResourceType
@@ -174,7 +174,11 @@ from kitaru.server.domain.cohort_version import (
     CohortVersionNotFound,
 )
 from kitaru.server.domain.device import Device, DeviceNotFound, DeviceStatus
-from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
+from kitaru.server.domain.evaluation import (
+    Evaluation,
+    EvaluationNameConflict,
+    EvaluationNotFound,
+)
 from kitaru.server.domain.experiment import (
     DuplicateExperimentName,
     Experiment,
@@ -4044,9 +4048,6 @@ class FakePluginRepository:
         self._versions: dict[uuid.UUID, PluginVersion] = {}
         self._blob_repository = blob_repository
         self._agent_repository = agent_repository
-        # Wired back by FakeEvaluationRepository, to null the evaluator
-        # version pointer of a stored evaluation on delete.
-        self._evaluations: FakeEvaluationRepository | None = None
 
     def _check_duplicate_name(self, plugin: Plugin) -> None:
         for other in self._plugins.values():
@@ -4183,8 +4184,6 @@ class FakePluginRepository:
         del self._plugins[plugin_id]
         for version_id in stale_ids:
             del self._versions[version_id]
-        if self._evaluations is not None:
-            self._evaluations._null_evaluator_version(stale_ids)
 
     async def create_version(
         self,
@@ -4911,7 +4910,7 @@ async def create_replay(
     replay_config_id: uuid.UUID,
     baseline_session_id: uuid.UUID,
     experiment_run_id: uuid.UUID | None = None,
-    evaluate_baselines: bool = False,
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
     status: ReplayStatus = ReplayStatus.PENDING,
 ) -> Replay:
     """Store a replay in the fake repository.
@@ -4924,7 +4923,7 @@ async def create_replay(
         baseline_session_id: Id of the session replayed.
         experiment_run_id: Run this replay belongs to, ``None`` for a
             standalone replay.
-        evaluate_baselines: Whether the baseline session is also scored.
+        baseline_evaluation_mode: How the baseline session is scored.
         status: Replay status.
 
     Returns:
@@ -4937,7 +4936,7 @@ async def create_replay(
             experiment_run_id=experiment_run_id,
             replay_config_id=replay_config_id,
             baseline_session_id=baseline_session_id,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
             status=status,
         )
     )
@@ -5171,7 +5170,7 @@ async def create_experiment_run(
     cohort_version_id: uuid.UUID,
     agent_version_id: uuid.UUID,
     number: int = 1,
-    evaluate_baselines: bool = False,
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
     status: ExperimentRunStatus = ExperimentRunStatus.RUNNING,
 ) -> ExperimentRun:
     """Store an experiment run in the fake repository.
@@ -5184,7 +5183,7 @@ async def create_experiment_run(
             replayed.
         agent_version_id: Id of the agent version to replay with.
         number: Run number within the experiment.
-        evaluate_baselines: Whether baseline sessions are also scored.
+        baseline_evaluation_mode: How baseline sessions are scored.
         status: Run status.
 
     Returns:
@@ -5197,7 +5196,7 @@ async def create_experiment_run(
             number=number,
             cohort_version_id=cohort_version_id,
             agent_version_id=agent_version_id,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
             status=status,
         )
     )
@@ -5211,30 +5210,12 @@ class FakeEvaluationRepository:
 
         Args:
             plugin_repository: Fake plugin repository, consulted to
-                denormalize the evaluator name and version. Also wired back
-                onto the plugin repository so its delete can null this
-                evaluation's evaluator version pointer.
+                denormalize the evaluator name and version and to check a
+                created row's evaluator version exists.
         """
         self._evaluations: dict[uuid.UUID, Evaluation] = {}
+        self._replay_links: set[tuple[uuid.UUID, uuid.UUID]] = set()
         self._plugin_repository = plugin_repository
-        if plugin_repository is not None:
-            plugin_repository._evaluations = self
-
-    def _null_evaluator_version(self, version_ids: Iterable[uuid.UUID]) -> None:
-        """Clear deleted plugin versions' evaluator version pointers.
-
-        Mirrors the SQL repository's SET NULL foreign key from
-        ``evaluation.evaluator_version_id``.
-
-        Args:
-            version_ids: Ids of the deleted plugin versions.
-        """
-        deleted = set(version_ids)
-        for evaluation_id, evaluation in self._evaluations.items():
-            if evaluation.evaluator_version_id in deleted:
-                self._evaluations[evaluation_id] = evaluation.model_copy(
-                    update={"evaluator_version_id": None}
-                )
 
     def _evaluator_info(
         self, evaluator_version_id: uuid.UUID | None
@@ -5287,7 +5268,8 @@ class FakeEvaluationRepository:
             Page of matching evaluations and the next cursor.
         """
         _refuse_unresolvable_fields(
-            evaluation_filter.expression, ("agent_id", "cohort_id", "experiment_run_id")
+            evaluation_filter.expression,
+            ("agent_id", "cohort_id", "experiment_run_id", "replay_id"),
         )
         evaluations = list(self._evaluations.values())
         if evaluation_filter.expression is not None:
@@ -5306,44 +5288,38 @@ class FakeEvaluationRepository:
         ]
         return items, next_cursor
 
-    async def merge_session_evaluations(
+    async def create_session_evaluations(
         self, session_id: uuid.UUID, evaluations: list[Evaluation]
     ) -> list[Evaluation]:
-        """Insert or replace manual evaluations upserted on (session, name).
+        """Insert manual evaluations into a session.
 
         Args:
             session_id: Id of the session the evaluations belong to.
             evaluations: Fully resolved evaluations to store, in request
                 order.
 
+        Raises:
+            EvaluationNameConflict: A name in the batch already exists for
+                the session.
+
         Returns:
             Stored evaluations in request order.
         """
-        _ = session_id
+        seen_names: set[str] = set()
+        for evaluation in evaluations:
+            exists = any(
+                e.session_id == evaluation.session_id
+                and e.evaluator_version_id is None
+                and e.name == evaluation.name
+                for e in self._evaluations.values()
+            )
+            if exists or evaluation.name in seen_names:
+                raise EvaluationNameConflict(evaluation.name, session_id)
+            seen_names.add(evaluation.name)
         stored: list[Evaluation] = []
         for evaluation in evaluations:
-            existing = next(
-                (
-                    e
-                    for e in self._evaluations.values()
-                    if e.session_id == evaluation.session_id
-                    and e.task_id is None
-                    and e.name == evaluation.name
-                ),
-                None,
-            )
             now = datetime.now(UTC)
-            if existing is None:
-                row = evaluation.model_copy(update={"created": now, "updated": now})
-            else:
-                row = evaluation.model_copy(
-                    update={
-                        "id": existing.id,
-                        "owner_id": existing.owner_id,
-                        "created": existing.created,
-                        "updated": _renewed_timestamp(existing.updated),
-                    }
-                )
+            row = evaluation.model_copy(update={"created": now, "updated": now})
             self._evaluations[row.id] = row
             stored.append(row.model_copy())
         return stored
@@ -5366,23 +5342,115 @@ class FakeEvaluationRepository:
         )
 
     async def create_task_evaluations(
-        self, evaluations: list[Evaluation]
+        self, evaluations: list[Evaluation], replay_id: uuid.UUID | None
     ) -> list[Evaluation]:
         """Insert evaluation rows produced by a completed evaluator task.
 
         Args:
             evaluations: Fully resolved evaluations to store, in result order.
+            replay_id: Replay to link each stored row to, ``None`` for a
+                standalone evaluation batch.
+
+        Raises:
+            PluginVersionIdNotFound: No plugin version has the evaluator
+                version id.
 
         Returns:
             Stored evaluations in result order.
         """
+        if not evaluations:
+            return []
+        evaluator_version_id = evaluations[0].evaluator_version_id
+        if (
+            evaluator_version_id is not None
+            and self._plugin_repository is not None
+            and evaluator_version_id not in self._plugin_repository._versions
+        ):
+            raise PluginVersionIdNotFound(evaluator_version_id)
         stored: list[Evaluation] = []
         for evaluation in evaluations:
             now = datetime.now(UTC)
             row = evaluation.model_copy(update={"created": now, "updated": now})
             self._evaluations[row.id] = row
             stored.append(row.model_copy())
+        if replay_id is not None:
+            self._replay_links.update((replay_id, row.id) for row in stored)
         return stored
+
+    async def get_latest_evaluation_ids_by_identity(
+        self, session_ids: Sequence[uuid.UUID]
+    ) -> dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID]:
+        """Read the latest evaluation id per (session, evaluator version, params hash).
+
+        Args:
+            session_ids: Ids of the candidate sessions.
+
+        Returns:
+            Latest evaluation id keyed by (session_id, evaluator_version_id,
+            params_hash), identities without a match omitted.
+        """
+        session_id_set = set(session_ids)
+        candidates = [
+            evaluation
+            for evaluation in self._evaluations.values()
+            if evaluation.session_id in session_id_set
+            and evaluation.evaluator_version_id is not None
+            and evaluation.params_hash is not None
+        ]
+        candidates.sort(key=lambda evaluation: (evaluation.created, evaluation.id))
+        latest: dict[tuple[uuid.UUID, uuid.UUID, str], uuid.UUID] = {}
+        for evaluation in candidates:
+            assert evaluation.evaluator_version_id is not None
+            assert evaluation.params_hash is not None
+            identity = (
+                evaluation.session_id,
+                evaluation.evaluator_version_id,
+                evaluation.params_hash,
+            )
+            latest[identity] = evaluation.id
+        return latest
+
+    async def add_replay_links(
+        self, links: Sequence[tuple[uuid.UUID, uuid.UUID]]
+    ) -> None:
+        """Link replays to evaluations they adopted instead of re-running.
+
+        Args:
+            links: (replay_id, evaluation_id) pairs to link.
+        """
+        self._replay_links.update(links)
+
+    async def list_replay_evaluations(
+        self, replay_ids: Sequence[uuid.UUID]
+    ) -> list[tuple[uuid.UUID, EvaluationWithEvaluator]]:
+        """Load the evaluations linked to a set of replays.
+
+        Args:
+            replay_ids: Ids of the replays.
+
+        Returns:
+            (replay_id, evaluation) pairs ordered by replay id then
+            evaluation id, each evaluation paired with its evaluator name
+            and version.
+        """
+        replay_id_set = set(replay_ids)
+        links = sorted(
+            (replay_id, evaluation_id)
+            for replay_id, evaluation_id in self._replay_links
+            if replay_id in replay_id_set
+        )
+        return [
+            (
+                replay_id,
+                EvaluationWithEvaluator(
+                    self._evaluations[evaluation_id].model_copy(),
+                    *self._evaluator_info(
+                        self._evaluations[evaluation_id].evaluator_version_id
+                    ),
+                ),
+            )
+            for replay_id, evaluation_id in links
+        ]
 
 
 async def create_evaluation(
@@ -5396,7 +5464,7 @@ async def create_evaluation(
     explanation: str | None = None,
     evaluator_version_id: uuid.UUID | None = None,
 ) -> Evaluation:
-    """Store an evaluation in the fake repository through its merge upsert.
+    """Store an evaluation in the fake repository through its create insert.
 
     Args:
         repository: Fake evaluation repository.
@@ -5422,7 +5490,7 @@ async def create_evaluation(
         value=value,
         explanation=explanation,
     )
-    stored = await repository.merge_session_evaluations(session_id, [evaluation])
+    stored = await repository.create_session_evaluations(session_id, [evaluation])
     return stored[0]
 
 
@@ -6056,31 +6124,6 @@ class FakeTaskRepository:
             and task.status is TaskStatus.COMPLETED
         }
 
-    async def get_scored_evaluator_version_ids_many(
-        self, input_session_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, set[uuid.UUID]]:
-        """Read the evaluator versions that already completed against each session.
-
-        Args:
-            input_session_ids: Ids of the scored sessions.
-
-        Returns:
-            Plugin version ids of every completed evaluator task scoring the
-            session, keyed by session id, sessions without one omitted.
-        """
-        session_id_set = set(input_session_ids)
-        scored: dict[uuid.UUID, set[uuid.UUID]] = {}
-        for task in self._tasks.values():
-            if (
-                isinstance(task, EvaluationTask)
-                and task.input_session_id in session_id_set
-                and task.status is TaskStatus.COMPLETED
-            ):
-                scored.setdefault(task.input_session_id, set()).add(
-                    task.plugin_version_id
-                )
-        return scored
-
 
 def _is_stale_before(task: Task, bound: datetime) -> bool:
     """Report whether a task last showed a sign of life before a bound.
@@ -6491,6 +6534,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         replay_repository=replays,
         job_repository=jobs,
         task_repository=tasks,
+        evaluation_repository=evaluations,
         transitions=transitions,
         payload_store=payload_store,
     )
@@ -6500,6 +6544,7 @@ def build_replay_services(policy: TaskPolicy | None = None) -> ReplayServices:
         experiment_run_repository=experiment_runs,
         job_repository=jobs,
         task_repository=tasks,
+        evaluation_repository=evaluations,
         session_repository=sessions,
         session_node_repository=session_nodes,
         agent_version_repository=agent_versions,

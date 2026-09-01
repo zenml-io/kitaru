@@ -39,7 +39,7 @@ from conftest import (
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
-from kitaru.api_models.v1.replay import ReplayStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.task import TaskOnFailure, TaskStatus
 from kitaru.server.application.models.auth import (
@@ -134,6 +134,7 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -216,7 +217,15 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         eval_task.id,
         TaskUpdate(
             status=TaskStatus.COMPLETED,
-            result=[{"name": "accuracy", "score": 0.9}],
+            result=[
+                {
+                    "name": "accuracy",
+                    "score": 0.9,
+                    "min_score": 0.0,
+                    "max_score": 1.0,
+                    "target_score": 0.95,
+                }
+            ],
         ),
         actor=build_task_actor(ACTOR.account, eval_task.id, 1, worker.id),
     )
@@ -233,6 +242,9 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
     assert evaluations[0].evaluation.score == 0.9
     assert evaluations[0].evaluation.task_id == eval_task.id
     assert evaluations[0].evaluation.evaluator_version_id == evaluator.id
+    assert evaluations[0].evaluation.min_score == 0.0
+    assert evaluations[0].evaluation.max_score == 1.0
+    assert evaluations[0].evaluation.target_score == 0.95
 
     job_after = await services.jobs.get(get_replay_job_id(bundle.replay))
     assert job_after.status is JobStatus.COMPLETED
@@ -265,10 +277,10 @@ async def test_standalone_replay_stamps_the_job_kind_replay(
     assert job.kind is JobKind.REPLAY
 
 
-async def test_evaluate_baselines_skips_already_scored_pairs(
+async def test_if_missing_skips_already_scored_pairs(
     services: ReplayServices,
 ) -> None:
-    """Baseline evaluator tasks skip evaluator versions that already scored it."""
+    """IF_MISSING baseline evaluator tasks skip already-scored evaluator versions."""
     agent_version = await _agent_version_with_run_spec(services)
     evaluator_a = await _evaluator_version(services, "accuracy")
     evaluator_b = await _evaluator_version(services, "tone")
@@ -307,7 +319,7 @@ async def test_evaluate_baselines_skips_already_scored_pairs(
                 EvaluatorConfigInput(evaluator="accuracy"),
                 EvaluatorConfigInput(evaluator="tone"),
             ],
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         ),
         actor=ACTOR,
     )
@@ -322,6 +334,149 @@ async def test_evaluate_baselines_skips_already_scored_pairs(
     assert len(baseline_tasks) == 1
     assert baseline_tasks[0].plugin_version_id == evaluator_b.id
     assert baseline_tasks[0].on_failure is TaskOnFailure.ABORT
+
+
+async def test_if_missing_with_different_params_does_not_adopt(
+    services: ReplayServices,
+) -> None:
+    """IF_MISSING does not adopt a prior evaluation run with different params."""
+    agent_version = await _agent_version_with_run_spec(services)
+    evaluator = await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    prior_job = await create_job(services.jobs, ACTOR.account.id)
+    prior_task = await create_evaluation_task(
+        services.tasks,
+        prior_job.id,
+        plugin_version_id=evaluator.id,
+        input_session_id=baseline.id,
+        params={"threshold": 0.5},
+        on_failure=TaskOnFailure.CONTINUE,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[
+                EvaluatorConfigInput(evaluator="accuracy", params={"threshold": 0.9}),
+            ],
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_tasks = [
+        task
+        for task in tasks
+        if isinstance(task, EvaluationTask) and task.input_session_id == baseline.id
+    ]
+    assert len(baseline_tasks) == 1
+    assert baseline_tasks[0].plugin_version_id == evaluator.id
+    assert baseline_tasks[0].params == {"threshold": 0.9}
+
+
+async def test_force_scores_already_scored_pairs(services: ReplayServices) -> None:
+    """FORCE creates a baseline evaluator task even for an already-scored pair."""
+    agent_version = await _agent_version_with_run_spec(services)
+    evaluator_a = await _evaluator_version(services, "accuracy")
+    evaluator_b = await _evaluator_version(services, "tone")
+    baseline = await _baseline_session(services, agent_version)
+
+    prior_job = await create_job(services.jobs, ACTOR.account.id)
+    prior_task = await create_evaluation_task(
+        services.tasks,
+        prior_job.id,
+        plugin_version_id=evaluator_a.id,
+        input_session_id=baseline.id,
+        on_failure=TaskOnFailure.CONTINUE,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[
+                EvaluatorConfigInput(evaluator="accuracy"),
+                EvaluatorConfigInput(evaluator="tone"),
+            ],
+            baseline_evaluation_mode=BaselineEvaluationMode.FORCE,
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_tasks = [
+        task
+        for task in tasks
+        if isinstance(task, EvaluationTask) and task.input_session_id == baseline.id
+    ]
+    assert {task.plugin_version_id for task in baseline_tasks} == {
+        evaluator_a.id,
+        evaluator_b.id,
+    }
+
+
+async def test_none_creates_no_baseline_evaluation_tasks(
+    services: ReplayServices,
+) -> None:
+    """NONE appends no baseline evaluator task."""
+    agent_version = await _agent_version_with_run_spec(services)
+    await _evaluator_version(services, "accuracy")
+    baseline = await _baseline_session(services, agent_version)
+
+    bundle = await services.replay_service.create_replay(
+        ReplayCreate(
+            baseline_session_id=baseline.id,
+            evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundle.replay.job_id), actor=ACTOR
+    )
+    baseline_tasks = [
+        task
+        for task in tasks
+        if isinstance(task, EvaluationTask) and task.input_session_id == baseline.id
+    ]
+    assert baseline_tasks == []
 
 
 async def test_create_replay_rejects_in_progress_baseline_evaluation(
@@ -343,7 +498,7 @@ async def test_create_replay_rejects_in_progress_baseline_evaluation(
             ReplayCreate(
                 baseline_session_id=baseline.id,
                 evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
-                evaluate_baselines=True,
+                baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
             ),
             actor=ACTOR,
         )
@@ -361,7 +516,7 @@ async def test_agent_task_failure_cancels_baseline_tasks_and_fails_replay(
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         ),
         actor=ACTOR,
     )
@@ -423,7 +578,7 @@ async def test_baseline_evaluator_failure_fails_the_replay(
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         ),
         actor=ACTOR,
     )
@@ -538,7 +693,9 @@ async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
     run, _ = await services.experiment_service.start_run(
         experiment_id,
         ExperimentRunCreate(
-            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -630,16 +787,16 @@ async def test_start_run_rejects_in_progress_cohort_session_evaluation(
             ExperimentRunCreate(
                 cohort_version_id=cohort_version.id,
                 agent_version_id=agent_version.id,
-                evaluate_baselines=True,
+                baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
             ),
             actor=ACTOR,
         )
 
 
-async def test_start_run_evaluate_baselines_skips_already_scored_sessions(
+async def test_start_run_if_missing_skips_already_scored_sessions(
     services: ReplayServices,
 ) -> None:
-    """The batched fan-out skips baseline evaluator tasks per already-scored session."""
+    """IF_MISSING skips baseline evaluator tasks per already-scored session."""
     agent_version = await _agent_version_with_run_spec(services)
     evaluator_a = await _evaluator_version(services, "accuracy")
     evaluator_b = await _evaluator_version(services, "tone")
@@ -693,7 +850,7 @@ async def test_start_run_evaluate_baselines_skips_already_scored_sessions(
         ExperimentRunCreate(
             cohort_version_id=cohort_version.id,
             agent_version_id=agent_version.id,
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         ),
         actor=ACTOR,
     )
@@ -736,6 +893,127 @@ async def test_start_run_evaluate_baselines_skips_already_scored_sessions(
         evaluator_a.id,
         evaluator_b.id,
     }
+
+
+async def test_start_run_force_scores_already_scored_sessions(
+    services: ReplayServices,
+) -> None:
+    """FORCE creates a baseline evaluator task even for an already-scored session."""
+    agent_version = await _agent_version_with_run_spec(services)
+    evaluator_a = await _evaluator_version(services, "accuracy")
+    evaluator_b = await _evaluator_version(services, "tone")
+    experiment, _ = await services.experiment_service.create_experiment(
+        ExperimentCreate(
+            name="exp1",
+            agent_id=agent_version.agent_id,
+            evaluators=[
+                EvaluatorConfigInput(evaluator="accuracy"),
+                EvaluatorConfigInput(evaluator="tone"),
+            ],
+        ),
+        actor=ACTOR,
+    )
+    scored_session = await _baseline_session(services, agent_version)
+
+    prior_job = await create_job(services.jobs, ACTOR.account.id)
+    prior_task = await create_evaluation_task(
+        services.tasks,
+        prior_job.id,
+        plugin_version_id=evaluator_a.id,
+        input_session_id=scored_session.id,
+        on_failure=TaskOnFailure.CONTINUE,
+    )
+    worker = await create_worker(services.workers, ACTOR.account.id)
+    await services.task_service.claim_tasks(
+        10, actor=build_worker_actor(ACTOR.account, worker.id)
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(status=TaskStatus.RUNNING),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+    await services.task_service.update_task(
+        prior_task.id,
+        TaskUpdate(
+            status=TaskStatus.COMPLETED,
+            result=[{"name": "accuracy", "score": 1.0}],
+        ),
+        actor=build_task_actor(ACTOR.account, prior_task.id, 1, worker.id),
+    )
+
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [scored_session.id]
+    )
+    run, _ = await services.experiment_service.start_run(
+        experiment.id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.FORCE,
+        ),
+        actor=ACTOR,
+    )
+    bundles, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
+    )
+    scored_tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundles[0].replay.job_id), actor=ACTOR
+    )
+    scored_baseline_tasks = [
+        task
+        for task in scored_tasks
+        if isinstance(task, EvaluationTask)
+        and task.input_session_id == scored_session.id
+    ]
+    assert {task.plugin_version_id for task in scored_baseline_tasks} == {
+        evaluator_a.id,
+        evaluator_b.id,
+    }
+
+
+async def test_start_run_none_creates_no_baseline_evaluation_tasks(
+    services: ReplayServices,
+) -> None:
+    """NONE appends no baseline evaluator task to the fanned-out replays."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id
+    )
+    session = await _baseline_session(services, agent_version)
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id]
+    )
+    run, _ = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
+        ),
+        actor=ACTOR,
+    )
+    bundles, _ = await services.replay_service.list_replays(
+        ReplayFilter(
+            expression=FilterCondition(
+                field="experiment_run_id", op=FilterOp.EQ, value=run.id
+            )
+        ),
+        actor=ACTOR,
+    )
+    tasks, _ = await services.task_service.list_tasks(
+        TaskFilter(job_id=bundles[0].replay.job_id), actor=ACTOR
+    )
+    baseline_tasks = [
+        task
+        for task in tasks
+        if isinstance(task, EvaluationTask) and task.input_session_id == session.id
+    ]
+    assert baseline_tasks == []
 
 
 async def test_start_run_rejects_an_empty_cohort_version(
@@ -976,7 +1254,9 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
     run, _ = await services.experiment_service.start_run(
         experiment_id,
         ExperimentRunCreate(
-            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -1040,7 +1320,9 @@ async def test_finalize_precedence_canceling_beats_failure(
     run, _ = await services.experiment_service.start_run(
         experiment_id,
         ExperimentRunCreate(
-            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )

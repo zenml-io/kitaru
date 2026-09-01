@@ -15,13 +15,18 @@
 
 import uuid
 from datetime import datetime
-from typing import Self
+from typing import Any, Self
 
 from pydantic import Field, model_validator
 
 from kitaru.api_models.v1.base import FiniteFloat
 from kitaru.api_models.v1.evaluation import EvaluationDataType
-from kitaru.server.domain.base import DomainModel, NotFoundError, ValidationError
+from kitaru.server.domain.base import (
+    ConflictError,
+    DomainModel,
+    NotFoundError,
+    ValidationError,
+)
 from kitaru.server.domain.ids import uuid7
 from kitaru.server.domain.names import EvaluationName
 
@@ -56,6 +61,19 @@ class DuplicateEvaluationNameInBatch(ValidationError):
         )
 
 
+class EvaluationNameConflict(ConflictError):
+    """Raised when a manual evaluation name already exists for a session."""
+
+    def __init__(self, name: str, session_id: uuid.UUID) -> None:
+        """Initialize the error.
+
+        Args:
+            name: Evaluation name that already exists.
+            session_id: Id of the session.
+        """
+        super().__init__(f"Evaluation {name} already exists for session {session_id}")
+
+
 class Evaluation(DomainModel):
     """Evaluation."""
 
@@ -70,6 +88,11 @@ class Evaluation(DomainModel):
     value: str | None = None
     explanation: str | None = None
     passed: bool | None = None
+    min_score: float | None = None
+    max_score: float | None = None
+    target_score: float | None = None
+    evaluator_params: dict[str, Any] | None = None
+    params_hash: str | None = None
     created: datetime | None = None
     updated: datetime | None = None
 
@@ -78,14 +101,23 @@ class Evaluation(DomainModel):
         """Enforce that data_type matches which of score and value are set.
 
         Raises:
-            InvalidEvaluation: Neither score nor value is set, or the
-                populated channels do not match data_type.
+            InvalidEvaluation: Neither score nor value is set, the populated
+                channels do not match data_type, or a scale field is set on
+                an evaluation whose data_type is not float.
 
         Returns:
             The validated evaluation.
         """
         if self.score is None and self.value is None:
             raise InvalidEvaluation("At least one of score or value must be set")
+        if self.data_type is not EvaluationDataType.FLOAT and (
+            self.min_score is not None
+            or self.max_score is not None
+            or self.target_score is not None
+        ):
+            raise InvalidEvaluation(
+                "min_score, max_score, and target_score require data_type float"
+            )
         if self.data_type in (EvaluationDataType.FLOAT, EvaluationDataType.BOOL):
             if self.score is None or self.value is not None:
                 raise InvalidEvaluation(

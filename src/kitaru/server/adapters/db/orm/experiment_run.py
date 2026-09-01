@@ -17,7 +17,6 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
-    Boolean,
     DateTime,
     ForeignKeyConstraint,
     Index,
@@ -28,6 +27,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.server.adapters.db.orm.base import (
     Base,
     TimestampMixin,
@@ -41,6 +41,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.experiment_run import ExperimentRun
 
 STATUS_LENGTH = 16
+BASELINE_EVALUATION_MODE_LENGTH = 32
 
 EXPERIMENT_RUN_OWNER_ID_FOREIGN_KEY = foreign_key_name("experiment_run", ["owner_id"])
 EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY = foreign_key_name(
@@ -100,7 +101,9 @@ class ExperimentRunORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH))
     cohort_version_id: Mapped[uuid.UUID]
     agent_version_id: Mapped[uuid.UUID]
-    evaluate_baselines: Mapped[bool] = mapped_column(Boolean)
+    baseline_evaluation_mode: Mapped[str] = mapped_column(
+        String(BASELINE_EVALUATION_MODE_LENGTH)
+    )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error: Mapped[str | None] = mapped_column(Text)
@@ -123,7 +126,7 @@ class ExperimentRunORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             status=run.status.value,
             cohort_version_id=run.cohort_version_id,
             agent_version_id=run.agent_version_id,
-            evaluate_baselines=run.evaluate_baselines,
+            baseline_evaluation_mode=run.baseline_evaluation_mode.value,
             started_at=run.started_at,
             ended_at=run.ended_at,
             error=run.error,
@@ -154,7 +157,9 @@ class ExperimentRunORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
             status=ExperimentRunStatus(self.status),
             cohort_version_id=self.cohort_version_id,
             agent_version_id=self.agent_version_id,
-            evaluate_baselines=self.evaluate_baselines,
+            baseline_evaluation_mode=BaselineEvaluationMode(
+                self.baseline_evaluation_mode
+            ),
             started_at=self.started_at,
             ended_at=self.ended_at,
             error=self.error,

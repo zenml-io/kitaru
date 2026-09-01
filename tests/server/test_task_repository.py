@@ -277,30 +277,6 @@ async def test_evaluator_pair_uniqueness(setup: Setup) -> None:
         await setup.tasks.create(duplicate)
 
 
-async def test_get_scored_evaluator_version_ids_many(setup: Setup) -> None:
-    """Group completed evaluator tasks by session id, other ids omitted."""
-    completed = EvaluationTask(
-        job_id=setup.job_id,
-        plugin_version_id=setup.plugin_version_id,
-        input_session_id=setup.session_id,
-    )
-    completed.claim(setup.worker_id, datetime.now(UTC))
-    completed.start(datetime.now(UTC))
-    completed.complete([{"name": "exact_match", "score": 1.0}], datetime.now(UTC))
-    await setup.tasks.create(completed)
-
-    other_session_id = uuid.uuid4()
-    scored = await setup.tasks.get_scored_evaluator_version_ids_many(
-        [setup.session_id, other_session_id]
-    )
-    assert scored == {setup.session_id: {setup.plugin_version_id}}
-
-
-async def test_get_scored_evaluator_version_ids_many_empty(setup: Setup) -> None:
-    """An empty id list needs no lookup and returns no matches."""
-    assert await setup.tasks.get_scored_evaluator_version_ids_many([]) == {}
-
-
 async def test_import_task_round_trips_its_fields(setup: Setup) -> None:
     """An importer task round-trips its plugin, payload, and agent references."""
     task = ImportTask(

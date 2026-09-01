@@ -20,6 +20,7 @@ from typing import ClassVar
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.base import FrozenModel
 from kitaru.server.base import ListFilter
 from kitaru.server.filtering import EQUALITY_OPS, SCOPE_OPS, FilterField
@@ -54,4 +55,4 @@ class ExperimentRunCreate(FrozenModel):
 
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
-    evaluate_baselines: bool = False
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.IF_MISSING

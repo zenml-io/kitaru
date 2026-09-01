@@ -45,7 +45,7 @@ async def handle_workflow_start(
     dto = ExperimentRunCreateRequest(
         cohort_version_id=request.cohort_version_id,
         agent_version_id=request.agent_version_id,
-        evaluate_baselines=request.evaluate_baselines,
+        baseline_evaluation_mode=request.baseline_evaluation_mode,
     )
     run = await state.client.experiments.start_run(
         request.experiment_id, dto, idempotency_key=request.idempotency_key
@@ -63,6 +63,6 @@ async def handle_workflow_start(
         "experiment_id": str(request.experiment_id),
         "cohort_version_id": str(request.cohort_version_id),
         "agent_version_id": str(request.agent_version_id),
-        "evaluate_baselines": request.evaluate_baselines,
+        "baseline_evaluation_mode": request.baseline_evaluation_mode,
         "result": run.model_dump(mode="json"),
     }

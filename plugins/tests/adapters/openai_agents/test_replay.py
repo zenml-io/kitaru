@@ -37,6 +37,7 @@ from agents.run_config import CallModelData, ModelInputData
 from openai.types.responses import ResponseFunctionToolCall
 
 from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
     ReplayResponse,
     ReplayStatus,
     ToolLookupMatch,
@@ -85,6 +86,7 @@ def _replay(
         ),
         evaluators=[],
         evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         status=ReplayStatus.PENDING,
         error=None,
         created=now,
