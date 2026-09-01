@@ -5,7 +5,7 @@ description: Add or change a separately packaged Kitaru trace importer that norm
 
 # Kitaru Importer Development
 
-Read `AGENTS.md`, `plugins/AGENTS.md`, `plugins/DEVELOPMENT.md`, and `src/kitaru/task/importer.py`. Treat the task module as the executable importer contract. Read the JSONL importer first for the smallest example, then the closest provider importer and its fixtures. Load the same-name `kitaru-dev` repo skill for the current host for the general command and PR workflow.
+Read `AGENTS.md`, `plugins/AGENTS.md`, `plugins/DEVELOPMENT.md`, and `src/kitaru/task/importer.py`. Treat the task module as the executable importer contract. Read the JSONL importer first for the smallest example, then the closest provider importer and its fixtures. Load the same-name `kitaru-dev` repo skill for the current host for the general command and PR workflow. When an importer version or another release unit changes, also load the `kitaru-release` skill before opening or updating the PR. State whether each changed distribution will ship in the next applicable release or be deferred past it; attach its exact release-unit label when publication is deferred past that release.
 
 First decide whether the request needs a reusable package. A one-off conversion to Kitaru JSONL or a self-contained registered script may be smaller. Registration stores source metadata; it does not upload or vendor a package.
 
