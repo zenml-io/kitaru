@@ -23,7 +23,7 @@ classifiers = [
 ]
 keywords = ["ai-agents", "kitaru", "langsmith", "observability", "traces"]
 dependencies = [
-    "kitaru>=0.23.0",
+    "kitaru>=0.24.0",
     "langsmith>=0.3,<1",
 ]
 
