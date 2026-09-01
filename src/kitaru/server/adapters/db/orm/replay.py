@@ -38,7 +38,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.replay import Replay
 
 STATUS_LENGTH = 16
-BASELINE_EVALUATION_MODE_LENGTH = 16
+BASELINE_EVALUATION_MODE_LENGTH = 32
 
 REPLAY_OWNER_ID_FOREIGN_KEY = foreign_key_name("replay", ["owner_id"])
 REPLAY_JOB_ID_FOREIGN_KEY = foreign_key_name("replay", ["job_id"])

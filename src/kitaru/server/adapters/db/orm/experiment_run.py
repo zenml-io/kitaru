@@ -41,7 +41,7 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.experiment_run import ExperimentRun
 
 STATUS_LENGTH = 16
-BASELINE_EVALUATION_MODE_LENGTH = 16
+BASELINE_EVALUATION_MODE_LENGTH = 32
 
 EXPERIMENT_RUN_OWNER_ID_FOREIGN_KEY = foreign_key_name("experiment_run", ["owner_id"])
 EXPERIMENT_RUN_EXPERIMENT_ID_FOREIGN_KEY = foreign_key_name(

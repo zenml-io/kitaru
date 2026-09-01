@@ -42,7 +42,7 @@ down_revision = "009_agent_version_run_hooks"
 branch_labels = None
 depends_on = None
 
-BASELINE_EVALUATION_MODE_LENGTH = 16
+BASELINE_EVALUATION_MODE_LENGTH = 32
 PARAMS_HASH_LENGTH = 64
 
 _BOOL_TO_MODE_SQL = (
