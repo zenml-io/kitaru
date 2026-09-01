@@ -374,3 +374,76 @@ async def test_api_key_responses_are_stored_encrypted(
     stored_tag = await idempotency_key_repository.get(ACCOUNT.id, "tag")
     assert stored_tag is not None
     assert stored_tag.id not in idempotency_key_repository.encrypted_ids
+
+
+async def test_api_key_replay_decrypts_the_stored_response(
+    client: httpx.AsyncClient,
+) -> None:
+    """Replay the decrypted stored response on an encrypting route."""
+    headers = {"Idempotency-Key": "create-key"}
+    body = {"name": "ci"}
+    first = await client.post("/api/v1/api-keys", json=body, headers=headers)
+    assert first.status_code == 201
+
+    second = await client.post("/api/v1/api-keys", json=body, headers=headers)
+    assert second.status_code == 201
+    assert second.headers["Idempotent-Replayed"] == "true"
+    assert second.json() == first.json()
+
+
+async def test_plaintext_key_reused_on_encrypting_route_returns_422(
+    client: httpx.AsyncClient,
+) -> None:
+    """Reject a key registered on a plaintext route before decrypting anything."""
+    headers = {"Idempotency-Key": "shared-key"}
+    first = await client.post("/api/v1/tags", json={"name": "prod"}, headers=headers)
+    assert first.status_code == 201
+
+    second = await client.post("/api/v1/api-keys", json={"name": "ci"}, headers=headers)
+    assert second.status_code == 422
+    assert second.json() == {
+        "detail": "Idempotency-Key was already used with a different request"
+    }
+
+    rotate = await client.post(
+        f"/api/v1/api-keys/{uuid.uuid4()}/rotate", headers=headers
+    )
+    assert rotate.status_code == 422
+
+
+async def test_encrypted_key_reused_on_plaintext_route_returns_422(
+    client: httpx.AsyncClient,
+) -> None:
+    """Reject a key registered on an encrypting route and reused on a plaintext one."""
+    headers = {"Idempotency-Key": "shared-key"}
+    first = await client.post("/api/v1/api-keys", json={"name": "ci"}, headers=headers)
+    assert first.status_code == 201
+
+    second = await client.post("/api/v1/tags", json={"name": "prod"}, headers=headers)
+    assert second.status_code == 422
+
+
+async def test_undecryptable_stored_response_returns_409(
+    client: httpx.AsyncClient,
+    idempotency_key_repository: FakeIdempotencyKeyRepository,
+) -> None:
+    """Reject a replay whose stored response cannot be decrypted."""
+    headers = {"Idempotency-Key": "create-key"}
+    body = {"name": "ci"}
+    first = await client.post("/api/v1/api-keys", json=body, headers=headers)
+    assert first.status_code == 201
+
+    stored = await idempotency_key_repository.get(ACCOUNT.id, "create-key")
+    assert stored is not None
+    await idempotency_key_repository.store_response(
+        stored.id,
+        response_status=201,
+        response_body=b"not-encrypted",
+        response_content_type="application/json",
+    )
+
+    second = await client.post("/api/v1/api-keys", json=body, headers=headers)
+    assert second.status_code == 409
+    assert second.json() == {
+        "detail": "Idempotency-Key stored response cannot be decrypted"
+    }
