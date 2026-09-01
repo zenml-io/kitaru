@@ -191,6 +191,7 @@ describe("runDemo recovery", () => {
     const createReplay = vi.fn();
     const runWorker = vi.fn();
     const replay = {
+      baseline_evaluation_mode: "none",
       baseline_session_id: INITIAL_SESSION_ID,
       created: "2026-08-14T10:00:00Z",
       evaluate_baselines: false,
