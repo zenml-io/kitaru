@@ -26,8 +26,8 @@ from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
 )
 from kitaru.server.application.models.evaluation import (
+    EvaluationCreate,
     EvaluationFilter,
-    EvaluationMerge,
 )
 from kitaru.server.application.models.job import EvaluationBatchCreate
 from kitaru.server.domain.evaluation import Evaluation
@@ -95,13 +95,17 @@ def evaluation_to_response(item: EvaluationWithEvaluator) -> EvaluationResponse:
         value=evaluation.value,
         explanation=evaluation.explanation,
         passed=evaluation.passed,
+        min_score=evaluation.min_score,
+        max_score=evaluation.max_score,
+        target_score=evaluation.target_score,
+        evaluator_params=evaluation.evaluator_params,
         created=evaluation.created,
         updated=evaluation.updated,
     )
 
 
-def merged_evaluation_to_response(evaluation: Evaluation) -> EvaluationResponse:
-    """Convert a manually merged evaluation to its response DTO.
+def created_evaluation_to_response(evaluation: Evaluation) -> EvaluationResponse:
+    """Convert a manually created evaluation to its response DTO.
 
     A manual evaluation carries no evaluator, so this skips the join
     ``evaluation_to_response`` performs for stored rows.
@@ -115,34 +119,37 @@ def merged_evaluation_to_response(evaluation: Evaluation) -> EvaluationResponse:
     return evaluation_to_response(EvaluationWithEvaluator(evaluation, None, None))
 
 
-def evaluation_result_to_merge(result: EvaluationResult) -> EvaluationMerge:
-    """Convert an evaluation result to its merge command, deriving data_type.
+def evaluation_result_to_create(result: EvaluationResult) -> EvaluationCreate:
+    """Convert an evaluation result to its create command, deriving data_type.
 
     Args:
         result: Evaluation result from the request.
 
     Returns:
-        Evaluation merge command.
+        Evaluation create command.
     """
-    return EvaluationMerge(
+    return EvaluationCreate(
         name=result.name,
         data_type=result.data_type,
         score=result.score,
         value=result.value,
         explanation=result.explanation,
         passed=result.passed,
+        min_score=result.min_score,
+        max_score=result.max_score,
+        target_score=result.target_score,
     )
 
 
-def session_evaluations_request_to_merges(
+def session_evaluations_request_to_creates(
     body: SessionEvaluationsRequest,
-) -> list[EvaluationMerge]:
-    """Convert a session evaluations request to its merge commands.
+) -> list[EvaluationCreate]:
+    """Convert a session evaluations request to its create commands.
 
     Args:
         body: Session evaluations request.
 
     Returns:
-        Evaluation merge commands in request order.
+        Evaluation create commands in request order.
     """
-    return [evaluation_result_to_merge(result) for result in body.evaluations]
+    return [evaluation_result_to_create(result) for result in body.evaluations]

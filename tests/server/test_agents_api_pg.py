@@ -332,6 +332,7 @@ async def _setup_agent_subtree(client: httpx.AsyncClient) -> dict[str, Any]:
         json={
             "cohort_version_id": cohort_version["id"],
             "agent_version_id": version["id"],
+            "baseline_evaluation_mode": "none",
         },
     )
 
@@ -552,6 +553,7 @@ async def test_delete_agent_retains_standalone_replays(
         json={
             "baseline_session_id": setup["session_ids"][2],
             "evaluators": [{"evaluator": "accuracy"}],
+            "baseline_evaluation_mode": "none",
         },
     )
     assert response.status_code == 201, response.text

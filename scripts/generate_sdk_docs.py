@@ -178,6 +178,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
     "kitaru.api_models.v1.replay": ModuleSpec(
         symbols=frozenset(
             {
+                "BaselineEvaluationMode",
                 "ReplayCreateRequest",
                 "ReplayListParams",
                 "ReplayResponse",

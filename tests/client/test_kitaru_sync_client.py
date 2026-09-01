@@ -23,7 +23,11 @@ import pytest
 
 from kitaru.api_models.v1.agent import AgentListParams, AgentResponse
 from kitaru.api_models.v1.base import Page
-from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
+from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
+    ReplayResponse,
+    ReplayStatus,
+)
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import NotFoundError
@@ -59,6 +63,7 @@ def _replay_response(**overrides: Any) -> ReplayResponse:
         "tool_policy": {"default": {"type": "passthrough"}, "tools": {}},
         "evaluators": [{"evaluator": "accuracy", "version": 1, "params": {}}],
         "evaluate_baselines": False,
+        "baseline_evaluation_mode": BaselineEvaluationMode.NONE,
         "status": ReplayStatus.PENDING,
         "error": None,
         "created": now,

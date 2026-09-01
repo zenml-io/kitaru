@@ -17,7 +17,12 @@ import uuid
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import JsonValue, RequestModel, ResponseModel
+from kitaru.api_models.v1.base import (
+    JsonValue,
+    PlainStr,
+    RequestModel,
+    ResponseModel,
+)
 
 MAX_IMPORT_FAILURES = 20
 
@@ -25,7 +30,7 @@ MAX_IMPORT_FAILURES = 20
 class ImportCreateRequest(RequestModel):
     """Import create request."""
 
-    importer: str = Field(description="Importer name.")
+    importer: PlainStr = Field(description="Importer name.")
     agent_id: uuid.UUID = Field(
         description="Agent imported sessions are created under."
     )

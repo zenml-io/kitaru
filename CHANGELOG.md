@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Added
+
+- Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. A request that sets neither `baseline_evaluation_mode` nor the deprecated `evaluate_baselines` defaults to `if_missing`. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
+- Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
+- Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
+- Added `min_score`, `max_score`, and `target_score` to evaluation results and evaluation responses, for displaying a score against its scale and against the score it should beat. All three are only accepted on a float evaluation.
+
+### Changed
+
+- `client.sessions.merge_evaluations` is renamed to `create_evaluations`. Manual evaluation names are unique per session, resending a name already stored for the session now returns HTTP 409 instead of overwriting the existing row.
+- A row written by an evaluator run keeps its evaluator version id forever, even after that evaluator is deleted, rather than losing it and becoming indistinguishable from a manual row.
+- `if_missing` baseline scoring now matches a prior evaluation by evaluator version and params rather than by evaluator version alone, so a baseline scored again with different params always gets a fresh task instead of being skipped.
+- Evaluation aggregates for an experiment run now read the replay links written at creation time, so a run's aggregate is pinned to the evaluations that scored its replays and a later evaluation of the same session no longer changes it. Aggregates now group by evaluator version in addition to name and data type, and `EvaluationAggregateResponse` exposes `evaluator_version_id`, `evaluator_name`, and `evaluator_version` per group. Manual evaluations no longer appear in run aggregates, they stay visible in listings and session views.
+- The evaluation `experiment_run_id` filter now matches through the replay link table instead of the producing task's job, so a standalone evaluation job's rows no longer match a run's filter and an evaluation adopted into a run through `if_missing` does.
+
+### Fixed
+
+- A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
+- Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
+- Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.
+
 ## [0.24.0]
 
 ### Added

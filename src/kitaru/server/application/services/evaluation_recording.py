@@ -20,28 +20,35 @@ from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationRepository,
 )
 from kitaru.server.application.interfaces.job_repository import JobRepository
+from kitaru.server.application.interfaces.replay_repository import ReplayRepository
 from kitaru.server.application.interfaces.session_repository import SessionRepository
 from kitaru.server.domain.base import NotFoundError
 from kitaru.server.domain.evaluation import Evaluation
 from kitaru.server.domain.task import EvaluationTask
+from kitaru.server.utils import hash_params
 
 
 async def record_task_evaluations(
     event: TaskTerminal,
     evaluation_repository: EvaluationRepository,
     job_repository: JobRepository,
+    replay_repository: ReplayRepository,
     session_repository: SessionRepository,
 ) -> None:
     """Write one evaluation row per result of a completed evaluator task.
 
     Applies uniformly to standalone, result, and baseline evaluator tasks,
-    the single writer of task-born evaluation rows. A no-op when the
-    terminal task is not an evaluator task or did not complete.
+    the single writer of task-born evaluation rows. Each row carries the
+    task's params and their hash, and links to the replay of the task's job
+    when it belongs to one. A no-op when the terminal task is not an
+    evaluator task or did not complete.
 
     Args:
         event: TaskTerminal event.
         evaluation_repository: Evaluation repository.
         job_repository: Job repository, for the owning job's owner id.
+        replay_repository: Replay repository, to link the rows to their job's
+            replay.
         session_repository: Session repository, to lock the scored session.
     """
     task = event.task
@@ -49,6 +56,7 @@ async def record_task_evaluations(
         return
     job = await job_repository.get(task.job_id)
     results = task.result if isinstance(task.result, list) else []
+    params_hash = hash_params(task.params)
     evaluations = [
         Evaluation(
             owner_id=job.owner_id,
@@ -61,6 +69,11 @@ async def record_task_evaluations(
             value=result.value,
             explanation=result.explanation,
             passed=result.passed,
+            min_score=result.min_score,
+            max_score=result.max_score,
+            target_score=result.target_score,
+            evaluator_params=task.params,
+            params_hash=params_hash,
         )
         for result in (EvaluationResult.model_validate(entry) for entry in results)
     ]
@@ -75,10 +88,13 @@ async def record_task_evaluations(
         )
     except NotFoundError:
         return
-    # The evaluator can be deleted while its task runs, cascading its version
-    # away. The insert then references a missing evaluator version, which
-    # leaves nothing to record.
+    replay = await replay_repository.get_by_job_id(task.job_id)
+    # The evaluator can be deleted while its task runs. The existence check
+    # ahead of the insert then finds the version gone, which leaves nothing
+    # to record.
     try:
-        await evaluation_repository.create_task_evaluations(evaluations)
+        await evaluation_repository.create_task_evaluations(
+            evaluations, replay.id if replay is not None else None
+        )
     except NotFoundError:
         return

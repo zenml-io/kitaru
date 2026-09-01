@@ -33,7 +33,11 @@ from kitaru.analytics.source import (
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.headers import CLIENT_HEADER, SKILL_HEADER
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
-from kitaru.server.adapters.db.errors import is_connection_unavailable, is_deadlock
+from kitaru.server.adapters.db.errors import (
+    is_connection_unavailable,
+    is_deadlock,
+    is_invalid_value,
+)
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -162,11 +166,12 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
 
 
 def _register_database_exception_handler(app: FastAPI) -> None:
-    """Register the JSON error response for a retryable database error.
+    """Register the JSON error response for a retryable or invalid database error.
 
     A deadlock-canceled transaction and a lost or unavailable connection both
-    yield HTTP 503 with a ``detail`` message. Any other database error
-    propagates unchanged.
+    yield HTTP 503. A value the database cannot store yields HTTP 422. Each
+    of these responses carries a ``detail`` message. Any other database
+    error propagates unchanged.
 
     Args:
         app: FastAPI application that will serve the v1 API.
@@ -182,6 +187,13 @@ def _register_database_exception_handler(app: FastAPI) -> None:
         if is_connection_unavailable(exc):
             return JSONResponse(
                 status_code=503, content={"detail": "Database connection unavailable"}
+            )
+        if is_invalid_value(exc):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": "Request contained a value the database cannot store"
+                },
             )
         raise exc
 

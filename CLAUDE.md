@@ -130,6 +130,7 @@ For adapter, importer, specialized UI API, docs, CI, and release work, load the 
 - **Single source of truth:** the `version` field in `pyproject.toml`. The release workflow bumps it automatically — never change it by hand.
 - **Never hardcode the version** in tests or application code. Use `importlib.metadata.version("kitaru")` to read it at runtime.
 - **Update `CHANGELOG.md`** when making user-facing changes. Add entries under the `[Unreleased]` heading. The release workflow moves `[Unreleased]` to a versioned heading (e.g. `[0.2.0] - 2026-04-01`) at release time.
+- **Track deprecations in `DEPRECATIONS.md`** at the repository root, one entry per deprecated surface.
 
 ## Commits and PRs
 

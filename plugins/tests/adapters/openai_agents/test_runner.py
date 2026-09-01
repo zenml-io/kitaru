@@ -48,6 +48,7 @@ from packaging.version import Version
 import kitaru_openai_agents.recording as recording_module
 import kitaru_openai_agents.runner as runner_module
 from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
     ReplayResponse,
     ReplayStatus,
     ToolLookupMatch,
@@ -151,6 +152,7 @@ def _replay(
         tool_policy=tool_policy or ToolPolicy(default=PassthroughConfig(), tools={}),
         evaluators=[],
         evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         status=ReplayStatus.PENDING,
         error=None,
         created=now,

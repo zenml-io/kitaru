@@ -13,7 +13,10 @@
 #  permissions and limitations under the License.
 """Replay DTO conversions."""
 
+from typing import Protocol
+
 from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
     ReplayCreateRequest,
     ReplayListParams,
     ReplayResponse,
@@ -36,6 +39,41 @@ from kitaru.server.application.models.replay import (
 )
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import ReplayConfig
+
+
+class BaselineEvaluationRequest(Protocol):
+    """Wire request carrying the deprecated bool and the mode field."""
+
+    evaluate_baselines: bool
+    baseline_evaluation_mode: BaselineEvaluationMode | None
+
+    @property
+    def model_fields_set(self) -> set[str]:
+        """Names of the fields the caller explicitly set."""
+        ...
+
+
+def resolve_baseline_evaluation_mode(
+    body: BaselineEvaluationRequest,
+) -> BaselineEvaluationMode:
+    """Resolve the deprecated bool and the mode field into one mode.
+
+    Reads the deprecated bool only when the caller set it, so a request
+    using only the mode field never triggers its deprecation warning.
+
+    Args:
+        body: Wire request carrying both fields.
+
+    Returns:
+        Resolved baseline evaluation mode.
+    """
+    if body.baseline_evaluation_mode is not None:
+        return body.baseline_evaluation_mode
+    if "evaluate_baselines" in body.model_fields_set:
+        if body.evaluate_baselines:
+            return BaselineEvaluationMode.IF_MISSING
+        return BaselineEvaluationMode.NONE
+    return BaselineEvaluationMode.IF_MISSING
 
 
 def replay_create_to_command(body: ReplayCreateRequest) -> ReplayCreate:
@@ -61,7 +99,7 @@ def replay_create_to_command(body: ReplayCreateRequest) -> ReplayCreate:
             else None
         ),
         evaluators=[evaluator_config_input(config) for config in body.evaluators],
-        evaluate_baselines=body.evaluate_baselines,
+        baseline_evaluation_mode=resolve_baseline_evaluation_mode(body),
     )
 
 
@@ -92,7 +130,9 @@ def replay_to_response(replay: Replay, config: ReplayConfig) -> ReplayResponse:
         evaluators=[
             evaluator_config_to_wire(evaluator) for evaluator in config.evaluators
         ],
-        evaluate_baselines=replay.evaluate_baselines,
+        evaluate_baselines=replay.baseline_evaluation_mode
+        is not BaselineEvaluationMode.NONE,
+        baseline_evaluation_mode=replay.baseline_evaluation_mode,
         status=replay.status,
         error=replay.error,
         created=replay.created,

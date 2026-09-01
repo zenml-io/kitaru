@@ -253,17 +253,3 @@ class TaskRepository(Protocol):
             session.
         """
         ...
-
-    async def get_scored_evaluator_version_ids_many(
-        self, input_session_ids: Sequence[uuid.UUID]
-    ) -> dict[uuid.UUID, set[uuid.UUID]]:
-        """Read the evaluator versions that already completed against each session.
-
-        Args:
-            input_session_ids: Ids of the scored sessions.
-
-        Returns:
-            Plugin version ids of every completed evaluator task scoring the
-            session, keyed by session id, sessions without one omitted.
-        """
-        ...

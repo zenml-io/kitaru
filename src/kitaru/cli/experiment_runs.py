@@ -26,6 +26,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.cli.output import CLIError, CommandResult, emit_event
 from kitaru.cli.receipts import get_wait_settings
 from kitaru.cli.registration import (
@@ -167,7 +168,7 @@ async def start_run(
     *,
     cohort_version_id: uuid.UUID,
     agent_reference: str,
-    evaluate_baselines: bool,
+    baseline_evaluation_mode: BaselineEvaluationMode,
     wait: bool,
     interval: float | None,
     timeout: float | None,
@@ -187,7 +188,7 @@ async def start_run(
         ExperimentRunCreateRequest(
             cohort_version_id=cohort_version.id,
             agent_version_id=agent_version.id,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
         ),
         idempotency_key=idempotency_key,
     )

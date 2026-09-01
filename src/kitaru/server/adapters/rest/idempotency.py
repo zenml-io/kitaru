@@ -160,6 +160,8 @@ async def _enforce_idempotency(
             original request is still in flight.
         IdempotencyKeyMismatch: A reused key was registered for a different
             method, path, query, or body.
+        IdempotencyKeyResponseUndecryptable: A reused key's stored response
+            cannot be decrypted.
         IdempotencyKeyReused: A reused key already has a stored response, to
             replay in place of running the route.
     """
@@ -193,9 +195,7 @@ async def _enforce_idempotency(
             )
         )
     except IdempotencyKeyAlreadyExists:
-        stored = await repository.get(
-            context.account.id, key, encrypted=encrypt_response
-        )
+        stored = await repository.get(context.account.id, key)
         if stored is None:
             # Raced the retention sweep between the conflict and this read.
             # Nothing to replay, so let the request run as if it were new.
@@ -207,9 +207,14 @@ async def _enforce_idempotency(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="Idempotency-Key request is still in progress.",
             ) from None
+        body = stored.response_body or b""
+        # Decrypt only after the fingerprint matched, because a mismatched key
+        # may belong to a route that stored its response as plaintext.
+        if encrypt_response and stored.response_body is not None:
+            body = repository.decrypt_response_body(stored.response_body)
         raise IdempotencyKeyReused(
             status_code=stored.response_status,
-            body=stored.response_body or b"",
+            body=body,
             content_type=stored.response_content_type,
         ) from None
     else:

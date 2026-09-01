@@ -18,7 +18,12 @@ from typing import Annotated, Literal
 
 from pydantic import Field
 
-from kitaru.api_models.v1.base import DiscriminatedRequestModel, JsonValue, RequestModel
+from kitaru.api_models.v1.base import (
+    DiscriminatedRequestModel,
+    JsonValue,
+    PlainStr,
+    RequestModel,
+)
 
 
 class HistoryScope(StrEnum):
@@ -60,7 +65,7 @@ class ReplayOverride(RequestModel):
 class EvaluatorConfig(RequestModel):
     """Evaluator config."""
 
-    evaluator: str = Field(description="Evaluator name.")
+    evaluator: PlainStr = Field(description="Evaluator name.")
     version: int | None = Field(
         default=None,
         description="Evaluator version, an omitted value resolves to latest.",
