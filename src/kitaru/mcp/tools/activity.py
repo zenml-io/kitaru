@@ -21,6 +21,7 @@ from kitaru.mcp.models.activity import (
     SessionNodesRequest,
 )
 from kitaru.mcp.models.common import ActivityItem, PageData
+from kitaru.mcp.tools.params import build_list_params
 from kitaru.mcp.tools.registry import build_page_data
 
 
@@ -40,21 +41,24 @@ async def handle_activity_read(
             return await client.experiment_runs.get(request.id)
         return await client.jobs.get(request.id)
     if isinstance(request, ActivityListRequest):
-        common = request.model_dump(include={"cursor", "size", "sort", "filter"})
         if request.kind == "session":
-            page = await client.sessions.list(SessionListParams.model_validate(common))
+            page = await client.sessions.list(
+                build_list_params(SessionListParams, request)
+            )
         elif request.kind == "replay":
-            page = await client.replays.list(ReplayListParams.model_validate(common))
+            page = await client.replays.list(
+                build_list_params(ReplayListParams, request)
+            )
         elif request.kind == "evaluation":
             page = await client.evaluations.list(
-                EvaluationListParams.model_validate(common)
+                build_list_params(EvaluationListParams, request)
             )
         elif request.kind == "experiment_run":
             page = await client.experiment_runs.list(
-                ExperimentRunListParams.model_validate(common)
+                build_list_params(ExperimentRunListParams, request)
             )
         else:
-            page = await client.jobs.list(JobListParams.model_validate(common))
+            page = await client.jobs.list(build_list_params(JobListParams, request))
         return build_page_data(page, request.size, PageData[ActivityItem])
     return await _get_children(state, request)
 

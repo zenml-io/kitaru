@@ -336,6 +336,26 @@ async def test_registry_tag_and_worker_lists_make_one_bounded_call(kind: str) ->
     assert result.page.has_more is True
 
 
+async def test_registry_list_forwards_a_boolean_filter_to_the_sdk() -> None:
+    """A boolean filter keeps its `and`/`or`/`not` operands on the way to the SDK."""
+    client = RegistryClient()
+    request = RegistryListRequest(
+        operation="list",
+        kind="worker",
+        filter={
+            "and": [
+                {"field": "name", "op": "eq", "value": "reg"},
+                {"not": {"field": "live", "op": "eq", "value": False}},
+            ]
+        },
+    )
+
+    await handle_registry_read(_get_state(cast(Any, client)), request)
+
+    _, params = client.calls[0]
+    assert params.filter == request.filter
+
+
 async def test_registry_worker_get_preserves_observation_fields() -> None:
     client = RegistryClient()
     worker_id = uuid.uuid4()
