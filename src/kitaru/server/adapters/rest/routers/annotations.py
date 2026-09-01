@@ -34,6 +34,7 @@ from kitaru.server.adapters.rest.mapping.annotations import (
     investigation_answer_create_to_command,
     manual_annotation_create_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.annotation_service import AnnotationService
@@ -41,7 +42,9 @@ from kitaru.server.application.services.annotation_service import AnnotationServ
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_annotation(
     body: AnnotationCreateRequest,
@@ -104,7 +107,7 @@ async def list_annotations(
     )
 
 
-@router.get("/{annotation_id}")
+@router.get("/{annotation_id}", responses=error_responses(404))
 async def get_annotation(
     annotation_id: uuid.UUID,
     service: Annotated[AnnotationService, Depends(get_annotation_service)],
@@ -127,7 +130,7 @@ async def get_annotation(
     return annotation_to_response(annotation)
 
 
-@router.patch("/{annotation_id}")
+@router.patch("/{annotation_id}", responses=error_responses(404))
 async def update_annotation(
     annotation_id: uuid.UUID,
     body: AnnotationUpdateRequest,
@@ -153,7 +156,11 @@ async def update_annotation(
     return annotation_to_response(annotation)
 
 
-@router.delete("/{annotation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{annotation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_annotation(
     annotation_id: uuid.UUID,
     service: Annotated[AnnotationService, Depends(get_annotation_service)],

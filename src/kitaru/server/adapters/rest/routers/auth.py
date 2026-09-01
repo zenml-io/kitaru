@@ -50,6 +50,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.adapters.rest.mapping.devices import (
     device_to_authorization_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.device import DeviceFingerprint
@@ -182,6 +183,7 @@ class LoginRequestForm:
     responses={
         400: {"model": TokenErrorResponse},
         422: {"model": ValidationErrorBody, "description": "Validation Error"},
+        **error_responses(503),
     },
 )
 async def device_authorization(
@@ -243,6 +245,7 @@ async def device_authorization(
     responses={
         400: {"model": TokenErrorResponse},
         422: {"model": ValidationErrorBody, "description": "Validation Error"},
+        **error_responses(401, 503),
     },
 )
 async def login(

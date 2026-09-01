@@ -129,3 +129,44 @@ def test_fastapi_auto_422_is_suppressed() -> None:
     )
     schema = app.openapi()
     assert "HTTPValidationError" not in schema["components"]["schemas"]
+
+
+def test_declared_error_statuses() -> None:
+    """Document the common error statuses on every router except auth and info."""
+    app = create_app(
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        )
+    )
+    schema = app.openapi()
+    error_ref = {"$ref": "#/components/schemas/ErrorBody"}
+    excluded_paths = {
+        "/api/v1/info",
+        "/api/v1/device_authorization",
+        "/api/v1/login",
+        "/api/v1/logout",
+    }
+    for path, path_item in schema["paths"].items():
+        if not path.startswith("/api/v1/") or path in excluded_paths:
+            continue
+        for operation in path_item.values():
+            responses = operation["responses"]
+            for status_code in ("401", "403", "503"):
+                assert status_code in responses
+                response = responses[status_code]
+                assert response["content"]["application/json"]["schema"] == error_ref
+
+    def assert_declared(path: str, method: str, status_code: str) -> None:
+        response = schema["paths"][path][method]["responses"][status_code]
+        assert response["content"]["application/json"]["schema"] == error_ref
+
+    assert_declared("/api/v1/agents/{agent_id}", "get", "404")
+    assert_declared("/api/v1/secrets/{secret_id}", "delete", "409")
+    assert_declared("/api/v1/blobs", "post", "413")
+    assert_declared("/api/v1/workers", "post", "426")
+    assert_declared("/api/v1/login", "post", "401")
+    assert_declared("/api/v1/login", "post", "503")
+    assert_declared("/api/v1/agents", "post", "400")
+    assert_declared("/health", "get", "503")

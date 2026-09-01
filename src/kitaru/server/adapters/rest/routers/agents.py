@@ -47,6 +47,7 @@ from kitaru.server.adapters.rest.mapping.agents import (
     agent_to_response,
     agent_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_service import AgentService
@@ -57,7 +58,9 @@ from kitaru.server.application.services.agent_version_service import (
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 409)
+)
 @idempotent
 async def create_agent(
     body: AgentCreateRequest,
@@ -108,7 +111,7 @@ async def list_agents(
     )
 
 
-@router.get("/{agent_id}")
+@router.get("/{agent_id}", responses=error_responses(404))
 async def get_agent(
     agent_id: uuid.UUID,
     service: Annotated[AgentService, Depends(get_agent_service)],
@@ -130,7 +133,7 @@ async def get_agent(
     return agent_to_response(agent)
 
 
-@router.patch("/{agent_id}")
+@router.patch("/{agent_id}", responses=error_responses(404, 409))
 async def update_agent(
     agent_id: uuid.UUID,
     body: AgentUpdateRequest,
@@ -156,7 +159,11 @@ async def update_agent(
     return agent_to_response(agent)
 
 
-@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{agent_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_agent(
     agent_id: uuid.UUID,
     service: Annotated[AgentService, Depends(get_agent_service)],
@@ -177,7 +184,11 @@ async def delete_agent(
     await service.delete_agent(agent_id, actor=actor)
 
 
-@router.post("/{agent_id}/versions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{agent_id}/versions",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
 @idempotent
 async def create_agent_version(
     agent_id: uuid.UUID,
