@@ -72,3 +72,22 @@ def test_missing_extra_has_actionable_error_without_traceback(
         "Install the Kitaru MCP server with pip install 'kitaru[mcp]'\n"
     )
     assert "Traceback" not in captured.err
+
+
+def test_shared_redaction_does_not_load_cli_or_server_dependencies() -> None:
+    script = """
+import sys
+import kitaru.redaction
+import kitaru.mcp.redaction
+for prefix in ("cyclopts", "rich", "kitaru.cli", "kitaru.server"):
+    assert not any(
+        name == prefix or name.startswith(prefix + ".") for name in sys.modules
+    ), prefix
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", script],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr

@@ -23,7 +23,7 @@ from typing import Any, TypeVar
 from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.experiment import ExperimentResponse
 from kitaru.api_models.v1.experiment_run import ExperimentRunResponse
-from kitaru.api_models.v1.replay import ReplayResponse
+from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayResponse
 from kitaru.api_models.v1.replay_config import (
     EvaluatorConfig,
     ReplayOverride,
@@ -192,7 +192,9 @@ class KitaruSyncClient:
         agent_version_id: uuid.UUID | None = None,
         override: ReplayOverride | None = None,
         tool_policy: ToolPolicy | None = None,
-        evaluate_baselines: bool = False,
+        baseline_evaluation_mode: BaselineEvaluationMode = (
+            BaselineEvaluationMode.IF_MISSING
+        ),
         wait: bool = True,
         timeout: float | None = None,
     ) -> ReplayResponse:
@@ -205,7 +207,7 @@ class KitaruSyncClient:
                 recorded version when unset.
             override: Override to apply.
             tool_policy: Tool policy to apply.
-            evaluate_baselines: Whether to also score the baseline session.
+            baseline_evaluation_mode: How to score the baseline session.
             wait: Whether to wait for the replay to reach a terminal status.
             timeout: Seconds to wait before giving up.
 
@@ -224,7 +226,7 @@ class KitaruSyncClient:
                 agent_version_id=agent_version_id,
                 override=override,
                 tool_policy=tool_policy,
-                evaluate_baselines=evaluate_baselines,
+                baseline_evaluation_mode=baseline_evaluation_mode,
                 wait=wait,
                 timeout=timeout,
             )
@@ -298,7 +300,9 @@ class KitaruSyncClient:
         experiment: uuid.UUID | str,
         cohort_version_id: uuid.UUID,
         agent_version_id: uuid.UUID,
-        evaluate_baselines: bool = False,
+        baseline_evaluation_mode: BaselineEvaluationMode = (
+            BaselineEvaluationMode.IF_MISSING
+        ),
         wait: bool = True,
         timeout: float | None = None,
     ) -> ExperimentRunResponse:
@@ -308,7 +312,7 @@ class KitaruSyncClient:
             experiment: Id or name of the experiment.
             cohort_version_id: Cohort version whose sessions are replayed.
             agent_version_id: Agent version to replay with.
-            evaluate_baselines: Whether to also score each baseline session.
+            baseline_evaluation_mode: How to score each baseline session.
             wait: Whether to wait for the run to reach a terminal status.
             timeout: Seconds to wait before giving up.
 
@@ -325,7 +329,7 @@ class KitaruSyncClient:
                 experiment,
                 cohort_version_id,
                 agent_version_id,
-                evaluate_baselines=evaluate_baselines,
+                baseline_evaluation_mode=baseline_evaluation_mode,
                 wait=wait,
                 timeout=timeout,
             )

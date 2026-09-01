@@ -15,6 +15,7 @@
 
 import io
 import json
+from typing import Any, Literal
 
 import pytest
 from rich.console import Console
@@ -67,6 +68,57 @@ def _render_text(
             stderr.getvalue()
         ).plain
     return stdout.getvalue(), stderr.getvalue()
+
+
+@pytest.mark.parametrize("rich", [False, True])
+def test_text_redacts_fields_and_metadata_before_rendering(rich: bool) -> None:
+    """Selecting a display field must not discard its secret-key context."""
+    result = CommandResult(
+        item={"password": "unmarked-secret", "tokens": {"input_tokens": 4}},
+        warnings=["Bearer warning-secret"],
+        links={"inspect": "https://example.test/KITKEY_link-secret"},
+        next_actions=["Use ZENPROKEY_action-secret"],
+    )
+    stdout, stderr = _render_text("example.get", result, rich=rich)
+    assert "unmarked-secret" not in stdout
+    assert "link-secret" not in stdout
+    assert "action-secret" not in stdout
+    assert "warning-secret" not in stderr
+    assert "input_tokens" in stdout
+    assert result.item["password"] == "unmarked-secret"
+    assert result.warnings == ["Bearer warning-secret"]
+
+
+@pytest.mark.parametrize("mode", ["json", "jsonl", "text"])
+def test_deep_result_and_error_remain_serializable(
+    mode: Literal["json", "jsonl", "text"],
+) -> None:
+    """Deep values must not break success or error emission."""
+    value: Any = {"password": "deep-secret"}
+    for _ in range(3000):
+        value = {"nested": value}
+    stdout, stderr = io.StringIO(), io.StringIO()
+    context = OutputContext(
+        command="example.get",
+        mode=mode,
+        debug=False,
+        traceback=False,
+        stdout=stdout,
+        stderr=stderr,
+        rich=False,
+    )
+    token = set_output_context(context)
+    try:
+        assert emit_result(CommandResult(item=value)) == 0
+        assert (
+            emit_error(CLIError("invalid_arguments", "bad input", details=value)) == 2
+        )
+    finally:
+        reset_output_context(token)
+    assert "deep-secret" not in stdout.getvalue() + stderr.getvalue()
+    if mode != "text":
+        assert json.loads(stdout.getvalue())["ok"] is True
+        assert json.loads(stderr.getvalue())["ok"] is False
 
 
 def test_auto_mode_and_finite_jsonl_contract() -> None:
@@ -152,6 +204,33 @@ def test_jsonl_lifecycle_events_are_append_only() -> None:
     events = [json.loads(line) for line in stdout.getvalue().splitlines()]
     assert [event["event"] for event in events] == ["starting", "stopped"]
     assert all(event["command"] == "worker.start" for event in events)
+
+
+def test_text_lifecycle_event_redacts_structured_data() -> None:
+    """Text events retain safe fields without exposing credential context."""
+    stdout = io.StringIO()
+    token = set_output_context(
+        OutputContext(
+            command="worker.start",
+            mode="text",
+            debug=False,
+            traceback=False,
+            stdout=stdout,
+            stderr=io.StringIO(),
+            rich=False,
+        )
+    )
+    try:
+        emit_event(
+            "starting",
+            {"name": "local", "password": "unmarked-secret", "note": "Bearer marked"},
+        )
+    finally:
+        reset_output_context(token)
+
+    output = stdout.getvalue()
+    assert "starting" in output and "local" in output
+    assert "unmarked-secret" not in output and "marked" not in output
 
 
 def test_interrupted_error_has_stable_structured_shape() -> None:

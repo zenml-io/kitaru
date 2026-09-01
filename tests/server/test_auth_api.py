@@ -210,7 +210,10 @@ async def test_login_missing_fields(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 when the login form omits the username."""
     response = await client.post("/api/v1/login", data={})
     assert response.status_code == 400
-    assert response.json() == {"detail": "Invalid request: username is required."}
+    assert response.json() == {
+        "error": "invalid_request",
+        "detail": "Invalid request: username is required.",
+    }
 
     response = await client.post("/api/v1/login", data={"username": "alice"})
     assert response.status_code == 401
@@ -222,14 +225,20 @@ async def test_login_unknown_grant_type(client: httpx.AsyncClient) -> None:
         "/api/v1/login", data={"grant_type": "client_credentials"}
     )
     assert response.status_code == 400
-    assert response.json() == {"detail": "Unsupported grant type: client_credentials"}
+    assert response.json() == {
+        "error": "unsupported_grant_type",
+        "detail": "Unsupported grant type: client_credentials",
+    }
 
 
 async def test_login_grant_type_rejected_by_scheme(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 for the control plane grant type under the local scheme."""
     response = await client.post("/api/v1/login", data={"grant_type": "control-plane"})
     assert response.status_code == 400
-    assert response.json() == {"detail": "Unsupported grant type: control-plane"}
+    assert response.json() == {
+        "error": "unsupported_grant_type",
+        "detail": "Unsupported grant type: control-plane",
+    }
 
 
 async def test_login_unavailable_under_none_scheme(
@@ -254,7 +263,34 @@ async def test_login_unavailable_under_none_scheme(
             "/api/v1/login", data={"username": "alice", "password": "secret"}
         )
         assert response.status_code == 400
-        assert response.json() == {"detail": "Unsupported grant type: password"}
+        assert response.json() == {
+            "error": "unsupported_grant_type",
+            "detail": "Unsupported grant type: password",
+        }
+
+
+async def test_login_missing_grant_type_under_none_scheme(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+) -> None:
+    """Observe HTTP 400 when no grant type can be resolved."""
+    app = build_app(
+        APISettings(
+            DB_HOST="localhost",
+            SECRET_ENCRYPTION_KEY="test-encryption-key",
+            JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+        ),
+        account_repository,
+        api_key_repository,
+    )
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/v1/login", data={})
+        assert response.status_code == 400
+        assert response.json() == {
+            "error": "invalid_request",
+            "detail": "Invalid request: grant type is required.",
+        }
 
 
 async def test_none_scheme_requires_bootstrap(

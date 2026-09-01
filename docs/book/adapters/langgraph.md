@@ -112,6 +112,10 @@ Misses follow the replay policy without silent fallback:
 
 Malformed, unsupported, or lossy recorded results fail closed with `ToolPolicyError`; they do not become misses or permit passthrough. A matched recorded failure also raises `ToolPolicyError` with the stored error text and aborts the graph unless application middleware catches it. Kitaru does not recreate the original exception class or LangGraph recovery behavior. The adapter rejects the `llm` tool policy. It does not substitute stored model responses.
 
+Newly recorded supported tool results preserve nested tuples and lists as distinct types, including tuple pairs in `Command.update` and the default empty tuple in `Command.goto`. Stored `ToolMessage` values must have an explicit `success` or `error` status; a missing or invalid status is rejected rather than treated as success.
+
+The tool-result envelope remains `kitaru.langgraph.tool_result.v1`. Valid older envelopes remain readable, and their stored lists remain lists. Older adapter versions reject the new nested tuple tag, so use an updated adapter to replay newly recorded tuple-bearing results. These changes cannot recover keys or tuple types already lost in historical records.
+
 ## Interrupts and unsupported invocation modes
 
 For a direct call outside a Kitaru worker, a public LangGraph interrupt result is returned unchanged and the session is recorded as completed with interruption metadata. Resume the same LangGraph thread with your existing checkpointer and `Command(resume=...)`; the resume call becomes a second Kitaru session. Kitaru never reads or replaces private checkpointer state.
@@ -137,6 +141,8 @@ The default per-invocation bounds are:
 | Items per collection |   1,000 |
 
 Limit hits or serialization failures mark the recording as lossy, truncate or drop only the stored copy, and preserve the graph outcome. Lossy tool arguments or results are not eligible for history substitution.
+
+Converting a non-string mapping key to a JSON string also marks the recording as lossy. This includes collisions such as the distinct keys `1` and `"1"`; the stored copy is best effort, and Kitaru will not use it for history substitution.
 
 ## Recording failures
 

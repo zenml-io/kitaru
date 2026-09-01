@@ -4,6 +4,7 @@
 import json
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, Literal, cast
 
@@ -18,7 +19,8 @@ from kitaru.api_models.v1.agent import AgentResponse
 from kitaru.api_models.v1.base import Page
 from kitaru.api_models.v1.cohort import CohortResponse
 from kitaru.api_models.v1.investigation import InvestigationSessionResponse
-from kitaru.api_models.v1.session import SessionDetailResponse
+from kitaru.api_models.v1.session import SessionDetailResponse, TokenUsage
+from kitaru.api_models.v1.session_node import SessionNodeResponse
 from kitaru.api_models.v1.tag import TagResponse
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import (
@@ -727,3 +729,61 @@ async def test_experiment_create_forwards_idempotency_key() -> None:
     )
 
     assert idempotency_keys == ["retry-experiment-1"]
+
+
+@pytest.mark.parametrize("kind", ["session", "session_nodes"])
+@pytest.mark.parametrize(
+    "usage", [None, TokenUsage(input_tokens=12, output_tokens=4, cached_input_tokens=2)]
+)
+async def test_public_activity_preserves_typed_token_usage(
+    kind: str, usage: TokenUsage | None
+) -> None:
+    client = FakeClient()
+    session_id = uuid.uuid4()
+    session = _get_session(session_id).model_copy(
+        update={"tokens": usage, "cost": Decimal("0.1250")}
+    )
+    node = SessionNodeResponse(
+        id=uuid.uuid4(),
+        session_id=session_id,
+        index=0,
+        parent_index=None,
+        secondary_parent_indexes=[],
+        secondary_parent_ids=[],
+        node_type="llm_call",
+        name="model",
+        status="completed",
+        tokens=usage,
+        cost=Decimal("0.2500"),
+        metadata={},
+    )
+
+    async def get_session(_item_id: uuid.UUID) -> SessionDetailResponse:
+        return session
+
+    async def list_nodes(
+        _session_id: uuid.UUID, _params: object
+    ) -> Page[SessionNodeResponse]:
+        return Page(items=[node], next_cursor=None)
+
+    client.sessions.get = get_session
+    client.sessions.list_nodes = list_nodes
+    server, context = _get_context(client)
+    request = (
+        {"operation": "get", "kind": kind, "id": str(session_id)}
+        if kind == "session"
+        else {"operation": "list_children", "kind": kind, "parent_id": str(session_id)}
+    )
+    result = await server.call_tool(
+        "kitaru_activity_read", {"request": request}, context
+    )
+
+    assert isinstance(result, CallToolResult)
+    assert result.is_error is False
+    assert isinstance(result.content[0], TextContent)
+    assert result.structured_content is not None
+    assert json.loads(result.content[0].text) == result.structured_content
+    data = result.structured_content["data"]
+    item = data if kind == "session" else data["items"][0]
+    assert item["tokens"] == (usage.model_dump() if usage is not None else None)
+    assert item["cost"] == ("0.1250" if kind == "session" else "0.2500")

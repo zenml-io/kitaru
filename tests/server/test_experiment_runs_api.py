@@ -33,7 +33,7 @@ from conftest import (
     create_session,
     override_idempotency,
 )
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.server.adapters.rest.dependencies import (
     authorize,
     get_experiment_run_service,
@@ -122,6 +122,7 @@ async def run_setup(services: ReplayServices) -> dict[str, str]:
         agent_id=agent.id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
     )
     cohort = await create_cohort(services.cohorts, ACCOUNT.id, agent.id)
     cohort_version = await create_cohort_version(
@@ -157,6 +158,60 @@ async def test_start_run(client: httpx.AsyncClient, run_setup: dict[str, str]) -
     assert body["number"] == 1
     assert body["progress"]["total"] == 1
     assert body["progress"]["pending"] == 1
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "if_missing"
+
+
+async def test_start_run_evaluate_baselines_true_normalizes_to_if_missing(
+    client: httpx.AsyncClient, run_setup: dict[str, str]
+) -> None:
+    """The deprecated bool True normalizes to the if_missing mode."""
+    response = await client.post(
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
+        json={
+            "cohort_version_id": run_setup["cohort_version_id"],
+            "agent_version_id": run_setup["agent_version_id"],
+            "evaluate_baselines": True,
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "if_missing"
+
+
+async def test_start_run_baseline_evaluation_mode_wins_when_bool_unset(
+    client: httpx.AsyncClient, run_setup: dict[str, str]
+) -> None:
+    """An explicit mode is honored when the deprecated bool is not set."""
+    response = await client.post(
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
+        json={
+            "cohort_version_id": run_setup["cohort_version_id"],
+            "agent_version_id": run_setup["agent_version_id"],
+            "baseline_evaluation_mode": "force",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "force"
+
+
+async def test_start_run_rejects_both_evaluate_baselines_and_mode(
+    client: httpx.AsyncClient, run_setup: dict[str, str]
+) -> None:
+    """Setting both the deprecated bool and the mode observes HTTP 422."""
+    response = await client.post(
+        f"/api/v1/experiments/{run_setup['experiment_id']}/runs",
+        json={
+            "cohort_version_id": run_setup["cohort_version_id"],
+            "agent_version_id": run_setup["agent_version_id"],
+            "evaluate_baselines": True,
+            "baseline_evaluation_mode": "force",
+        },
+    )
+    assert response.status_code == 422
 
 
 async def test_get_run(client: httpx.AsyncClient, run_setup: dict[str, str]) -> None:

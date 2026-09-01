@@ -17,6 +17,7 @@ import uuid
 from collections.abc import Mapping
 from typing import ClassVar
 
+from kitaru.api_models.v1.base import PlainStr
 from kitaru.server.base import FrozenModel, ListFilter
 from kitaru.server.domain.device import DeviceStatus
 from kitaru.server.filtering import EQUALITY_OPS, FilterField
@@ -36,11 +37,11 @@ class DeviceFilter(ListFilter):
 class DeviceFingerprint(FrozenModel):
     """Device fingerprint."""
 
-    hostname: str | None = None
-    os: str | None = None
-    ip_address: str | None = None
-    python_version: str | None = None
-    client_version: str | None = None
+    hostname: PlainStr | None = None
+    os: PlainStr | None = None
+    ip_address: PlainStr | None = None
+    python_version: PlainStr | None = None
+    client_version: PlainStr | None = None
 
 
 class DevicePolicy(FrozenModel):

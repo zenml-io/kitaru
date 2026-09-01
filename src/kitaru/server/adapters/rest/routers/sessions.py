@@ -42,8 +42,8 @@ from kitaru.server.adapters.rest.dependencies import (
     get_session_service,
 )
 from kitaru.server.adapters.rest.mapping.evaluations import (
-    merged_evaluation_to_response,
-    session_evaluations_request_to_merges,
+    created_evaluation_to_response,
+    session_evaluations_request_to_creates,
 )
 from kitaru.server.adapters.rest.mapping.session_nodes import (
     referenced_parent_ids,
@@ -313,21 +313,21 @@ async def get_session_with_nodes(
 
 
 @router.post("/{session_id}/evaluations")
-async def merge_session_evaluations(
+async def create_session_evaluations(
     session_id: uuid.UUID,
     body: SessionEvaluationsRequest,
     service: Annotated[EvaluationService, Depends(get_evaluation_service)],
     actor: Annotated[AuthContext, Depends(authorize_with_task)],
 ) -> list[EvaluationResponse]:
-    """Merge manual evaluations into a session.
+    """Create manual evaluations on a session.
 
-    A resent name overwrites its score, value, data type, and explanation.
     Clients observe HTTP 200 on success, 404 when no session has this id,
-    409 when the session is not finished, and 422 when the request names
-    the same evaluation twice.
+    409 when the session is not finished or an evaluation name already
+    exists for the session, and 422 when the request names the same
+    evaluation twice.
 
     Args:
-        session_id: Id of the session to merge evaluations into.
+        session_id: Id of the session to create evaluations on.
         body: Session evaluations request.
         service: Evaluation service.
         actor: Caller context.
@@ -335,6 +335,6 @@ async def merge_session_evaluations(
     Returns:
         Stored evaluations in request order.
     """
-    commands = session_evaluations_request_to_merges(body)
-    evaluations = await service.merge_evaluations(session_id, commands, actor=actor)
-    return [merged_evaluation_to_response(evaluation) for evaluation in evaluations]
+    commands = session_evaluations_request_to_creates(body)
+    evaluations = await service.create_evaluations(session_id, commands, actor=actor)
+    return [created_evaluation_to_response(evaluation) for evaluation in evaluations]

@@ -880,6 +880,16 @@
         "title": "AuthScheme",
         "type": "string"
       },
+      "BaselineEvaluationMode": {
+        "description": "Baseline evaluation mode.",
+        "enum": [
+          "none",
+          "if_missing",
+          "force"
+        ],
+        "title": "BaselineEvaluationMode",
+        "type": "string"
+      },
       "BlobResponse": {
         "description": "Blob response.",
         "properties": {
@@ -1630,6 +1640,43 @@
             "$ref": "#/components/schemas/EvaluationDataType",
             "description": "Evaluation data type."
           },
+          "evaluator_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the evaluator that produced the group.",
+            "title": "Evaluator Name"
+          },
+          "evaluator_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Version of the evaluator that produced the group.",
+            "title": "Evaluator Version"
+          },
+          "evaluator_version_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Evaluator version that produced the group.",
+            "title": "Evaluator Version Id"
+          },
           "name": {
             "description": "Evaluation name.",
             "title": "Name",
@@ -1725,6 +1772,19 @@
             "description": "Name of the evaluator that produced the result.",
             "title": "Evaluator Name"
           },
+          "evaluator_params": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Params the evaluator ran with.",
+            "title": "Evaluator Params"
+          },
           "evaluator_version": {
             "anyOf": [
               {
@@ -1767,6 +1827,30 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale.",
+            "title": "Max Score"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale.",
+            "title": "Min Score"
           },
           "name": {
             "description": "Evaluation name.",
@@ -1811,6 +1895,18 @@
             "format": "uuid",
             "title": "Session Id",
             "type": "string"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat.",
+            "title": "Target Score"
           },
           "task_id": {
             "anyOf": [
@@ -1872,6 +1968,30 @@
             "description": "Free-form explanation.",
             "title": "Explanation"
           },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale.",
+            "title": "Max Score"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale.",
+            "title": "Min Score"
+          },
           "name": {
             "description": "Evaluation name.",
             "title": "Name",
@@ -1903,6 +2023,18 @@
             ],
             "description": "Numeric or boolean score.",
             "title": "Score"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat.",
+            "title": "Target Score"
           },
           "value": {
             "anyOf": [
@@ -1943,6 +2075,18 @@
             "description": "Highest score of float and bool evaluations, null for other data types.",
             "title": "Max"
           },
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.",
+            "title": "Max Score"
+          },
           "mean": {
             "anyOf": [
               {
@@ -1967,6 +2111,18 @@
             "description": "Lowest score of float and bool evaluations, null for other data types.",
             "title": "Min"
           },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.",
+            "title": "Min Score"
+          },
           "pass_rate": {
             "anyOf": [
               {
@@ -1978,6 +2134,18 @@
             ],
             "description": "Share of passed evaluations among those carrying a passed flag, null when none do.",
             "title": "Pass Rate"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat shared by every aggregated evaluation, null when they differ or one lacks it.",
+            "title": "Target Score"
           },
           "value_counts": {
             "anyOf": [
@@ -2059,6 +2227,30 @@
       "EvaluationValue": {
         "description": "Evaluation value.",
         "properties": {
+          "max_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Upper bound of the score scale.",
+            "title": "Max Score"
+          },
+          "min_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lower bound of the score scale.",
+            "title": "Min Score"
+          },
           "passed": {
             "anyOf": [
               {
@@ -2085,6 +2277,18 @@
             ],
             "description": "Numeric or boolean score.",
             "title": "Score"
+          },
+          "target_score": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Score to beat.",
+            "title": "Target Score"
           },
           "value": {
             "anyOf": [
@@ -2647,6 +2851,17 @@
             "title": "Agent Version Id",
             "type": "string"
           },
+          "baseline_evaluation_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BaselineEvaluationMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How to score each baseline session."
+          },
           "cohort_version_id": {
             "description": "Cohort version whose sessions are replayed.",
             "format": "uuid",
@@ -2655,6 +2870,7 @@
           },
           "evaluate_baselines": {
             "default": false,
+            "deprecated": true,
             "description": "Whether to also score each baseline session.",
             "title": "Evaluate Baselines",
             "type": "boolean"
@@ -2721,6 +2937,10 @@
             "title": "Agent Version Id",
             "type": "string"
           },
+          "baseline_evaluation_mode": {
+            "$ref": "#/components/schemas/BaselineEvaluationMode",
+            "description": "How baseline sessions are scored."
+          },
           "cohort_version_id": {
             "description": "Cohort version whose sessions are replayed.",
             "format": "uuid",
@@ -2759,6 +2979,7 @@
             "title": "Error"
           },
           "evaluate_baselines": {
+            "deprecated": true,
             "description": "Whether baseline sessions are also scored.",
             "title": "Evaluate Baselines",
             "type": "boolean"
@@ -2825,6 +3046,7 @@
           "cohort_version_id",
           "agent_version_id",
           "evaluate_baselines",
+          "baseline_evaluation_mode",
           "progress"
         ],
         "title": "ExperimentRunResponse",
@@ -5123,6 +5345,17 @@
             "description": "Agent version to replay with, the baseline session's recorded version when unset.",
             "title": "Agent Version Id"
           },
+          "baseline_evaluation_mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BaselineEvaluationMode"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How to score the baseline session."
+          },
           "baseline_session_id": {
             "description": "Session to replay.",
             "format": "uuid",
@@ -5131,6 +5364,7 @@
           },
           "evaluate_baselines": {
             "default": false,
+            "deprecated": true,
             "description": "Whether to also score the baseline session.",
             "title": "Evaluate Baselines",
             "type": "boolean"
@@ -5278,6 +5512,10 @@
       "ReplayResponse": {
         "description": "Replay response.",
         "properties": {
+          "baseline_evaluation_mode": {
+            "$ref": "#/components/schemas/BaselineEvaluationMode",
+            "description": "How the baseline session is scored."
+          },
           "baseline_session_id": {
             "description": "Session replayed.",
             "format": "uuid",
@@ -5303,6 +5541,7 @@
             "title": "Error"
           },
           "evaluate_baselines": {
+            "deprecated": true,
             "description": "Whether the baseline session is also scored.",
             "title": "Evaluate Baselines",
             "type": "boolean"
@@ -5394,6 +5633,7 @@
           "tool_policy",
           "evaluators",
           "evaluate_baselines",
+          "baseline_evaluation_mode",
           "status"
         ],
         "title": "ReplayResponse",
@@ -9177,7 +9417,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.23.0+dev"
+    "version": "0.24.0+dev"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -11406,7 +11646,7 @@
     },
     "/api/v1/device_authorization": {
       "post": {
-        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/api/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    HTTPException: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
+        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/api/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    TokenGrantError: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
         "operationId": "device_authorization_api_v1_device_authorization_post",
         "requestBody": {
           "content": {
@@ -11427,6 +11667,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "422": {
             "content": {
@@ -12432,6 +12682,8 @@
             "name": "version",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
               "title": "Version",
               "type": "integer"
             }
@@ -12483,6 +12735,8 @@
             "name": "version",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
               "title": "Version",
               "type": "integer"
             }
@@ -13168,7 +13422,7 @@
     },
     "/api/v1/experiments/{experiment_id}/runs": {
       "post": {
-        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, 409 when\nevaluate_baselines is set and a cohort version session is not finished,\nand 422 when the cohort version has no sessions, the cohort version or\nagent version belongs to another agent, or the resolved agent version\nhas no run spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
+        "description": "Start an experiment run, fanning out one replay per cohort version session.\n\nClients observe HTTP 201 on success, 404 when the experiment, the\ncohort version, or the resolved agent version does not exist, 409 when\nthe baseline evaluation mode is not none and a cohort version session\nis not finished, and 422 when the cohort version has no sessions, the\ncohort version or agent version belongs to another agent, or the\nresolved agent version has no run spec.\n\nArgs:\n    experiment_id: Id of the experiment.\n    body: Experiment run create request.\n    service: Experiment service.\n    actor: Caller context.\n\nReturns:\n    Created run.",
         "operationId": "start_run_api_v1_experiments__experiment_id__runs_post",
         "parameters": [
           {
@@ -13708,6 +13962,8 @@
             "name": "version",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
               "title": "Version",
               "type": "integer"
             }
@@ -13759,6 +14015,8 @@
             "name": "version",
             "required": true,
             "schema": {
+              "maximum": 2147483647,
+              "minimum": 1,
               "title": "Version",
               "type": "integer"
             }
@@ -14666,7 +14924,7 @@
     },
     "/api/v1/login": {
       "post": {
-        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``api-key`` grant type reads\nan API key from the authorization header and is accepted under the same\nscheme. The ``control-plane`` grant type reads a control plane credential\nfrom the authorization header and mirrors the control plane user into a\nlocal account. The device grant type takes the ``device_id`` and\n``device_code`` of a device authorization and returns a token once an\naccount has confirmed it.\n\nClients observe HTTP 200 on success, 400 when the grant type is not\naccepted by this server or a device authorization is not ready, and 401\nwhen the credentials cannot be validated. A 400 for the device grant type\ncarries an OAuth 2.0 ``error`` code, of which ``authorization_pending``\nmeans the caller should poll again.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
+        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``api-key`` grant type reads\nan API key from the authorization header and is accepted under the same\nscheme. The ``control-plane`` grant type reads a control plane credential\nfrom the authorization header and mirrors the control plane user into a\nlocal account. The device grant type takes the ``device_id`` and\n``device_code`` of a device authorization and returns a token once an\naccount has confirmed it.\n\nClients observe HTTP 200 on success, 400 when the grant type is not\naccepted by this server or a device authorization is not ready, and 401\nwhen the credentials cannot be validated. A 400 carries an OAuth 2.0\n``error`` code, of which ``authorization_pending`` means the caller\nshould poll again.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
         "operationId": "login_api_v1_login_post",
         "requestBody": {
           "content": {
@@ -14836,7 +15094,7 @@
         ]
       },
       "post": {
-        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, 409\nwhen evaluate_baselines is set and the baseline session is not\nfinished, and 422 when the baseline session carries no agent version\nand none was given, the resolved agent version has no run spec, the\ntool policy uses cohort-version-scoped history, or an evaluator\nversion repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
+        "description": "Create a standalone replay of a recorded or imported session.\n\nClients observe HTTP 201 on success, 404 when the baseline session or\nthe resolved agent version or an evaluator config does not exist, 409\nwhen the baseline evaluation mode is not none and the baseline session\nis not finished, and 422 when the baseline session carries no agent\nversion and none was given, the resolved agent version has no run spec,\nthe tool policy uses cohort-version-scoped history, or an evaluator\nversion repeats.\n\nArgs:\n    body: Replay create request.\n    service: Replay service.\n    actor: Caller context.\n\nReturns:\n    Created replay.",
         "operationId": "create_replay_api_v1_replays_post",
         "parameters": [
           {
@@ -15831,8 +16089,8 @@
     },
     "/api/v1/sessions/{session_id}/evaluations": {
       "post": {
-        "description": "Merge manual evaluations into a session.\n\nA resent name overwrites its score, value, data type, and explanation.\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is not finished, and 422 when the request names\nthe same evaluation twice.\n\nArgs:\n    session_id: Id of the session to merge evaluations into.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
-        "operationId": "merge_session_evaluations_api_v1_sessions__session_id__evaluations_post",
+        "description": "Create manual evaluations on a session.\n\nClients observe HTTP 200 on success, 404 when no session has this id,\n409 when the session is not finished or an evaluation name already\nexists for the session, and 422 when the request names the same\nevaluation twice.\n\nArgs:\n    session_id: Id of the session to create evaluations on.\n    body: Session evaluations request.\n    service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    Stored evaluations in request order.",
+        "operationId": "create_session_evaluations_api_v1_sessions__session_id__evaluations_post",
         "parameters": [
           {
             "in": "path",
@@ -15863,7 +16121,7 @@
                   "items": {
                     "$ref": "#/components/schemas/EvaluationResponse"
                   },
-                  "title": "Response Merge Session Evaluations Api V1 Sessions  Session Id  Evaluations Post",
+                  "title": "Response Create Session Evaluations Api V1 Sessions  Session Id  Evaluations Post",
                   "type": "array"
                 }
               }
@@ -15881,7 +16139,7 @@
             "description": "Validation Error"
           }
         },
-        "summary": "Merge Session Evaluations",
+        "summary": "Create Session Evaluations",
         "tags": [
           "sessions"
         ]
@@ -16727,7 +16985,7 @@
     },
     "/api/v1/ui/experiment-runs/{experiment_run_id}/evaluation-aggregates": {
       "get": {
-        "description": "Aggregate the evaluations of an experiment run's replays.\n\nBaseline and result sessions are aggregated separately, and each\naggregate carries the per-replay evaluation values of the 50 most\nrecent replays. Clients observe HTTP 200 on success and 404 when no\nexperiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name and data type pair, sorted by\n    name.",
+        "description": "Aggregate the evaluations linked to an experiment run's replays.\n\nThe input set is the evaluations linked to the run's replays, grouped by\nname, evaluator version, and data type. Baseline and result sessions are\naggregated separately, and each aggregate carries the per-replay\nevaluation values of the 50 most recent replays. Clients observe HTTP\n200 on success and 404 when no experiment run has this id.\n\nArgs:\n    experiment_run_id: Id of the experiment run.\n    run_service: Experiment run service.\n    replay_service: Replay service.\n    evaluation_service: Evaluation service.\n    actor: Caller context.\n\nReturns:\n    One aggregate per evaluation name, evaluator version, and data\n    type, sorted by name.",
         "operationId": "list_experiment_run_evaluation_aggregates_api_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get",
         "parameters": [
           {
