@@ -26,9 +26,37 @@ import pytest
 
 import kitaru.cli
 from kitaru.cli import app as app_module
-from kitaru.cli.output import CommandResult, OutputMode, emit_event, get_output_context
+from kitaru.cli.output import (
+    CLIError,
+    CommandResult,
+    OutputMode,
+    emit_event,
+    get_output_context,
+)
 from kitaru.cli.skill_discovery import INSTALL_COMMAND, SKILLS_URL
 from kitaru.client.exceptions import APIError, InvalidServerResponseError
+
+
+def test_main_emits_deep_error_as_structured_stderr(monkeypatch, capsys) -> None:
+    """Deep error details do not escape the CLI's error boundary."""
+    details: dict[str, Any] = {}
+    cursor = details
+    for _ in range(3000):
+        cursor["nested"] = {}
+        cursor = cursor["nested"]
+    cursor["password"] = "unmarked-secret"
+
+    def fail_version() -> str:
+        raise CLIError("invalid_arguments", "Invalid input", details=details)
+
+    monkeypatch.setattr(app_module.diagnostics, "package_version", fail_version)
+    assert app_module.main(["version", "--output", "json"]) == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["kind"] == "invalid_arguments"
+    assert "Traceback" not in captured.err
+    assert "unmarked-secret" not in captured.err
 
 
 def test_bare_command_group_prints_help_without_bootstrap(monkeypatch, capsys) -> None:
