@@ -183,6 +183,16 @@ def test_session_request_maps_fields() -> None:
     assert request.framework == "langgraph"
 
 
+def test_session_request_carries_an_explicit_origin() -> None:
+    """Use the origin the caller passes instead of the imported default."""
+    request = session_request(
+        imported_session("ext-1"), uuid.uuid4(), "acme", SessionOrigin.REPLAY
+    )
+
+    assert request.origin == SessionOrigin.REPLAY
+    assert request.imported_from == "acme"
+
+
 _PARSER_SCRIPT = """
 import json
 

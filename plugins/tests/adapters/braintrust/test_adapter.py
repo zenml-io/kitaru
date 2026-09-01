@@ -103,7 +103,7 @@ def test_run_imports_the_braintrust_trace_around_the_function(
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
     assert request.agent_id == agent_id
-    assert request.origin == SessionOrigin.IMPORTED
+    assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"project-1:{root_span_id}"
     assert request.imported_from == "braintrust"

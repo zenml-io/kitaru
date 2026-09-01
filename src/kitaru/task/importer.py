@@ -172,7 +172,10 @@ def call_parser(
 
 
 def session_request(
-    parsed: ImportedSession, agent_id: uuid.UUID, provider: str | None
+    parsed: ImportedSession,
+    agent_id: uuid.UUID,
+    provider: str | None,
+    origin: SessionOrigin = SessionOrigin.IMPORTED,
 ) -> SessionCreateRequest:
     """Build a session create request for one parsed import item.
 
@@ -180,13 +183,14 @@ def session_request(
         parsed: Imported session.
         agent_id: Agent the session is created under.
         provider: Source system named on the import.
+        origin: Session origin.
 
     Returns:
         Session create request.
     """
     return SessionCreateRequest(
         agent_id=agent_id,
-        origin=SessionOrigin.IMPORTED,
+        origin=origin,
         status=parsed.status,
         name=parsed.name,
         input_text_selector=parsed.input_text_selector,
@@ -285,6 +289,7 @@ async def ingest_session(
     parsed: ImportedSession,
     agent_id: uuid.UUID,
     provider: str | None,
+    origin: SessionOrigin = SessionOrigin.IMPORTED,
 ) -> SessionResponse | None:
     """Create a session for one parsed import item and ingest its nodes.
 
@@ -293,6 +298,7 @@ async def ingest_session(
         parsed: Imported session.
         agent_id: Agent the session is created under.
         provider: Source system named on the import.
+        origin: Session origin.
 
     Raises:
         APIError: Session creation or node ingestion failed.
@@ -302,7 +308,7 @@ async def ingest_session(
         Created session, None when a session with the external id already
         exists.
     """
-    request = session_request(parsed, agent_id, provider)
+    request = session_request(parsed, agent_id, provider, origin)
     try:
         session = await client.sessions.create(request)
     except APIError as exc:

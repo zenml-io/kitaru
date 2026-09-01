@@ -106,7 +106,7 @@ def test_run_imports_the_langsmith_trace_around_the_function(
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
     assert request.agent_id == agent_id
-    assert request.origin == SessionOrigin.IMPORTED
+    assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.COMPLETED
     assert request.external_id == f"{PROJECT_ID}:{trace_id}"
     assert request.imported_from == "langsmith"

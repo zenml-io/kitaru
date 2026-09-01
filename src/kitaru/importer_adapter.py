@@ -101,9 +101,10 @@ class ImporterBackedAdapter:
         """
         asyncio.run(self._check_replay())
         agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
+        origin = self._get_origin()
         with self.trace() as external_id:
             result = func(*args, **kwargs)
-        asyncio.run(self._import_trace(external_id, agent_id))
+        asyncio.run(self._import_trace(external_id, agent_id, origin))
         return result
 
     async def run_async(
@@ -121,10 +122,17 @@ class ImporterBackedAdapter:
         """
         await self._check_replay()
         agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
+        origin = self._get_origin()
         with self.trace() as external_id:
             result = await func(*args, **kwargs)
-        await self._import_trace(external_id, agent_id)
+        await self._import_trace(external_id, agent_id, origin)
         return result
+
+    def _get_origin(self) -> SessionOrigin:
+        """Return the session origin for the current run."""
+        if os.environ.get("KITARU_REPLAY_ID") is not None:
+            return SessionOrigin.REPLAY
+        return SessionOrigin.RECORDED
 
     async def _check_replay(self) -> None:
         """Reject a replay config the adapter cannot apply.
@@ -148,12 +156,15 @@ class ImporterBackedAdapter:
                 "Importer-backed adapters do not support replay tool policies"
             )
 
-    async def _import_trace(self, external_id: str, agent_id: uuid.UUID) -> None:
+    async def _import_trace(
+        self, external_id: str, agent_id: uuid.UUID, origin: SessionOrigin
+    ) -> None:
         """Wait for the provider trace, then fetch, parse, and ingest it.
 
         Args:
             external_id: Provider trace id.
             agent_id: Agent the imported session is created under.
+            origin: Session origin.
 
         Raises:
             SessionImportError: The parse yielded a failure or anything but
@@ -165,7 +176,9 @@ class ImporterBackedAdapter:
                 await self.wait_until_complete(external_id)
         except TimeoutError:
             async with KitaruAPIClient() as client:
-                await self._create_timed_out_session(client, external_id, agent_id)
+                await self._create_timed_out_session(
+                    client, external_id, agent_id, origin
+                )
             return
         payload = await self.fetch(external_id)
         sessions: list[ImportedSession] = []
@@ -181,14 +194,20 @@ class ImporterBackedAdapter:
                 f"{external_id}, expected exactly one"
             )
         async with KitaruAPIClient() as client:
-            session = await ingest_session(client, sessions[0], agent_id, self.provider)
+            session = await ingest_session(
+                client, sessions[0], agent_id, self.provider, origin
+            )
         if session is None:
             raise SessionImportError(
                 f"A session with external id {sessions[0].external_id} already exists"
             )
 
     async def _create_timed_out_session(
-        self, client: KitaruAPIClient, external_id: str, agent_id: uuid.UUID
+        self,
+        client: KitaruAPIClient,
+        external_id: str,
+        agent_id: uuid.UUID,
+        origin: SessionOrigin,
     ) -> None:
         """Create a failed session for a trace that did not complete in time.
 
@@ -196,10 +215,11 @@ class ImporterBackedAdapter:
             client: API client.
             external_id: Provider trace id.
             agent_id: Agent the failed session is created under.
+            origin: Session origin.
         """
         request = SessionCreateRequest(
             agent_id=agent_id,
-            origin=SessionOrigin.IMPORTED,
+            origin=origin,
             status=SessionStatus.FAILED,
             inputs=None,
             outputs=None,

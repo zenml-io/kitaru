@@ -210,7 +210,7 @@ def test_run_imports_the_trace_around_the_function(
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
     assert request.agent_id == agent_id
-    assert request.origin == SessionOrigin.IMPORTED
+    assert request.origin == SessionOrigin.RECORDED
     assert request.external_id == "trace-1"
     assert request.imported_from == "acme"
     assert len(client.sessions.batches) == 1
@@ -288,7 +288,7 @@ def test_run_creates_a_failed_session_on_timeout(
     assert len(client.sessions.created) == 1
     request = client.sessions.created[0]
     assert request.agent_id == agent_id
-    assert request.origin == SessionOrigin.IMPORTED
+    assert request.origin == SessionOrigin.RECORDED
     assert request.status == SessionStatus.FAILED
     assert request.external_id == "trace-1"
     assert request.imported_from == "acme"
@@ -429,7 +429,29 @@ def test_run_proceeds_with_a_passthrough_replay(
 
     assert result == "done"
     assert len(client.sessions.created) == 1
+    request = client.sessions.created[0]
+    assert request.origin == SessionOrigin.REPLAY
+    assert request.imported_from == "acme"
     assert len(client.sessions.batches) == 1
+
+
+def test_run_creates_a_replay_origin_session_on_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Carry the replay origin on the failed session of a timed out replay."""
+    adapter, client, _ = _adapter(
+        monkeypatch, _single_session_parser, completeness_timeout=0.01
+    )
+    _arm_replay(monkeypatch, client)
+    adapter.wait_seconds = 10.0
+
+    result = adapter.run(lambda: "done")
+
+    assert result == "done"
+    assert len(client.sessions.created) == 1
+    request = client.sessions.created[0]
+    assert request.origin == SessionOrigin.REPLAY
+    assert request.status == SessionStatus.FAILED
 
 
 async def test_run_async_rejects_a_replay_with_an_override(
