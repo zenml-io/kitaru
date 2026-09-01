@@ -69,9 +69,11 @@ def resolve_baseline_evaluation_mode(
     """
     if body.baseline_evaluation_mode is not None:
         return body.baseline_evaluation_mode
-    if "evaluate_baselines" in body.model_fields_set and body.evaluate_baselines:
-        return BaselineEvaluationMode.IF_MISSING
-    return BaselineEvaluationMode.NONE
+    if "evaluate_baselines" in body.model_fields_set:
+        if body.evaluate_baselines:
+            return BaselineEvaluationMode.IF_MISSING
+        return BaselineEvaluationMode.NONE
+    return BaselineEvaluationMode.IF_MISSING
 
 
 def replay_create_to_command(body: ReplayCreateRequest) -> ReplayCreate:

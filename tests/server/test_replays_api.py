@@ -126,8 +126,8 @@ async def test_create_replay(
     assert body["baseline_session_id"] == str(baseline_session_id)
     assert body["status"] == "pending"
     assert body["result_session_id"] is None
-    assert body["evaluate_baselines"] is False
-    assert body["baseline_evaluation_mode"] == "none"
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "if_missing"
     assert body["evaluators"][0]["evaluator"] == "accuracy"
 
 

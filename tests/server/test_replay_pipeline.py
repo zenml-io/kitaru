@@ -134,6 +134,7 @@ async def test_standalone_replay_pipeline_end_to_end(services: ReplayServices) -
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -692,7 +693,9 @@ async def test_start_run_creates_one_agent_task_per_replay_with_matching_fields(
     run, _ = await services.experiment_service.start_run(
         experiment_id,
         ExperimentRunCreate(
-            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -1251,7 +1254,9 @@ async def test_run_cancel_in_flight_task_keeps_status_until_it_terminates(
     run, _ = await services.experiment_service.start_run(
         experiment_id,
         ExperimentRunCreate(
-            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -1315,7 +1320,9 @@ async def test_finalize_precedence_canceling_beats_failure(
     run, _ = await services.experiment_service.start_run(
         experiment_id,
         ExperimentRunCreate(
-            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            cohort_version_id=cohort_version.id,
+            agent_version_id=agent_version.id,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )

@@ -55,4 +55,4 @@ class ExperimentRunCreate(FrozenModel):
 
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
-    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.IF_MISSING

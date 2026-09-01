@@ -178,6 +178,7 @@ async def test_background_sweep_reaches_replay_settlement_subscribers(
             json={
                 "baseline_session_id": baseline["id"],
                 "evaluators": [{"evaluator": "accuracy"}],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()

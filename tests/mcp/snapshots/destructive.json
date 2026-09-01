@@ -9537,7 +9537,7 @@
             },
             "baseline_evaluation_mode": {
               "$ref": "#/$defs/BaselineEvaluationMode",
-              "default": "none"
+              "default": "if_missing"
             },
             "cohort_version_id": {
               "format": "uuid",

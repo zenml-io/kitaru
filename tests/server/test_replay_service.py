@@ -37,8 +37,9 @@ from conftest import (
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
@@ -151,6 +152,7 @@ async def _session(
         "agent_id": agent_version.agent_id,
         "agent_version_id": agent_version.id,
         "origin": SessionOrigin.RECORDED,
+        "status": SessionStatus.COMPLETED,
     }
     values.update(overrides)
     return await create_session(services.sessions, ACTOR.account.id, **values)
@@ -170,6 +172,7 @@ async def test_create_replay_runs_the_named_agent_version(
             baseline_session_id=baseline.id,
             agent_version_id=replayed.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -193,6 +196,7 @@ async def test_create_replay_resolves_baseline_agent_version(
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )

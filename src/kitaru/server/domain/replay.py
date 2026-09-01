@@ -126,7 +126,7 @@ class Replay(DomainModel):
     replay_config_id: uuid.UUID
     baseline_session_id: uuid.UUID
     result_session_id: uuid.UUID | None = None
-    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.IF_MISSING
     status: ReplayStatus = ReplayStatus.PENDING
     error: str | None = None
     created: datetime | None = None

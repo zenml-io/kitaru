@@ -192,7 +192,9 @@ class KitaruSyncClient:
         agent_version_id: uuid.UUID | None = None,
         override: ReplayOverride | None = None,
         tool_policy: ToolPolicy | None = None,
-        baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
+        baseline_evaluation_mode: BaselineEvaluationMode = (
+            BaselineEvaluationMode.IF_MISSING
+        ),
         wait: bool = True,
         timeout: float | None = None,
     ) -> ReplayResponse:
@@ -298,7 +300,9 @@ class KitaruSyncClient:
         experiment: uuid.UUID | str,
         cohort_version_id: uuid.UUID,
         agent_version_id: uuid.UUID,
-        baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
+        baseline_evaluation_mode: BaselineEvaluationMode = (
+            BaselineEvaluationMode.IF_MISSING
+        ),
         wait: bool = True,
         timeout: float | None = None,
     ) -> ExperimentRunResponse:

@@ -2592,7 +2592,9 @@ async def replay_create(
     agent: str | None = None,
     override: str | None = None,
     tool_policy: str | None = None,
-    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
+    baseline_evaluation_mode: BaselineEvaluationMode = (
+        BaselineEvaluationMode.IF_MISSING
+    ),
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one standalone replay without waiting for its job."""
@@ -2698,7 +2700,9 @@ async def experiment_run_start(
     *,
     cohort_version: uuid.UUID,
     agent: str,
-    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE,
+    baseline_evaluation_mode: BaselineEvaluationMode = (
+        BaselineEvaluationMode.IF_MISSING
+    ),
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,

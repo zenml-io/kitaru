@@ -175,6 +175,7 @@ async def test_delete_conflict_when_referenced_by_experiment_run(
         json={
             "cohort_version_id": cohort_version["id"],
             "agent_version_id": agent_version["id"],
+            "baseline_evaluation_mode": "none",
         },
     )
 

@@ -56,7 +56,7 @@ class ReplayCreate(FrozenModel):
     override: ReplayOverride | None = None
     tool_policy: ToolPolicy | None = None
     evaluators: list[EvaluatorConfigInput]
-    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.NONE
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.IF_MISSING
 
 
 class ToolLookupResult(NamedTuple):

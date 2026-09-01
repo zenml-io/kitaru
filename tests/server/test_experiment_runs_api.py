@@ -158,8 +158,8 @@ async def test_start_run(client: httpx.AsyncClient, run_setup: dict[str, str]) -
     assert body["number"] == 1
     assert body["progress"]["total"] == 1
     assert body["progress"]["pending"] == 1
-    assert body["evaluate_baselines"] is False
-    assert body["baseline_evaluation_mode"] == "none"
+    assert body["evaluate_baselines"] is True
+    assert body["baseline_evaluation_mode"] == "if_missing"
 
 
 async def test_start_run_evaluate_baselines_true_normalizes_to_if_missing(
