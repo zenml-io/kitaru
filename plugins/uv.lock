@@ -16,7 +16,6 @@ exclude-newer-span = "P3D"
 
 [manifest]
 members = [
-    "kitaru-braintrust",
     "kitaru-braintrust-importer",
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
@@ -36,7 +35,7 @@ members = [
 dev = [
     { name = "hypothesis", specifier = ">=6.165" },
     { name = "kitaru", extras = ["server"], editable = "../" },
-    { name = "kitaru-braintrust", editable = "packages/braintrust" },
+    { name = "kitaru-braintrust-importer", editable = "packages/braintrust-importer" },
     { name = "kitaru-langfuse-importer", editable = "packages/langfuse-importer" },
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-langsmith", editable = "packages/langsmith" },
@@ -1234,14 +1233,13 @@ dev = [
 ]
 
 [[package]]
-name = "kitaru-braintrust"
+name = "kitaru-braintrust-importer"
 version = "0.1.0"
-source = { editable = "packages/braintrust" }
+source = { editable = "packages/braintrust-importer" }
 dependencies = [
     { name = "braintrust" },
     { name = "httpx" },
     { name = "kitaru" },
-    { name = "kitaru-braintrust-importer" },
 ]
 
 [package.metadata]
@@ -1249,19 +1247,7 @@ requires-dist = [
     { name = "braintrust", specifier = ">=0.30,<1" },
     { name = "httpx", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
-    { name = "kitaru-braintrust-importer", editable = "packages/braintrust-importer" },
 ]
-
-[[package]]
-name = "kitaru-braintrust-importer"
-version = "0.1.0"
-source = { editable = "packages/braintrust-importer" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-evaluator"

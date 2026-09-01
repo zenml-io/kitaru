@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add the Braintrust importer-backed adapter, replacing the `kitaru-braintrust` distribution.
+
 ## 0.1.0
 
 - First stable release of the Braintrust trace importer.

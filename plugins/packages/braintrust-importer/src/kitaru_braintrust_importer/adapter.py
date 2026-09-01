@@ -14,24 +14,20 @@
 """Braintrust importer-backed adapter."""
 
 import asyncio
-import json
-import os
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
-import httpx
 from braintrust import SpanImpl, current_logger, flush, start_span
 
-from kitaru.env import get_required_env
 from kitaru.importer_adapter import ImporterBackedAdapter
-from kitaru_braintrust_importer.importer import parse
+
+from .api import fetch_spans, serialize_spans, wait_for_spans
+from .importer import parse
 
 __all__ = ["BraintrustAdapter"]
 
-_POLL_INTERVAL = 2.0
 _ROOT_SPAN_NAME = "kitaru-run"
-_DEFAULT_API_URL = "https://api.braintrust.dev"
 
 
 def _get_project_id() -> str:
@@ -47,43 +43,6 @@ def _get_project_id() -> str:
     if logger is None:
         raise RuntimeError("No active Braintrust logger is configured")
     return logger.id
-
-
-async def _query_spans(
-    client: httpx.AsyncClient, project_id: str, root_span_id: str
-) -> list[dict[str, Any]]:
-    """Fetch all span rows of one trace via BTQL.
-
-    Args:
-        client: HTTP client.
-        project_id: Braintrust project id.
-        root_span_id: Braintrust root span id.
-
-    Returns:
-        Span rows.
-    """
-    api_url = os.environ.get("BRAINTRUST_API_URL") or _DEFAULT_API_URL
-    query = (
-        f"select: * | from: project_logs('{project_id}') spans"
-        f" | filter: root_span_id = '{root_span_id}'"
-    )
-    response = await client.post(
-        f"{api_url}/btql",
-        headers={"Authorization": f"Bearer {get_required_env('BRAINTRUST_API_KEY')}"},
-        json={"query": query},
-    )
-    response.raise_for_status()
-    return response.json()["data"]
-
-
-def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:
-    """Return whether every root span row has an end metric."""
-    roots = [row for row in rows if not row.get("span_parents")]
-    return bool(roots) and all(
-        isinstance(metrics := row.get("metrics"), dict)
-        and metrics.get("end") is not None
-        for row in roots
-    )
 
 
 class BraintrustAdapter(ImporterBackedAdapter):
@@ -130,18 +89,9 @@ class BraintrustAdapter(ImporterBackedAdapter):
         # Resolve the project id in a worker thread because the first access
         # logs in and registers the project.
         project_id = await asyncio.to_thread(_get_project_id)
-        # The trace is complete when it has rows, every root span row has an
-        # end metric, and the row count is stable across two consecutive
-        # polls.
-        previous_count: int | None = None
-        async with httpx.AsyncClient() as client:
-            while True:
-                rows = await _query_spans(client, project_id, external_id)
-                if len(rows) == previous_count and _roots_have_ended(rows):
-                    self._completed_rows[external_id] = rows
-                    return
-                previous_count = len(rows)
-                await asyncio.sleep(_POLL_INTERVAL)
+        self._completed_rows[external_id] = await wait_for_spans(
+            project_id, external_id
+        )
 
     async def fetch(self, external_id: str) -> bytes:
         """Fetch the finished trace as Braintrust project-log JSON.
@@ -155,7 +105,5 @@ class BraintrustAdapter(ImporterBackedAdapter):
         rows = self._completed_rows.pop(external_id, None)
         if rows is None:
             project_id = await asyncio.to_thread(_get_project_id)
-            async with httpx.AsyncClient() as client:
-                rows = await _query_spans(client, project_id, external_id)
-        # Serialize with the events envelope the importer parser expects.
-        return json.dumps({"events": rows}).encode("utf-8")
+            rows = await fetch_spans(project_id, external_id)
+        return serialize_spans(rows)

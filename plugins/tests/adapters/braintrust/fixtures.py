@@ -22,7 +22,8 @@ from typing import Any
 import pytest
 from braintrust import NOOP_SPAN, SpanImpl
 
-import kitaru_braintrust.adapter as adapter_module
+import kitaru_braintrust_importer.adapter as adapter_module
+import kitaru_braintrust_importer.api as api_module
 
 RowsBuilder = Callable[[str], list[dict[str, Any]]]
 
@@ -168,7 +169,7 @@ class FakeBraintrust:
 
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adapter_module, "_POLL_INTERVAL", 0.0)
+    monkeypatch.setattr(api_module, "_POLL_INTERVAL", 0.0)
 
 
 @pytest.fixture
@@ -181,7 +182,7 @@ def fake_braintrust(monkeypatch: pytest.MonkeyPatch) -> FakeBraintrust:
     monkeypatch.setattr(adapter_module, "flush", fake.flush)
     monkeypatch.setattr(adapter_module, "current_logger", fake.current_logger)
     monkeypatch.setattr(
-        adapter_module,
+        api_module,
         "httpx",
         SimpleNamespace(AsyncClient=lambda: _FakeAsyncClient(fake)),
     )

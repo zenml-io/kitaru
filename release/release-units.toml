@@ -53,21 +53,6 @@ checks = [
 ]
 
 [[units]]
-slug = "braintrust"
-path = "plugins/packages/braintrust"
-distribution = "kitaru-braintrust"
-registry = "pypi"
-version-source = "plugins/packages/braintrust/pyproject.toml"
-changelog = "plugins/packages/braintrust/CHANGELOG.md"
-lock-source = "plugins/uv.lock"
-default-catalog = false
-release-label = "requires:plugin:braintrust-adapter"
-impact-paths = ["plugins/packages/braintrust/**"]
-tag-prefix = "python/kitaru-braintrust/v"
-maintenance-branch-prefix = "release/braintrust-adapter/"
-checks = ["plugin package (braintrust)"]
-
-[[units]]
 slug = "braintrust-importer"
 path = "plugins/packages/braintrust-importer"
 distribution = "kitaru-braintrust-importer"
