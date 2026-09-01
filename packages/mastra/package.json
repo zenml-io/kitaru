@@ -1,6 +1,6 @@
 {
   "name": "@zenml-io/kitaru-mastra",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Mastra adapter for Kitaru agent tracing and replay",
   "license": "Apache-2.0",
   "repository": {
@@ -38,7 +38,7 @@
     "mastra"
   ],
   "dependencies": {
-    "@zenml-io/kitaru": "workspace:0.1.2"
+    "@zenml-io/kitaru": "workspace:0.2.0"
   },
   "peerDependencies": {
     "@mastra/core": ">=1.51.0 <1.52.0"
