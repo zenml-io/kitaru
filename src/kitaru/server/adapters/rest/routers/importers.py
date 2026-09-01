@@ -21,7 +21,7 @@ importers are both plugin resources.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 
 from kitaru.api_models.v1.base import ListParams, Page
 from kitaru.api_models.v1.importer import (
@@ -217,7 +217,7 @@ async def list_importer_versions(
 @router.get("/{importer_id}/versions/{version}")
 async def get_importer_version(
     importer_id: uuid.UUID,
-    version: int,
+    version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
     service: Annotated[PluginService, Depends(get_importer_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> ImporterVersionResponse:
@@ -243,7 +243,7 @@ async def get_importer_version(
 @router.patch("/{importer_id}/versions/{version}")
 async def update_importer_version(
     importer_id: uuid.UUID,
-    version: int,
+    version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
     body: ImporterVersionUpdateRequest,
     service: Annotated[PluginService, Depends(get_importer_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
