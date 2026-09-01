@@ -24,7 +24,8 @@ from typing import Any
 
 import pytest
 
-import kitaru_logfire.adapter as adapter_module
+import kitaru_logfire_importer.adapter as adapter_module
+import kitaru_logfire_importer.api as api_module
 
 RowsBuilder = Callable[[str], list[dict[str, Any]]]
 
@@ -206,7 +207,7 @@ class FakeLogfire:
 
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adapter_module, "_POLL_INTERVAL", 0.0)
+    monkeypatch.setattr(api_module, "_POLL_INTERVAL", 0.0)
 
 
 @pytest.fixture
@@ -217,15 +218,15 @@ def fake_logfire(monkeypatch: pytest.MonkeyPatch) -> FakeLogfire:
     monkeypatch.setattr(adapter_module, "span", fake.span)
     monkeypatch.setattr(adapter_module, "force_flush", fake.force_flush)
     monkeypatch.setattr(
-        adapter_module,
+        api_module,
         "AsyncLogfireQueryClient",
         lambda read_token: _FakeQueryClient(fake, read_token),
     )
     monkeypatch.setattr(
-        adapter_module, "get_base_url_from_token", fake.get_base_url_from_token
+        api_module, "get_base_url_from_token", fake.get_base_url_from_token
     )
     monkeypatch.setattr(
-        adapter_module,
+        api_module,
         "httpx",
         SimpleNamespace(
             AsyncClient=lambda *, base_url: _FakeAsyncClient(fake, base_url)

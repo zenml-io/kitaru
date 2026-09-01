@@ -19,40 +19,17 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from typing import Any, ClassVar
 
-import httpx
 from logfire import force_flush, span
-from logfire._internal.config import get_base_url_from_token
-from logfire.query_client import AsyncLogfireQueryClient
 from opentelemetry.trace import format_trace_id
 
-from kitaru.env import get_required_env
 from kitaru.importer_adapter import ImporterBackedAdapter
-from kitaru_logfire_importer.importer import parse
+
+from .api import fetch_trace, wait_for_trace
+from .importer import parse
 
 __all__ = ["LogfireAdapter"]
 
-_POLL_INTERVAL = 2.0
 _ROOT_SPAN_NAME = "kitaru-run"
-
-
-def _get_query_client() -> AsyncLogfireQueryClient:
-    """Build a Query API client from the read token in the environment.
-
-    Returns:
-        Query API client.
-    """
-    return AsyncLogfireQueryClient(get_required_env("LOGFIRE_READ_TOKEN"))
-
-
-def _roots_have_ended(rows: list[dict[str, Any]]) -> bool:
-    """Return whether every root record row has an end timestamp."""
-    ids = {row.get("span_id") for row in rows}
-    roots = [
-        row
-        for row in rows
-        if row.get("parent_span_id") is None or row.get("parent_span_id") not in ids
-    ]
-    return bool(roots) and all(row.get("end_timestamp") is not None for row in roots)
 
 
 class LogfireAdapter(ImporterBackedAdapter):
@@ -101,23 +78,7 @@ class LogfireAdapter(ImporterBackedAdapter):
         # Flush in a worker thread because the SDK call blocks on network
         # delivery.
         await asyncio.to_thread(force_flush)
-        started_at = self._started_at[external_id]
-        sql = (
-            "SELECT span_id, parent_span_id, end_timestamp FROM records "
-            f"WHERE trace_id = '{external_id}'"
-        )
-        # The trace is complete when it has rows, every root record row has
-        # an end timestamp, and the row count is stable across two
-        # consecutive polls.
-        previous_count: int | None = None
-        async with _get_query_client() as client:
-            while True:
-                results = await client.query_json_rows(sql, min_timestamp=started_at)
-                rows = results["rows"]
-                if len(rows) == previous_count and _roots_have_ended(rows):
-                    return
-                previous_count = len(rows)
-                await asyncio.sleep(_POLL_INTERVAL)
+        await wait_for_trace(external_id, self._started_at[external_id])
 
     async def fetch(self, external_id: str) -> bytes:
         """Fetch the finished trace as Logfire Query API NDJSON.
@@ -129,22 +90,4 @@ class LogfireAdapter(ImporterBackedAdapter):
             Trace payload bytes.
         """
         started_at = self._started_at.pop(external_id)
-        read_token = get_required_env("LOGFIRE_READ_TOKEN")
-        # Request the NDJSON stream the importer parser expects directly
-        # because the query client only returns decoded results.
-        async with httpx.AsyncClient(
-            base_url=get_base_url_from_token(read_token)
-        ) as client:
-            response = await client.post(
-                "/v2/query",
-                headers={
-                    "accept": "application/x-ndjson",
-                    "authorization": f"Bearer {read_token}",
-                },
-                json={
-                    "sql": f"SELECT * FROM records WHERE trace_id = '{external_id}'",
-                    "min_timestamp": started_at.isoformat(),
-                },
-            )
-            response.raise_for_status()
-            return response.content
+        return await fetch_trace(external_id, started_at)

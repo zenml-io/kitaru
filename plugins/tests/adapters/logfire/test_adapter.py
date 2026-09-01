@@ -28,7 +28,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_logfire import LogfireAdapter
+from kitaru_logfire_importer import LogfireAdapter
 from kitaru_logfire_importer.importer import parse
 
 from .fixtures import PROJECT_ID, FakeLogfire, build_complete_rows, build_row

@@ -2,4 +2,6 @@
 
 from kitaru_logfire_importer.importer import parse
 
-__all__ = ["parse"]
+from .adapter import LogfireAdapter
+
+__all__ = ["LogfireAdapter", "parse"]

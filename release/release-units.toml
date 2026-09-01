@@ -128,21 +128,6 @@ maintenance-branch-prefix = "release/langgraph/"
 checks = ["plugin package (langgraph)"]
 
 [[units]]
-slug = "logfire"
-path = "plugins/packages/logfire"
-distribution = "kitaru-logfire"
-registry = "pypi"
-version-source = "plugins/packages/logfire/pyproject.toml"
-changelog = "plugins/packages/logfire/CHANGELOG.md"
-lock-source = "plugins/uv.lock"
-default-catalog = false
-release-label = "requires:plugin:logfire-adapter"
-impact-paths = ["plugins/packages/logfire/**"]
-tag-prefix = "python/kitaru-logfire/v"
-maintenance-branch-prefix = "release/logfire-adapter/"
-checks = ["plugin package (logfire)"]
-
-[[units]]
 slug = "logfire-importer"
 path = "plugins/packages/logfire-importer"
 distribution = "kitaru-logfire-importer"

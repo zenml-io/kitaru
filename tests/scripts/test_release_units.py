@@ -30,7 +30,6 @@ EXPECTED_UNITS = {
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
     "langgraph": "kitaru-langgraph",
-    "logfire": "kitaru-logfire",
     "logfire-importer": "kitaru-logfire-importer",
     "langsmith-importer": "kitaru-langsmith-importer",
     "openai-agents": "kitaru-openai-agents",
@@ -118,7 +117,7 @@ def core_release_repo(
     return tmp_path, version
 
 
-def test_inventory_describes_core_and_twelve_plugin_distributions() -> None:
+def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -642,7 +641,7 @@ def test_text_and_json_outputs_contain_the_same_unit_identities() -> None:
     assert all(unit.distribution in text_output for unit in inventory.units)
 
 
-def test_plugin_matrix_is_generated_from_the_twelve_plugin_units() -> None:
+def test_plugin_matrix_is_generated_from_the_eleven_plugin_units() -> None:
     matrix = build_plugin_matrix(load_inventory())
 
     assert matrix == {
@@ -832,7 +831,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 13 release units."),
+        (["validate"], "Validated 12 release units."),
         (
             [
                 "propose-core-version",

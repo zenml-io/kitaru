@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add the Logfire importer-backed adapter, replacing the `kitaru-logfire` distribution.
+
 ## 0.1.1
 
 - Keep same-named sessions from different Logfire projects separate.
