@@ -1582,11 +1582,11 @@ export interface paths {
          *
          *     Clients observe HTTP 201 on success, 404 when the experiment, the
          *     cohort version, or the resolved agent version does not exist, 409 when
-         *     evaluate_baselines is set and a cohort version session is not finished,
-         *     and 422 when the cohort version has no sessions, the cohort version or
-         *     agent version belongs to another agent, the resolved agent version has
-         *     no run spec, or the config carries an override or tool policy the
-         *     agent version's runtime capabilities do not declare.
+         *     the baseline evaluation mode is not none and a cohort version session
+         *     is not finished, and 422 when the cohort version has no sessions, the
+         *     cohort version or agent version belongs to another agent, the resolved
+         *     agent version has no run spec, or the config carries an override or
+         *     tool policy the agent version's runtime capabilities do not declare.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2280,11 +2280,11 @@ export interface paths {
          *
          *     Clients observe HTTP 201 on success, 404 when the baseline session or
          *     the resolved agent version or an evaluator config does not exist, 409
-         *     when evaluate_baselines is set and the baseline session is not
-         *     finished, and 422 when the baseline session carries no agent version
-         *     and none was given, the resolved agent version has no run spec, the
-         *     tool policy uses cohort-version-scoped history, the config carries an
-         *     override or tool policy the agent version's runtime capabilities do
+         *     when the baseline evaluation mode is not none and the baseline session
+         *     is not finished, and 422 when the baseline session carries no agent
+         *     version and none was given, the resolved agent version has no run spec,
+         *     the tool policy uses cohort-version-scoped history, the config carries
+         *     an override or tool policy the agent version's runtime capabilities do
          *     not declare, or an evaluator version repeats.
          *
          *     Args:
@@ -2701,16 +2701,16 @@ export interface paths {
         get?: never;
         put?: never;
         /**
-         * Merge Session Evaluations
-         * @description Merge manual evaluations into a session.
+         * Create Session Evaluations
+         * @description Create manual evaluations on a session.
          *
-         *     A resent name overwrites its score, value, data type, and explanation.
          *     Clients observe HTTP 200 on success, 404 when no session has this id,
-         *     409 when the session is not finished, and 422 when the request names
-         *     the same evaluation twice.
+         *     409 when the session is not finished or an evaluation name already
+         *     exists for the session, and 422 when the request names the same
+         *     evaluation twice.
          *
          *     Args:
-         *         session_id: Id of the session to merge evaluations into.
+         *         session_id: Id of the session to create evaluations on.
          *         body: Session evaluations request.
          *         service: Evaluation service.
          *         actor: Caller context.
@@ -2718,7 +2718,7 @@ export interface paths {
          *     Returns:
          *         Stored evaluations in request order.
          */
-        post: operations["merge_session_evaluations_api_v1_sessions__session_id__evaluations_post"];
+        post: operations["create_session_evaluations_api_v1_sessions__session_id__evaluations_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3118,12 +3118,13 @@ export interface paths {
         };
         /**
          * List Experiment Run Evaluation Aggregates
-         * @description Aggregate the evaluations of an experiment run's replays.
+         * @description Aggregate the evaluations linked to an experiment run's replays.
          *
-         *     Baseline and result sessions are aggregated separately, and each
-         *     aggregate carries the per-replay evaluation values of the 50 most
-         *     recent replays. Clients observe HTTP 200 on success and 404 when no
-         *     experiment run has this id.
+         *     The input set is the evaluations linked to the run's replays, grouped by
+         *     name, evaluator version, and data type. Baseline and result sessions are
+         *     aggregated separately, and each aggregate carries the per-replay
+         *     evaluation values of the 50 most recent replays. Clients observe HTTP
+         *     200 on success and 404 when no experiment run has this id.
          *
          *     Args:
          *         experiment_run_id: Id of the experiment run.
@@ -3133,8 +3134,8 @@ export interface paths {
          *         actor: Caller context.
          *
          *     Returns:
-         *         One aggregate per evaluation name and data type pair, sorted by
-         *         name.
+         *         One aggregate per evaluation name, evaluator version, and data
+         *         type, sorted by name.
          */
         get: operations["list_experiment_run_evaluation_aggregates_api_v1_ui_experiment_runs__experiment_run_id__evaluation_aggregates_get"];
         put?: never;
@@ -4120,6 +4121,12 @@ export interface components {
          */
         AuthScheme: "none" | "local" | "control_plane";
         /**
+         * BaselineEvaluationMode
+         * @description Baseline evaluation mode.
+         * @enum {string}
+         */
+        BaselineEvaluationMode: "none" | "if_missing" | "force";
+        /**
          * BlobResponse
          * @description Blob response.
          */
@@ -4563,6 +4570,21 @@ export interface components {
             /** @description Evaluation data type. */
             data_type: components["schemas"]["EvaluationDataType"];
             /**
+             * Evaluator Name
+             * @description Name of the evaluator that produced the group.
+             */
+            evaluator_name?: string | null;
+            /**
+             * Evaluator Version
+             * @description Version of the evaluator that produced the group.
+             */
+            evaluator_version?: number | null;
+            /**
+             * Evaluator Version Id
+             * @description Evaluator version that produced the group.
+             */
+            evaluator_version_id?: string | null;
+            /**
              * Name
              * @description Evaluation name.
              */
@@ -4616,6 +4638,13 @@ export interface components {
              */
             evaluator_name?: string | null;
             /**
+             * Evaluator Params
+             * @description Params the evaluator ran with.
+             */
+            evaluator_params?: {
+                [key: string]: unknown;
+            } | null;
+            /**
              * Evaluator Version
              * @description Version of the evaluator that produced the result.
              */
@@ -4636,6 +4665,16 @@ export interface components {
              * @description Evaluation id.
              */
             id: string;
+            /**
+             * Max Score
+             * @description Upper bound of the score scale.
+             */
+            max_score?: number | null;
+            /**
+             * Min Score
+             * @description Lower bound of the score scale.
+             */
+            min_score?: number | null;
             /**
              * Name
              * @description Evaluation name.
@@ -4664,6 +4703,11 @@ export interface components {
              */
             session_id: string;
             /**
+             * Target Score
+             * @description Score to beat.
+             */
+            target_score?: number | null;
+            /**
              * Task Id
              * @description Evaluator task that produced the result.
              */
@@ -4691,6 +4735,16 @@ export interface components {
              */
             explanation?: string | null;
             /**
+             * Max Score
+             * @description Upper bound of the score scale.
+             */
+            max_score?: number | null;
+            /**
+             * Min Score
+             * @description Lower bound of the score scale.
+             */
+            min_score?: number | null;
+            /**
              * Name
              * @description Evaluation name.
              */
@@ -4705,6 +4759,11 @@ export interface components {
              * @description Numeric or boolean score.
              */
             score?: number | boolean | null;
+            /**
+             * Target Score
+             * @description Score to beat.
+             */
+            target_score?: number | null;
             /**
              * Value
              * @description Label or string value.
@@ -4727,6 +4786,11 @@ export interface components {
              */
             max?: number | null;
             /**
+             * Max Score
+             * @description Upper bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.
+             */
+            max_score?: number | null;
+            /**
              * Mean
              * @description Mean score of float evaluations, share of true results of bool evaluations, null for other data types.
              */
@@ -4737,10 +4801,20 @@ export interface components {
              */
             min?: number | null;
             /**
+             * Min Score
+             * @description Lower bound of the score scale shared by every aggregated evaluation, null when they differ or one lacks it.
+             */
+            min_score?: number | null;
+            /**
              * Pass Rate
              * @description Share of passed evaluations among those carrying a passed flag, null when none do.
              */
             pass_rate?: number | null;
+            /**
+             * Target Score
+             * @description Score to beat shared by every aggregated evaluation, null when they differ or one lacks it.
+             */
+            target_score?: number | null;
             /**
              * Value Counts
              * @description Occurrences per value, only for categorical evaluations.
@@ -4789,6 +4863,16 @@ export interface components {
          */
         EvaluationValue: {
             /**
+             * Max Score
+             * @description Upper bound of the score scale.
+             */
+            max_score?: number | null;
+            /**
+             * Min Score
+             * @description Lower bound of the score scale.
+             */
+            min_score?: number | null;
+            /**
              * Passed
              * @description Pass or fail verdict.
              */
@@ -4798,6 +4882,11 @@ export interface components {
              * @description Numeric or boolean score.
              */
             score?: number | boolean | null;
+            /**
+             * Target Score
+             * @description Score to beat.
+             */
+            target_score?: number | null;
             /**
              * Value
              * @description Label or string value.
@@ -5113,6 +5202,8 @@ export interface components {
              * @description Agent version to replay with.
              */
             agent_version_id: string;
+            /** @description How to score each baseline session. */
+            baseline_evaluation_mode?: components["schemas"]["BaselineEvaluationMode"] | null;
             /**
              * Cohort Version Id
              * Format: uuid
@@ -5121,6 +5212,7 @@ export interface components {
             cohort_version_id: string;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether to also score each baseline session.
              * @default false
              */
@@ -5173,6 +5265,8 @@ export interface components {
              * @description Agent version to replay with.
              */
             agent_version_id: string;
+            /** @description How baseline sessions are scored. */
+            baseline_evaluation_mode: components["schemas"]["BaselineEvaluationMode"];
             /**
              * Cohort Version Id
              * Format: uuid
@@ -5197,6 +5291,7 @@ export interface components {
             error?: string | null;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether baseline sessions are also scored.
              */
             evaluate_baselines: boolean;
@@ -6434,6 +6529,8 @@ export interface components {
              * @description Agent version to replay with, the baseline session's recorded version when unset.
              */
             agent_version_id?: string | null;
+            /** @description How to score the baseline session. */
+            baseline_evaluation_mode?: components["schemas"]["BaselineEvaluationMode"] | null;
             /**
              * Baseline Session Id
              * Format: uuid
@@ -6442,6 +6539,7 @@ export interface components {
             baseline_session_id: string;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether to also score the baseline session.
              * @default false
              */
@@ -6507,6 +6605,8 @@ export interface components {
          * @description Replay response.
          */
         ReplayResponse: {
+            /** @description How the baseline session is scored. */
+            baseline_evaluation_mode: components["schemas"]["BaselineEvaluationMode"];
             /**
              * Baseline Session Id
              * Format: uuid
@@ -6526,6 +6626,7 @@ export interface components {
             error?: string | null;
             /**
              * Evaluate Baselines
+             * @deprecated
              * @description Whether the baseline session is also scored.
              */
             evaluate_baselines: boolean;
@@ -16531,7 +16632,7 @@ export interface operations {
             };
         };
     };
-    merge_session_evaluations_api_v1_sessions__session_id__evaluations_post: {
+    create_session_evaluations_api_v1_sessions__session_id__evaluations_post: {
         parameters: {
             query?: never;
             header?: never;
