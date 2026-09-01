@@ -9177,7 +9177,7 @@
   },
   "info": {
     "title": "Kitaru",
-    "version": "0.24.0"
+    "version": "0.24.0+dev"
   },
   "openapi": "3.1.0",
   "paths": {
