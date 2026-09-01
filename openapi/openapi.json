@@ -11646,7 +11646,7 @@
     },
     "/api/v1/device_authorization": {
       "post": {
-        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/api/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    HTTPException: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
+        "description": "Start a device authorization and receive its codes.\n\nThe caller shows the user code to a person, who confirms it at the\nverification URI while signed in. The caller then polls ``/api/v1/login`` with\nthe device grant type until the confirmation lands. Clients observe HTTP\n200 on success and 400 when this server does not authenticate requests.\nThe codes are returned exactly once.\n\nArgs:\n    request: Incoming request.\n    settings: Service settings governing auth behavior.\n    service: Device service.\n    hostname: Host the caller runs on.\n    os: Operating system the caller runs on.\n    python_version: Python version the caller runs.\n    client_version: Kitaru version the caller runs.\n\nRaises:\n    TokenGrantError: This server does not authenticate requests.\n\nReturns:\n    Device authorization carrying the plaintext codes.",
         "operationId": "device_authorization_api_v1_device_authorization_post",
         "requestBody": {
           "content": {
@@ -11667,6 +11667,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TokenErrorResponse"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "422": {
             "content": {
@@ -14914,7 +14924,7 @@
     },
     "/api/v1/login": {
       "post": {
-        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``api-key`` grant type reads\nan API key from the authorization header and is accepted under the same\nscheme. The ``control-plane`` grant type reads a control plane credential\nfrom the authorization header and mirrors the control plane user into a\nlocal account. The device grant type takes the ``device_id`` and\n``device_code`` of a device authorization and returns a token once an\naccount has confirmed it.\n\nClients observe HTTP 200 on success, 400 when the grant type is not\naccepted by this server or a device authorization is not ready, and 401\nwhen the credentials cannot be validated. A 400 for the device grant type\ncarries an OAuth 2.0 ``error`` code, of which ``authorization_pending``\nmeans the caller should poll again.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
+        "description": "Log in and receive a bearer token.\n\nThe ``password`` grant type takes the form username and password and is\naccepted under the ``local`` auth scheme. The ``api-key`` grant type reads\nan API key from the authorization header and is accepted under the same\nscheme. The ``control-plane`` grant type reads a control plane credential\nfrom the authorization header and mirrors the control plane user into a\nlocal account. The device grant type takes the ``device_id`` and\n``device_code`` of a device authorization and returns a token once an\naccount has confirmed it.\n\nClients observe HTTP 200 on success, 400 when the grant type is not\naccepted by this server or a device authorization is not ready, and 401\nwhen the credentials cannot be validated. A 400 carries an OAuth 2.0\n``error`` code, of which ``authorization_pending`` means the caller\nshould poll again.\n\nArgs:\n    request: Incoming request.\n    response: Outgoing response.\n    settings: Service settings governing auth behavior.\n    service: Authentication service.\n    form: Login request form carrying the resolved grant type.\n\nRaises:\n    HTTPException: The credentials cannot be validated.\n\nReturns:\n    Issued token.",
         "operationId": "login_api_v1_login_post",
         "requestBody": {
           "content": {

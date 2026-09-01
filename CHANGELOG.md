@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
 - Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
 - Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.
+- `POST /api/v1/login` validation failures now carry the OAuth 2.0 `error` code their declared 400 response requires, `invalid_request` for a missing field and `unsupported_grant_type` for an unknown or rejected grant type. `POST /api/v1/device_authorization` declares its 400 response and returns the same shape when the server does not authenticate requests.
 
 ## [0.24.0]
 

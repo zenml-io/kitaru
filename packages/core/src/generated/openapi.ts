@@ -904,7 +904,7 @@ export interface paths {
          *         client_version: Kitaru version the caller runs.
          *
          *     Raises:
-         *         HTTPException: This server does not authenticate requests.
+         *         TokenGrantError: This server does not authenticate requests.
          *
          *     Returns:
          *         Device authorization carrying the plaintext codes.
@@ -2199,9 +2199,9 @@ export interface paths {
          *
          *     Clients observe HTTP 200 on success, 400 when the grant type is not
          *     accepted by this server or a device authorization is not ready, and 401
-         *     when the credentials cannot be validated. A 400 for the device grant type
-         *     carries an OAuth 2.0 ``error`` code, of which ``authorization_pending``
-         *     means the caller should poll again.
+         *     when the credentials cannot be validated. A 400 carries an OAuth 2.0
+         *     ``error`` code, of which ``authorization_pending`` means the caller
+         *     should poll again.
          *
          *     Args:
          *         request: Incoming request.
@@ -10005,6 +10005,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DeviceAuthorizationResponse"];
+                };
+            };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TokenErrorResponse"];
                 };
             };
             /** @description Validation Error */
