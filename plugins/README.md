@@ -16,8 +16,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer and importer-backed adapter |
 | `logfire-importer` | `kitaru-logfire-importer` | Logfire importer and importer-backed adapter |
 | `openai-agents` | `kitaru-openai-agents` | OpenAI Agents SDK recording adapter |
-| `phoenix` | `kitaru-phoenix` | Arize Phoenix importer-backed adapter |
-| `phoenix-importer` | `kitaru-phoenix-importer` | Arize Phoenix importer |
+| `phoenix-importer` | `kitaru-phoenix-importer` | Arize Phoenix importer and importer-backed adapter |
 | `pydantic-ai` | `kitaru-pydantic-ai` | PydanticAI recording and replay adapter |
 
 ## Development and releases

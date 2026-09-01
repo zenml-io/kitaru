@@ -21,7 +21,7 @@ from typing import Any
 import pytest
 from opentelemetry.trace import NoOpTracerProvider, format_trace_id
 
-import kitaru_phoenix.adapter as adapter_module
+import kitaru_phoenix_importer.adapter as adapter_module
 from kitaru import importer_adapter
 from kitaru.api_models.v1.session import (
     SessionCreateRequest,
@@ -30,7 +30,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_phoenix import PhoenixAdapter
+from kitaru_phoenix_importer import PhoenixAdapter
 from kitaru_phoenix_importer.importer import parse
 
 from .fixtures import PROJECT, FakePhoenix, build_complete_spans, build_span

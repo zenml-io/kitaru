@@ -173,21 +173,6 @@ maintenance-branch-prefix = "release/openai-agents/"
 checks = ["plugin package (openai-agents)"]
 
 [[units]]
-slug = "phoenix"
-path = "plugins/packages/phoenix"
-distribution = "kitaru-phoenix"
-registry = "pypi"
-version-source = "plugins/packages/phoenix/pyproject.toml"
-changelog = "plugins/packages/phoenix/CHANGELOG.md"
-lock-source = "plugins/uv.lock"
-default-catalog = false
-release-label = "requires:plugin:phoenix-adapter"
-impact-paths = ["plugins/packages/phoenix/**"]
-tag-prefix = "python/kitaru-phoenix/v"
-maintenance-branch-prefix = "release/phoenix-adapter/"
-checks = ["plugin package (phoenix)"]
-
-[[units]]
 slug = "phoenix-importer"
 path = "plugins/packages/phoenix-importer"
 distribution = "kitaru-phoenix-importer"

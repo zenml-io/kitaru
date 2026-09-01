@@ -24,7 +24,6 @@ members = [
     "kitaru-langsmith-importer",
     "kitaru-logfire-importer",
     "kitaru-openai-agents",
-    "kitaru-phoenix",
     "kitaru-phoenix-importer",
     "kitaru-pydantic-ai",
 ]
@@ -39,7 +38,7 @@ dev = [
     { name = "kitaru-langsmith-importer", editable = "packages/langsmith-importer" },
     { name = "kitaru-logfire-importer", editable = "packages/logfire-importer" },
     { name = "kitaru-openai-agents", editable = "packages/openai-agents" },
-    { name = "kitaru-phoenix", editable = "packages/phoenix" },
+    { name = "kitaru-phoenix-importer", editable = "packages/phoenix-importer" },
     { name = "kitaru-pydantic-ai", extras = ["openai"], editable = "packages/pydantic-ai" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "pytest-asyncio", specifier = ">=1.4.0" },
@@ -1358,13 +1357,12 @@ requires-dist = [
 ]
 
 [[package]]
-name = "kitaru-phoenix"
+name = "kitaru-phoenix-importer"
 version = "0.1.0"
-source = { editable = "packages/phoenix" }
+source = { editable = "packages/phoenix-importer" }
 dependencies = [
     { name = "arize-phoenix-client" },
     { name = "kitaru" },
-    { name = "kitaru-phoenix-importer" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
 ]
@@ -1373,21 +1371,9 @@ dependencies = [
 requires-dist = [
     { name = "arize-phoenix-client", specifier = ">=2.0,<4" },
     { name = "kitaru", editable = "../" },
-    { name = "kitaru-phoenix-importer", editable = "packages/phoenix-importer" },
     { name = "opentelemetry-api", specifier = ">=1.12" },
     { name = "opentelemetry-sdk", specifier = ">=1.12" },
 ]
-
-[[package]]
-name = "kitaru-phoenix-importer"
-version = "0.1.0"
-source = { editable = "packages/phoenix-importer" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-pydantic-ai"

@@ -14,32 +14,21 @@
 """Arize Phoenix importer-backed adapter."""
 
 import asyncio
-import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Any
 
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.trace import format_trace_id, get_tracer, get_tracer_provider
-from phoenix.client import AsyncClient
-from phoenix.client.utils.config import get_env_project_name
 
 from kitaru.importer_adapter import ImporterBackedAdapter
-from kitaru_phoenix_importer.importer import parse
+
+from .api import fetch_spans, serialize_spans, wait_for_spans
+from .importer import parse
 
 __all__ = ["PhoenixAdapter"]
 
-_POLL_INTERVAL = 2.0
 _ROOT_SPAN_NAME = "kitaru-run"
-_SPAN_LIMIT = 1000
-
-
-def _has_root(spans: list[Any]) -> bool:
-    """Return whether a root span is among the fetched spans."""
-    ids = {span["context"]["span_id"] for span in spans}
-    return any(
-        span.get("parent_id") is None or span["parent_id"] not in ids for span in spans
-    )
 
 
 class PhoenixAdapter(ImporterBackedAdapter):
@@ -86,22 +75,7 @@ class PhoenixAdapter(ImporterBackedAdapter):
         # delivery. Only the SDK provider exposes a flush.
         if isinstance(provider, TracerProvider):
             await asyncio.to_thread(provider.force_flush)
-        project = get_env_project_name()
-        client = AsyncClient()
-        # The trace is complete when it has spans, a root span is present,
-        # and the span count is stable across two consecutive polls.
-        previous_count: int | None = None
-        while True:
-            spans = await client.spans.get_spans(
-                project_identifier=project,
-                trace_ids=[external_id],
-                limit=_SPAN_LIMIT,
-            )
-            if len(spans) == previous_count and _has_root(spans):
-                self._spans[external_id] = spans
-                return
-            previous_count = len(spans)
-            await asyncio.sleep(_POLL_INTERVAL)
+        self._spans[external_id] = await wait_for_spans(external_id)
 
     async def fetch(self, external_id: str) -> bytes:
         """Fetch the finished trace as a Phoenix span JSON array.
@@ -114,9 +88,5 @@ class PhoenixAdapter(ImporterBackedAdapter):
         """
         spans = self._spans.pop(external_id, None)
         if spans is None:
-            spans = await AsyncClient().spans.get_spans(
-                project_identifier=get_env_project_name(),
-                trace_ids=[external_id],
-                limit=_SPAN_LIMIT,
-            )
-        return json.dumps(spans).encode("utf-8")
+            spans = await fetch_spans(external_id)
+        return serialize_spans(spans)

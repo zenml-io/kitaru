@@ -2,4 +2,6 @@
 
 from kitaru_phoenix_importer.importer import parse
 
-__all__ = ["parse"]
+from .adapter import PhoenixAdapter
+
+__all__ = ["PhoenixAdapter", "parse"]

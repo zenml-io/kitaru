@@ -23,7 +23,8 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
     InMemorySpanExporter,
 )
 
-import kitaru_phoenix.adapter as adapter_module
+import kitaru_phoenix_importer.adapter as adapter_module
+import kitaru_phoenix_importer.api as api_module
 
 SpansBuilder = Callable[[str], list[dict[str, Any]]]
 
@@ -113,7 +114,7 @@ class FakePhoenix:
 
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adapter_module, "_POLL_INTERVAL", 0.0)
+    monkeypatch.setattr(api_module, "_POLL_INTERVAL", 0.0)
 
 
 @pytest.fixture
@@ -132,5 +133,5 @@ def fake_phoenix(monkeypatch: pytest.MonkeyPatch) -> FakePhoenix:
     monkeypatch.setattr(fake.provider, "force_flush", force_flush)
     monkeypatch.setattr(adapter_module, "get_tracer", fake.provider.get_tracer)
     monkeypatch.setattr(adapter_module, "get_tracer_provider", lambda: fake.provider)
-    monkeypatch.setattr(adapter_module, "AsyncClient", lambda: _FakeAsyncClient(fake))
+    monkeypatch.setattr(api_module, "AsyncClient", lambda: _FakeAsyncClient(fake))
     return fake
