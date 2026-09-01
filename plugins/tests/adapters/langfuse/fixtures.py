@@ -40,21 +40,25 @@ def build_observation(
     """Build one Langfuse API observation record."""
     record: dict[str, Any] = {
         "id": observation_id,
-        "traceId": trace_id,
+        "trace_id": trace_id,
         "type": observation_type,
         "name": observation_id,
-        "startTime": "2026-07-24T10:00:00Z",
+        "start_time": "2026-07-24T10:00:00Z",
         "usage": {"input": 3, "output": 5, "total": 8, "unit": "TOKENS"},
         "level": "DEFAULT",
-        "usageDetails": {"input": 3, "output": 5},
-        "costDetails": {"total": 0.001},
+        "usage_details": {"input": 3, "output": 5},
+        "cost_details": {"total": 0.001},
         "environment": "default",
+        "input": None,
+        "output": None,
+        "metadata": None,
+        "model_parameters": None,
         **extra,
     }
     if end_time is not None:
-        record["endTime"] = end_time
+        record["end_time"] = end_time
     if parent_id is not None:
-        record["parentObservationId"] = parent_id
+        record["parent_observation_id"] = parent_id
     return record
 
 
@@ -62,20 +66,21 @@ def build_trace(
     trace_id: str, observations: list[dict[str, Any]]
 ) -> TraceWithFullDetails:
     """Build one Langfuse API trace response with nested observations."""
-    return TraceWithFullDetails.parse_obj(
+    return TraceWithFullDetails.model_validate(
         {
             "id": trace_id,
             "timestamp": "2026-07-24T10:00:00Z",
-            "projectId": "project-1",
+            "project_id": "project-1",
             "name": "run",
             "input": {"prompt": "hello"},
             "output": {"answer": "world"},
+            "metadata": None,
             "tags": [],
             "public": False,
             "environment": "default",
-            "htmlPath": f"/project/project-1/traces/{trace_id}",
+            "html_path": f"/project/project-1/traces/{trace_id}",
             "latency": 1.0,
-            "totalCost": 0.001,
+            "total_cost": 0.001,
             "observations": observations,
             "scores": [],
         }
@@ -119,7 +124,7 @@ class FakeLangfuseClient:
         return builder(trace_id)
 
     @contextmanager
-    def start_as_current_span(
+    def start_as_current_observation(
         self, *, name: str, trace_context: TraceContext
     ) -> Iterator[None]:
         self.trace_contexts.append(trace_context)

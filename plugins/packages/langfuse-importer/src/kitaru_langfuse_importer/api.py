@@ -88,4 +88,4 @@ def serialize_trace(trace: TraceWithFullDetails) -> bytes:
     """
     # Serialize with the camelCase wire field names the importer parser
     # expects.
-    return trace.json(by_alias=True).encode("utf-8")
+    return trace.model_dump_json(by_alias=True).encode("utf-8")

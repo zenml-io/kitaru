@@ -56,7 +56,7 @@ class LangfuseAdapter(ImporterBackedAdapter):
         """
         client = get_client()
         trace_id = Langfuse.create_trace_id()
-        with client.start_as_current_span(
+        with client.start_as_current_observation(
             name=_ROOT_SPAN_NAME, trace_context=TraceContext(trace_id=trace_id)
         ):
             yield trace_id

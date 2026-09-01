@@ -24,7 +24,7 @@ classifiers = [
 keywords = ["ai-agents", "kitaru", "langfuse", "observability", "traces"]
 dependencies = [
     "kitaru>=0.23.0",
-    "langfuse>=3.0.0,<4",
+    "langfuse>=4.14,<5",
 ]
 
 [project.urls]
