@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the LangSmith importer-backed adapter, replacing the `kitaru-langsmith` distribution.
+- Add the LangSmith importer-backed adapter.
 
 ## 0.1.0
 

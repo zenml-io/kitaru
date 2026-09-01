@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the Braintrust importer-backed adapter, replacing the `kitaru-braintrust` distribution.
+- Add the Braintrust importer-backed adapter.
 
 ## 0.1.0
 

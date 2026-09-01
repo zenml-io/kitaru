@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the Logfire importer-backed adapter, replacing the `kitaru-logfire` distribution.
+- Add the Logfire importer-backed adapter.
 
 ## 0.1.1
 

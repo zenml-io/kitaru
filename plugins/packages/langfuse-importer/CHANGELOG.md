@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the Langfuse importer-backed adapter, replacing the `kitaru-langfuse` distribution.
+- Add the Langfuse importer-backed adapter.
 
 ## 0.1.1
 

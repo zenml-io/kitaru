@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the Arize Phoenix importer-backed adapter, replacing the `kitaru-phoenix` distribution.
+- Add the Arize Phoenix importer-backed adapter.
 
 ## 0.1.0
 
