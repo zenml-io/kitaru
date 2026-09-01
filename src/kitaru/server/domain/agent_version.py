@@ -108,8 +108,8 @@ def validate_timeout_seconds(value: int) -> int:
 TimeoutSeconds = Annotated[int, AfterValidator(validate_timeout_seconds)]
 
 
-class ReplayCapabilities(FrozenModel):
-    """Replay capabilities."""
+class RuntimeCapabilities(FrozenModel):
+    """Runtime capabilities."""
 
     overrides: bool = True
     tool_policies: bool = True
@@ -123,7 +123,9 @@ class RunSpec(FrozenModel):
     env: dict[str, str] = Field(default_factory=dict)
     secret_ids: list[uuid.UUID] = Field(default_factory=list)
     hooks: list[TaskHook] = Field(default_factory=list)
-    replay_capabilities: ReplayCapabilities = Field(default_factory=ReplayCapabilities)
+    runtime_capabilities: RuntimeCapabilities = Field(
+        default_factory=RuntimeCapabilities
+    )
     timeout_seconds: TimeoutSeconds = 3600
 
 

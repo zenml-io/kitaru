@@ -55,8 +55,8 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionAgentMismatch,
-    ReplayCapabilities,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
@@ -78,7 +78,7 @@ def services() -> ReplayServices:
 
 async def _agent_version_with_run_spec(
     services: ReplayServices,
-    replay_capabilities: ReplayCapabilities | None = None,
+    runtime_capabilities: RuntimeCapabilities | None = None,
 ) -> AgentVersion:
     agent = await create_agent(services.agents, ACTOR.account.id)
     return await create_agent_version(
@@ -88,7 +88,7 @@ async def _agent_version_with_run_spec(
         run_spec=RunSpec(
             command="run.sh",
             timeout_seconds=60,
-            replay_capabilities=replay_capabilities or ReplayCapabilities(),
+            runtime_capabilities=runtime_capabilities or RuntimeCapabilities(),
         ),
     )
 
@@ -1119,7 +1119,7 @@ async def test_start_run_rejects_an_override_outside_capabilities(
 ) -> None:
     """An override is rejected when the agent version does not support overrides."""
     agent_version = await _agent_version_with_run_spec(
-        services, replay_capabilities=ReplayCapabilities(overrides=False)
+        services, runtime_capabilities=RuntimeCapabilities(overrides=False)
     )
     experiment_id, _ = await _create_experiment_with_evaluator(
         services, agent_version.agent_id, override=ReplayOverride(model="gpt-5")

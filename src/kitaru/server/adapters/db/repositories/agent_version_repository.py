@@ -336,8 +336,8 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
             if run_spec is not None
             else None
         )
-        row.run_replay_capabilities = (
-            run_spec.replay_capabilities.model_dump(mode="json")
+        row.run_runtime_capabilities = (
+            run_spec.runtime_capabilities.model_dump(mode="json")
             if run_spec is not None
             else None
         )

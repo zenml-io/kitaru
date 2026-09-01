@@ -158,7 +158,7 @@ class ReplayService:
                 and none was given, the resolved agent version has no run
                 spec, the config uses cohort-version-scoped history, the
                 config carries an override or tool policy the agent version's
-                replay capabilities do not declare, or an evaluator config is
+                runtime capabilities do not declare, or an evaluator config is
                 scoped to another agent.
             AgentVersionNotFound: No agent version has the resolved id.
             SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
@@ -196,7 +196,7 @@ class ReplayService:
         config.check_standalone()
         run_spec = agent_version.run_spec
         assert run_spec is not None
-        config.check_capabilities(run_spec.replay_capabilities)
+        config.check_capabilities(run_spec.runtime_capabilities)
         config = await self._experiments.create_replay_config(config)
         replays = await create_replay_pipelines(
             baselines=[baseline],

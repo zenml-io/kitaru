@@ -202,7 +202,7 @@ async def start_run(
     is not finished, and 422 when the cohort version has no sessions, the
     cohort version or agent version belongs to another agent, the resolved
     agent version has no run spec, or the config carries an override or
-    tool policy the agent version's replay capabilities do not declare.
+    tool policy the agent version's runtime capabilities do not declare.
 
     Args:
         experiment_id: Id of the experiment.

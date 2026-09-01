@@ -25,7 +25,7 @@ from kitaru.api_models.v1.replay_config import (
     ToolPolicyOnMiss,
 )
 from kitaru.base import FrozenModel
-from kitaru.server.domain.agent_version import ReplayCapabilities
+from kitaru.server.domain.agent_version import RuntimeCapabilities
 from kitaru.server.domain.base import (
     ConflictError,
     DomainModel,
@@ -168,11 +168,11 @@ class ReplayConfig(DomainModel):
                     "A standalone replay cannot use cohort-version-scoped history"
                 )
 
-    def check_capabilities(self, capabilities: ReplayCapabilities) -> None:
-        """Reject settings the agent version's replay capabilities cannot apply.
+    def check_capabilities(self, capabilities: RuntimeCapabilities) -> None:
+        """Reject settings the agent version's runtime capabilities cannot apply.
 
         Args:
-            capabilities: Replay capabilities of the agent version.
+            capabilities: Runtime capabilities of the agent version.
 
         Raises:
             ValidationError: The config carries an override or a

@@ -62,7 +62,7 @@ async def create_replay(
     is not finished, and 422 when the baseline session carries no agent
     version and none was given, the resolved agent version has no run spec,
     the tool policy uses cohort-version-scoped history, the config carries
-    an override or tool policy the agent version's replay capabilities do
+    an override or tool policy the agent version's runtime capabilities do
     not declare, or an evaluator version repeats.
 
     Args:

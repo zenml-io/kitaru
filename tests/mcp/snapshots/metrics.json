@@ -6,7 +6,7 @@
   },
   "modes": {
     "destructive": {
-      "discovery_response_bytes": 163224,
+      "discovery_response_bytes": 163229,
       "tool_count": 11,
       "tools": {
         "kitaru_activity_read": {
@@ -46,10 +46,10 @@
         },
         "kitaru_registry_read": {
           "$defs_count": 49,
-          "combined_bytes": 33461,
+          "combined_bytes": 33466,
           "input_bytes": 5706,
           "maximum_nesting_depth": 8,
-          "output_bytes": 27755
+          "output_bytes": 27760
         },
         "kitaru_review_manage": {
           "$defs_count": 30,
@@ -89,7 +89,7 @@
       }
     },
     "read-only": {
-      "discovery_response_bytes": 84843,
+      "discovery_response_bytes": 84848,
       "tool_count": 3,
       "tools": {
         "kitaru_activity_read": {
@@ -101,10 +101,10 @@
         },
         "kitaru_registry_read": {
           "$defs_count": 49,
-          "combined_bytes": 33461,
+          "combined_bytes": 33466,
           "input_bytes": 5706,
           "maximum_nesting_depth": 8,
-          "output_bytes": 27755
+          "output_bytes": 27760
         },
         "kitaru_review_read": {
           "$defs_count": 20,
@@ -116,7 +116,7 @@
       }
     },
     "standard": {
-      "discovery_response_bytes": 151513,
+      "discovery_response_bytes": 151518,
       "tool_count": 9,
       "tools": {
         "kitaru_activity_read": {
@@ -149,10 +149,10 @@
         },
         "kitaru_registry_read": {
           "$defs_count": 49,
-          "combined_bytes": 33461,
+          "combined_bytes": 33466,
           "input_bytes": 5706,
           "maximum_nesting_depth": 8,
-          "output_bytes": 27755
+          "output_bytes": 27760
         },
         "kitaru_review_manage": {
           "$defs_count": 30,

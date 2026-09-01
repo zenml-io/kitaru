@@ -18,7 +18,7 @@ import uuid
 import pytest
 
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
-from kitaru.server.domain.agent_version import ReplayCapabilities
+from kitaru.server.domain.agent_version import RuntimeCapabilities
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.replay_config import (
     EvaluatorConfig,
@@ -118,20 +118,20 @@ def test_check_capabilities_allows_override_and_tool_policy() -> None:
         )
     )
     config = _config(policy, override=ReplayOverride(model="gpt-5"))
-    config.check_capabilities(ReplayCapabilities())
+    config.check_capabilities(RuntimeCapabilities())
 
 
 def test_check_capabilities_rejects_an_override() -> None:
     """Reject an override when the capabilities exclude overrides."""
     config = _config(default_tool_policy(), override=ReplayOverride(model="gpt-5"))
     with pytest.raises(ValidationError, match="does not support replay overrides"):
-        config.check_capabilities(ReplayCapabilities(overrides=False))
+        config.check_capabilities(RuntimeCapabilities(overrides=False))
 
 
 def test_check_capabilities_allows_a_null_override() -> None:
     """Accept a config without an override when the capabilities exclude overrides."""
     config = _config(default_tool_policy())
-    config.check_capabilities(ReplayCapabilities(overrides=False))
+    config.check_capabilities(RuntimeCapabilities(overrides=False))
 
 
 def test_check_capabilities_rejects_a_non_passthrough_default() -> None:
@@ -143,7 +143,7 @@ def test_check_capabilities_rejects_a_non_passthrough_default() -> None:
     )
     config = _config(policy)
     with pytest.raises(ValidationError, match="does not support replay tool policies"):
-        config.check_capabilities(ReplayCapabilities(tool_policies=False))
+        config.check_capabilities(RuntimeCapabilities(tool_policies=False))
 
 
 def test_check_capabilities_rejects_a_non_passthrough_named_tool() -> None:
@@ -158,10 +158,10 @@ def test_check_capabilities_rejects_a_non_passthrough_named_tool() -> None:
     )
     config = _config(policy)
     with pytest.raises(ValidationError, match="does not support replay tool policies"):
-        config.check_capabilities(ReplayCapabilities(tool_policies=False))
+        config.check_capabilities(RuntimeCapabilities(tool_policies=False))
 
 
 def test_check_capabilities_allows_all_passthrough() -> None:
     """Accept an all-passthrough policy when the capabilities exclude policies."""
     config = _config(default_tool_policy())
-    config.check_capabilities(ReplayCapabilities(tool_policies=False))
+    config.check_capabilities(RuntimeCapabilities(tool_policies=False))

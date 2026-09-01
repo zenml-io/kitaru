@@ -41,14 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Added task hooks to the agent version run spec: `copy_workdir` runs the agent in a fresh copy of the working directory, `setup_command` runs a shell command in the working directory before the agent process, and `teardown_command` runs one after it based on the task outcome. Hooks run in the declared order before the agent process, and their teardowns run in reverse order after it.
 - Added Hypothesis property tests for the importer `parse()` contract, the MCP tool boundary, and credential redaction, plus a nightly `fuzz-nightly` workflow that runs them with a larger example budget and a cached example database.
 - Send an anonymous client analytics ID with requests, disable with `KITARU_DISABLE_CLIENT_ANALYTICS` or `DO_NOT_TRACK`.
-- Added replay capabilities to the agent version run spec: `overrides` and `tool_policies` declare whether the runtime can apply replay overrides and non-passthrough tool policies. Both default to true, and clients read them from the agent version response.
+- Added runtime capabilities to the agent version run spec: `overrides` and `tool_policies` declare whether the runtime can apply replay overrides and non-passthrough tool policies. Both default to true, and clients read them from the agent version response.
 
 ### Changed
 
 - The Vercel AI SDK adapter is now developed and tested against `ai` 7.0.85. The supported peer range is unchanged (`>=7.0.60 <8.0.0`).
 - `kitaru-pydantic-ai` now supports the PydanticAI 2.23 through 2.36 minor lines in addition to 2.14.1+, and the plugin workspace lockfile resolves `pydantic-ai-slim` 2.35.3 with `genai-prices` 0.1.4.
 - `kitaru-openai-agents` now supports the OpenAI Agents SDK 0.20, 0.21, and 0.22 minor lines in addition to 0.19.3+. The 0.21 line moved the OpenAI provider to `openai>=3.0.0,<4`, so the plugin workspace lockfile now resolves `openai-agents` 0.22.0 with `openai` 3.5.0.
-- Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's replay capabilities do not declare.
+- Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's runtime capabilities do not declare.
 - Importer-backed adapters now reject a replay config carrying an override or a non-passthrough tool policy with a RuntimeError before the wrapped function runs.
 - Updating a finished session now returns HTTP 409 for every field. Previously only a status change was rejected and the other fields stayed writable.
 - Creating evaluations for a session that is not finished is now rejected with HTTP 409 on every path. This covers evaluation batches, merging manual evaluations into a session, and replays and experiment runs that score baseline sessions.

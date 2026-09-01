@@ -59,8 +59,8 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionWithoutRunSpec,
-    ReplayCapabilities,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -119,7 +119,7 @@ async def _agent_version(
     services: ReplayServices,
     with_run_spec: bool = True,
     name: str = "assistant",
-    replay_capabilities: ReplayCapabilities | None = None,
+    runtime_capabilities: RuntimeCapabilities | None = None,
 ) -> AgentVersion:
     agent = await create_agent(services.agents, ACTOR.account.id, name=name)
     return await create_agent_version(
@@ -128,7 +128,7 @@ async def _agent_version(
         owner_id=ACTOR.account.id,
         run_spec=RunSpec(
             command="run.sh",
-            replay_capabilities=replay_capabilities or ReplayCapabilities(),
+            runtime_capabilities=runtime_capabilities or RuntimeCapabilities(),
         )
         if with_run_spec
         else None,
@@ -305,7 +305,7 @@ async def test_create_replay_rejects_an_override_outside_capabilities(
 ) -> None:
     """An override is rejected when the agent version does not support overrides."""
     agent_version = await _agent_version(
-        services, replay_capabilities=ReplayCapabilities(overrides=False)
+        services, runtime_capabilities=RuntimeCapabilities(overrides=False)
     )
     await _evaluator(services)
     baseline = await _session(services, agent_version)
@@ -326,7 +326,7 @@ async def test_create_replay_rejects_a_tool_policy_outside_capabilities(
 ) -> None:
     """A non-passthrough policy is rejected when the agent version excludes policies."""
     agent_version = await _agent_version(
-        services, replay_capabilities=ReplayCapabilities(tool_policies=False)
+        services, runtime_capabilities=RuntimeCapabilities(tool_policies=False)
     )
     await _evaluator(services)
     baseline = await _session(services, agent_version)

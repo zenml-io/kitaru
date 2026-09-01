@@ -19,8 +19,8 @@ from datetime import UTC, datetime
 from kitaru.api_models.v1.agent_version import (
     AgentCapabilities,
     AgentVersionUpdateRequest,
-    ReplayCapabilities,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.api_models.v1.hook import (
     CopyWorkdirHook,
@@ -41,10 +41,10 @@ from kitaru.server.domain.agent_version import (
     AgentCapabilities as DomainAgentCapabilities,
 )
 from kitaru.server.domain.agent_version import AgentVersion
-from kitaru.server.domain.agent_version import (
-    ReplayCapabilities as DomainReplayCapabilities,
-)
 from kitaru.server.domain.agent_version import RunSpec as DomainRunSpec
+from kitaru.server.domain.agent_version import (
+    RuntimeCapabilities as DomainRuntimeCapabilities,
+)
 from kitaru.server.domain.hook import (
     CopyWorkdirHook as DomainCopyWorkdirHook,
 )
@@ -135,33 +135,33 @@ def test_agent_version_response_carries_run_spec_hooks() -> None:
     ]
 
 
-def test_run_spec_replay_capabilities_convert_to_domain() -> None:
-    """Convert declared and omitted replay capabilities to domain value objects."""
+def test_run_spec_runtime_capabilities_convert_to_domain() -> None:
+    """Convert declared and omitted runtime capabilities to domain value objects."""
     declared = run_spec_to_domain(
         RunSpec(
             command="run.sh",
-            replay_capabilities=ReplayCapabilities(
+            runtime_capabilities=RuntimeCapabilities(
                 overrides=False, tool_policies=False
             ),
         )
     )
     omitted = run_spec_to_domain(RunSpec(command="run.sh"))
 
-    assert declared.replay_capabilities == DomainReplayCapabilities(
+    assert declared.runtime_capabilities == DomainRuntimeCapabilities(
         overrides=False, tool_policies=False
     )
-    assert omitted.replay_capabilities == DomainReplayCapabilities()
+    assert omitted.runtime_capabilities == DomainRuntimeCapabilities()
 
 
-def test_agent_version_response_carries_run_spec_replay_capabilities() -> None:
-    """Convert a stored run spec's replay capabilities back to their wire values."""
+def test_agent_version_response_carries_run_spec_runtime_capabilities() -> None:
+    """Convert a stored run spec's runtime capabilities back to their wire values."""
     now = datetime.now(UTC)
     version = AgentVersion(
         owner_id=uuid.uuid4(),
         agent_id=uuid.uuid4(),
         run_spec=DomainRunSpec(
             command="run.sh",
-            replay_capabilities=DomainReplayCapabilities(
+            runtime_capabilities=DomainRuntimeCapabilities(
                 overrides=False, tool_policies=True
             ),
         ),
@@ -172,7 +172,7 @@ def test_agent_version_response_carries_run_spec_replay_capabilities() -> None:
     response = agent_version_to_response(version)
 
     assert response.run_spec is not None
-    assert response.run_spec.replay_capabilities == ReplayCapabilities(
+    assert response.run_spec.runtime_capabilities == RuntimeCapabilities(
         overrides=False, tool_policies=True
     )
 

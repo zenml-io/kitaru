@@ -1586,7 +1586,7 @@ export interface paths {
          *     and 422 when the cohort version has no sessions, the cohort version or
          *     agent version belongs to another agent, the resolved agent version has
          *     no run spec, or the config carries an override or tool policy the
-         *     agent version's replay capabilities do not declare.
+         *     agent version's runtime capabilities do not declare.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2284,7 +2284,7 @@ export interface paths {
          *     finished, and 422 when the baseline session carries no agent version
          *     and none was given, the resolved agent version has no run spec, the
          *     tool policy uses cohort-version-scoped history, the config carries an
-         *     override or tool policy the agent version's replay capabilities do
+         *     override or tool policy the agent version's runtime capabilities do
          *     not declare, or an evaluator version repeats.
          *
          *     Args:
@@ -6425,24 +6425,6 @@ export interface components {
             sha256: string;
         };
         /**
-         * ReplayCapabilities
-         * @description Replay capabilities.
-         */
-        ReplayCapabilities: {
-            /**
-             * Overrides
-             * @description Whether the runtime can apply replay overrides.
-             * @default true
-             */
-            overrides: boolean;
-            /**
-             * Tool Policies
-             * @description Whether the runtime can apply non-passthrough tool policies.
-             * @default true
-             */
-            tool_policies: boolean;
-        };
-        /**
          * ReplayCreateRequest
          * @description Replay create request.
          */
@@ -6613,7 +6595,7 @@ export interface components {
              * @description Hooks run around the task process.
              */
             hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
-            replay_capabilities?: components["schemas"]["ReplayCapabilities"];
+            runtime_capabilities?: components["schemas"]["RuntimeCapabilities"];
             /**
              * Secret Ids
              * @description Secrets merged into the process environment.
@@ -6630,6 +6612,24 @@ export interface components {
              * @description Working directory.
              */
             working_dir?: string | null;
+        };
+        /**
+         * RuntimeCapabilities
+         * @description Runtime capabilities.
+         */
+        RuntimeCapabilities: {
+            /**
+             * Overrides
+             * @description Whether the runtime can apply replay overrides.
+             * @default true
+             */
+            overrides: boolean;
+            /**
+             * Tool Policies
+             * @description Whether the runtime can apply non-passthrough tool policies.
+             * @default true
+             */
+            tool_policies: boolean;
         };
         /**
          * SampleDataCreateRequest

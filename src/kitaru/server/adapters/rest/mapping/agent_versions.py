@@ -24,10 +24,10 @@ from kitaru.api_models.v1.agent_version import (
     AgentVersionResponse,
     AgentVersionUpdateRequest,
 )
-from kitaru.api_models.v1.agent_version import (
-    ReplayCapabilities as WireReplayCapabilities,
-)
 from kitaru.api_models.v1.agent_version import RunSpec as WireRunSpec
+from kitaru.api_models.v1.agent_version import (
+    RuntimeCapabilities as WireRuntimeCapabilities,
+)
 from kitaru.server.adapters.rest.mapping.filtering import filter_to_expression
 from kitaru.server.adapters.rest.mapping.hooks import hook_to_domain, hook_to_response
 from kitaru.server.application.models.agent_version import (
@@ -37,42 +37,42 @@ from kitaru.server.application.models.agent_version import (
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
-    ReplayCapabilities,
     RunSpec,
+    RuntimeCapabilities,
 )
 
 
-def _replay_capabilities_to_domain(
-    replay_capabilities: WireReplayCapabilities,
-) -> ReplayCapabilities:
-    """Convert wire replay capabilities to their domain value object.
+def _runtime_capabilities_to_domain(
+    runtime_capabilities: WireRuntimeCapabilities,
+) -> RuntimeCapabilities:
+    """Convert wire runtime capabilities to their domain value object.
 
     Args:
-        replay_capabilities: Wire replay capabilities.
+        runtime_capabilities: Wire runtime capabilities.
 
     Returns:
-        Domain replay capabilities.
+        Domain runtime capabilities.
     """
-    return ReplayCapabilities(
-        overrides=replay_capabilities.overrides,
-        tool_policies=replay_capabilities.tool_policies,
+    return RuntimeCapabilities(
+        overrides=runtime_capabilities.overrides,
+        tool_policies=runtime_capabilities.tool_policies,
     )
 
 
-def _replay_capabilities_to_response(
-    replay_capabilities: ReplayCapabilities,
-) -> WireReplayCapabilities:
-    """Convert domain replay capabilities to their wire value object.
+def _runtime_capabilities_to_response(
+    runtime_capabilities: RuntimeCapabilities,
+) -> WireRuntimeCapabilities:
+    """Convert domain runtime capabilities to their wire value object.
 
     Args:
-        replay_capabilities: Domain replay capabilities.
+        runtime_capabilities: Domain runtime capabilities.
 
     Returns:
-        Wire replay capabilities.
+        Wire runtime capabilities.
     """
-    return WireReplayCapabilities(
-        overrides=replay_capabilities.overrides,
-        tool_policies=replay_capabilities.tool_policies,
+    return WireRuntimeCapabilities(
+        overrides=runtime_capabilities.overrides,
+        tool_policies=runtime_capabilities.tool_policies,
     )
 
 
@@ -91,8 +91,8 @@ def run_spec_to_domain(run_spec: WireRunSpec) -> RunSpec:
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         hooks=[hook_to_domain(hook) for hook in run_spec.hooks],
-        replay_capabilities=_replay_capabilities_to_domain(
-            run_spec.replay_capabilities
+        runtime_capabilities=_runtime_capabilities_to_domain(
+            run_spec.runtime_capabilities
         ),
         timeout_seconds=run_spec.timeout_seconds,
     )
@@ -113,8 +113,8 @@ def _run_spec_to_response(run_spec: RunSpec) -> WireRunSpec:
         env=run_spec.env,
         secret_ids=run_spec.secret_ids,
         hooks=[hook_to_response(hook) for hook in run_spec.hooks],
-        replay_capabilities=_replay_capabilities_to_response(
-            run_spec.replay_capabilities
+        runtime_capabilities=_runtime_capabilities_to_response(
+            run_spec.runtime_capabilities
         ),
         timeout_seconds=run_spec.timeout_seconds,
     )

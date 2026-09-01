@@ -22,8 +22,8 @@ from kitaru.api_models.v1.filter import FilterableListParams
 from kitaru.api_models.v1.hook import TaskHook
 
 
-class ReplayCapabilities(RequestModel):
-    """Replay capabilities."""
+class RuntimeCapabilities(RequestModel):
+    """Runtime capabilities."""
 
     overrides: bool = Field(
         default=True, description="Whether the runtime can apply replay overrides."
@@ -48,8 +48,8 @@ class RunSpec(RequestModel):
     hooks: list[TaskHook] = Field(
         default_factory=list, description="Hooks run around the task process."
     )
-    replay_capabilities: ReplayCapabilities = Field(
-        default_factory=ReplayCapabilities, description="Replay capabilities."
+    runtime_capabilities: RuntimeCapabilities = Field(
+        default_factory=RuntimeCapabilities, description="Runtime capabilities."
     )
     timeout_seconds: PositiveInt = Field(default=3600, description="Process timeout.")
 

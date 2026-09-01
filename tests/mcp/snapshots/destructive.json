@@ -1531,26 +1531,6 @@
           "title": "PassthroughConfig",
           "type": "object"
         },
-        "ReplayCapabilities": {
-          "additionalProperties": false,
-          "description": "Replay capabilities.",
-          "properties": {
-            "overrides": {
-              "default": true,
-              "description": "Whether the runtime can apply replay overrides.",
-              "title": "Overrides",
-              "type": "boolean"
-            },
-            "tool_policies": {
-              "default": true,
-              "description": "Whether the runtime can apply non-passthrough tool policies.",
-              "title": "Tool Policies",
-              "type": "boolean"
-            }
-          },
-          "title": "ReplayCapabilities",
-          "type": "object"
-        },
         "ReplayOverride": {
           "additionalProperties": false,
           "description": "Replay override.",
@@ -1661,8 +1641,8 @@
               "title": "Hooks",
               "type": "array"
             },
-            "replay_capabilities": {
-              "$ref": "#/$defs/ReplayCapabilities"
+            "runtime_capabilities": {
+              "$ref": "#/$defs/RuntimeCapabilities"
             },
             "secret_ids": {
               "description": "Secrets merged into the process environment.",
@@ -1698,6 +1678,26 @@
             "command"
           ],
           "title": "RunSpec",
+          "type": "object"
+        },
+        "RuntimeCapabilities": {
+          "additionalProperties": false,
+          "description": "Runtime capabilities.",
+          "properties": {
+            "overrides": {
+              "default": true,
+              "description": "Whether the runtime can apply replay overrides.",
+              "title": "Overrides",
+              "type": "boolean"
+            },
+            "tool_policies": {
+              "default": true,
+              "description": "Whether the runtime can apply non-passthrough tool policies.",
+              "title": "Tool Policies",
+              "type": "boolean"
+            }
+          },
+          "title": "RuntimeCapabilities",
           "type": "object"
         },
         "ScriptPluginSource": {

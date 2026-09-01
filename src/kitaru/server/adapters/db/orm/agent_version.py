@@ -34,8 +34,8 @@ from kitaru.server.adapters.db.orm.orm_utils import (
 from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
-    ReplayCapabilities,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.server.domain.hook import TaskHook
 
@@ -80,7 +80,7 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     run_hooks: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSONB(none_as_null=True)
     )
-    run_replay_capabilities: Mapped[dict[str, bool] | None] = mapped_column(
+    run_runtime_capabilities: Mapped[dict[str, bool] | None] = mapped_column(
         JSONB(none_as_null=True)
     )
     run_timeout_seconds: Mapped[int | None]
@@ -116,8 +116,8 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 if run_spec is not None
                 else None
             ),
-            run_replay_capabilities=(
-                run_spec.replay_capabilities.model_dump(mode="json")
+            run_runtime_capabilities=(
+                run_spec.runtime_capabilities.model_dump(mode="json")
                 if run_spec is not None
                 else None
             ),
@@ -149,10 +149,10 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                     if self.run_hooks is not None
                     else []
                 ),
-                replay_capabilities=(
-                    ReplayCapabilities(**self.run_replay_capabilities)
-                    if self.run_replay_capabilities is not None
-                    else ReplayCapabilities()
+                runtime_capabilities=(
+                    RuntimeCapabilities(**self.run_runtime_capabilities)
+                    if self.run_runtime_capabilities is not None
+                    else RuntimeCapabilities()
                 ),
                 timeout_seconds=self.run_timeout_seconds,
             )

@@ -241,7 +241,7 @@ PUBLIC_API: dict[str, ModuleSpec] = {
                 "AgentVersionResponse",
                 "RunSpec",
                 "AgentCapabilities",
-                "ReplayCapabilities",
+                "RuntimeCapabilities",
             }
         ),
     ),

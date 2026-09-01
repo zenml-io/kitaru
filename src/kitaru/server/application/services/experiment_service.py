@@ -427,7 +427,7 @@ class ExperimentService:
             ValidationError: The cohort version has no sessions, belongs to
                 a cohort of another agent, the resolved agent version has no
                 run spec, or the config carries an override or tool policy
-                the agent version's replay capabilities do not declare.
+                the agent version's runtime capabilities do not declare.
             SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
                 ``NONE`` and a cohort version session is in progress.
             AgentVersionNotFound: No agent version has the given id.
@@ -457,7 +457,7 @@ class ExperimentService:
         config = await self._repository.get_replay_config(experiment.replay_config_id)
         run_spec = agent_version.run_spec
         assert run_spec is not None
-        config.check_capabilities(run_spec.replay_capabilities)
+        config.check_capabilities(run_spec.runtime_capabilities)
         sessions = await self._resolve_cohort_version_sessions(cohort_version.id)
 
         number = await self._experiment_runs.get_max_number(experiment_id) + 1
