@@ -52,14 +52,22 @@ class FakeClient:
         self.close_count = 0
         self.task_inputs: Any = "task input"
         self.replay: Any = None
+        self.tool_lookup_requests: list[Any] = []
+        self.tool_lookup_responses: list[Any] = []
         self.tasks = SimpleNamespace(get_spec=self._get_task)
-        self.replays = SimpleNamespace(get=self._get_replay)
+        self.replays = SimpleNamespace(
+            get=self._get_replay, tool_lookup=self._tool_lookup
+        )
 
     async def _get_task(self, _: uuid.UUID) -> Any:
         return SimpleNamespace(details=AgentTaskDetails(inputs=self.task_inputs))
 
     async def _get_replay(self, _: uuid.UUID) -> Any:
         return self.replay
+
+    async def _tool_lookup(self, _: uuid.UUID, request: Any) -> Any:
+        self.tool_lookup_requests.append(request)
+        return self.tool_lookup_responses.pop(0)
 
     async def close(self) -> None:
         self.close_count += 1

@@ -4,8 +4,11 @@
 """Public capability errors for the Claude Agent SDK adapter."""
 
 import uuid
+from collections.abc import Iterable
+from dataclasses import dataclass
+from typing import Any
 
-from claude_agent_sdk import ResultMessage
+from claude_agent_sdk import ResultMessage, SdkMcpTool
 
 
 class KitaruRecordingError(RuntimeError):
@@ -34,4 +37,38 @@ class UnsupportedReplayError(ValueError):
     """Reject a replay request that the public Claude boundary cannot enforce."""
 
 
-__all__ = ["KitaruRecordingError", "UnsupportedReplayError"]
+class ToolPolicyError(RuntimeError):
+    """Reject a tool replay policy that cannot be applied safely."""
+
+
+class ToolPolicyMissError(ToolPolicyError):
+    """Report a fail-closed static or history lookup miss."""
+
+
+@dataclass(frozen=True)
+class ReplayableSdkMcpServer:
+    """Immutable definition used to materialize one fresh server per query."""
+
+    name: str
+    version: str
+    tools: tuple[SdkMcpTool[Any], ...]
+
+
+def replayable_sdk_mcp_server(
+    *,
+    name: str,
+    tools: Iterable[SdkMcpTool[Any]],
+    version: str = "1.0.0",
+) -> ReplayableSdkMcpServer:
+    """Define public SDK MCP tools that Kitaru may replay."""
+    return ReplayableSdkMcpServer(name=name, version=version, tools=tuple(tools))
+
+
+__all__ = [
+    "KitaruRecordingError",
+    "ReplayableSdkMcpServer",
+    "ToolPolicyError",
+    "ToolPolicyMissError",
+    "UnsupportedReplayError",
+    "replayable_sdk_mcp_server",
+]

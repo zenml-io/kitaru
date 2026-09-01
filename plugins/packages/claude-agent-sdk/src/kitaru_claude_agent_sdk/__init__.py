@@ -15,7 +15,14 @@
 
 from importlib.metadata import version
 
-from .capability import KitaruRecordingError, UnsupportedReplayError
+from .capability import (
+    KitaruRecordingError,
+    ReplayableSdkMcpServer,
+    ToolPolicyError,
+    ToolPolicyMissError,
+    UnsupportedReplayError,
+    replayable_sdk_mcp_server,
+)
 from .recording import InvocationRecorder
 from .runner import KitaruClaudeRunner
 
@@ -26,5 +33,9 @@ __all__ = [
     "InvocationRecorder",
     "KitaruClaudeRunner",
     "KitaruRecordingError",
+    "ReplayableSdkMcpServer",
+    "ToolPolicyError",
+    "ToolPolicyMissError",
     "UnsupportedReplayError",
+    "replayable_sdk_mcp_server",
 ]

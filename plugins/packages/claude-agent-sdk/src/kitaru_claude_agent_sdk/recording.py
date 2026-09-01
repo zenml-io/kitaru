@@ -44,9 +44,11 @@ from kitaru.api_models.v1.session_node import (
     SessionNodeCreateRequest,
 )
 from kitaru.api_models.v1.task import AgentTaskDetails
+from kitaru.cache_keys import compute_tool_cache_key
 from kitaru.client import KitaruAPIClient
 
 from .capability import KitaruRecordingError
+from .codec import encode_tool_result
 
 ADAPTER_VERSION = version("kitaru-claude-agent-sdk")
 FRAMEWORK = "claude-agent-sdk"
@@ -197,12 +199,14 @@ class InvocationRecorder:
     started_at: datetime
     captured_inputs: Any
     safe_options: dict[str, Any]
+    replayable_tool_names: frozenset[str] = frozenset()
     next_index: int = 1
     closed: bool = False
     finalized: bool = False
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _message_indexes: dict[str, int] = field(default_factory=dict, repr=False)
     _tool_indexes: dict[str, int] = field(default_factory=dict, repr=False)
+    _tool_cache_keys: dict[str, str] = field(default_factory=dict, repr=False)
     _tool_nodes: dict[str, SessionNodeCreateRequest] = field(
         default_factory=dict, repr=False
     )
@@ -211,6 +215,9 @@ class InvocationRecorder:
         default_factory=dict, repr=False
     )
     _hook_events: dict[str, list[str]] = field(default_factory=dict, repr=False)
+    _tool_policy_events: dict[str, list[dict[str, Any]]] = field(
+        default_factory=dict, repr=False
+    )
 
     @classmethod
     async def start(
@@ -223,6 +230,7 @@ class InvocationRecorder:
         session_name: str | None,
         replay: bool,
         safe_options: Mapping[str, Any] | None = None,
+        replayable_tool_names: frozenset[str] = frozenset(),
     ) -> "InvocationRecorder":
         """Create the session and root before Claude execution starts."""
         started_at = datetime.now(UTC)
@@ -253,6 +261,7 @@ class InvocationRecorder:
             started_at=started_at,
             captured_inputs=captured_inputs,
             safe_options=selected_options,
+            replayable_tool_names=replayable_tool_names,
         )
         await recorder._persist(
             SessionNodeCreateRequest(
@@ -329,10 +338,48 @@ class InvocationRecorder:
                 self._tool_nodes[tool_id] = node
             else:
                 node = node.model_copy(
-                    update={"attributes": {"hook_events": list(events)}}
+                    update={
+                        "attributes": {
+                            **cast(dict[str, Any], node.attributes),
+                            "hook_events": list(events),
+                        }
+                    }
                 )
                 self._tool_nodes[tool_id] = node
             await self._persist(node)
+
+    async def record_tool_policy(
+        self,
+        *,
+        tool_name: str,
+        arguments: dict[str, Any],
+        policy: str,
+        live: bool,
+    ) -> None:
+        """Mark one wrapped call as substituted or as a live side effect."""
+        cache_key = compute_tool_cache_key(tool_name, arguments)
+        if cache_key is None:
+            return
+        event = {"policy": policy, "live": live}
+        async with self.lock:
+            for tool_id, node in self._tool_nodes.items():
+                if (
+                    node.tool_name == tool_name
+                    and self._tool_cache_keys.get(tool_id) == cache_key
+                    and "replay" not in node.attributes
+                ):
+                    updated = node.model_copy(
+                        update={
+                            "attributes": {
+                                **cast(dict[str, Any], node.attributes),
+                                "replay": event,
+                            }
+                        }
+                    )
+                    self._tool_nodes[tool_id] = updated
+                    await self._persist(updated)
+                    return
+            self._tool_policy_events.setdefault(cache_key, []).append(event)
 
     async def finalize(
         self,
@@ -464,6 +511,18 @@ class InvocationRecorder:
             )
 
     async def _record_tool_use(self, block: ToolUseBlock, parent_index: int) -> None:
+        cache_key = compute_tool_cache_key(block.name, block.input)
+        if cache_key is not None:
+            self._tool_cache_keys[block.id] = cache_key
+        policy_events = (
+            self._tool_policy_events.get(cache_key, []) if cache_key is not None else []
+        )
+        replay_event = policy_events.pop(0) if policy_events else None
+        attributes: dict[str, Any] = {
+            "hook_events": list(self._hook_events.get(block.id, []))
+        }
+        if replay_event is not None:
+            attributes["replay"] = replay_event
         node = self._tool_nodes.get(block.id)
         if node is None:
             node = self._new_node(
@@ -475,7 +534,7 @@ class InvocationRecorder:
                 inputs=_capture(block.input),
                 outputs=None,
                 tool_name=block.name,
-                attributes={"hook_events": list(self._hook_events.get(block.id, []))},
+                attributes=attributes,
             )
             self._tool_indexes[block.id] = node.index
         else:
@@ -485,7 +544,8 @@ class InvocationRecorder:
                     "inputs": _capture(block.input),
                     "tool_name": block.name,
                     "attributes": {
-                        "hook_events": list(self._hook_events.get(block.id, []))
+                        **cast(dict[str, Any], node.attributes),
+                        **attributes,
                     },
                 }
             )
@@ -494,6 +554,17 @@ class InvocationRecorder:
 
     async def _record_tool_result(self, block: ToolResultBlock) -> None:
         node = self._tool_nodes.get(block.tool_use_id)
+        tool_name = node.tool_name if node is not None else None
+        outputs = _capture(block.content)
+        if tool_name in self.replayable_tool_names:
+            content = (
+                [{"type": "text", "text": block.content}]
+                if isinstance(block.content, str)
+                else block.content
+            )
+            outputs = encode_tool_result(
+                {"content": content, "is_error": bool(block.is_error)}
+            )
         if node is None:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
@@ -502,7 +573,7 @@ class InvocationRecorder:
                 external_id=block.tool_use_id,
                 status=(NodeStatus.FAILED if block.is_error else NodeStatus.COMPLETED),
                 inputs=None,
-                outputs=_capture(block.content),
+                outputs=outputs,
                 tool_name=None,
                 error="Claude tool result reported an error"
                 if block.is_error
@@ -522,7 +593,7 @@ class InvocationRecorder:
                         else None
                     ),
                     "ended_at": datetime.now(UTC),
-                    "outputs": _capture(block.content),
+                    "outputs": outputs,
                 }
             )
         self._tool_nodes[block.tool_use_id] = node
