@@ -48,6 +48,14 @@ class IdempotencyKeyMismatch(ValidationError):
         super().__init__("Idempotency-Key was already used with a different request")
 
 
+class IdempotencyKeyResponseUndecryptable(ConflictError):
+    """Raised when a stored idempotency response body cannot be decrypted."""
+
+    def __init__(self) -> None:
+        """Initialize the error."""
+        super().__init__("Idempotency-Key stored response cannot be decrypted")
+
+
 class IdempotencyKey(DomainModel):
     """Idempotency key."""
 
