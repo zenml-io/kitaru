@@ -358,6 +358,6 @@ async def test_device_authorization_under_none_scheme(
         response = await client.post("/api/v1/device_authorization", data={})
     assert response.status_code == 400
     assert response.json() == {
-        "error": "invalid_request",
+        "error": "unsupported_grant_type",
         "detail": "This server does not authenticate requests.",
     }

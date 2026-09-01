@@ -212,7 +212,7 @@ async def device_authorization(
     """
     if settings.AUTH_SCHEME is AuthScheme.NONE:
         raise TokenGrantError(
-            TokenErrorCode.INVALID_REQUEST,
+            TokenErrorCode.UNSUPPORTED_GRANT_TYPE,
             "This server does not authenticate requests.",
         )
     fingerprint = DeviceFingerprint(
