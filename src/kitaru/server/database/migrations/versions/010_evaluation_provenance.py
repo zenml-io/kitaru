@@ -28,7 +28,6 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 from kitaru.server.adapters.db.orm.evaluation import (
-    EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY,
     EVALUATION_SESSION_ID_EVALUATOR_VERSION_ID_PARAMS_HASH_INDEX,
     EVALUATION_SESSION_ID_NAME_UNIQUE_INDEX,
 )
@@ -241,7 +240,7 @@ def upgrade() -> None:
             postgresql_where=sa.text("evaluator_version_id IS NULL"),
         )
         batch_op.drop_constraint(
-            EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY, type_="foreignkey"
+            "fk_evaluation_evaluator_version_id", type_="foreignkey"
         )
         batch_op.create_index(
             EVALUATION_SESSION_ID_EVALUATOR_VERSION_ID_PARAMS_HASH_INDEX,

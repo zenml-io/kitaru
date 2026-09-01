@@ -47,10 +47,6 @@ from kitaru.server.domain.names import MAX_NAME_LENGTH
 DATA_TYPE_LENGTH = 16
 
 EVALUATION_OWNER_ID_FOREIGN_KEY = foreign_key_name("evaluation", ["owner_id"])
-# No longer a live constraint, kept for the migration that drops it.
-EVALUATION_EVALUATOR_VERSION_ID_FOREIGN_KEY = foreign_key_name(
-    "evaluation", ["evaluator_version_id"]
-)
 EVALUATION_SESSION_ID_FOREIGN_KEY = foreign_key_name("evaluation", ["session_id"])
 EVALUATION_TASK_ID_FOREIGN_KEY = foreign_key_name("evaluation", ["task_id"])
 EVALUATION_TASK_ID_NAME_UNIQUE_CONSTRAINT = unique_constraint_name(
