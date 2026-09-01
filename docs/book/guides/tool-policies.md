@@ -39,6 +39,8 @@ A policy belongs to a replay or an [experiment](../concepts/experiments.md). The
 
 {% hint style="info" %} The OpenAI Agents adapter does not support a `history` default. Keep its default as `passthrough` and add a named `history` override for each direct function tool you want to replay. See the [OpenAI Agents adapter page](../adapters/openai-agents.md). {% endhint %}
 
+Anything beyond `passthrough` needs a runtime that can intercept tool calls. A replay or experiment run with a non-passthrough policy is rejected when the agent version does not declare the `tool_policies` [runtime capability](../concepts/agents-and-sessions.md).
+
 ## The four policies
 
 ### `history`: use a recorded result
