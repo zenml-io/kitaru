@@ -34,6 +34,7 @@ from kitaru.api_models.v1.auth import (
     TokenErrorResponse,
     TokenResponse,
 )
+from kitaru.api_models.v1.base import PlainStr
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
@@ -181,10 +182,10 @@ async def device_authorization(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
     service: Annotated[DeviceService, Depends(get_device_service)],
-    hostname: Annotated[str | None, Form()] = None,
-    os: Annotated[str | None, Form()] = None,
-    python_version: Annotated[str | None, Form()] = None,
-    client_version: Annotated[str | None, Form()] = None,
+    hostname: Annotated[PlainStr | None, Form()] = None,
+    os: Annotated[PlainStr | None, Form()] = None,
+    python_version: Annotated[PlainStr | None, Form()] = None,
+    client_version: Annotated[PlainStr | None, Form()] = None,
 ) -> DeviceAuthorizationResponse:
     """Start a device authorization and receive its codes.
 

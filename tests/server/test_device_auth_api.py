@@ -196,6 +196,26 @@ async def test_device_authorization_returns_codes(client: httpx.AsyncClient) -> 
     assert body["interval"] > 0
 
 
+async def test_device_authorization_rejects_nul_byte(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for a NUL byte in a device fingerprint field."""
+    response = await client.post(
+        "/api/v1/device_authorization", data={"python_version": "3.14\x00"}
+    )
+    assert response.status_code == 422
+
+
+async def test_device_authorization_accepts_non_ascii(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 200 for a non-ASCII device fingerprint field."""
+    response = await client.post(
+        "/api/v1/device_authorization", data={"python_version": "3.14☃"}
+    )
+    assert response.status_code == 200
+
+
 async def test_poll_before_verification_is_pending(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 with authorization_pending before an account confirms."""
     authorization = (await client.post("/api/v1/device_authorization", data={})).json()
