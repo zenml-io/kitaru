@@ -254,6 +254,7 @@ Use the package directory and distribution name from this table:
 | Package input | Distribution | Tag format |
 |---|---|---|
 | `braintrust-importer` | `kitaru-braintrust-importer` | `braintrust-importer-vX.Y.Z` |
+| `claude-agent-sdk` | `kitaru-claude-agent-sdk` | `python/kitaru-claude-agent-sdk/vX.Y.Z` |
 | `evaluator` | `kitaru-evaluator` | `evaluator-vX.Y.Z` |
 | `jsonl-importer` | `kitaru-jsonl-importer` | `jsonl-importer-vX.Y.Z` |
 | `langfuse-importer` | `kitaru-langfuse-importer` | `langfuse-importer-vX.Y.Z` |

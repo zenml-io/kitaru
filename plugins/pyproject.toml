@@ -1,11 +1,13 @@
 [tool.uv]
 exclude-newer = "3 days"
+exclude-newer-package = { claude-agent-sdk = "2026-09-01" }
 
 [tool.uv.workspace]
 members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-claude-agent-sdk = { workspace = true }
 kitaru-langgraph = { workspace = true }
 kitaru-openai-agents = { workspace = true }
 kitaru-pydantic-ai = { workspace = true }
@@ -13,6 +15,7 @@ kitaru-pydantic-ai = { workspace = true }
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "kitaru-claude-agent-sdk",
     "kitaru-langgraph[deepagents]",
     "kitaru-openai-agents",
     "kitaru-pydantic-ai[openai]",
@@ -37,6 +40,7 @@ convention = "google"
 [tool.ruff.lint.isort]
 known-first-party = [
     "kitaru",
+    "kitaru_claude_agent_sdk",
     "kitaru_evaluator",
     "kitaru_braintrust_importer",
     "kitaru_jsonl_importer",

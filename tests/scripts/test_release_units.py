@@ -26,6 +26,7 @@ INVENTORY_PATH = REPO_ROOT / "release" / "release-units.toml"
 EXPECTED_UNITS = {
     "kitaru": "kitaru",
     "braintrust-importer": "kitaru-braintrust-importer",
+    "claude-agent-sdk": "kitaru-claude-agent-sdk",
     "evaluator": "kitaru-evaluator",
     "jsonl-importer": "kitaru-jsonl-importer",
     "langfuse-importer": "kitaru-langfuse-importer",
@@ -116,7 +117,7 @@ def core_release_repo(
     return tmp_path, version
 
 
-def test_inventory_describes_core_and_ten_plugin_distributions() -> None:
+def test_inventory_describes_core_and_eleven_plugin_distributions() -> None:
     inventory = load_inventory()
 
     assert {unit.slug: unit.distribution for unit in inventory.units} == EXPECTED_UNITS
@@ -828,7 +829,7 @@ def _run_cli(*arguments: str) -> subprocess.CompletedProcess[str]:
     [
         (["list"], "SLUG\tDISTRIBUTION\tVERSION\tDEFAULT\tTAG"),
         (["resolve", "--unit", "kitaru"], "python/kitaru/v"),
-        (["validate"], "Validated 11 release units."),
+        (["validate"], "Validated 12 release units."),
         (
             [
                 "propose-core-version",

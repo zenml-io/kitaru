@@ -68,6 +68,21 @@ maintenance-branch-prefix = "release/braintrust/"
 checks = ["plugin package (braintrust-importer)"]
 
 [[units]]
+slug = "claude-agent-sdk"
+path = "plugins/packages/claude-agent-sdk"
+distribution = "kitaru-claude-agent-sdk"
+registry = "pypi"
+version-source = "plugins/packages/claude-agent-sdk/pyproject.toml"
+changelog = "plugins/packages/claude-agent-sdk/CHANGELOG.md"
+lock-source = "plugins/uv.lock"
+default-catalog = false
+release-label = "requires:plugin:claude-agent-sdk"
+impact-paths = ["plugins/packages/claude-agent-sdk/**"]
+tag-prefix = "python/kitaru-claude-agent-sdk/v"
+maintenance-branch-prefix = "release/claude-agent-sdk/"
+checks = ["plugin package (claude-agent-sdk)"]
+
+[[units]]
 slug = "evaluator"
 path = "plugins/packages/evaluator"
 distribution = "kitaru-evaluator"
