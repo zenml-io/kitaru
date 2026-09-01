@@ -13,8 +13,8 @@
 #  permissions and limitations under the License.
 """Agent version runtime capabilities Alembic revision.
 
-Revision ID: 010_agent_runtime_capabilities
-Revises: 009_agent_version_run_hooks
+Revision ID: 011_agent_runtime_capabilities
+Revises: 010_evaluation_provenance
 Create Date: 2026-08-31
 
 """
@@ -24,8 +24,8 @@ from alembic import op
 from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
-revision = "010_agent_runtime_capabilities"
-down_revision = "009_agent_version_run_hooks"
+revision = "011_agent_runtime_capabilities"
+down_revision = "010_evaluation_provenance"
 branch_labels = None
 depends_on = None
 
