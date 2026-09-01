@@ -46,34 +46,12 @@ pytestmark = pytest.mark.skipif(
 
 SPEC_PATH = Path(__file__).parents[2] / "openapi" / "openapi.json"
 
-# Operations with a filed, reproduced defect. The fuzzer's job is to surface
-# what is not yet known, so a crash already on the tracker would otherwise
-# mask everything behind it in the same operation. Delete an entry as part of
-# closing its issue; the run then covers the operation again.
-KNOWN_FAILURES: dict[tuple[str, str], str] = {
-    ("POST", "/api/v1/device_authorization"): "#927 NUL byte reaches PostgreSQL",
-    ("POST", "/api/v1/login"): "#927 NUL byte reaches PostgreSQL",
-    ("POST", "/api/v1/imports"): "#927 NUL byte reaches PostgreSQL",
-    ("POST", "/api/v1/importers"): "#927 NUL byte reaches PostgreSQL",
-    (
-        "GET",
-        "/api/v1/evaluators/{evaluator_id}/versions/{version}",
-    ): "#928 int32 overflow",
-    (
-        "PATCH",
-        "/api/v1/evaluators/{evaluator_id}/versions/{version}",
-    ): "#928 int32 overflow",
-    (
-        "GET",
-        "/api/v1/importers/{importer_id}/versions/{version}",
-    ): "#928 int32 overflow",
-    (
-        "PATCH",
-        "/api/v1/importers/{importer_id}/versions/{version}",
-    ): "#928 int32 overflow",
-    ("POST", "/api/v1/api-keys"): "#931 idempotency key decryption",
-    ("POST", "/api/v1/api-keys/{api_key_id}/rotate"): "#931 idempotency key decryption",
-}
+# Operations with a filed, reproduced defect, mapped to the issue that owns
+# them. The fuzzer's job is to surface what is not yet known, so a crash
+# already on the tracker would otherwise mask everything behind it in the same
+# operation. Delete an entry as part of closing its issue; the run then covers
+# the operation again. Empty is the healthy state: every operation is covered.
+KNOWN_FAILURES: dict[tuple[str, str], str] = {}
 
 # Derandomized runs replay the same inputs every time, which is what a
 # reproducible gate wants. Nightly exploration wants fresh inputs instead.
