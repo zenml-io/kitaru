@@ -65,7 +65,7 @@ from kitaru.server.application.services.replay_service import ReplayService
 from kitaru.server.application.services.sample_data_seeding import SampleDataSeeder
 from kitaru.server.application.services.session_service import SessionService
 from kitaru.server.domain.evaluation import Evaluation
-from kitaru.server.filtering import MAX_FILTER_IN_VALUES, AndExpression, FilterCondition
+from kitaru.server.filtering import MAX_FILTER_IN_VALUES, FilterCondition
 from kitaru.server.utils import paginate_all
 
 router = APIRouter(route_class=KitaruAPIRoute)
@@ -82,8 +82,7 @@ def _group_key(evaluation: Evaluation) -> GroupKey:
         evaluation: Evaluation to key.
 
     Returns:
-        (name, evaluator_version_id, data_type) key, version id None for a
-        manual evaluation.
+        (name, evaluator_version_id, data_type) key.
     """
     return (evaluation.name, evaluation.evaluator_version_id, evaluation.data_type)
 
@@ -92,7 +91,6 @@ async def _load_session_evaluations(
     service: EvaluationService,
     session_ids: list[uuid.UUID],
     actor: AuthContext,
-    extra_condition: FilterCondition | None = None,
 ) -> dict[uuid.UUID, list[EvaluationWithEvaluator]]:
     """Load the evaluations of the given sessions, grouped by session id.
 
@@ -100,7 +98,6 @@ async def _load_session_evaluations(
         service: Evaluation service.
         session_ids: Ids of the sessions to load evaluations for.
         actor: Caller context.
-        extra_condition: Additional condition applied to every chunk.
 
     Returns:
         Evaluations of each session, newest first.
@@ -114,11 +111,8 @@ async def _load_session_evaluations(
             op=FilterOp.IN,
             value=session_ids[start : start + MAX_FILTER_IN_VALUES],
         )
-        expression: FilterCondition | AndExpression = membership
-        if extra_condition is not None:
-            expression = AndExpression(operands=(membership, extra_condition))
         items = await paginate_all(
-            lambda cursor, expression=expression: service.list_evaluations(
+            lambda cursor, expression=membership: service.list_evaluations(
                 EvaluationFilter(expression=expression, cursor=cursor, size=1000),
                 actor=actor,
             )
@@ -126,31 +120,6 @@ async def _load_session_evaluations(
         for item in items:
             grouped[item.evaluation.session_id].append(item)
     return grouped
-
-
-async def _load_manual_session_evaluations(
-    service: EvaluationService,
-    session_ids: list[uuid.UUID],
-    actor: AuthContext,
-) -> dict[uuid.UUID, list[EvaluationWithEvaluator]]:
-    """Load the manual evaluations of the given sessions, grouped by session id.
-
-    Args:
-        service: Evaluation service.
-        session_ids: Ids of the sessions to load manual evaluations for.
-        actor: Caller context.
-
-    Returns:
-        Manual evaluations of each session, newest first.
-    """
-    return await _load_session_evaluations(
-        service,
-        session_ids,
-        actor,
-        extra_condition=FilterCondition(
-            field="evaluator_version_id", op=FilterOp.IS_NULL
-        ),
-    )
 
 
 def _shared_value(values: list[float | None]) -> float | None:
@@ -316,8 +285,7 @@ async def list_experiment_run_evaluation_aggregates(
 ) -> list[EvaluationAggregateResponse]:
     """Aggregate the evaluations linked to an experiment run's replays.
 
-    The input set is the evaluations linked to the run's replays plus the
-    manual evaluations of their baseline and result sessions, grouped by
+    The input set is the evaluations linked to the run's replays, grouped by
     name, evaluator version, and data type. Baseline and result sessions are
     aggregated separately, and each aggregate carries the per-replay
     evaluation values of the 50 most recent replays. Clients observe HTTP
@@ -356,18 +324,13 @@ async def list_experiment_run_evaluation_aggregates(
     linked = await evaluation_service.list_replay_evaluations(
         [details.replay.id for details in replays], actor
     )
-    manual = await _load_manual_session_evaluations(
-        evaluation_service, baseline_session_ids + result_session_ids, actor
-    )
 
     # Each group holds at most one row per session by construction: one
     # evaluator config per run, if_missing adoption pins one row, and a
     # duplicate name within a task is rejected at write time.
     session_evaluations: dict[uuid.UUID, dict[GroupKey, Evaluation]] = defaultdict(dict)
     evaluator_info: dict[uuid.UUID | None, tuple[str | None, int | None]] = {}
-    items = [item for _, item in linked]
-    items += [item for group in manual.values() for item in group]
-    for item in items:
+    for _, item in linked:
         evaluation = item.evaluation
         session_evaluations[evaluation.session_id][_group_key(evaluation)] = evaluation
         evaluator_info[evaluation.evaluator_version_id] = (

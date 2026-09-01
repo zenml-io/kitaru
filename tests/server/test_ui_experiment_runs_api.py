@@ -176,6 +176,9 @@ async def _store_linked_evaluation(
     score: float | bool | None = None,
     value: str | None = None,
     passed: bool | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    target_score: float | None = None,
 ) -> None:
     """Store an evaluator-produced evaluation and link it to a replay."""
     evaluation = Evaluation(
@@ -187,6 +190,9 @@ async def _store_linked_evaluation(
         score=score,
         value=value,
         passed=passed,
+        min_score=min_score,
+        max_score=max_score,
+        target_score=target_score,
     )
     await services.evaluations.create_task_evaluations(
         [evaluation], replay_id=replay_id
@@ -218,6 +224,7 @@ async def test_aggregates_float_evaluations(
 ) -> None:
     """Aggregate float evaluations of baseline and result sessions separately."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     first_baseline, first_result = uuid.uuid4(), uuid.uuid4()
     second_baseline, second_result = uuid.uuid4(), uuid.uuid4()
     first_replay_id = await _add_replay_with_result_session(
@@ -226,14 +233,32 @@ async def test_aggregates_float_evaluations(
     second_replay_id = await _add_replay_with_result_session(
         services, run_id, second_baseline, second_result
     )
-    await _store_evaluation(
-        services, first_result, "accuracy", EvaluationDataType.FLOAT, score=0.5
+    await _store_linked_evaluation(
+        services,
+        first_replay_id,
+        first_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.5,
     )
-    await _store_evaluation(
-        services, second_result, "accuracy", EvaluationDataType.FLOAT, score=1.0
+    await _store_linked_evaluation(
+        services,
+        second_replay_id,
+        second_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=1.0,
     )
-    await _store_evaluation(
-        services, first_baseline, "accuracy", EvaluationDataType.FLOAT, score=0.1
+    await _store_linked_evaluation(
+        services,
+        first_replay_id,
+        first_baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.1,
     )
 
     response = await client.get(
@@ -244,9 +269,9 @@ async def test_aggregates_float_evaluations(
     assert response.json() == [
         {
             "name": "accuracy",
-            "evaluator_version_id": None,
-            "evaluator_name": None,
-            "evaluator_version": None,
+            "evaluator_version_id": str(version_id),
+            "evaluator_name": "accuracy-scorer",
+            "evaluator_version": 1,
             "data_type": "float",
             "baseline": {
                 "count": 1,
@@ -312,24 +337,33 @@ async def test_aggregates_score_bounds_when_uniform(
 ) -> None:
     """Carry the score bound fields when every row in a group agrees on them."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), first_result)
-    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), second_result)
-    await _store_evaluation(
+    first_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), first_result
+    )
+    second_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), second_result
+    )
+    await _store_linked_evaluation(
         services,
+        first_replay_id,
         first_result,
         "accuracy",
         EvaluationDataType.FLOAT,
+        version_id,
         score=0.5,
         min_score=0.0,
         max_score=1.0,
         target_score=0.9,
     )
-    await _store_evaluation(
+    await _store_linked_evaluation(
         services,
+        second_replay_id,
         second_result,
         "accuracy",
         EvaluationDataType.FLOAT,
+        version_id,
         score=1.0,
         min_score=0.0,
         max_score=1.0,
@@ -359,24 +393,33 @@ async def test_aggregates_score_bounds_null_when_mixed(
 ) -> None:
     """Null the score bound fields when rows in a group disagree on them."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), first_result)
-    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), second_result)
-    await _store_evaluation(
+    first_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), first_result
+    )
+    second_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), second_result
+    )
+    await _store_linked_evaluation(
         services,
+        first_replay_id,
         first_result,
         "accuracy",
         EvaluationDataType.FLOAT,
+        version_id,
         score=0.5,
         min_score=0.0,
         max_score=1.0,
         target_score=0.9,
     )
-    await _store_evaluation(
+    await _store_linked_evaluation(
         services,
+        second_replay_id,
         second_result,
         "accuracy",
         EvaluationDataType.FLOAT,
+        version_id,
         score=1.0,
         min_score=0.0,
         max_score=2.0,
@@ -402,21 +445,34 @@ async def test_aggregates_score_bounds_null_when_one_row_lacks_it(
 ) -> None:
     """Null a score bound field when any row in the group has no value for it."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     first_result, second_result = uuid.uuid4(), uuid.uuid4()
-    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), first_result)
-    await _add_replay_with_result_session(services, run_id, uuid.uuid4(), second_result)
-    await _store_evaluation(
+    first_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), first_result
+    )
+    second_replay_id = await _add_replay_with_result_session(
+        services, run_id, uuid.uuid4(), second_result
+    )
+    await _store_linked_evaluation(
         services,
+        first_replay_id,
         first_result,
         "accuracy",
         EvaluationDataType.FLOAT,
+        version_id,
         score=0.5,
         min_score=0.0,
         max_score=1.0,
         target_score=0.9,
     )
-    await _store_evaluation(
-        services, second_result, "accuracy", EvaluationDataType.FLOAT, score=1.0
+    await _store_linked_evaluation(
+        services,
+        second_replay_id,
+        second_result,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=1.0,
     )
 
     response = await client.get(
@@ -438,21 +494,26 @@ async def test_aggregates_bool_and_pass_rate(
 ) -> None:
     """Aggregate bool evaluations of result sessions into a share and pass rate."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     results = [uuid.uuid4() for _ in range(3)]
-    for result_session_id in results:
+    replay_ids = [
         await _add_replay_with_result_session(
             services, run_id, uuid.uuid4(), result_session_id
         )
+        for result_session_id in results
+    ]
     scores = [True, True, False]
     passed_flags = [True, False, True]
-    for result_session_id, score, passed in zip(
-        results, scores, passed_flags, strict=True
+    for result_session_id, replay_id, score, passed in zip(
+        results, replay_ids, scores, passed_flags, strict=True
     ):
-        await _store_evaluation(
+        await _store_linked_evaluation(
             services,
+            replay_id,
             result_session_id,
             "ok",
             EvaluationDataType.BOOL,
+            version_id,
             score=score,
             passed=passed,
         )
@@ -491,6 +552,7 @@ async def test_aggregates_categorical_value_counts(
 ) -> None:
     """Aggregate categorical evaluations of result sessions into per-value counts."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     results = [uuid.uuid4() for _ in range(3)]
     replay_ids = [
         await _add_replay_with_result_session(
@@ -499,12 +561,16 @@ async def test_aggregates_categorical_value_counts(
         for result_session_id in results
     ]
     values = ["good", "good", "bad"]
-    for result_session_id, value in zip(results, values, strict=True):
-        await _store_evaluation(
+    for result_session_id, replay_id, value in zip(
+        results, replay_ids, values, strict=True
+    ):
+        await _store_linked_evaluation(
             services,
+            replay_id,
             result_session_id,
             "label",
             EvaluationDataType.CATEGORICAL,
+            version_id,
             score=0.0,
             value=value,
         )
@@ -560,8 +626,15 @@ async def test_aggregates_dedupes_shared_baseline_session(
         services, run_id, uuid.uuid4(), second_result
     )
     await _reassign_baseline_session(services, second_replay_id, baseline)
-    await _store_evaluation(
-        services, baseline, "accuracy", EvaluationDataType.FLOAT, score=0.42
+    version_id = await _create_evaluator_version(services)
+    await _store_linked_evaluation(
+        services,
+        first_replay_id,
+        baseline,
+        "accuracy",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.42,
     )
 
     response = await client.get(
@@ -601,6 +674,7 @@ async def test_aggregates_caps_replays_to_most_recent(
 ) -> None:
     """Cap the replays array at the 50 most recent replays, oldest first."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     replay_ids = []
     for index in range(55):
         result_session_id = uuid.uuid4()
@@ -608,11 +682,13 @@ async def test_aggregates_caps_replays_to_most_recent(
             services, run_id, uuid.uuid4(), result_session_id
         )
         replay_ids.append(replay_id)
-        await _store_evaluation(
+        await _store_linked_evaluation(
             services,
+            replay_id,
             result_session_id,
             "m",
             EvaluationDataType.FLOAT,
+            version_id,
             score=index / 100,
         )
 
@@ -634,10 +710,19 @@ async def test_aggregates_include_baseline_only_names(
 ) -> None:
     """Include an evaluation name that only exists on a baseline session."""
     run_id = await _create_run(services)
+    version_id = await _create_evaluator_version(services)
     baseline, result = uuid.uuid4(), uuid.uuid4()
-    await _add_replay_with_result_session(services, run_id, baseline, result)
-    await _store_evaluation(
-        services, baseline, "baseline_only", EvaluationDataType.FLOAT, score=0.3
+    replay_id = await _add_replay_with_result_session(
+        services, run_id, baseline, result
+    )
+    await _store_linked_evaluation(
+        services,
+        replay_id,
+        baseline,
+        "baseline_only",
+        EvaluationDataType.FLOAT,
+        version_id,
+        score=0.3,
     )
 
     response = await client.get(
@@ -859,10 +944,10 @@ async def test_aggregates_groups_by_evaluator_version(
     assert second_group["baseline"]["mean"] == 0.4
 
 
-async def test_aggregates_manual_and_linked_groups_coexist(
+async def test_aggregates_manual_rows_invisible(
     client: httpx.AsyncClient, services: ReplayServices
 ) -> None:
-    """A manual group and a linked group of the same name appear side by side."""
+    """A manual evaluation of a run's session does not enter the aggregate."""
     run_id = await _create_run(services)
     version_id = await _create_evaluator_version(services)
     baseline, result = uuid.uuid4(), uuid.uuid4()
@@ -879,7 +964,7 @@ async def test_aggregates_manual_and_linked_groups_coexist(
         score=0.2,
     )
     await _store_evaluation(
-        services, baseline, "accuracy", EvaluationDataType.FLOAT, score=0.9
+        services, baseline, "human_quality", EvaluationDataType.FLOAT, score=0.9
     )
 
     response = await client.get(
@@ -888,14 +973,9 @@ async def test_aggregates_manual_and_linked_groups_coexist(
 
     assert response.status_code == 200
     body = response.json()
-    assert len(body) == 2
-    by_version = {entry["evaluator_version_id"]: entry for entry in body}
-    assert by_version.keys() == {str(version_id), None}
-    assert by_version[str(version_id)]["baseline"]["mean"] == 0.2
-    manual_group = by_version[None]
-    assert manual_group["evaluator_name"] is None
-    assert manual_group["evaluator_version"] is None
-    assert manual_group["baseline"]["mean"] == 0.9
+    assert len(body) == 1
+    assert body[0]["evaluator_version_id"] == str(version_id)
+    assert body[0]["baseline"]["mean"] == 0.2
 
 
 async def test_aggregates_dangling_evaluator_version(

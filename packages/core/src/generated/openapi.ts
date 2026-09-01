@@ -3118,8 +3118,7 @@ export interface paths {
          * List Experiment Run Evaluation Aggregates
          * @description Aggregate the evaluations linked to an experiment run's replays.
          *
-         *     The input set is the evaluations linked to the run's replays plus the
-         *     manual evaluations of their baseline and result sessions, grouped by
+         *     The input set is the evaluations linked to the run's replays, grouped by
          *     name, evaluator version, and data type. Baseline and result sessions are
          *     aggregated separately, and each aggregate carries the per-replay
          *     evaluation values of the 50 most recent replays. Clients observe HTTP
