@@ -12,8 +12,7 @@ Kitaru keeps the default catalog in `src/kitaru/server/api/bootstrap.py`. At sta
 | `braintrust-importer` | `kitaru-braintrust-importer` | Braintrust importer |
 | `evaluator` | `kitaru-evaluator` | All built-in evaluators |
 | `jsonl-importer` | `kitaru-jsonl-importer` | Kitaru JSONL importer |
-| `langfuse` | `kitaru-langfuse` | Langfuse importer-backed adapter |
-| `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer |
+| `langfuse-importer` | `kitaru-langfuse-importer` | Langfuse importer and importer-backed adapter |
 | `langgraph` | `kitaru-langgraph` | LangGraph recording and replay adapter |
 | `langsmith` | `kitaru-langsmith` | LangSmith importer-backed adapter |
 | `langsmith-importer` | `kitaru-langsmith-importer` | LangSmith importer |

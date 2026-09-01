@@ -22,7 +22,8 @@ import pytest
 from langfuse.api import TraceWithFullDetails
 from langfuse.types import TraceContext
 
-import kitaru_langfuse.adapter as adapter_module
+import kitaru_langfuse_importer.adapter as adapter_module
+import kitaru_langfuse_importer.api as api_module
 
 TraceBuilder = Callable[[str], TraceWithFullDetails]
 
@@ -132,7 +133,7 @@ class FakeLangfuseClient:
 
 @pytest.fixture(autouse=True)
 def _fast_polling(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(adapter_module, "_POLL_INTERVAL", 0.0)
+    monkeypatch.setattr(api_module, "_POLL_INTERVAL", 0.0)
 
 
 @pytest.fixture
@@ -140,4 +141,5 @@ def fake_langfuse(monkeypatch: pytest.MonkeyPatch) -> FakeLangfuseClient:
     """Create a fake Langfuse client and route the adapter to it."""
     fake = FakeLangfuseClient()
     monkeypatch.setattr(adapter_module, "get_client", lambda: fake)
+    monkeypatch.setattr(api_module, "get_client", lambda: fake)
     return fake

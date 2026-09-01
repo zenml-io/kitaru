@@ -18,30 +18,17 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 
 from langfuse import Langfuse, get_client
-from langfuse.api import NotFoundError, ObservationsView, TraceWithFullDetails
+from langfuse.api import TraceWithFullDetails
 from langfuse.types import TraceContext
 
 from kitaru.importer_adapter import ImporterBackedAdapter
-from kitaru_langfuse_importer.importer import parse
+
+from .api import fetch_trace, serialize_trace, wait_for_trace
+from .importer import parse
 
 __all__ = ["LangfuseAdapter"]
 
-_POLL_INTERVAL = 2.0
 _ROOT_SPAN_NAME = "kitaru-run"
-
-
-def _roots_have_ended(observations: list[ObservationsView]) -> bool:
-    """Return whether every root observation has an end time."""
-    ids = {observation.id for observation in observations}
-    roots = [
-        observation
-        for observation in observations
-        if observation.parent_observation_id is None
-        or observation.parent_observation_id not in ids
-    ]
-    return bool(roots) and all(
-        observation.end_time is not None for observation in roots
-    )
 
 
 class LangfuseAdapter(ImporterBackedAdapter):
@@ -84,24 +71,7 @@ class LangfuseAdapter(ImporterBackedAdapter):
         # Flush in a worker thread because the SDK call blocks on network
         # delivery.
         await asyncio.to_thread(client.flush)
-        api = client.async_api
-        # The trace is complete when it is fetchable, every root observation
-        # has an end time, and the observation count is stable across two
-        # consecutive polls.
-        previous_count: int | None = None
-        while True:
-            try:
-                trace = await api.trace.get(external_id)
-            except NotFoundError:
-                previous_count = None
-            else:
-                if len(trace.observations) == previous_count and _roots_have_ended(
-                    trace.observations
-                ):
-                    self._completed_traces[external_id] = trace
-                    return
-                previous_count = len(trace.observations)
-            await asyncio.sleep(_POLL_INTERVAL)
+        self._completed_traces[external_id] = await wait_for_trace(external_id)
 
     async def fetch(self, external_id: str) -> bytes:
         """Fetch the finished trace as Langfuse trace JSON.
@@ -114,7 +84,5 @@ class LangfuseAdapter(ImporterBackedAdapter):
         """
         trace = self._completed_traces.pop(external_id, None)
         if trace is None:
-            trace = await get_client().async_api.trace.get(external_id)
-        # Serialize with the camelCase wire field names the importer parser
-        # expects.
-        return trace.json(by_alias=True).encode("utf-8")
+            trace = await fetch_trace(external_id)
+        return serialize_trace(trace)

@@ -5,8 +5,8 @@ resolution-markers = [
     "python_full_version >= '3.14' and sys_platform == 'win32'",
     "python_full_version >= '3.14' and sys_platform != 'win32'",
     "python_full_version == '3.13.*' and sys_platform == 'win32'",
-    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version == '3.13.*' and sys_platform != 'win32'",
+    "python_full_version < '3.13' and sys_platform == 'win32'",
     "python_full_version < '3.13' and sys_platform != 'win32'",
 ]
 
@@ -20,7 +20,6 @@ members = [
     "kitaru-braintrust-importer",
     "kitaru-evaluator",
     "kitaru-jsonl-importer",
-    "kitaru-langfuse",
     "kitaru-langfuse-importer",
     "kitaru-langgraph",
     "kitaru-langsmith",
@@ -38,7 +37,7 @@ dev = [
     { name = "hypothesis", specifier = ">=6.165" },
     { name = "kitaru", extras = ["server"], editable = "../" },
     { name = "kitaru-braintrust", editable = "packages/braintrust" },
-    { name = "kitaru-langfuse", editable = "packages/langfuse" },
+    { name = "kitaru-langfuse-importer", editable = "packages/langfuse-importer" },
     { name = "kitaru-langgraph", extras = ["deepagents"], editable = "packages/langgraph" },
     { name = "kitaru-langsmith", editable = "packages/langsmith" },
     { name = "kitaru-logfire", editable = "packages/logfire" },
@@ -1287,32 +1286,19 @@ dependencies = [
 requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
-name = "kitaru-langfuse"
-version = "0.1.0"
-source = { editable = "packages/langfuse" }
+name = "kitaru-langfuse-importer"
+version = "0.1.1"
+source = { editable = "packages/langfuse-importer" }
 dependencies = [
     { name = "kitaru" },
-    { name = "kitaru-langfuse-importer" },
     { name = "langfuse" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "kitaru", editable = "../" },
-    { name = "kitaru-langfuse-importer", editable = "packages/langfuse-importer" },
     { name = "langfuse", specifier = ">=3.0.0,<4" },
 ]
-
-[[package]]
-name = "kitaru-langfuse-importer"
-version = "0.1.1"
-source = { editable = "packages/langfuse-importer" }
-dependencies = [
-    { name = "kitaru" },
-]
-
-[package.metadata]
-requires-dist = [{ name = "kitaru", editable = "../" }]
 
 [[package]]
 name = "kitaru-langgraph"
