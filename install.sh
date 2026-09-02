@@ -311,6 +311,28 @@ login_cmd() {
   else printf 'kitaru login --local'; fi
 }
 
+# `kitaru login --local` refuses to replace an existing local server container
+# from an older release unless told to with --upgrade (the database is kept).
+# Running the installer is that approval: its documented contract is that a
+# re-run upgrades. So on exactly that conflict, retry with --upgrade.
+LOCAL_UPGRADE_HINT="kitaru login --local --upgrade"
+login_local() {
+  local out; out="$(mktemp)"
+  if kitaru login --local </dev/tty 2>&1 | tee "$out"; then
+    rm -f "$out"; LOGGED_IN=1; return 0
+  fi
+  if grep -q -- "--upgrade" "$out"; then
+    rm -f "$out"
+    note "An older local server is running. Upgrading it to match kitaru $(kitaru --version); your database is kept."
+    if kitaru login --local --upgrade </dev/tty; then LOGGED_IN=1; return 0; fi
+    warn "Local server upgrade did not complete. Run: $LOCAL_UPGRADE_HINT"
+    return 1
+  fi
+  rm -f "$out"
+  warn "Local server did not start. Run: kitaru login --local"
+  return 1
+}
+
 LOGGED_IN=0
 if [ "$KITARU_SKIP_LOGIN" = "1" ]; then
   note "Skipping login (--no-login)"
@@ -325,7 +347,7 @@ else
   if [ -n "$KITARU_SERVER" ]; then
     kitaru login "$KITARU_SERVER" </dev/tty && LOGGED_IN=1 || warn "Login did not complete. Run: $(login_cmd)"
   else
-    kitaru login --local </dev/tty && LOGGED_IN=1 || warn "Local server did not start. Run: kitaru login --local"
+    login_local
   fi
 fi
 
