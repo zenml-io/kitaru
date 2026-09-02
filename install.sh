@@ -168,7 +168,7 @@ else
 fi
 
 persist_path() {
-  # `uv tool update-shell` handles bash/zsh/fish when it recognises the login
+  # `uv tool update-shell` handles bash/zsh/fish when it recognizes the login
   # shell. Cover the rest (Alpine sh, containers, CI images) by appending to
   # ~/.profile when no rc file mentions the directory yet.
   local dir="$1" f
