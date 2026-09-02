@@ -105,14 +105,29 @@ class FuzzServer:
     base_url: str
     token: str
 
+    def __init__(self) -> None:
+        self._server: uvicorn.Server | None = None
+        self._thread: threading.Thread | None = None
+
     def start(self) -> None:
-        """Create the database, boot the app, and log in as the admin account."""
+        """Create the database, boot the app, and log in as the admin account.
+
+        A failure after the database exists still drops it, so a broken
+        migration or login does not leave one disposable database per attempt.
+        """
         self.settings = local_settings(
             use_db=True,
             DEFAULT_ACCOUNT_PASSWORD=DEFAULT_ACCOUNT_PASSWORD,
             TASK_SWEEP_INTERVAL_SECONDS=0,
         )
         asyncio.run(DatabaseService.create_db(self.settings))
+        try:
+            self._boot()
+        except Exception:
+            self.stop()
+            raise
+
+    def _boot(self) -> None:
         capture_path = os.environ.get("KITARU_FUZZ_CAPTURE")
         self.capture = ExceptionCaptureApp(
             create_app(self.settings),
@@ -154,7 +169,12 @@ class FuzzServer:
         return {"Authorization": f"Bearer {self.token}"}
 
     def stop(self) -> None:
-        """Shut the server down and drop the disposable database."""
-        self._server.should_exit = True
-        self._thread.join(timeout=30)
+        """Shut the server down and drop the disposable database.
+
+        Safe to call on a server that only got partway through ``start``.
+        """
+        if self._server is not None:
+            self._server.should_exit = True
+        if self._thread is not None:
+            self._thread.join(timeout=30)
         asyncio.run(drop_test_database(self.settings))

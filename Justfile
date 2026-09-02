@@ -107,7 +107,7 @@ fuzz-filters:
 
 # Heavy API fuzzing run against a live server (requires docker compose up -d db)
 fuzz-api:
-    KITARU_FUZZ=1 KITARU_FUZZ_RANDOM=1 KITARU_FUZZ_MAX_EXAMPLES=400 uv run --extra server --group fuzz pytest tests/server/test_fuzz_api.py -p no:randomly --hypothesis-show-statistics
+    HYPOTHESIS_PROFILE=nightly KITARU_FUZZ=1 KITARU_FUZZ_RANDOM=1 KITARU_FUZZ_MAX_EXAMPLES=400 uv run --extra server --group fuzz pytest tests/server/test_fuzz_api.py -p no:randomly --hypothesis-show-statistics
 
 # Check Alembic migrations against the ORM schema (requires docker compose up -d db)
 migration-check:
