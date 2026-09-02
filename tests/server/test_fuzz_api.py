@@ -66,7 +66,6 @@ FUZZ_SETTINGS = settings(
     max_examples=int(os.environ.get("KITARU_FUZZ_MAX_EXAMPLES", "25")),
     deadline=None,
     derandomize=DERANDOMIZE,
-    database=None,
     suppress_health_check=list(HealthCheck),
 )
 
