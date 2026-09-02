@@ -25,6 +25,10 @@ jobs:
           - name: mcp
             sync-command: uv sync --frozen --extra server --extra mcp
             recipe: fuzz-mcp
+          - name: api
+            sync-command: uv sync --frozen --extra server --group fuzz
+            recipe: fuzz-api
+            needs-db: true
     name: fuzz (${{ matrix.name }})
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
@@ -37,6 +41,18 @@ jobs:
         env:
           SYNC_COMMAND: ${{ matrix.sync-command }}
         run: $SYNC_COMMAND
+      # The API fuzz run drives the real app, so it needs the same PostgreSQL
+      # the pg tests expect on port 5433. Compose owns that port mapping.
+      - name: Start PostgreSQL
+        if: matrix.needs-db
+        run: |-
+          docker compose up -d db
+          for _ in $(seq 1 60); do
+            if docker compose exec -T db pg_isready -U postgres; then exit 0; fi
+            sleep 2
+          done
+          echo "PostgreSQL did not become ready" >&2
+          exit 1
       - name: Restore Hypothesis database
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
         with:
