@@ -158,4 +158,20 @@ class Page(ResponseModel, Generic[ItemT]):
 class ErrorBody(ResponseModel):
     """Error body."""
 
-    detail: str
+    detail: str = Field(description="Error message.")
+
+
+class ValidationErrorItem(ResponseModel):
+    """Validation error item."""
+
+    loc: list[str | int] = Field(description="Path to the invalid input.")
+    msg: str = Field(description="Error message.")
+    type: str = Field(description="Error type identifier.")
+    input: Any = Field(default=None, description="Invalid input value.")
+    ctx: dict[str, Any] = Field(default_factory=dict, description="Error context.")
+
+
+class ValidationErrorBody(ResponseModel):
+    """Validation error body."""
+
+    detail: str | list[ValidationErrorItem] = Field(description="Error detail.")

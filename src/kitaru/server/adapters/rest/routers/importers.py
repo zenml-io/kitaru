@@ -34,6 +34,7 @@ from kitaru.api_models.v1.importer import (
     ImporterVersionUpdateRequest,
 )
 from kitaru.server.adapters.rest.dependencies import authorize, get_importer_service
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.adapters.rest.routers import plugins
 from kitaru.server.application.models.auth import AuthContext
@@ -42,7 +43,9 @@ from kitaru.server.application.services.plugin_service import PluginService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 409)
+)
 @idempotent
 async def create_importer(
     body: ImporterCreateRequest,
@@ -89,7 +92,7 @@ async def list_importers(
     )
 
 
-@router.get("/{importer_id}")
+@router.get("/{importer_id}", responses=error_responses(404))
 async def get_importer(
     importer_id: uuid.UUID,
     service: Annotated[PluginService, Depends(get_importer_service)],
@@ -111,7 +114,7 @@ async def get_importer(
     return await plugins.get_plugin(service, importer_id, ImporterResponse, actor=actor)
 
 
-@router.patch("/{importer_id}")
+@router.patch("/{importer_id}", responses=error_responses(404))
 async def update_importer(
     importer_id: uuid.UUID,
     body: ImporterUpdateRequest,
@@ -137,7 +140,11 @@ async def update_importer(
     )
 
 
-@router.delete("/{importer_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{importer_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_importer(
     importer_id: uuid.UUID,
     service: Annotated[PluginService, Depends(get_importer_service)],
@@ -156,7 +163,11 @@ async def delete_importer(
     await plugins.delete_plugin(service, importer_id, actor=actor)
 
 
-@router.post("/{importer_id}/versions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{importer_id}/versions",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
 @idempotent
 async def create_importer_version(
     importer_id: uuid.UUID,
@@ -214,7 +225,7 @@ async def list_importer_versions(
     )
 
 
-@router.get("/{importer_id}/versions/{version}")
+@router.get("/{importer_id}/versions/{version}", responses=error_responses(404))
 async def get_importer_version(
     importer_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
@@ -240,7 +251,7 @@ async def get_importer_version(
     )
 
 
-@router.patch("/{importer_id}/versions/{version}")
+@router.patch("/{importer_id}/versions/{version}", responses=error_responses(404))
 async def update_importer_version(
     importer_id: uuid.UUID,
     version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],

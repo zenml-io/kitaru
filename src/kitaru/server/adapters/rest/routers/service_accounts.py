@@ -29,6 +29,7 @@ from kitaru.server.adapters.rest.dependencies import (
     require_local_account_management,
 )
 from kitaru.server.adapters.rest.mapping.accounts import account_to_response
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -40,6 +41,7 @@ router = APIRouter(route_class=KitaruAPIRoute)
     "",
     status_code=status.HTTP_201_CREATED,
     dependencies=[Depends(require_local_account_management)],
+    responses=error_responses(400, 409),
 )
 @idempotent
 async def create_service_account(
@@ -70,6 +72,7 @@ async def create_service_account(
 @router.patch(
     "/{account_id}",
     dependencies=[Depends(require_local_account_management)],
+    responses=error_responses(404),
 )
 async def update_service_account(
     account_id: uuid.UUID,

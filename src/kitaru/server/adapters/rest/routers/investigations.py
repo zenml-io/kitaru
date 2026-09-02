@@ -40,6 +40,7 @@ from kitaru.server.adapters.rest.mapping.investigations import (
     investigation_to_response,
     investigation_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.investigation_service import (
@@ -49,7 +50,9 @@ from kitaru.server.application.services.investigation_service import (
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_investigation(
     body: InvestigationCreateRequest,
@@ -104,7 +107,7 @@ async def list_investigations(
     )
 
 
-@router.get("/{investigation_id}")
+@router.get("/{investigation_id}", responses=error_responses(404))
 async def get_investigation(
     investigation_id: uuid.UUID,
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
@@ -127,7 +130,7 @@ async def get_investigation(
     return investigation_to_response(investigation)
 
 
-@router.patch("/{investigation_id}")
+@router.patch("/{investigation_id}", responses=error_responses(404, 409))
 async def update_investigation(
     investigation_id: uuid.UUID,
     body: InvestigationUpdateRequest,
@@ -156,7 +159,11 @@ async def update_investigation(
     return investigation_to_response(investigation)
 
 
-@router.delete("/{investigation_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{investigation_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_investigation(
     investigation_id: uuid.UUID,
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
@@ -175,7 +182,7 @@ async def delete_investigation(
     await service.delete_investigation(investigation_id, actor=actor)
 
 
-@router.get("/{investigation_id}/sessions")
+@router.get("/{investigation_id}/sessions", responses=error_responses(404))
 async def list_investigation_sessions(
     investigation_id: uuid.UUID,
     service: Annotated[InvestigationService, Depends(get_investigation_service)],
@@ -208,7 +215,9 @@ async def list_investigation_sessions(
     )
 
 
-@router.patch("/{investigation_id}/sessions/{session_id}")
+@router.patch(
+    "/{investigation_id}/sessions/{session_id}", responses=error_responses(404)
+)
 async def update_investigation_session_verdict(
     investigation_id: uuid.UUID,
     session_id: uuid.UUID,

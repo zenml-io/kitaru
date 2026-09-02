@@ -34,7 +34,7 @@ from kitaru.api_models.v1.auth import (
     TokenErrorResponse,
     TokenResponse,
 )
-from kitaru.api_models.v1.base import PlainStr
+from kitaru.api_models.v1.base import PlainStr, ValidationErrorBody
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.server.adapters.auth.auth_service import (
     AuthenticationError,
@@ -50,6 +50,7 @@ from kitaru.server.adapters.rest.dependencies import (
 from kitaru.server.adapters.rest.mapping.devices import (
     device_to_authorization_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.device import DeviceFingerprint
@@ -177,7 +178,14 @@ class LoginRequestForm:
         )
 
 
-@router.post("/device_authorization", responses={400: {"model": TokenErrorResponse}})
+@router.post(
+    "/device_authorization",
+    responses={
+        400: {"model": TokenErrorResponse},
+        422: {"model": ValidationErrorBody, "description": "Validation Error"},
+        **error_responses(503),
+    },
+)
 async def device_authorization(
     request: Request,
     settings: Annotated[APISettings, Depends(get_app_settings)],
@@ -232,7 +240,14 @@ async def device_authorization(
     )
 
 
-@router.post("/login", responses={400: {"model": TokenErrorResponse}})
+@router.post(
+    "/login",
+    responses={
+        400: {"model": TokenErrorResponse},
+        422: {"model": ValidationErrorBody, "description": "Validation Error"},
+        **error_responses(401, 503),
+    },
+)
 async def login(
     request: Request,
     response: Response,
