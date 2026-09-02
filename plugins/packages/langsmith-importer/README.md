@@ -17,6 +17,12 @@ See the [LangSmith import guide](https://docs.zenml.io/kitaru/guides/import-lang
 
 ## Adapter
 
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-langsmith-importer[adapter]"
+```
+
 The package also ships an adapter that imports LangSmith traces of wrapped agent runs. The adapter uses the LangSmith SDK already configured in your process and the Kitaru connection from your environment. Set `LANGSMITH_API_KEY` (plus `LANGSMITH_ENDPOINT` for a self-hosted instance) to the credentials the trace fetch authenticates with, then wrap your agent entrypoint in a `LangSmithAdapter` and run it through the adapter.
 
 ```python

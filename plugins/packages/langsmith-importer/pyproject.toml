@@ -24,6 +24,10 @@ classifiers = [
 keywords = ["ai-agents", "kitaru", "langsmith", "observability", "traces"]
 dependencies = [
     "kitaru>=0.24.0",
+]
+
+[project.optional-dependencies]
+adapter = [
     "langsmith>=0.3,<1",
 ]
 

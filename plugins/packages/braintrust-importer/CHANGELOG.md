@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the Braintrust importer-backed adapter.
+- Add the Braintrust importer-backed adapter, installed through the `adapter` extra.
 
 ## 0.1.0
 

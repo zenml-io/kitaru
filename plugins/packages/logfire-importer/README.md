@@ -17,6 +17,12 @@ See the [Logfire import guide](https://docs.zenml.io/kitaru/guides/import-logfir
 
 ## Adapter
 
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-logfire-importer[adapter]"
+```
+
 The package also ships an adapter that imports Logfire traces of wrapped agent runs. The adapter uses the Logfire SDK already configured in your process and the Kitaru connection from your environment. Set `LOGFIRE_TOKEN` to the write token the SDK records traces with.
 
 The trace fetch goes through the Logfire Query API, which authenticates with a read token, a separate credential from the SDK's write token. Create one under your Logfire project settings and set it as `LOGFIRE_READ_TOKEN`. Then wrap your agent entrypoint in a `LogfireAdapter` and run it through the adapter.

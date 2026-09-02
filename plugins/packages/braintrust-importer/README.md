@@ -17,6 +17,12 @@ See the [Braintrust import guide](https://docs.zenml.io/kitaru/guides/import-bra
 
 ## Adapter
 
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-braintrust-importer[adapter]"
+```
+
 The package also ships an adapter that imports Braintrust traces of wrapped agent runs. The adapter uses the Braintrust logger already configured in your process and the Kitaru connection from your environment. Set `BRAINTRUST_API_KEY` to the key the trace fetch authenticates with, then wrap your agent entrypoint in a `BraintrustAdapter` and run it through the adapter.
 
 ```python

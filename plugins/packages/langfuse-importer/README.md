@@ -17,6 +17,12 @@ See the [Langfuse import guide](https://docs.zenml.io/kitaru/guides/import-langf
 
 ## Adapter
 
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-langfuse-importer[adapter]"
+```
+
 The package also ships an adapter that imports Langfuse traces of wrapped agent runs. The adapter uses the Langfuse client already configured in your process and the Kitaru connection from your environment. Wrap your agent entrypoint in a `LangfuseAdapter` and run it through the adapter.
 
 ```python

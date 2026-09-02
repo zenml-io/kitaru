@@ -18,13 +18,13 @@ kitaru-pydantic-ai = { workspace = true }
 [dependency-groups]
 dev = [
     "kitaru[server]",
-    "kitaru-braintrust-importer",
-    "kitaru-langfuse-importer",
+    "kitaru-braintrust-importer[adapter]",
+    "kitaru-langfuse-importer[adapter]",
     "kitaru-langgraph[deepagents]",
-    "kitaru-langsmith-importer",
-    "kitaru-logfire-importer",
+    "kitaru-langsmith-importer[adapter]",
+    "kitaru-logfire-importer[adapter]",
     "kitaru-openai-agents",
-    "kitaru-phoenix-importer",
+    "kitaru-phoenix-importer[adapter]",
     "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",

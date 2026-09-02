@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Add the Logfire importer-backed adapter.
+- Add the Logfire importer-backed adapter, installed through the `adapter` extra.
 
 ## 0.1.1
 

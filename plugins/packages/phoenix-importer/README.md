@@ -17,6 +17,12 @@ See [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-you
 
 ## Adapter
 
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-phoenix-importer[adapter]"
+```
+
 The package also ships an adapter that imports Arize Phoenix traces of wrapped agent runs. The adapter uses the OTel tracer provider Phoenix tracing already configured in your process, for example via `phoenix.otel.register()`, and the Kitaru connection from your environment.
 
 The trace fetch goes through the Phoenix client, which reads `PHOENIX_ENDPOINT` (or `PHOENIX_COLLECTOR_ENDPOINT`), `PHOENIX_API_KEY`, and the project name from `PHOENIX_PROJECT` from your environment. Fetching by trace id requires a Phoenix server >= 13.9.0. Then wrap your agent entrypoint in a `PhoenixAdapter` and run it through the adapter.
