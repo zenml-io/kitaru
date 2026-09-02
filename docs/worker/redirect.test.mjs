@@ -57,7 +57,11 @@ for (const [input, expected] of marketingCases) {
 }
 
 // kitaru.ai/install serves the installer script instead of redirecting.
-const installCases = ["https://kitaru.ai/install", "https://kitaru.ai/install.sh", "https://kitaru.ai/install/"];
+const installCases = [
+  "https://kitaru.ai/install",
+  "https://kitaru.ai/install.sh",
+  "https://kitaru.ai/install/",
+];
 
 for (const input of installCases) {
   test(`fetch(${input}) serves install.sh`, async () => {
@@ -65,14 +69,22 @@ for (const input of installCases) {
     let requested;
     globalThis.fetch = async (url) => {
       requested = String(url);
-      return new Response("#!/usr/bin/env bash\necho kitaru\n", { status: 200 });
+      return new Response("#!/usr/bin/env bash\necho kitaru\n", {
+        status: 200,
+      });
     };
     try {
       const response = await worker.fetch(new Request(input));
       assert.equal(response.status, 200);
-      assert.equal(response.headers.get("content-type"), "text/plain; charset=utf-8");
+      assert.equal(
+        response.headers.get("content-type"),
+        "text/plain; charset=utf-8",
+      );
       assert.match(await response.text(), /^#!\/usr\/bin\/env bash/);
-      assert.equal(requested, "https://raw.githubusercontent.com/zenml-io/kitaru/main/install.sh");
+      assert.equal(
+        requested,
+        "https://raw.githubusercontent.com/zenml-io/kitaru/main/install.sh",
+      );
     } finally {
       globalThis.fetch = realFetch;
     }
@@ -87,9 +99,14 @@ test("fetch(/install.md) serves the installation page as Markdown", async () => 
     return new Response("# Installation\n", { status: 200 });
   };
   try {
-    const response = await worker.fetch(new Request("https://kitaru.ai/install.md"));
+    const response = await worker.fetch(
+      new Request("https://kitaru.ai/install.md"),
+    );
     assert.equal(response.status, 200);
-    assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.equal(
+      response.headers.get("content-type"),
+      "text/markdown; charset=utf-8",
+    );
     assert.match(await response.text(), /^# Installation/);
     assert.equal(
       requested,
@@ -104,7 +121,9 @@ test("fetch(/install) returns 502 when GitHub is unavailable", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("nope", { status: 500 });
   try {
-    const response = await worker.fetch(new Request("https://kitaru.ai/install"));
+    const response = await worker.fetch(
+      new Request("https://kitaru.ai/install"),
+    );
     assert.equal(response.status, 502);
   } finally {
     globalThis.fetch = realFetch;
