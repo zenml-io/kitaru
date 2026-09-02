@@ -43,7 +43,8 @@ jobs:
           kitaru doctor > doctor.json || true
           python3 -c "import json; d=json.load(open('doctor.json'))['item']['checks']; [print(c['name'], c['status'], c.get('detail','')[:80]) for c in d]" \
             || cat doctor.json
-          grep -l ".local/bin" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || { echo "PATH not persisted"; exit 1; }
+          cat "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null | grep -q ".local/bin" \
+            || { echo "PATH not persisted"; exit 1; }
       - name: Re-run is an upgrade, not an error
         shell: bash
         run: cat install.sh | bash -s -- --no-login --no-skills --no-mcp --quiet
