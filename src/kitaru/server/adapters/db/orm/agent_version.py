@@ -35,6 +35,7 @@ from kitaru.server.domain.agent_version import (
     AgentCapabilities,
     AgentVersion,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.server.domain.hook import TaskHook
 
@@ -79,6 +80,9 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
     run_hooks: Mapped[list[dict[str, Any]] | None] = mapped_column(
         JSONB(none_as_null=True)
     )
+    run_runtime_capabilities: Mapped[dict[str, bool] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
     run_timeout_seconds: Mapped[int | None]
     capabilities: Mapped[dict[str, list[str]]] = mapped_column(JSONB)
 
@@ -112,6 +116,11 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                 if run_spec is not None
                 else None
             ),
+            run_runtime_capabilities=(
+                run_spec.runtime_capabilities.model_dump(mode="json")
+                if run_spec is not None
+                else None
+            ),
             run_timeout_seconds=(
                 run_spec.timeout_seconds if run_spec is not None else None
             ),
@@ -139,6 +148,11 @@ class AgentVersionORM(UUIDPrimaryKeyMixin, TimestampMixin, Base):
                     _TASK_HOOKS_ADAPTER.validate_python(self.run_hooks)
                     if self.run_hooks is not None
                     else []
+                ),
+                runtime_capabilities=(
+                    RuntimeCapabilities(**self.run_runtime_capabilities)
+                    if self.run_runtime_capabilities is not None
+                    else RuntimeCapabilities()
                 ),
                 timeout_seconds=self.run_timeout_seconds,
             )

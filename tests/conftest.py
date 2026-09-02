@@ -55,8 +55,8 @@ from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.api_models.v1.replay import BaselineEvaluationMode, ReplayStatus
-from kitaru.api_models.v1.session import SessionOrigin, TokenUsage
-from kitaru.api_models.v1.session_node import NodeStatus
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus, TokenUsage
+from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.tag import TagResourceType
 from kitaru.api_models.v1.task import TaskKind, TaskOnFailure, TaskStatus
 from kitaru.api_models.v1.worker import WorkerClaim, WorkerRuntime, WorkerScope
@@ -265,6 +265,7 @@ from kitaru.server.filtering import (
     NotExpression,
     OrExpression,
 )
+from kitaru.task.importer import ImportedNode, ImportedSession
 from kitaru.transport import RetryTransport
 
 _HYPOTHESIS_DB = DirectoryBasedExampleDatabase(".hypothesis/examples")
@@ -299,6 +300,55 @@ UNSCOPED_WORKER_SCOPE = WorkerScope(
 os.environ["KITARU_SERVER_ANALYTICS_OPT_IN"] = "false"
 
 TEST_DB_PREFIX = "kitaru_test"
+
+
+def imported_node(
+    name: str, children: list[ImportedNode] | None = None
+) -> ImportedNode:
+    """Build an imported node for parser and ingest tests.
+
+    Args:
+        name: Node name.
+        children: Child nodes.
+
+    Returns:
+        Imported node.
+    """
+    return ImportedNode(
+        node_type=NodeType.LLM_CALL,
+        name=name,
+        status=NodeStatus.COMPLETED,
+        inputs=None,
+        outputs=None,
+        attributes=None,
+        children=children or [],
+    )
+
+
+def imported_session(
+    external_id: str, nodes: list[ImportedNode] | None = None
+) -> ImportedSession:
+    """Build an imported session for parser and ingest tests.
+
+    Args:
+        external_id: Session external id.
+        nodes: Top-level nodes.
+
+    Returns:
+        Imported session.
+    """
+    return ImportedSession(
+        status=SessionStatus.COMPLETED,
+        name=external_id,
+        inputs=None,
+        outputs=None,
+        error=None,
+        started_at=None,
+        ended_at=None,
+        external_id=external_id,
+        metadata={},
+        nodes=nodes or [],
+    )
 
 
 @pytest.fixture(autouse=True)

@@ -1641,6 +1641,9 @@
               "title": "Hooks",
               "type": "array"
             },
+            "runtime_capabilities": {
+              "$ref": "#/$defs/RuntimeCapabilities"
+            },
             "secret_ids": {
               "description": "Secrets merged into the process environment.",
               "items": {
@@ -1675,6 +1678,26 @@
             "command"
           ],
           "title": "RunSpec",
+          "type": "object"
+        },
+        "RuntimeCapabilities": {
+          "additionalProperties": false,
+          "description": "Runtime capabilities.",
+          "properties": {
+            "overrides": {
+              "default": true,
+              "description": "Whether the runtime can apply replay overrides.",
+              "title": "Overrides",
+              "type": "boolean"
+            },
+            "tool_policies": {
+              "default": true,
+              "description": "Whether the runtime can apply non-passthrough tool policies.",
+              "title": "Tool Policies",
+              "type": "boolean"
+            }
+          },
+          "title": "RuntimeCapabilities",
           "type": "object"
         },
         "ScriptPluginSource": {

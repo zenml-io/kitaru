@@ -56,11 +56,13 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionAgentMismatch,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.cohort_version import CohortVersion, CohortVersionIdNotFound
 from kitaru.server.domain.plugin import PluginKind, PluginVersion, ScriptPluginSource
 from kitaru.server.domain.replay import DuplicateReplayForBaseline
+from kitaru.server.domain.replay_config import ReplayOverride
 from kitaru.server.domain.session import Session, SessionNotEvaluatable
 from kitaru.server.domain.task import AgentTask, AgentTaskDetails, EvaluationTask
 from kitaru.server.filtering import FilterCondition
@@ -74,13 +76,20 @@ def services() -> ReplayServices:
     return build_replay_services()
 
 
-async def _agent_version_with_run_spec(services: ReplayServices) -> AgentVersion:
+async def _agent_version_with_run_spec(
+    services: ReplayServices,
+    runtime_capabilities: RuntimeCapabilities | None = None,
+) -> AgentVersion:
     agent = await create_agent(services.agents, ACTOR.account.id)
     return await create_agent_version(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh", timeout_seconds=60),
+        run_spec=RunSpec(
+            command="run.sh",
+            timeout_seconds=60,
+            runtime_capabilities=runtime_capabilities or RuntimeCapabilities(),
+        ),
     )
 
 
@@ -623,13 +632,17 @@ async def test_baseline_evaluator_failure_fails_the_replay(
 
 
 async def _create_experiment_with_evaluator(
-    services: ReplayServices, agent_id: uuid.UUID, evaluator_name: str = "accuracy"
+    services: ReplayServices,
+    agent_id: uuid.UUID,
+    evaluator_name: str = "accuracy",
+    override: ReplayOverride | None = None,
 ) -> tuple[uuid.UUID, uuid.UUID]:
     await _evaluator_version(services, evaluator_name)
     experiment, config = await services.experiment_service.create_experiment(
         ExperimentCreate(
             name="exp1",
             agent_id=agent_id,
+            override=override,
             evaluators=[EvaluatorConfigInput(evaluator=evaluator_name)],
         ),
         actor=ACTOR,
@@ -1099,6 +1112,53 @@ async def test_start_run_rejects_an_agent_version_of_another_agent(
             ),
             actor=ACTOR,
         )
+
+
+async def test_start_run_rejects_an_override_outside_capabilities(
+    services: ReplayServices,
+) -> None:
+    """An override is rejected when the agent version does not support overrides."""
+    agent_version = await _agent_version_with_run_spec(
+        services, runtime_capabilities=RuntimeCapabilities(overrides=False)
+    )
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id, override=ReplayOverride(model="gpt-5")
+    )
+    session = await _baseline_session(services, agent_version)
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id]
+    )
+    with pytest.raises(ValidationError, match="does not support replay overrides"):
+        await services.experiment_service.start_run(
+            experiment_id,
+            ExperimentRunCreate(
+                cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_start_run_accepts_an_override_within_capabilities(
+    services: ReplayServices,
+) -> None:
+    """An override starts the run when the agent version supports overrides."""
+    agent_version = await _agent_version_with_run_spec(services)
+    experiment_id, _ = await _create_experiment_with_evaluator(
+        services, agent_version.agent_id, override=ReplayOverride(model="gpt-5")
+    )
+    session = await _baseline_session(services, agent_version)
+    cohort_version = await _cohort_version(
+        services, agent_version.agent_id, [session.id]
+    )
+    run, counts = await services.experiment_service.start_run(
+        experiment_id,
+        ExperimentRunCreate(
+            cohort_version_id=cohort_version.id, agent_version_id=agent_version.id
+        ),
+        actor=ACTOR,
+    )
+    assert run.number == 1
+    assert counts.total == 1
 
 
 async def test_run_numbers_increment_per_experiment(services: ReplayServices) -> None:

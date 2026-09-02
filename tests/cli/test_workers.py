@@ -167,6 +167,25 @@ def test_config_merge_rejects_an_invalid_claim_value() -> None:
     assert error.value.kind == "invalid_arguments"
 
 
+def test_configure_worker_logging_installs_the_requested_level(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Install a root logging handler at the requested level."""
+    calls: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        workers.logging, "basicConfig", lambda **kwargs: calls.append(kwargs)
+    )
+    workers._configure_worker_logging("debug")
+    assert calls[0]["level"] == workers.logging.DEBUG
+
+
+def test_configure_worker_logging_rejects_an_unknown_level() -> None:
+    """An unrecognized log level raises a CLI error."""
+    with pytest.raises(CLIError) as error:
+        workers._configure_worker_logging("chatty")
+    assert error.value.kind == "invalid_arguments"
+
+
 def test_drain_timeout_merges_explicit_over_environment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

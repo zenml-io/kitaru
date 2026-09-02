@@ -15,6 +15,25 @@ The importer understands Langfuse trace, observation, and ingestion-event record
 
 See the [Langfuse import guide](https://docs.zenml.io/kitaru/guides/import-langfuse-traces) for accepted formats, parameters, deduplication behavior, and fidelity limits.
 
+## Adapter
+
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-langfuse-importer[adapter]"
+```
+
+The package also ships an adapter that imports Langfuse traces of wrapped agent runs. The adapter uses the Langfuse client already configured in your process and the Kitaru connection from your environment. Wrap your agent entrypoint in a `LangfuseAdapter` and run it through the adapter.
+
+```python
+from kitaru_langfuse_importer.adapter import LangfuseAdapter
+
+adapter = LangfuseAdapter()
+result = adapter.run(my_agent, "Hello")
+```
+
+The adapter runs the function inside a Langfuse trace, waits for Langfuse to finish ingesting the trace, fetches it, and imports it as one Kitaru session. Use `run_async` for async functions. When the trace does not complete within the completeness timeout, the adapter creates a failed session carrying the trace id.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)
