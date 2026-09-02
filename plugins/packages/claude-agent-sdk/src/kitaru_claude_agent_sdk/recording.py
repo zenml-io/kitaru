@@ -436,6 +436,19 @@ class InvocationRecorder:
                 else None
             )
             first_failure: BaseException | None = None
+            if failed:
+                failed_nodes = self._fail_unfinished_nodes(
+                    ended_at=ended_at,
+                    error=error_text or "Query ended before this call completed",
+                )
+                if failed_nodes:
+                    try:
+                        await self.client.sessions.ingest_nodes(
+                            self.session_id,
+                            SessionNodeBatchRequest(nodes=failed_nodes),
+                        )
+                    except Exception as persistence_error:
+                        first_failure = first_failure or persistence_error
             try:
                 try:
                     await self._persist(
@@ -483,6 +496,26 @@ class InvocationRecorder:
                     first_failure = first_failure or persistence_error
             if first_failure is not None:
                 raise first_failure
+
+    def _fail_unfinished_nodes(
+        self, *, ended_at: datetime, error: str
+    ) -> list[SessionNodeCreateRequest]:
+        """Mark unfinished tool and subagent calls as failed."""
+        failed_nodes: list[SessionNodeCreateRequest] = []
+        for node_by_id in (self._tool_nodes, self._task_nodes):
+            for external_id, node in node_by_id.items():
+                if node.status is not NodeStatus.IN_PROGRESS:
+                    continue
+                failed_node = node.model_copy(
+                    update={
+                        "status": NodeStatus.FAILED,
+                        "error": error,
+                        "ended_at": ended_at,
+                    }
+                )
+                node_by_id[external_id] = failed_node
+                failed_nodes.append(failed_node)
+        return failed_nodes
 
     async def _record_assistant(self, message: AssistantMessage) -> None:
         identity = message.message_id or message.uuid

@@ -515,6 +515,44 @@ async def test_cancelled_and_explicit_close_finalize_only_once(
     assert fake_client.close_count == 1
 
 
+async def test_failure_finalization_marks_open_tool_and_task_nodes_failed(
+    fake_client: FakeClient,
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(
+        AssistantMessage(
+            content=[ToolUseBlock("tool-1", "lookup", {"query": "refund"})],
+            model="claude-test",
+            message_id="message-1",
+        )
+    )
+    await recorder.record_message(
+        TaskStartedMessage(
+            subtype="task_started",
+            data={},
+            task_id="task-1",
+            description="research",
+            uuid="task-event-1",
+            session_id="session-1",
+            tool_use_id="tool-1",
+            task_type="agent",
+        )
+    )
+
+    await finalize_failure(recorder, GeneratorExit())
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    child_nodes = [
+        node
+        for node in latest.values()
+        if node.node_type in {NodeType.TOOL_CALL, NodeType.SUBAGENT_CALL}
+    ]
+    assert len(child_nodes) == 2
+    assert all(node.status is NodeStatus.FAILED for node in child_nodes)
+    assert all(node.error == "GeneratorExit" for node in child_nodes)
+    assert all(node.ended_at is not None for node in child_nodes)
+
+
 async def test_orphan_task_stop_after_cancellation_is_retained_under_root(
     fake_client: FakeClient,
 ) -> None:
