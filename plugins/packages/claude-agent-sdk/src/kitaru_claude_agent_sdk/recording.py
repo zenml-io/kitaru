@@ -234,6 +234,9 @@ class InvocationRecorder:
     lock: asyncio.Lock = field(default_factory=asyncio.Lock)
     _message_indexes: dict[str, int] = field(default_factory=dict, repr=False)
     _tool_cache_keys: dict[str, str] = field(default_factory=dict, repr=False)
+    _effective_tool_inputs: dict[str, dict[str, Any]] = field(
+        default_factory=dict, repr=False
+    )
     _tool_nodes: dict[str, SessionNodeCreateRequest] = field(
         default_factory=dict, repr=False
     )
@@ -361,32 +364,81 @@ class InvocationRecorder:
             events = self._hook_events.setdefault(tool_id, [])
             if event not in events:
                 events.append(event)
+            name = hook_input.get("tool_name")
+            tool_name = name if isinstance(name, str) else None
+            tool_input = hook_input.get("tool_input")
+            effective_arguments = (
+                tool_input
+                if event == "after"
+                and tool_name in self.replayable_tool_names
+                and isinstance(tool_input, dict)
+                else None
+            )
+            attributes: dict[str, Any] = {"hook_events": list(events)}
+            if effective_arguments is not None and tool_name is not None:
+                self._effective_tool_inputs[tool_id] = effective_arguments
+                cache_key = compute_tool_cache_key(tool_name, effective_arguments)
+                if cache_key is not None:
+                    self._tool_cache_keys[tool_id] = cache_key
+                    replay_event = self._pop_tool_policy_event(cache_key)
+                    if replay_event is not None:
+                        attributes["replay"] = replay_event
             node = self._tool_nodes.get(tool_id)
             if node is None:
-                name = hook_input.get("tool_name")
                 node = self._new_node(
                     node_type=NodeType.TOOL_CALL,
-                    name=name if isinstance(name, str) else "tool",
+                    name=tool_name or "tool",
                     parent_index=0,
                     external_id=tool_id,
                     status=NodeStatus.IN_PROGRESS,
-                    inputs=_capture(hook_input.get("tool_input")),
+                    inputs=(
+                        effective_arguments
+                        if effective_arguments is not None
+                        else _capture(tool_input)
+                    ),
                     outputs=None,
-                    tool_name=name if isinstance(name, str) else None,
-                    attributes={"hook_events": list(events)},
+                    tool_name=tool_name,
+                    attributes=attributes,
                 )
                 self._tool_nodes[tool_id] = node
             else:
-                node = node.model_copy(
-                    update={
-                        "attributes": {
-                            **cast(dict[str, Any], node.attributes),
-                            "hook_events": list(events),
-                        }
+                update: dict[str, Any] = {
+                    "attributes": {
+                        **cast(dict[str, Any], node.attributes),
+                        **attributes,
                     }
-                )
+                }
+                if effective_arguments is not None:
+                    update["inputs"] = effective_arguments
+                node = node.model_copy(update=update)
                 self._tool_nodes[tool_id] = node
             await self._persist(node)
+
+    async def set_effective_tool_arguments(
+        self, *, tool_id: str, tool_name: str, arguments: dict[str, Any]
+    ) -> None:
+        """Retain effective replayable-tool arguments for the next node write."""
+        if tool_name not in self.replayable_tool_names:
+            return
+        async with self.lock:
+            self._effective_tool_inputs[tool_id] = arguments
+            node = self._tool_nodes.get(tool_id)
+            cache_key = compute_tool_cache_key(tool_name, arguments)
+            if cache_key is not None:
+                self._tool_cache_keys[tool_id] = cache_key
+            if node is None:
+                return
+            attributes = cast(dict[str, Any], node.attributes)
+            replay_event = self._pop_tool_policy_event(cache_key)
+            if replay_event is not None:
+                attributes = {**attributes, "replay": replay_event}
+            updated = node.model_copy(
+                update={
+                    "inputs": arguments,
+                    "attributes": attributes,
+                }
+            )
+            self._tool_nodes[tool_id] = updated
 
     async def record_tool_policy(
         self,
@@ -607,24 +659,25 @@ class InvocationRecorder:
             )
 
     async def _record_tool_use(self, block: ToolUseBlock, parent_index: int) -> None:
-        cache_key = compute_tool_cache_key(block.name, block.input)
-        if cache_key is not None:
-            self._tool_cache_keys[block.id] = cache_key
-        inputs = (
-            block.input
-            if block.name in self.replayable_tool_names
-            else _capture(block.input)
-        )
-        policy_events = (
-            self._tool_policy_events.get(cache_key, []) if cache_key is not None else []
-        )
-        replay_event = policy_events.pop(0) if policy_events else None
+        node = self._tool_nodes.get(block.id)
+        if block.id in self._effective_tool_inputs:
+            cache_key = self._tool_cache_keys.get(block.id)
+            inputs = self._effective_tool_inputs[block.id]
+        else:
+            cache_key = compute_tool_cache_key(block.name, block.input)
+            if cache_key is not None:
+                self._tool_cache_keys[block.id] = cache_key
+            inputs = (
+                block.input
+                if block.name in self.replayable_tool_names
+                else _capture(block.input)
+            )
+        replay_event = self._pop_tool_policy_event(cache_key)
         attributes: dict[str, Any] = {
             "hook_events": list(self._hook_events.get(block.id, []))
         }
         if replay_event is not None:
             attributes["replay"] = replay_event
-        node = self._tool_nodes.get(block.id)
         if node is None or node.index == parent_index:
             node = self._new_node(
                 node_type=NodeType.TOOL_CALL,
@@ -659,6 +712,13 @@ class InvocationRecorder:
             )
         self._tool_nodes[block.id] = node
         await self._persist(node)
+
+    def _pop_tool_policy_event(self, cache_key: str | None) -> dict[str, Any] | None:
+        """Pop the next policy event for one effective tool input."""
+        policy_events = (
+            self._tool_policy_events.get(cache_key, []) if cache_key is not None else []
+        )
+        return policy_events.pop(0) if policy_events else None
 
     async def _record_tool_result(self, block: ToolResultBlock) -> None:
         node = self._tool_nodes.get(block.tool_use_id)

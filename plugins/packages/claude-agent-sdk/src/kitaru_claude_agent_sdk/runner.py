@@ -30,8 +30,10 @@ from claude_agent_sdk import (
     HookJSONOutput,
     HookMatcher,
     Message,
+    PermissionResultAllow,
     ResultMessage,
     SdkMcpTool,
+    ToolPermissionContext,
     create_sdk_mcp_server,
 )
 from claude_agent_sdk import (
@@ -188,7 +190,12 @@ class KitaruClaudeRunner:
                     recorder,
                     replay_abort,
                 )
-                copied_options.hooks = _compose_hooks(copied_options.hooks, recorder)
+                copied_options.hooks = _compose_hooks(
+                    copied_options.hooks, recorder, replay_abort
+                )
+                copied_options.can_use_tool = _compose_permission_callback(
+                    copied_options.can_use_tool, recorder, replay_abort
+                )
                 inner = cast(
                     AsyncGenerator[Message, None],
                     sdk_query(
@@ -757,6 +764,7 @@ def _get_safe_options(options: ClaudeAgentOptions) -> dict[str, Any]:
 def _compose_hooks(
     caller_hooks: Any,
     recorder: InvocationRecorder,
+    replay_abort: _ReplayAbortState,
 ) -> Any:
     """Append run-local observers without mutating caller hook collections."""
     hooks = {name: list(matchers) for name, matchers in (caller_hooks or {}).items()}
@@ -766,8 +774,10 @@ def _compose_hooks(
         _tool_use_id: str | None,
         _context: HookContext,
     ) -> HookJSONOutput:
-        await recorder.record_tool_hook(
-            cast(Mapping[str, Any], hook_input), event="before"
+        await replay_abort.run_kitaru(
+            recorder.record_tool_hook(
+                cast(Mapping[str, Any], hook_input), event="before"
+            )
         )
         return {}
 
@@ -776,8 +786,10 @@ def _compose_hooks(
         _tool_use_id: str | None,
         _context: HookContext,
     ) -> HookJSONOutput:
-        await recorder.record_tool_hook(
-            cast(Mapping[str, Any], hook_input), event="after"
+        await replay_abort.run_kitaru(
+            recorder.record_tool_hook(
+                cast(Mapping[str, Any], hook_input), event="after"
+            )
         )
         return {}
 
@@ -791,6 +803,37 @@ def _compose_hooks(
         HookMatcher(hooks=[cast(HookCallback, after_tool)])
     )
     return hooks
+
+
+def _compose_permission_callback(
+    caller: Any,
+    recorder: InvocationRecorder,
+    replay_abort: _ReplayAbortState,
+) -> Any:
+    """Record arguments rewritten by the caller's permission callback."""
+    if caller is None:
+        return None
+
+    async def can_use_tool(
+        tool_name: str,
+        arguments: dict[str, Any],
+        context: ToolPermissionContext,
+    ) -> Any:
+        result = await caller(tool_name, arguments, context)
+        if isinstance(result, PermissionResultAllow) and context.tool_use_id:
+            effective_arguments = (
+                result.updated_input if result.updated_input is not None else arguments
+            )
+            await replay_abort.run_kitaru(
+                recorder.set_effective_tool_arguments(
+                    tool_id=context.tool_use_id,
+                    tool_name=tool_name,
+                    arguments=effective_arguments,
+                )
+            )
+        return result
+
+    return can_use_tool
 
 
 async def _close_client_preserving_error(client: Any, error: BaseException) -> None:

@@ -350,6 +350,60 @@ async def test_replayable_tool_preserves_full_arguments_for_history_key(
     assert tool.inputs == arguments
 
 
+@pytest.mark.parametrize("effective_before_stream", [True, False])
+async def test_replayable_tool_records_effective_rewritten_arguments(
+    fake_client: FakeClient, effective_before_stream: bool
+) -> None:
+    tool_id = "tool-1"
+    tool_name = "mcp__support__lookup"
+    proposed = {"query": "proposed"}
+    effective = {"query": "rewritten"}
+    recorder = await InvocationRecorder.start(
+        client=cast(KitaruAPIClient, fake_client),
+        inputs="hello",
+        agent_id=uuid.uuid4(),
+        agent_version_id=None,
+        session_name=None,
+        replay=False,
+        replayable_tool_names=frozenset({tool_name}),
+    )
+
+    async def record_stream_message() -> None:
+        await recorder.record_message(
+            AssistantMessage(
+                content=[ToolUseBlock(tool_id, tool_name, proposed)],
+                model="claude-test",
+                message_id="message-1",
+            )
+        )
+
+    if not effective_before_stream:
+        await record_stream_message()
+    await recorder.record_tool_policy(
+        tool_name=tool_name,
+        arguments=effective,
+        policy="passthrough",
+        live=True,
+    )
+    await recorder.record_tool_hook(
+        {
+            "tool_use_id": tool_id,
+            "tool_name": tool_name,
+            "tool_input": effective,
+        },
+        event="after",
+    )
+    if effective_before_stream:
+        await record_stream_message()
+
+    latest = {node.index: node for node in nodes(fake_client)}
+    tool = next(
+        node for node in latest.values() if node.node_type is NodeType.TOOL_CALL
+    )
+    assert tool.inputs == effective
+    assert tool.attributes["replay"] == {"policy": "passthrough", "live": True}
+
+
 async def test_unknown_message_is_bounded_and_opaque_fields_are_not_persisted(
     fake_client: FakeClient,
 ) -> None:

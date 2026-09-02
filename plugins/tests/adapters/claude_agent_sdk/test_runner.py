@@ -16,8 +16,10 @@ from claude_agent_sdk import (
     ClaudeAgentOptions,
     HookCallback,
     HookMatcher,
+    PermissionResultAllow,
     ResultMessage,
     SystemMessage,
+    ToolPermissionContext,
 )
 
 import kitaru_claude_agent_sdk.runner as runner_module
@@ -181,7 +183,7 @@ async def test_copies_options_and_preserves_hooks_permissions_and_transport(
         assert copied.permission_mode == "default"
         assert copied.allowed_tools is options.allowed_tools
         assert copied.disallowed_tools is options.disallowed_tools
-        assert copied.can_use_tool is can_use_tool
+        assert copied.can_use_tool is not can_use_tool
         assert copied.mcp_servers is options.mcp_servers
         assert copied.hooks is not options.hooks
         assert copied.hooks["PreToolUse"][0] is caller_matcher
@@ -201,6 +203,35 @@ async def test_copies_options_and_preserves_hooks_permissions_and_transport(
     assert options.hooks == {"PreToolUse": [caller_matcher]}
     assert caller_hook_calls == ["called"]
     assert permission_calls == ["Read"]
+
+
+async def test_permission_callback_reports_rewritten_tool_arguments() -> None:
+    calls: list[dict[str, Any]] = []
+
+    async def caller(*_: Any) -> PermissionResultAllow:
+        return PermissionResultAllow(updated_input={"query": "rewritten"})
+
+    class Recorder:
+        async def set_effective_tool_arguments(self, **kwargs: Any) -> None:
+            calls.append(kwargs)
+
+    callback = runner_module._compose_permission_callback(
+        caller,
+        cast(Any, Recorder()),
+        runner_module._ReplayAbortState(),
+    )
+    context = ToolPermissionContext(tool_use_id="tool-1")
+
+    result = await callback("mcp__support__lookup", {"query": "proposed"}, context)
+
+    assert isinstance(result, PermissionResultAllow)
+    assert calls == [
+        {
+            "tool_id": "tool-1",
+            "tool_name": "mcp__support__lookup",
+            "arguments": {"query": "rewritten"},
+        }
+    ]
 
 
 async def test_replay_uses_recorded_input_and_supported_overrides(
@@ -447,6 +478,34 @@ async def test_terminal_recording_error_retains_native_message(
     assert caught.value.terminal_message is terminal
     assert caught.value.phase == "finalize"
     assert fake.closed == 1
+
+
+async def test_sdk_cannot_swallow_hook_recording_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _use_client(monkeypatch)
+
+    async def fake_query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
+        client.ingest_error = OSError("hook recording failed")
+        hook = kwargs["options"].hooks["PostToolUse"][-1].hooks[0]
+        with pytest.raises(OSError, match="hook recording failed"):
+            await hook(
+                {
+                    "tool_use_id": "tool-1",
+                    "tool_name": "mcp__support__lookup",
+                    "tool_input": {"query": "rewritten"},
+                },
+                "tool-1",
+                object(),
+            )
+        yield _terminal()
+
+    monkeypatch.setattr(runner_module, "sdk_query", fake_query)
+
+    with pytest.raises(OSError, match="hook recording failed"):
+        await _collect(KitaruClaudeRunner(agent_id=uuid.uuid4()), prompt="hello")
+
+    assert client.sessions.updated[-1][1].status.value == "failed"
 
 
 async def test_explicit_close_closes_inner_iterator_and_finalizes_once(
