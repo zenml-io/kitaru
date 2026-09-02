@@ -157,6 +157,7 @@ jobs:
           --extra cli
           --extra worker
           --extra s3
+          --group fuzz
       - run: uv run ty check
   audit:
     if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft == false }}
