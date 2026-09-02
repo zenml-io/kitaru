@@ -21,9 +21,7 @@ on:
         type: string
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - install.sh
-      - .github/workflows/installer.yml
+    paths: [install.sh, .github/workflows/installer.yml]
 permissions: {}
 concurrency:
   group: installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
@@ -36,7 +34,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+        os:
+          - ubuntu-latest
+          - ubuntu-24.04-arm
+          - macos-latest
+          - macos-15-intel
+          - windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
