@@ -434,11 +434,10 @@ class InvocationRecorder:
                 error_text = _captured_text(
                     "; ".join(terminal.errors or []) or terminal.subtype
                 )
-            outputs = (
-                _capture(terminal.result)
-                if terminal is not None and not failed
-                else None
+            session_outputs = (
+                terminal.result if terminal is not None and not failed else None
             )
+            root_outputs = _capture(session_outputs)
             metadata = _get_terminal_metadata(terminal) if terminal is not None else {}
             cost = (
                 Decimal(str(terminal.total_cost_usd))
@@ -474,7 +473,7 @@ class InvocationRecorder:
                             started_at=self.started_at,
                             ended_at=ended_at,
                             inputs=self.captured_inputs,
-                            outputs=outputs,
+                            outputs=root_outputs,
                             cost=cost,
                             attributes={"options": self.safe_options},
                             metadata=metadata,
@@ -491,7 +490,7 @@ class InvocationRecorder:
                                 if failed
                                 else SessionStatus.COMPLETED
                             ),
-                            outputs=outputs,
+                            outputs=session_outputs,
                             error=error_text,
                             ended_at=ended_at,
                             metadata=metadata,

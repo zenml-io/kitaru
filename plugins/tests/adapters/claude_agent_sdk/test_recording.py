@@ -405,7 +405,7 @@ async def test_root_ingest_failure_marks_created_session_failed(
     assert update.error == "root ingest failed"
 
 
-async def test_terminal_result_and_error_are_bounded(
+async def test_terminal_result_is_authoritative_and_diagnostics_are_bounded(
     fake_client: FakeClient,
 ) -> None:
     recorder = await _recorder(fake_client)
@@ -416,7 +416,7 @@ async def test_terminal_result_and_error_are_bounded(
 
     root = {node.index: node for node in nodes(fake_client)}[0]
     assert root.outputs == {"value": "x" * (16 * 1024), "truncated": True}
-    assert fake_client.sessions.updated[-1][1].outputs == root.outputs
+    assert fake_client.sessions.updated[-1][1].outputs == terminal.result
 
     error_recorder = await _recorder(fake_client)
     error = RuntimeError("y" * (16 * 1024 + 1))
