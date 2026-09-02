@@ -53,6 +53,6 @@ Known bugs are pinned with `@pytest.mark.xfail(strict=True, reason="<issue>")` e
 
 The only assertion is that the server never answers 5xx. One database is shared for the whole session, so an earlier operation's rows are visible to a later one, which makes "was this input rejected?" depend on run order while leaving "did the server crash?" well-posed. Schemathesis's `negative_data_rejection` is therefore deliberately not run. Negative generation is still on, so schema-violating input is still sent; only the rejection assertion is dropped.
 
-Known defects are listed in `KNOWN_FAILURES` keyed by method and path, with the issue number as the reason, and skip rather than mask everything behind them in the same operation. Delete an entry as part of closing its issue. `test_response_matches_schema` is gated behind `KITARU_FUZZ_SCHEMA_CONFORMANCE` until #930 lands, because every hand-raised 422 currently violates its own documented schema.
+Known defects are listed in `KNOWN_FAILURES` keyed by method and path, with the issue number as the reason, and skip rather than mask everything behind them in the same operation. Delete an entry as part of closing its issue.
 
 `KITARU_FUZZ_MAX_EXAMPLES` sets depth (default 25) and `KITARU_FUZZ_RANDOM=1` turns off `derandomize` so a nightly explores fresh inputs; the default stays derandomized so a failure reproduces. `KITARU_FUZZ_CAPTURE` writes captured tracebacks to a JSONL file. Findings scale steeply with depth, so prefer nightly depth over a shallow gate.

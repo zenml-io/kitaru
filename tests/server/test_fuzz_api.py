@@ -109,10 +109,6 @@ def test_no_server_error(case: schemathesis.Case, fuzz_server: FuzzServer) -> No
     _run(case, fuzz_server, [not_a_server_error])
 
 
-@pytest.mark.skipif(
-    not os.environ.get("KITARU_FUZZ_SCHEMA_CONFORMANCE"),
-    reason="blocked on #930: every hand-raised 422 violates its documented schema",
-)
 @_load_schema(GenerationMode.POSITIVE).parametrize()
 @FUZZ_SETTINGS
 def test_response_matches_schema(
