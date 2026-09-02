@@ -32,6 +32,11 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+
+# The schemathesis dependency lives in the `fuzz` group, which the regular
+# test matrix does not install, so guard the import before the module loads.
+pytest.importorskip("schemathesis")
+
 import schemathesis
 from fuzz_server import FuzzServer
 from hypothesis import HealthCheck, settings
