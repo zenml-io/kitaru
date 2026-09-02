@@ -26,7 +26,6 @@ from kitaru.api_models.v1.session import SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType, SessionNodeResponse
 from kitaru.task.evaluator import SessionView
 
-_ENCODING_REVISION = 1
 _EVIDENCE_LIMIT = 20
 _RESULT_VALUE_MAX_BYTES = 64_000
 _UNAVAILABLE = {"$kitaru": "unavailable"}
@@ -122,77 +121,6 @@ def _token_fields(tokens: Any) -> Any:
         "output_tokens": tokens.output_tokens,
         "reasoning_tokens": tokens.reasoning_tokens,
     }
-
-
-def _input_envelope(view: SessionView) -> dict[str, Any]:
-    """Select the union of score-relevant fields in supplied node order."""
-    session = view.session
-    selected_session = {
-        "cost": session.cost,
-        "ended_at": session.ended_at,
-        "error": session.error,
-        "id": session.id,
-        "inputs": session.inputs,
-        "llm_call_count": session.llm_call_count,
-        "outputs": session.outputs,
-        "started_at": session.started_at,
-        "status": session.status,
-        "tokens": _token_fields(session.tokens),
-        "tool_call_count": session.tool_call_count,
-    }
-    selected_nodes = [
-        {
-            "cost": node.cost,
-            "ended_at": node.ended_at,
-            "error": node.error,
-            "id": node.id,
-            "index": node.index,
-            "inputs": node.inputs,
-            "model": node.model,
-            "node_type": node.node_type,
-            "outputs": node.outputs,
-            "parent_id": node.parent_id,
-            "parent_index": node.parent_index,
-            "provider": node.model_provider,
-            "requested_model": node.requested_model,
-            "secondary_parent_ids": node.secondary_parent_ids,
-            "secondary_parent_indexes": node.secondary_parent_indexes,
-            "started_at": node.started_at,
-            "status": node.status,
-            "tokens": _token_fields(node.tokens),
-            "tool_name": node.tool_name,
-        }
-        for node in view.nodes
-    ]
-    normalized, _ = _normalize_observed(
-        {
-            "encoding_revision": _ENCODING_REVISION,
-            "nodes": selected_nodes,
-            "session": selected_session,
-        }
-    )
-    return normalized
-
-
-def _base_results(view: SessionView, config: dict[str, Any]) -> list[EvaluationResult]:
-    """Emit stable retry receipts shared by every bundle."""
-    normalized_config, complete = _normalize_observed(
-        {"encoding_revision": _ENCODING_REVISION, "parameters": config}
-    )
-    if not complete:
-        raise ValueError("configuration must contain only finite JSON values")
-    return [
-        EvaluationResult(
-            name="input_sha256",
-            value=_hash(_input_envelope(view)),
-            explanation="Hash of the revision-1 materialized input envelope.",
-        ),
-        EvaluationResult(
-            name="config_sha256",
-            value=_hash(normalized_config),
-            explanation="Hash of the normalized revision-1 evaluator parameters.",
-        ),
-    ]
 
 
 def _json_result(
@@ -462,7 +390,7 @@ def session_diagnostics(session: SessionView) -> list[EvaluationResult]:
                             "scope": "node",
                         }
                     )
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
             _json_result(
@@ -656,14 +584,7 @@ def output_contract(
         normalized_expected, expected_complete = _normalize_observed(expected)
         if not expected_complete:
             raise ValueError("expected must contain only finite JSON values")
-    config: dict[str, Any] = {}
-    if expected is not _UNSET:
-        config["expected"] = normalized_expected
-    if paths is not None:
-        config["required_paths"] = paths
-    if type_requirements is not None:
-        config["type_requirements"] = dict(sorted(type_requirements.items()))
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     output_available = session.session.outputs is not None and output_complete
     terminal = _is_terminal(session)
     results.append(
@@ -832,7 +753,7 @@ def trajectory_signals(session: SessionView) -> list[EvaluationResult]:
         repeats.append(evidence)
         if first.status is NodeStatus.FAILED:
             retries.append(evidence)
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
             _json_result(
@@ -913,7 +834,7 @@ def tool_health(session: SessionView) -> list[EvaluationResult]:
             repeated_failures.append(
                 {"indexes": [first.index, second.index], "tool_name": first.tool_name}
             )
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
             _finding_result("failed_calls", failed, "Tool calls recorded as failed."),
@@ -987,7 +908,7 @@ def timing_profile(
         active[node_id] = node
         heapq.heappush(active_heap, (ended_at, node_id))
     wall_clock = _duration(session.session.started_at, session.session.ended_at)
-    results = _base_results(session, {"evidence_limit": limit})
+    results: list[EvaluationResult] = []
     results.extend(
         [
             EvaluationResult(
@@ -1129,12 +1050,7 @@ def resource_budget(
             raise ValueError(f"{name} must be an integer")
     if all(value is None for value in ceilings.values()):
         raise ValueError("at least one resource ceiling is required")
-    config = {
-        name: _format_decimal(value)
-        for name, value in ceilings.items()
-        if value is not None
-    }
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     terminal = _is_terminal(session)
     nodes = _analysis_nodes(session)
     tool_count = sum(node.node_type is NodeType.TOOL_CALL for node in nodes)
@@ -1281,16 +1197,7 @@ def tool_policy(
     if required is None and forbidden is None and max_calls_per_tool is None:
         raise ValueError("at least one tool policy rule is required")
     maximums = dict(sorted((max_calls_per_tool or {}).items()))
-    config = {
-        key: value
-        for key, value in {
-            "forbidden_tools": forbidden,
-            "max_calls_per_tool": maximums or None,
-            "required_tools": required,
-        }.items()
-        if value is not None
-    }
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     calls = _tool_calls(session)
     known, name_coverage = _get_tool_name_coverage(calls)
     complete = _is_terminal(session) and len(known) == len(calls)
@@ -1388,7 +1295,7 @@ def llm_call_signals(session: SessionView) -> list[EvaluationResult]:
         and node.model is not None
         and node.requested_model != node.model
     ]
-    results = _base_results(session, {})
+    results: list[EvaluationResult] = []
     results.extend(
         [
             _finding_result("failed_calls", failed, "LLM calls recorded as failed."),
@@ -1443,14 +1350,7 @@ def model_policy(
         raise ValueError("require_requested_model_match must be a boolean")
     if models is None and providers is None and not require_requested_model_match:
         raise ValueError("at least one model policy rule is required")
-    config: dict[str, Any] = {
-        "require_requested_model_match": require_requested_model_match
-    }
-    if models is not None:
-        config["allowed_models"] = models
-    if providers is not None:
-        config["allowed_providers"] = providers
-    results = _base_results(session, config)
+    results: list[EvaluationResult] = []
     calls = _llm_calls(session)
     terminal = _is_terminal(session)
     can_pass = terminal and bool(calls)
@@ -1534,7 +1434,7 @@ def workflow_conformance(
         raise ValueError("expected_tools must be a non-empty list of non-empty strings")
     if mode not in _WORKFLOW_MODES:
         raise ValueError(f"mode must be one of {sorted(_WORKFLOW_MODES)}")
-    results = _base_results(session, {"expected_tools": expected_tools, "mode": mode})
+    results: list[EvaluationResult] = []
     calls = _tool_calls(session)
     observed, name_coverage = _get_tool_name_coverage(calls)
     matched = False

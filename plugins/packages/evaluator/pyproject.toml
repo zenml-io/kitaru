@@ -1,6 +1,6 @@
 [project]
 name = "kitaru-evaluator"
-version = "0.1.2"
+version = "0.1.3"
 description = "Built-in offline evaluators for Kitaru."
 readme = "README.md"
 license = "Apache-2.0"

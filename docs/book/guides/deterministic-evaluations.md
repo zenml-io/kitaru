@@ -71,7 +71,7 @@ Configured rules use conservative evidence semantics:
 
 ## Understand result evidence
 
-Every bundle emits `input_sha256` and `config_sha256`. The input hash covers the materialized session and node fields used across the deterministic catalog. The configuration hash covers normalized parameters for that evaluator. Use both values to tell whether two attempts analyzed the same fetched evidence with the same configuration.
+Configured bundles no longer echo a hash of their parameters into a result. Read `evaluator_params` on the evaluation response to see the exact params an evaluator ran with.
 
 Finding results use compact JSON in `value`:
 
@@ -154,7 +154,7 @@ For larger sets, split the session IDs into chunks that satisfy the formula and 
 
 ## Current evidence limits
 
-The worker fetches the session and its nodes when an attempt runs. These reads are separate and the underlying records can change, so a retry can observe a later or internally mixed materialization. The hashes expose that difference, but they do not create an immutable snapshot. Repeatability also depends on a compatible Kitaru and Python worker runtime.
+The worker fetches the session and its nodes when an attempt runs. These reads are separate and the underlying records can change, so a retry can observe a later or internally mixed materialization. Repeatability also depends on a compatible Kitaru and Python worker runtime.
 
 The current session view cannot distinguish an absent normalized output from an explicit JSON null. An observed null session output is therefore unavailable to `output-contract`, including when the expected value is null. A null tool result has the same ambiguity and is reported as a diagnostic rather than an integrity verdict.
 

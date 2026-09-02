@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.3
+
+- Remove `input_sha256` and `config_sha256` provenance results from every deterministic evaluator bundle.
+
 ## 0.1.2
 
 - Include directly priced non-root spans and fall back to aggregate costs when direct coverage is incomplete.
