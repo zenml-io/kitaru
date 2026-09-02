@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 - Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's runtime capabilities do not declare.
 - Importer-backed adapters now reject a replay config carrying an override or a non-passthrough tool policy with a RuntimeError before the wrapped function runs.
 - `session_request` in `kitaru.task.importer` now takes the parsed session, the agent id, the provider, and the origin instead of the import task details.
+- The built-in deterministic evaluators (`kitaru/session-diagnostics@1` and the other nine bundles) no longer emit `input_sha256` or `config_sha256` results.
 
 ### Fixed
 

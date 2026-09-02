@@ -169,7 +169,7 @@ def test_entrypoint_loads_through_package_plugin_contract() -> None:
     assert [result.model_dump(mode="json") for result in first] == [
         result.model_dump(mode="json") for result in repeated
     ]
-    assert {result.name for result in first} >= {"input_sha256", "terminality"}
+    assert "terminality" in {result.name for result in first}
 
 
 def test_ordered_result_name_contracts() -> None:
@@ -214,8 +214,6 @@ def test_ordered_result_name_contracts() -> None:
     }
     expected = {
         "session_diagnostics": [
-            "input_sha256",
-            "config_sha256",
             "terminality",
             "node_order",
             "parent_linkage",
@@ -228,16 +226,12 @@ def test_ordered_result_name_contracts() -> None:
             "resource_integrity",
         ],
         "output_contract": [
-            "input_sha256",
-            "config_sha256",
             "output_availability",
             "exact_output",
             "required_paths",
             "type_requirements",
         ],
         "trajectory_signals": [
-            "input_sha256",
-            "config_sha256",
             "tool_identity_coverage",
             "adjacent_identical_calls",
             "failed_identical_retries",
@@ -245,8 +239,6 @@ def test_ordered_result_name_contracts() -> None:
             "cycle_detector_bounds",
         ],
         "tool_health": [
-            "input_sha256",
-            "config_sha256",
             "failed_calls",
             "null_results",
             "empty_results",
@@ -254,8 +246,6 @@ def test_ordered_result_name_contracts() -> None:
             "adjacent_repeated_failures",
         ],
         "timing_profile": [
-            "input_sha256",
-            "config_sha256",
             "wall_clock_duration_seconds",
             "node_duration_coverage",
             "slowest_nodes",
@@ -263,8 +253,6 @@ def test_ordered_result_name_contracts() -> None:
             "invalid_intervals",
         ],
         "resource_budget": [
-            "input_sha256",
-            "config_sha256",
             "duration_budget",
             "cost_budget",
             "total_tokens_budget",
@@ -273,16 +261,12 @@ def test_ordered_result_name_contracts() -> None:
             "tool_call_count_budget",
         ],
         "tool_policy": [
-            "input_sha256",
-            "config_sha256",
             "tool_name_coverage",
             "required_tools",
             "forbidden_tools",
             "per_tool_maximums",
         ],
         "llm_call_signals": [
-            "input_sha256",
-            "config_sha256",
             "failed_calls",
             "empty_results",
             "adjacent_identical_inputs",
@@ -290,15 +274,11 @@ def test_ordered_result_name_contracts() -> None:
             "metadata_coverage",
         ],
         "model_policy": [
-            "input_sha256",
-            "config_sha256",
             "allowed_models",
             "allowed_providers",
             "requested_model_match",
         ],
         "workflow_conformance": [
-            "input_sha256",
-            "config_sha256",
             "tool_name_coverage",
             "workflow_match",
         ],
@@ -306,40 +286,6 @@ def test_ordered_result_name_contracts() -> None:
     assert {
         name: [result.name for result in results] for name, results in calls.items()
     } == expected
-
-
-def test_shared_hashes_are_stable_and_preserve_node_array_order() -> None:
-    """Canonicalize object keys while retaining supplied node order."""
-    first = _node(0, tool_name="search", inputs={"b": 2, "a": 1}, outputs={})
-    second = _node(1, tool_name="read", inputs={}, outputs={})
-    same = _node(0, tool_name="search", inputs={"a": 1, "b": 2}, outputs={})
-    hash_a = _by_name(evaluators.session_diagnostics(_view([first, second])))[
-        "input_sha256"
-    ].value
-    hash_b = _by_name(evaluators.session_diagnostics(_view([same, second])))[
-        "input_sha256"
-    ].value
-    hash_reordered = _by_name(evaluators.session_diagnostics(_view([second, first])))[
-        "input_sha256"
-    ].value
-    assert hash_a == hash_b
-    assert hash_a != hash_reordered
-    config_a = _by_name(
-        evaluators.output_contract(
-            _view(), type_requirements={"/answer": "integer", "": "object"}
-        )
-    )["config_sha256"].value
-    config_b = _by_name(
-        evaluators.output_contract(
-            _view(), type_requirements={"": "object", "/answer": "integer"}
-        )
-    )["config_sha256"].value
-    assert config_a == config_b
-    assert [
-        result.model_dump_json() for result in evaluators.session_diagnostics(_view())
-    ] == [
-        result.model_dump_json() for result in evaluators.session_diagnostics(_view())
-    ]
 
 
 def test_decimal_encoding_ignores_ambient_precision() -> None:
