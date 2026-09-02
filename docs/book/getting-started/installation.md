@@ -17,6 +17,24 @@ The Kitaru CLI, server, and workers require **Python 3.11 or newer**. TypeScript
 
 The server stores everything in **PostgreSQL**, its only stateful dependency. You do not install it by hand for local use: `kitaru login --local` provisions the server and Postgres together in Docker. A [self-hosted deployment](../deploy/README.md) brings its own Postgres. Workers are plain processes (`kitaru worker start`) that run wherever your agent's environment lives; for containerized fleets, the published `zenmldocker/kitaru-worker` image works out of the box (see [Workers in production](../deploy/workers.md)).
 
+## One-line install
+
+The fastest way onto a machine is the installer. It puts the CLI and MCP server in an isolated [uv](https://docs.astral.sh/uv/) environment (installing uv first if you do not have it), installs the [agent skills](../agent-native/setup.md) for every coding agent it finds, registers the MCP server with Claude Code and Codex, and runs `kitaru login --local` when Docker is running:
+
+```bash
+curl -fsSL https://kitaru.ai/install | bash
+```
+
+Nothing needs `sudo`; everything lands under your home directory, and running it again upgrades. `--server https://your-team.kitaru.ai` logs in to a team server instead of starting a local one; `--with kitaru-pydantic-ai` adds an adapter to the same environment; `--no-login`, `--no-skills`, and `--no-mcp` skip steps. `curl -fsSL https://kitaru.ai/install | bash -s -- --help` lists everything.
+
+Already working inside a coding agent? Paste this prompt instead. It reads this page and runs the same installer for you:
+
+```
+Set up Kitaru on this machine by following https://raw.githubusercontent.com/zenml-io/kitaru/main/docs/book/getting-started/installation.md. Use the one-line installer, tell me what it did, and stop before logging in if Docker is not running.
+```
+
+The installer is the right choice for the CLI on a laptop. To use the SDK from your agent's own code, or to pin Kitaru inside a project's environment, install it into that project instead:
+
 ## Install the Python SDK and CLI
 
 {% tabs %} {% tab title="uv (recommended)" %}

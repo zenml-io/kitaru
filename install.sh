@@ -154,8 +154,14 @@ if have uv; then
   ok "uv $(uv --version 2>/dev/null | awk '{print $2}') found"
 else
   step "Installing uv (Python package manager, from astral.sh)"
-  fetch_to_stdout https://astral.sh/uv/install.sh | quiet sh -s -- --quiet \
+  # Download to a file first: `quiet` closes stdin, so piping into `sh -s`
+  # would hand the installer an empty script.
+  UV_INSTALLER="$(mktemp)"
+  fetch_to_stdout https://astral.sh/uv/install.sh >"$UV_INSTALLER" \
+    || die "Could not download the uv installer from https://astral.sh/uv/install.sh"
+  quiet sh "$UV_INSTALLER" --quiet \
     || die "uv install failed. Install it from https://docs.astral.sh/uv/ and re-run."
+  rm -f "$UV_INSTALLER"
   ensure_path "$HOME/.local/bin"
   have uv || die "uv installed but not found on PATH. Open a new terminal and re-run."
   ok "uv $(uv --version | awk '{print $2}') installed"
