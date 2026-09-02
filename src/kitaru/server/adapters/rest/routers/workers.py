@@ -46,6 +46,7 @@ from kitaru.server.adapters.rest.mapping.workers import (
     worker_list_params_to_filter,
     worker_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.config import APISettings
 from kitaru.server.application.models.auth import AuthContext, WorkerAuthContext
@@ -88,7 +89,7 @@ def _check_worker_client(client: str) -> None:
         )
 
 
-@router.post("")
+@router.post("", responses=error_responses(426))
 async def register_worker(
     body: WorkerCreateRequest,
     service: Annotated[WorkerService, Depends(get_worker_service)],
@@ -134,7 +135,7 @@ async def register_worker(
     )
 
 
-@router.post("/{worker_id}/token")
+@router.post("/{worker_id}/token", responses=error_responses(404))
 async def renew_worker_token(
     worker_id: uuid.UUID,
     service: Annotated[WorkerService, Depends(get_worker_service)],
@@ -197,7 +198,7 @@ async def list_workers(
     )
 
 
-@router.get("/{worker_id}")
+@router.get("/{worker_id}", responses=error_responses(404))
 async def get_worker(
     worker_id: uuid.UUID,
     service: Annotated[WorkerService, Depends(get_worker_service)],
@@ -224,7 +225,7 @@ async def get_worker(
     )
 
 
-@router.post("/{worker_id}/heartbeat")
+@router.post("/{worker_id}/heartbeat", responses=error_responses(404))
 async def heartbeat_worker(
     worker_id: uuid.UUID,
     body: WorkerHeartbeatRequest,
@@ -251,7 +252,11 @@ async def heartbeat_worker(
     return WorkerHeartbeatResponse(cancel_task_ids=cancel_task_ids)
 
 
-@router.delete("/{worker_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{worker_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_worker(
     worker_id: uuid.UUID,
     service: Annotated[WorkerService, Depends(get_worker_service)],

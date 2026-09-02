@@ -44,6 +44,7 @@ from kitaru.server.adapters.rest.mapping.tasks import (
     task_to_response,
     task_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import (
     AuthContext,
@@ -82,7 +83,7 @@ async def list_tasks(
     )
 
 
-@router.post("/claim")
+@router.post("/claim", responses=error_responses(404))
 async def claim_tasks(
     body: TaskClaimRequest,
     service: Annotated[TaskService, Depends(get_task_service)],
@@ -123,7 +124,7 @@ async def claim_tasks(
     return claimed_tasks_to_response(claimed, tokens)
 
 
-@router.get("/{task_id}")
+@router.get("/{task_id}", responses=error_responses(404))
 async def get_task(
     task_id: uuid.UUID,
     service: Annotated[TaskService, Depends(get_task_service)],
@@ -146,7 +147,7 @@ async def get_task(
     return task_to_response(task)
 
 
-@router.get("/{task_id}/spec")
+@router.get("/{task_id}/spec", responses=error_responses(404, 409))
 async def get_task_spec(
     task_id: uuid.UUID,
     service: Annotated[TaskService, Depends(get_task_service)],
@@ -170,7 +171,7 @@ async def get_task_spec(
     return spec_to_response(spec)
 
 
-@router.patch("/{task_id}")
+@router.patch("/{task_id}", responses=error_responses(404, 409, 413))
 async def update_task(
     task_id: uuid.UUID,
     body: TaskUpdateRequest,

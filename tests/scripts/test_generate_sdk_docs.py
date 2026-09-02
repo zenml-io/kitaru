@@ -203,6 +203,8 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
             "TimestampedResponseModel",
             "OwnedResponseModel",
             "ErrorBody",
+            "ValidationErrorItem",
+            "ValidationErrorBody",
             "PlainSerializedSecretStr",
             "FiniteFloat",
             "JsonValue",

@@ -35,6 +35,7 @@ from kitaru.server.adapters.rest.mapping.experiment_runs import (
     experiment_run_to_response,
 )
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.api.run_cancellation import RunCanceler, get_run_canceler
 from kitaru.server.application.models.auth import AuthContext
@@ -72,7 +73,7 @@ async def list_experiment_runs(
     )
 
 
-@router.get("/{experiment_run_id}")
+@router.get("/{experiment_run_id}", responses=error_responses(404))
 async def get_experiment_run(
     experiment_run_id: uuid.UUID,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
@@ -94,7 +95,11 @@ async def get_experiment_run(
     return experiment_run_to_response(run, counts)
 
 
-@router.delete("/{experiment_run_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{experiment_run_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_experiment_run(
     experiment_run_id: uuid.UUID,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
@@ -112,7 +117,7 @@ async def delete_experiment_run(
     await service.delete_run(experiment_run_id, actor=actor)
 
 
-@router.get("/{experiment_run_id}/jobs")
+@router.get("/{experiment_run_id}/jobs", responses=error_responses(404))
 async def list_experiment_run_jobs(
     experiment_run_id: uuid.UUID,
     service: Annotated[ExperimentRunService, Depends(get_experiment_run_service)],
@@ -141,7 +146,7 @@ async def list_experiment_run_jobs(
     )
 
 
-@router.post("/{experiment_run_id}/cancel")
+@router.post("/{experiment_run_id}/cancel", responses=error_responses(404, 409))
 async def cancel_experiment_run(
     experiment_run_id: uuid.UUID,
     actor: Annotated[AuthContext, Depends(authorize)],

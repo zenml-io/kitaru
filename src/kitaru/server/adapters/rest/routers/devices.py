@@ -30,6 +30,7 @@ from kitaru.server.adapters.rest.mapping.devices import (
     device_list_params_to_filter,
     device_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.device_service import DeviceService
@@ -64,7 +65,7 @@ async def list_devices(
     )
 
 
-@router.get("/{device_id}")
+@router.get("/{device_id}", responses=error_responses(404))
 async def get_device(
     device_id: uuid.UUID,
     service: Annotated[DeviceService, Depends(get_device_service)],
@@ -90,7 +91,7 @@ async def get_device(
     return device_to_response(device)
 
 
-@router.post("/{device_id}/verify")
+@router.post("/{device_id}/verify", responses=error_responses(404))
 async def verify_device(
     device_id: uuid.UUID,
     body: DeviceVerifyRequest,
@@ -123,7 +124,7 @@ async def verify_device(
     return device_to_response(device)
 
 
-@router.patch("/{device_id}")
+@router.patch("/{device_id}", responses=error_responses(404))
 async def update_device(
     device_id: uuid.UUID,
     body: DeviceUpdateRequest,
@@ -154,7 +155,11 @@ async def update_device(
     return device_to_response(device)
 
 
-@router.delete("/{device_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{device_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_device(
     device_id: uuid.UUID,
     service: Annotated[DeviceService, Depends(get_device_service)],

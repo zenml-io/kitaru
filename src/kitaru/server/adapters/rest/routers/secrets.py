@@ -34,6 +34,7 @@ from kitaru.server.adapters.rest.mapping.secrets import (
     secret_list_params_to_filter,
     secret_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.secret_service import SecretService
@@ -41,7 +42,9 @@ from kitaru.server.application.services.secret_service import SecretService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 409)
+)
 @idempotent
 async def create_secret(
     body: SecretCreateRequest,
@@ -95,7 +98,7 @@ async def list_secrets(
     )
 
 
-@router.get("/{secret_id}")
+@router.get("/{secret_id}", responses=error_responses(404))
 async def get_secret(
     secret_id: uuid.UUID,
     service: Annotated[SecretService, Depends(get_secret_service)],
@@ -120,7 +123,7 @@ async def get_secret(
     return secret_to_response(secret, include_values=include_values)
 
 
-@router.patch("/{secret_id}")
+@router.patch("/{secret_id}", responses=error_responses(404))
 async def update_secret(
     secret_id: uuid.UUID,
     body: SecretUpdateRequest,
@@ -147,7 +150,11 @@ async def update_secret(
     return secret_to_response(secret)
 
 
-@router.delete("/{secret_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{secret_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_secret(
     secret_id: uuid.UUID,
     service: Annotated[SecretService, Depends(get_secret_service)],
