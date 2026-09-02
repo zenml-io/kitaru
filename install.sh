@@ -126,7 +126,9 @@ fi
 case "$(uname -s)" in
   Darwin|Linux) ;;
   MINGW*|MSYS*|CYGWIN*)
-    die "Windows: run this inside WSL, or install manually with: uv tool install \"kitaru[cli,mcp,worker]\"" ;;
+    # Git Bash / MSYS. uv, the CLI and the MCP server install fine; the local
+    # server still needs Docker Desktop. WSL is the smoother path.
+    warn "Windows (Git Bash) detected. Installing; WSL is recommended for the local server." ;;
   *) die "Unsupported OS: $(uname -s)" ;;
 esac
 
@@ -195,6 +197,7 @@ quiet uv "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --v
 
 # uv puts tool executables in its tool bin dir; make sure future shells see it.
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$(cygpath -u "$TOOL_BIN" 2>/dev/null || echo "$TOOL_BIN")" ;; esac
 ensure_path "$TOOL_BIN"
 quiet uv tool update-shell || true
 persist_path "$TOOL_BIN"

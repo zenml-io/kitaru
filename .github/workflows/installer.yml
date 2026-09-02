@@ -1,0 +1,49 @@
+---
+name: Installer smoke
+# Runs install.sh on real GitHub-hosted runners the way a user would
+# (`curl ... | bash`), then checks the CLI, MCP server, skills, and PATH.
+# No Docker on the runners, so login is skipped.
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - install.sh
+      - .github/workflows/installer.yml
+permissions: {}
+concurrency:
+  group: installer-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  install:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-latest, macos-15-intel, windows-latest]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Run the installer as a user would
+        shell: bash
+        run: cat install.sh | bash -s -- --no-login --verbose
+      - name: Verify
+        shell: bash
+        run: |
+          set -euxo pipefail
+          export PATH="$HOME/.local/bin:$PATH"
+          uname -a
+          kitaru --version
+          kitaru-mcp --help >/dev/null
+          ls "$HOME/.agents/skills"
+          test -f "$HOME/.agents/skills/kitaru-investigation/SKILL.md"
+          kitaru doctor > doctor.json || true
+          python3 -c "import json; d=json.load(open('doctor.json'))['item']['checks']; [print(c['name'], c['status'], c.get('detail','')[:80]) for c in d]" \
+            || cat doctor.json
+          grep -l ".local/bin" "$HOME/.bashrc" "$HOME/.zshrc" "$HOME/.profile" "$HOME/.bash_profile" 2>/dev/null || { echo "PATH not persisted"; exit 1; }
+      - name: Re-run is an upgrade, not an error
+        shell: bash
+        run: cat install.sh | bash -s -- --no-login --no-skills --no-mcp --quiet
