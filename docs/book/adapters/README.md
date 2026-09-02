@@ -21,7 +21,7 @@ Each adapter ships as its own distribution, installed alongside Kitaru in the ag
 | [LangGraph](langgraph.md) | `kitaru-langgraph` | `kitaru_langgraph.KitaruGraphRunner` | Yes | Depends on construction |
 | [OpenAI Agents SDK](openai-agents.md) | `kitaru-openai-agents` | `kitaru_openai_agents.KitaruRunner` | Yes | Yes |
 
-| [Importer-backed](importer-backed.md) | `kitaru-<provider>-importer[adapter]` | `<Provider>Adapter` in the importer package | Yes, through the provider trace | Passthrough only |
+| [Importer-backed](importer-backed.md) | `kitaru-<provider>-importer[adapter]` | `<Provider>Adapter` in the package's `adapter` module | Yes, through the provider trace | Passthrough only |
 
 LangChain agents and Deep Agents use the LangGraph adapter, since their public factories return LangGraph runnables. What the LangGraph adapter can replay depends on how the graph was constructed; its [capability matrix](langgraph.md) is the reference.
 

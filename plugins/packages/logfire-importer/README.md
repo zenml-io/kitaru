@@ -28,7 +28,7 @@ The package also ships an adapter that imports Logfire traces of wrapped agent r
 The trace fetch goes through the Logfire Query API, which authenticates with a read token, a separate credential from the SDK's write token. Create one under your Logfire project settings and set it as `LOGFIRE_READ_TOKEN`. Then wrap your agent entrypoint in a `LogfireAdapter` and run it through the adapter.
 
 ```python
-from kitaru_logfire_importer import LogfireAdapter
+from kitaru_logfire_importer.adapter import LogfireAdapter
 
 adapter = LogfireAdapter()
 result = adapter.run(my_agent, "Hello")

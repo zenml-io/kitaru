@@ -26,7 +26,7 @@ uv add "kitaru-braintrust-importer[adapter]"
 The package also ships an adapter that imports Braintrust traces of wrapped agent runs. The adapter uses the Braintrust logger already configured in your process and the Kitaru connection from your environment. Set `BRAINTRUST_API_KEY` to the key the trace fetch authenticates with, then wrap your agent entrypoint in a `BraintrustAdapter` and run it through the adapter.
 
 ```python
-from kitaru_braintrust_importer import BraintrustAdapter
+from kitaru_braintrust_importer.adapter import BraintrustAdapter
 
 adapter = BraintrustAdapter()
 result = adapter.run(my_agent, "Hello")

@@ -31,7 +31,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_phoenix_importer import PhoenixAdapter
+from kitaru_phoenix_importer.adapter import PhoenixAdapter
 from kitaru_phoenix_importer.importer import parse
 
 from .fixtures import PROJECT, FakePhoenix, build_complete_spans, build_span
@@ -256,7 +256,7 @@ async def test_fetch_round_trips_through_the_real_parser(
 
     # The fetch serves the spans cached by the completeness wait.
     assert fake_phoenix.requested == [trace_id] * 2
-    items = list(parse(payload, PhoenixAdapter.parser_params))
+    items = list(parse(payload, {}))
     assert len(items) == 1
     session = items[0]
     assert isinstance(session, ImportedSession)

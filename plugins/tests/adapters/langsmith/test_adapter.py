@@ -28,7 +28,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_langsmith_importer import LangSmithAdapter
+from kitaru_langsmith_importer.adapter import _PARSER_PARAMS, LangSmithAdapter
 from kitaru_langsmith_importer.importer import parse
 
 from .fixtures import PROJECT_ID, FakeLangSmith, build_complete_runs, build_run
@@ -234,7 +234,7 @@ async def test_fetch_round_trips_through_the_real_parser(
     payload = await adapter.fetch(trace_id)
 
     assert len(fake_langsmith.requested) == 2
-    items = list(parse(payload, LangSmithAdapter.parser_params))
+    items = list(parse(payload, _PARSER_PARAMS))
     assert len(items) == 1
     session = items[0]
     assert isinstance(session, ImportedSession)
@@ -258,6 +258,6 @@ async def test_fetch_refetches_a_trace_missing_from_the_poll_state(
     payload = await adapter.fetch(trace_id)
 
     assert fake_langsmith.requested == [trace_id]
-    items = list(parse(payload, LangSmithAdapter.parser_params))
+    items = list(parse(payload, _PARSER_PARAMS))
     assert len(items) == 1
     assert isinstance(items[0], ImportedSession)

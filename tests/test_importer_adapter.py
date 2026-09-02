@@ -126,15 +126,12 @@ class _FakeClient:
 class _FakeAdapter(ImporterBackedAdapter):
     """Adapter subclass with scripted hooks."""
 
-    provider = "acme"
-
     def __init__(
         self,
         parser: Parser,
         completeness_timeout: float = 120.0,
     ) -> None:
-        super().__init__(completeness_timeout)
-        self.parser = parser
+        super().__init__("acme", parser, completeness_timeout=completeness_timeout)
         self.events: list[str] = []
         self.wait_seconds = 0.0
         self.wait_error: Exception | None = None

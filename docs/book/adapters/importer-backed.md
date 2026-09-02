@@ -15,11 +15,11 @@ Each adapter ships inside the provider's importer package, behind the `adapter` 
 
 | Provider | Install | Entry point | Credentials the trace fetch reads |
 | --- | --- | --- | --- |
-| Langfuse | `kitaru-langfuse-importer[adapter]` | `kitaru_langfuse_importer.LangfuseAdapter` | The Langfuse client configured in your process |
-| Braintrust | `kitaru-braintrust-importer[adapter]` | `kitaru_braintrust_importer.BraintrustAdapter` | `BRAINTRUST_API_KEY` and the active Braintrust logger |
-| LangSmith | `kitaru-langsmith-importer[adapter]` | `kitaru_langsmith_importer.LangSmithAdapter` | `LANGSMITH_API_KEY`, plus `LANGSMITH_ENDPOINT` for a self-hosted instance |
-| Logfire | `kitaru-logfire-importer[adapter]` | `kitaru_logfire_importer.LogfireAdapter` | `LOGFIRE_TOKEN` for the SDK and `LOGFIRE_READ_TOKEN` for the fetch |
-| Arize Phoenix | `kitaru-phoenix-importer[adapter]` | `kitaru_phoenix_importer.PhoenixAdapter` | `PHOENIX_ENDPOINT` or `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_API_KEY`, and `PHOENIX_PROJECT` |
+| Langfuse | `kitaru-langfuse-importer[adapter]` | `kitaru_langfuse_importer.adapter.LangfuseAdapter` | The Langfuse client configured in your process |
+| Braintrust | `kitaru-braintrust-importer[adapter]` | `kitaru_braintrust_importer.adapter.BraintrustAdapter` | `BRAINTRUST_API_KEY` and the active Braintrust logger |
+| LangSmith | `kitaru-langsmith-importer[adapter]` | `kitaru_langsmith_importer.adapter.LangSmithAdapter` | `LANGSMITH_API_KEY`, plus `LANGSMITH_ENDPOINT` for a self-hosted instance |
+| Logfire | `kitaru-logfire-importer[adapter]` | `kitaru_logfire_importer.adapter.LogfireAdapter` | `LOGFIRE_TOKEN` for the SDK and `LOGFIRE_READ_TOKEN` for the fetch |
+| Arize Phoenix | `kitaru-phoenix-importer[adapter]` | `kitaru_phoenix_importer.adapter.PhoenixAdapter` | `PHOENIX_ENDPOINT` or `PHOENIX_COLLECTOR_ENDPOINT`, `PHOENIX_API_KEY`, and `PHOENIX_PROJECT` |
 
 ## Record a run
 
@@ -32,11 +32,12 @@ uv add "kitaru-langfuse-importer[adapter]"
 Configure the provider SDK as you already do, then wrap the entrypoint:
 
 ```python
-from kitaru_langfuse_importer import LangfuseAdapter
+from kitaru_langfuse_importer.adapter import LangfuseAdapter
 
 
 def run_agent(question: str) -> str:
-    ...  # the Langfuse-instrumented agent
+    # The Langfuse-instrumented agent.
+    ...
 
 
 adapter = LangfuseAdapter()

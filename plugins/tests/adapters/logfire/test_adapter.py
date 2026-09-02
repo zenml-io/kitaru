@@ -28,7 +28,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_logfire_importer import LogfireAdapter
+from kitaru_logfire_importer.adapter import _PARSER_PARAMS, LogfireAdapter
 from kitaru_logfire_importer.importer import parse
 
 from .fixtures import PROJECT_ID, FakeLogfire, build_complete_rows, build_row
@@ -249,7 +249,7 @@ async def test_fetch_round_trips_through_the_real_parser(
     payload = await adapter.fetch(trace_id)
 
     assert fake_logfire.requested == [trace_id] * 3
-    items = list(parse(payload, LogfireAdapter.parser_params))
+    items = list(parse(payload, _PARSER_PARAMS))
     assert len(items) == 1
     session = items[0]
     assert isinstance(session, ImportedSession)

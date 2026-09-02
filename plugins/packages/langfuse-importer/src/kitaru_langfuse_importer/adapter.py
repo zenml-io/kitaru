@@ -34,9 +34,6 @@ _ROOT_SPAN_NAME = "kitaru-run"
 class LangfuseAdapter(ImporterBackedAdapter):
     """Adapter importing Langfuse traces of wrapped runs."""
 
-    provider = "langfuse"
-    parser = staticmethod(parse)
-
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
 
@@ -44,7 +41,7 @@ class LangfuseAdapter(ImporterBackedAdapter):
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        super().__init__(completeness_timeout)
+        super().__init__("langfuse", parse, completeness_timeout=completeness_timeout)
         self._completed_traces: dict[str, TraceWithFullDetails] = {}
 
     @contextmanager

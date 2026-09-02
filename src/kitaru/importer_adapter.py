@@ -16,9 +16,10 @@
 import asyncio
 import os
 import uuid
+from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from contextlib import AbstractContextManager
-from typing import Any, ClassVar, TypeVar
+from typing import Any, TypeVar
 
 from kitaru.api_models.v1.imports import ImportFailure
 from kitaru.api_models.v1.replay_config import PassthroughConfig
@@ -41,51 +42,56 @@ __all__ = ["ImporterBackedAdapter"]
 T = TypeVar("T")
 
 
-class ImporterBackedAdapter:
+class ImporterBackedAdapter(ABC):
     """Base class for adapters importing provider traces of wrapped runs."""
 
-    provider: str
-    parser: Parser
-    parser_params: ClassVar[dict[str, Any]] = {}
-
-    def __init__(self, completeness_timeout: float = 120.0) -> None:
+    def __init__(
+        self,
+        provider: str,
+        parser: Parser,
+        parser_params: dict[str, Any] | None = None,
+        completeness_timeout: float = 120.0,
+    ) -> None:
         """Initialize the adapter.
 
         Args:
+            provider: Source system named on the imported sessions.
+            parser: Importer parser for the fetched trace payload.
+            parser_params: Params passed to the parser.
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
+        self._provider = provider
+        self._parser = parser
+        self._parser_params = parser_params or {}
         self._completeness_timeout = completeness_timeout
 
+    @abstractmethod
     def open_trace(self) -> AbstractContextManager[str]:
         """Activate a provider trace and yield its external id.
 
-        Raises:
-            NotImplementedError: Always.
+        Returns:
+            Provider trace context manager.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     async def wait_until_complete(self, external_id: str) -> None:
         """Block until the provider has the finished trace.
 
         Args:
             external_id: Provider trace id.
-
-        Raises:
-            NotImplementedError: Always.
         """
-        raise NotImplementedError
 
+    @abstractmethod
     async def fetch(self, external_id: str) -> bytes:
         """Fetch the finished trace as payload bytes.
 
         Args:
             external_id: Provider trace id.
 
-        Raises:
-            NotImplementedError: Always.
+        Returns:
+            Trace payload bytes.
         """
-        raise NotImplementedError
 
     def run(self, func: Callable[..., T], /, *args: Any, **kwargs: Any) -> T:
         """Run a function inside a provider trace and import the trace.
@@ -184,7 +190,7 @@ class ImporterBackedAdapter:
             return
         payload = await self.fetch(external_id)
         sessions: list[ImportedSession] = []
-        for item in call_parser(self.parser, payload, self.parser_params):
+        for item in call_parser(self._parser, payload, self._parser_params):
             if isinstance(item, ImportFailure):
                 raise SessionImportError(
                     f"Parser failed on trace {external_id}: {item.error}"
@@ -197,7 +203,7 @@ class ImporterBackedAdapter:
             )
         async with KitaruAPIClient() as client:
             session = await ingest_session(
-                client, sessions[0], None, self.provider, origin
+                client, sessions[0], None, self._provider, origin
             )
         if session is None:
             raise SessionImportError(
@@ -225,6 +231,6 @@ class ImporterBackedAdapter:
             error="Provider trace did not complete within "
             f"{self._completeness_timeout} seconds",
             metadata={"external_id": external_id},
-            imported_from=self.provider,
+            imported_from=self._provider,
         )
         await client.sessions.create(request)

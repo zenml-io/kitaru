@@ -34,9 +34,6 @@ _ROOT_SPAN_NAME = "kitaru-run"
 class PhoenixAdapter(ImporterBackedAdapter):
     """Adapter importing Phoenix traces of wrapped runs."""
 
-    provider = "phoenix"
-    parser = staticmethod(parse)
-
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
 
@@ -44,7 +41,7 @@ class PhoenixAdapter(ImporterBackedAdapter):
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        super().__init__(completeness_timeout)
+        super().__init__("phoenix", parse, completeness_timeout=completeness_timeout)
         self._spans: dict[str, list[Any]] = {}
 
     @contextmanager

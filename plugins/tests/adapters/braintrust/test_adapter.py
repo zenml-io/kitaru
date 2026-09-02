@@ -27,7 +27,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_braintrust_importer import BraintrustAdapter
+from kitaru_braintrust_importer.adapter import BraintrustAdapter
 from kitaru_braintrust_importer.importer import parse
 
 from .fixtures import FakeBraintrust, build_complete_rows, build_row

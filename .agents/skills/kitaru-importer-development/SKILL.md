@@ -28,7 +28,7 @@ An importer package for a provider with a live read API can also ship an importe
 
 - Split the code into `adapter.py` (the subclass: trace pinning, SDK buffer flush, per-run cache) and `api.py` (the provider read layer: credential and client resolution, the completeness poll, single fetch, serialization to parser payload bytes). Keep `api.py` adapter-free so future direct-from-API imports can reuse it.
 - Run blocking SDK calls inside the async hooks via `asyncio.to_thread`, never in `open_trace()` teardown.
-- Provider SDK dependencies belong in the importer package's `adapter` extra, and the package `__init__` resolves the adapter through a module `__getattr__` so `parse` never loads the SDK. Adapter tests live under `plugins/tests/adapters/<slug>/` and run the real parser against a faked provider SDK.
+- Provider SDK dependencies belong in the importer package's `adapter` extra. Users import the adapter from the `adapter` submodule, never from the package `__init__`, so `parse` never loads the SDK. Adapter tests live under `plugins/tests/adapters/<slug>/` and run the real parser against a faked provider SDK.
 - Agent versions whose run spec command uses such an adapter must declare `runtime_capabilities` with `overrides: false` and `tool_policies: false`, since the runtime cannot intercept model or tool calls. Replay and experiment run creation reject configs the declaration cannot apply, and the adapter raises on such configs as a backstop.
 
 ## Package, register, and version

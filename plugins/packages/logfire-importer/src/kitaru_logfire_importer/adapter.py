@@ -17,7 +17,6 @@ import asyncio
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from typing import Any, ClassVar
 
 from logfire import force_flush, span
 from opentelemetry.trace import format_trace_id
@@ -29,15 +28,13 @@ from .importer import parse
 
 __all__ = ["LogfireAdapter"]
 
+_PARSER_PARAMS = {"join_on": "trace_id"}
+
 _ROOT_SPAN_NAME = "kitaru-run"
 
 
 class LogfireAdapter(ImporterBackedAdapter):
     """Adapter importing Logfire traces of wrapped runs."""
-
-    provider = "logfire"
-    parser = staticmethod(parse)
-    parser_params: ClassVar[dict[str, Any]] = {"join_on": "trace_id"}
 
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
@@ -46,7 +43,9 @@ class LogfireAdapter(ImporterBackedAdapter):
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        super().__init__(completeness_timeout)
+        super().__init__(
+            "logfire", parse, _PARSER_PARAMS, completeness_timeout=completeness_timeout
+        )
         self._started_at: dict[str, datetime] = {}
 
     @contextmanager

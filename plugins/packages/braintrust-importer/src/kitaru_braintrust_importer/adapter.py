@@ -48,9 +48,6 @@ def _get_project_id() -> str:
 class BraintrustAdapter(ImporterBackedAdapter):
     """Adapter importing Braintrust traces of wrapped runs."""
 
-    provider = "braintrust"
-    parser = staticmethod(parse)
-
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
 
@@ -58,7 +55,7 @@ class BraintrustAdapter(ImporterBackedAdapter):
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        super().__init__(completeness_timeout)
+        super().__init__("braintrust", parse, completeness_timeout=completeness_timeout)
         self._completed_rows: dict[str, list[dict[str, Any]]] = {}
 
     @contextmanager

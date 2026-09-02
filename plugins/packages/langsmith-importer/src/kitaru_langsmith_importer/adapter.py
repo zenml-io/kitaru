@@ -17,7 +17,6 @@ import asyncio
 import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, ClassVar
 
 from langsmith import Client, trace, tracing_context
 from langsmith.run_trees import get_cached_client
@@ -30,15 +29,13 @@ from .importer import parse
 
 __all__ = ["LangSmithAdapter"]
 
+_PARSER_PARAMS = {"join_on": "trace_id"}
+
 _ROOT_RUN_NAME = "kitaru-run"
 
 
 class LangSmithAdapter(ImporterBackedAdapter):
     """Adapter importing LangSmith traces of wrapped runs."""
-
-    provider = "langsmith"
-    parser = staticmethod(parse)
-    parser_params: ClassVar[dict[str, Any]] = {"join_on": "trace_id"}
 
     def __init__(self, completeness_timeout: float = 120.0) -> None:
         """Initialize the adapter.
@@ -47,7 +44,12 @@ class LangSmithAdapter(ImporterBackedAdapter):
             completeness_timeout: Seconds to wait for the provider trace to
                 complete.
         """
-        super().__init__(completeness_timeout)
+        super().__init__(
+            "langsmith",
+            parse,
+            _PARSER_PARAMS,
+            completeness_timeout=completeness_timeout,
+        )
         self._client: Client | None = None
         self._completed_runs: dict[str, list[Run]] = {}
 

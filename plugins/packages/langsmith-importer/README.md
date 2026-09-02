@@ -26,7 +26,7 @@ uv add "kitaru-langsmith-importer[adapter]"
 The package also ships an adapter that imports LangSmith traces of wrapped agent runs. The adapter uses the LangSmith SDK already configured in your process and the Kitaru connection from your environment. Set `LANGSMITH_API_KEY` (plus `LANGSMITH_ENDPOINT` for a self-hosted instance) to the credentials the trace fetch authenticates with, then wrap your agent entrypoint in a `LangSmithAdapter` and run it through the adapter.
 
 ```python
-from kitaru_langsmith_importer import LangSmithAdapter
+from kitaru_langsmith_importer.adapter import LangSmithAdapter
 
 adapter = LangSmithAdapter()
 result = adapter.run(my_agent, "Hello")

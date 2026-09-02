@@ -28,7 +28,7 @@ from kitaru.api_models.v1.session import (
 )
 from kitaru.api_models.v1.session_node import NodeType, SessionNodeBatchRequest
 from kitaru.task.importer import ImportedSession
-from kitaru_langfuse_importer import LangfuseAdapter
+from kitaru_langfuse_importer.adapter import LangfuseAdapter
 from kitaru_langfuse_importer.importer import parse
 
 from .fixtures import (
