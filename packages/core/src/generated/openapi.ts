@@ -1584,8 +1584,9 @@ export interface paths {
          *     cohort version, or the resolved agent version does not exist, 409 when
          *     the baseline evaluation mode is not none and a cohort version session
          *     is not finished, and 422 when the cohort version has no sessions, the
-         *     cohort version or agent version belongs to another agent, or the
-         *     resolved agent version has no run spec.
+         *     cohort version or agent version belongs to another agent, the resolved
+         *     agent version has no run spec, or the config carries an override or
+         *     tool policy the agent version's runtime capabilities do not declare.
          *
          *     Args:
          *         experiment_id: Id of the experiment.
@@ -2282,8 +2283,9 @@ export interface paths {
          *     when the baseline evaluation mode is not none and the baseline session
          *     is not finished, and 422 when the baseline session carries no agent
          *     version and none was given, the resolved agent version has no run spec,
-         *     the tool policy uses cohort-version-scoped history, or an evaluator
-         *     version repeats.
+         *     the tool policy uses cohort-version-scoped history, the config carries
+         *     an override or tool policy the agent version's runtime capabilities do
+         *     not declare, or an evaluator version repeats.
          *
          *     Args:
          *         body: Replay create request.
@@ -6694,6 +6696,7 @@ export interface components {
              * @description Hooks run around the task process.
              */
             hooks?: (components["schemas"]["CopyWorkdirHook"] | components["schemas"]["SetupCommandHook"] | components["schemas"]["TeardownCommandHook"])[];
+            runtime_capabilities?: components["schemas"]["RuntimeCapabilities"];
             /**
              * Secret Ids
              * @description Secrets merged into the process environment.
@@ -6710,6 +6713,24 @@ export interface components {
              * @description Working directory.
              */
             working_dir?: string | null;
+        };
+        /**
+         * RuntimeCapabilities
+         * @description Runtime capabilities.
+         */
+        RuntimeCapabilities: {
+            /**
+             * Overrides
+             * @description Whether the runtime can apply replay overrides.
+             * @default true
+             */
+            overrides: boolean;
+            /**
+             * Tool Policies
+             * @description Whether the runtime can apply non-passthrough tool policies.
+             * @default true
+             */
+            tool_policies: boolean;
         };
         /**
          * SampleDataCreateRequest

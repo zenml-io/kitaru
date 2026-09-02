@@ -34,6 +34,26 @@ kitaru agent version register support-agent \
 
 Register a new version when the code changes. An [experiment](experiments.md) is precisely "replay this cohort on that agent version and see what moved."
 
+## Runtime capabilities
+
+The run spec also declares what the runtime can do during a re-run. `runtime_capabilities` holds two booleans, both `true` by default: `overrides`, whether the runtime can apply [replay](replay.md) overrides (model, prompts, model params), and `tool_policies`, whether it can apply non-passthrough [tool policies](../guides/tool-policies.md). Both work by intercepting model and tool calls inside the agent process. Some runtimes execute the agent for real and cannot intercept anything, and the server cannot tell that from the run command, so the version declares it.
+
+Recording adapters intercept calls and keep the defaults. Declare both `false` when the version runs an importer-backed adapter, which records by importing the provider trace after the run and never intercepts a call. Set the declaration in the run spec at registration, via a spec document:
+
+```yaml
+run_spec:
+  command: python agent.py
+  runtime_capabilities:
+    overrides: false
+    tool_policies: false
+```
+
+```bash
+kitaru agent version register support-agent --spec spec.yaml
+```
+
+Creating a replay or starting an experiment run is rejected with 422 when its config carries an override or a non-passthrough tool policy the version's declared capabilities cannot apply. Runtimes that cannot apply them also fail the run when such a config reaches them anyway.
+
 ## What a session records
 
 A session carries its top-level `inputs`, `outputs`, `status` (`in_progress` / `completed` / `failed`), timing, and rolled-up totals: `cost`, `tokens` (input / output / cached / reasoning), `llm_call_count`, and `tool_call_count`.

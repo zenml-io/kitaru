@@ -6,15 +6,25 @@ members = ["packages/*"]
 
 [tool.uv.sources]
 kitaru = { path = "..", editable = true }
+kitaru-braintrust-importer = { workspace = true }
+kitaru-langfuse-importer = { workspace = true }
 kitaru-langgraph = { workspace = true }
+kitaru-langsmith-importer = { workspace = true }
+kitaru-logfire-importer = { workspace = true }
 kitaru-openai-agents = { workspace = true }
+kitaru-phoenix-importer = { workspace = true }
 kitaru-pydantic-ai = { workspace = true }
 
 [dependency-groups]
 dev = [
     "kitaru[server]",
+    "kitaru-braintrust-importer[adapter]",
+    "kitaru-langfuse-importer[adapter]",
     "kitaru-langgraph[deepagents]",
+    "kitaru-langsmith-importer[adapter]",
+    "kitaru-logfire-importer[adapter]",
     "kitaru-openai-agents",
+    "kitaru-phoenix-importer[adapter]",
     "kitaru-pydantic-ai[openai]",
     "pytest>=8.0",
     "pytest-asyncio>=1.4.0",

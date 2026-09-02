@@ -110,8 +110,8 @@ class SessionNodeService:
         Raises:
             SessionNotFound: No session has this id.
             SessionAccessDenied: A task principal does not own the session.
-            SessionNotIngestable: The session is not in progress and its
-                origin is not imported.
+            SessionNotIngestable: The session is not in progress, its origin
+                is not imported, and it names no import source.
             SessionNodeParentNotFound: A parent_index or secondary parent
                 index does not match a stored or batched node.
 
