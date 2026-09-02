@@ -343,12 +343,14 @@ class Session(DomainModel):
         """Require the session to currently accept node ingestion.
 
         Raises:
-            SessionNotIngestable: The session is not in progress and its
-                origin is not imported.
+            SessionNotIngestable: The session is not in progress, its origin
+                is not imported, and it names no import source.
         """
         if self.status == SessionStatus.IN_PROGRESS:
             return
         if self.origin == SessionOrigin.IMPORTED:
+            return
+        if self.imported_from is not None:
             return
         raise SessionNotIngestable(self.id)
 

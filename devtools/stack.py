@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import logging
 import os
 import signal
 import socket
@@ -404,6 +405,10 @@ async def _status(args: argparse.Namespace) -> None:
 
 async def _workers(args: argparse.Namespace) -> None:
     """Run in-process workers until interrupted."""
+    logging.basicConfig(
+        level=logging.getLevelNamesMapping()[args.log_level.upper()],
+        format="%(asctime)s %(name)s %(levelname)s %(message)s",
+    )
     if "KITARU_API_URL" not in os.environ:
         state = _read_state()
         if state is None:
@@ -519,6 +524,11 @@ def main() -> int:
     workers = commands.add_parser("workers", help="Run in-process workers.")
     workers.add_argument("--count", type=int, default=1)
     workers.add_argument("--concurrency", type=int, default=8)
+    workers.add_argument(
+        "--log-level",
+        choices=["debug", "info", "warning", "error"],
+        default="info",
+    )
     workers.set_defaults(handler=_workers)
 
     db = commands.add_parser("db", help="Manage local test databases.")

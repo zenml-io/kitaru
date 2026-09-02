@@ -336,6 +336,11 @@ class SQLAgentVersionRepository(BaseSQLRepository[AgentVersionORM]):
             if run_spec is not None
             else None
         )
+        row.run_runtime_capabilities = (
+            run_spec.runtime_capabilities.model_dump(mode="json")
+            if run_spec is not None
+            else None
+        )
         row.run_timeout_seconds = (
             run_spec.timeout_seconds if run_spec is not None else None
         )
