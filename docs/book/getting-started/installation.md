@@ -20,6 +20,16 @@ What it does, in order:
 
 Nothing needs `sudo`, everything lands under your home directory, and running it again upgrades. Options: `--server https://your-team.kitaru.ai` logs in to a team server instead of starting a local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, and `--no-login`, `--no-skills`, `--no-mcp` skip steps. `bash -s -- --help` after the pipe lists everything.
 
+Prefer to do it by hand? The installer is three commands, which you can run yourself:
+
+```bash
+uv tool install "kitaru[cli,mcp,worker]"     # CLI + MCP server, isolated from your projects
+npx skills add zenml-io/kitaru-skills          # the coding-agent skills
+kitaru login --local                           # local server in Docker, or: kitaru login <team-url>
+```
+
+then point your assistant at `kitaru-mcp` as described in [Set up your coding agent](../agent-native/setup.md).
+
 Already inside Claude Code, Codex, or Cursor? Paste this instead and it runs the same installer for you:
 
 ```

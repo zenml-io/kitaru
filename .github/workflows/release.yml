@@ -160,8 +160,17 @@ jobs:
         with:
           packages-dir: package-dist
           skip-existing: true
-  publish-deployables:
+  installer-smoke:
+    # The one-liner (kitaru.ai/install) installs from PyPI, so run it on real
+    # runners against the version just published before promoting anything.
     needs: [build, publish-python]
+    permissions:
+      contents: read
+    uses: ./.github/workflows/installer.yml
+    with:
+      version: ${{ needs.build.outputs.version }}
+  publish-deployables:
+    needs: [build, publish-python, installer-smoke]
     runs-on: ubuntu-latest
     environment:
       name: pypi

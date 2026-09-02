@@ -3,8 +3,22 @@ name: Installer smoke
 # Runs install.sh on real GitHub-hosted runners the way a user would
 # (`curl ... | bash`), then checks the CLI, MCP server, skills, and PATH.
 # No Docker on the runners, so login is skipped.
+# Triggers: PRs that touch the script (path-filtered, so this does not run on
+# ordinary PRs), manual dispatch, and the release workflow right after the
+# package is published, to prove the one-liner installs the new version.
 on:
   workflow_dispatch:
+    inputs:
+      version:
+        description: Kitaru version the installer must produce (empty = latest)
+        required: false
+        type: string
+  workflow_call:
+    inputs:
+      version:
+        description: Kitaru version the installer must produce (empty = latest)
+        required: false
+        type: string
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
     paths:
@@ -29,14 +43,28 @@ jobs:
           persist-credentials: false
       - name: Run the installer as a user would
         shell: bash
-        run: cat install.sh | bash -s -- --no-login --verbose
+        env:
+          KITARU_VERSION: ${{ inputs.version }}
+        # PyPI can lag a few seconds behind a publish; retry the pinned install.
+        run: |
+          for attempt in 1 2 3 4 5; do
+            cat install.sh | bash -s -- --no-login --verbose && exit 0
+            echo "installer attempt $attempt failed; retrying in 30s" >&2
+            sleep 30
+          done
+          exit 1
       - name: Verify
         shell: bash
+        env:
+          EXPECTED_VERSION: ${{ inputs.version }}
         run: |
           set -euxo pipefail
           export PATH="$HOME/.local/bin:$PATH"
           uname -a
           kitaru --version
+          if [ -n "$EXPECTED_VERSION" ]; then
+            test "$(kitaru --version)" = "$EXPECTED_VERSION"
+          fi
           kitaru-mcp --help >/dev/null
           ls "$HOME/.agents/skills"
           test -f "$HOME/.agents/skills/kitaru-investigation/SKILL.md"
