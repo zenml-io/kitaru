@@ -102,10 +102,6 @@ A span whose parent is absent from the file remains importable as a root node. T
 
 {% hint style="warning" %} A trace export can contain prompts, tool arguments, tool results, annotations, and exception stack traces. Importing stores that content on your Kitaru server. Check your access and retention rules before importing production data. {% endhint %}
 
-## Malformed records and depth limits
-
-Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Deeper trees, non-finite or negative costs, negative token counts, and payloads that cannot be serialized are reported as import failures. A normalization failure rejects the affected session, including any traces already grouped into it; unrelated sessions still import.
-
 ## Next
 
 Evaluate the imported history with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort with [Build a regression suite from production](regression-suite.md).

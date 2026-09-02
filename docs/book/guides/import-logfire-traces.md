@@ -165,10 +165,6 @@ Two more things worth knowing before you rely on an import:
 
 {% hint style="warning" %} An import stores the parsed trace content, including prompts, tool arguments, and tool results, on your Kitaru server. The server is self-hosted, but check your own access and retention rules before importing exports that contain customer data. {% endhint %}
 
-## Malformed records and depth limits
-
-Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Deeper trees, non-finite or negative costs, negative token counts, and payloads that cannot be serialized are reported as import failures. A normalization failure rejects the affected session, including any traces already grouped into it; unrelated sessions still import.
-
 ## Next
 
 Evaluate your imported history with [Write an evaluator](write-an-evaluator.md), then freeze the sessions that matter into a cohort and put a change to the test with [Build a regression suite from production](regression-suite.md).

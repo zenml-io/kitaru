@@ -77,7 +77,7 @@ kitaru session list --agent support-agent --origin imported --imported-from brai
 
 | Param | Meaning |
 | --- | --- |
-| `source_instance` | Project identity fallback. The importer uses the trace's agreed `project_id`; `source_instance` is used when the trace carries none. |
+| `source_instance` | Project identity fallback. The importer prefers each record's `project_id`; `source_instance` is used when the export carries none. |
 | `filename` | Optional label. When neither `project_id` nor `source_instance` is available, the filename stem becomes the project identity. A record with none of the three fails with "Braintrust export has no project id; provide source\_instance". |
 | `join_on` | Dotted path or RFC 6901 JSON Pointer selecting the value that groups traces into one session. Defaults to the session id found in metadata. See [Grouping traces into sessions](#grouping-traces-into-sessions). |
 
@@ -141,12 +141,6 @@ Two more things worth knowing before you rely on an import:
 A flat export (rows with `input`, `output`, `metadata`, and `metrics`, but no `span_id` or `span_parents`) still imports. The importer marks it `source_completeness: "flat"`, gives each row a synthetic identity, and relaxes one rule: without span types to read, a row that carries `metadata.model` or token metrics is treated as a model call. There is no hierarchy to rebuild, so the nodes land flat. Prefer a full project-log export whenever you can get one.
 
 {% hint style="warning" %} An import stores the parsed trace content, including prompts, tool arguments, and tool results, on your Kitaru server. The server is self-hosted, but check your own access and retention rules before importing exports that contain customer data. {% endhint %}
-
-## Malformed records and depth limits
-
-Nested node trees support at most 64 nodes along a parent path, counting the root as level 1. Deeper trees, non-finite or negative costs, negative token counts, and payloads that cannot be serialized are reported as import failures. A normalization failure rejects the affected session, including any traces already grouped into it; unrelated sessions still import.
-
-All nonempty `project_id` values within a trace must agree, even when `source_instance` is supplied. Conflicting traces fail before session grouping. `span_parents` must be a list or null, and model/provider metadata must be a string or null.
 
 ## Next
 
