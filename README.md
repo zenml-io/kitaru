@@ -53,7 +53,7 @@ curl -fsSL https://kitaru.ai/install | bash
 Already in Claude Code, Codex, or Cursor? Paste this instead and let it run the same installer:
 
 ```
-Set up Kitaru on this machine by following https://raw.githubusercontent.com/zenml-io/kitaru/main/docs/book/getting-started/installation.md. Use the one-line installer, tell me what it did, and stop before logging in if Docker is not running.
+Set up Kitaru on this machine by following https://kitaru.ai/install.md. Use the one-line installer, tell me what it did, and stop before logging in if Docker is not running.
 ```
 
 Prefer to do it by hand, or want Kitaru inside your project's environment? The local server is FastAPI + Postgres, and `kitaru login --local` provisions it with Docker:

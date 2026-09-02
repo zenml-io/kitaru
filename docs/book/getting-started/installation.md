@@ -23,7 +23,7 @@ Nothing needs `sudo`, everything lands under your home directory, and running it
 Already inside Claude Code, Codex, or Cursor? Paste this instead and it runs the same installer for you:
 
 ```
-Set up Kitaru on this machine by following https://raw.githubusercontent.com/zenml-io/kitaru/main/docs/book/getting-started/installation.md. Use the one-line installer, tell me what it did, and stop before logging in if Docker is not running.
+Set up Kitaru on this machine by following https://kitaru.ai/install.md. Use the one-line installer, tell me what it did, and stop before logging in if Docker is not running.
 ```
 
 ## Verify

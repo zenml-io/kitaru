@@ -10,9 +10,10 @@
 //   kitaru.ai/docs/<anything else>     -> docs.zenml.io/kitaru/<anything else>
 //   kitaru.ai/ , /pricing, /blog/* ... -> www.zenml.io (marketing)
 //
-// One exception serves content: kitaru.ai/install (and /install.sh) proxies
-// install.sh from the repository's main branch so `curl -fsSL
-// https://kitaru.ai/install | bash` works without a redirect hop.
+// Two exceptions serve content from the repository's main branch: /install
+// (and /install.sh) is install.sh, so `curl -fsSL https://kitaru.ai/install |
+// bash` works without a redirect hop, and /install.md is the installation
+// docs page as Markdown for coding agents.
 import {
   DOCS_PREFIX,
   LEGACY_MARKETING_PREFIX_REDIRECTS,
@@ -24,9 +25,21 @@ import {
 const GITBOOK_BASE = "https://docs.zenml.io/kitaru";
 const SDKDOCS_BASE = "https://sdkdocs.kitaru.ai";
 const CHANGELOG_URL = "https://docs.zenml.io/changelog";
-const INSTALL_SCRIPT_URL =
-  "https://raw.githubusercontent.com/zenml-io/kitaru/main/install.sh";
-const INSTALL_PATHS = new Set(["/install", "/install.sh"]);
+const RAW_MAIN = "https://raw.githubusercontent.com/zenml-io/kitaru/main";
+// kitaru.ai/install serves the installer script; kitaru.ai/install.md serves
+// the installation page as plain Markdown so a coding agent can be told to
+// "follow https://kitaru.ai/install.md" without hitting GitBook's HTML.
+const INSTALL_FILES = new Map([
+  ["/install", { url: `${RAW_MAIN}/install.sh`, type: "text/plain" }],
+  ["/install.sh", { url: `${RAW_MAIN}/install.sh`, type: "text/plain" }],
+  [
+    "/install.md",
+    {
+      url: `${RAW_MAIN}/docs/book/getting-started/installation.md`,
+      type: "text/markdown",
+    },
+  ],
+]);
 
 const retiredDocsRedirects = new Map(RETIRED_DOCS_REDIRECTS);
 const marketingRedirects = new Map(LEGACY_MARKETING_REDIRECTS);
@@ -71,26 +84,26 @@ function marketingRedirectTarget(pathname) {
 }
 
 /**
- * Serve install.sh from GitHub main as text/plain, cached at the edge for
- * five minutes so a release lands quickly without hammering GitHub.
+ * Serve one file from GitHub main, cached at the edge for five minutes so a
+ * release lands quickly without hammering GitHub.
  */
-export async function serveInstallScript(request) {
+export async function serveInstallFile(request, { url, type }) {
   if (request.method !== "GET" && request.method !== "HEAD") {
     return new Response("Method not allowed", { status: 405 });
   }
-  const upstream = await fetch(INSTALL_SCRIPT_URL, {
+  const upstream = await fetch(url, {
     cf: { cacheTtl: 300, cacheEverything: true },
   });
   if (!upstream.ok) {
     return new Response(
-      "install.sh is temporarily unavailable. See https://docs.zenml.io/kitaru/getting-started/setup\n",
+      "This file is temporarily unavailable. See https://docs.zenml.io/kitaru/getting-started/installation\n",
       { status: 502, headers: { "content-type": "text/plain; charset=utf-8" } },
     );
   }
   return new Response(request.method === "HEAD" ? null : upstream.body, {
     status: 200,
     headers: {
-      "content-type": "text/plain; charset=utf-8",
+      "content-type": `${type}; charset=utf-8`,
       "cache-control": "public, max-age=300",
       "x-content-type-options": "nosniff",
     },
@@ -102,8 +115,9 @@ export default {
     const url = new URL(request.url);
     const { pathname } = url;
 
-    if (INSTALL_PATHS.has(normalizePath(pathname))) {
-      return serveInstallScript(request);
+    const installFile = INSTALL_FILES.get(normalizePath(pathname));
+    if (installFile) {
+      return serveInstallFile(request, installFile);
     }
 
     if (

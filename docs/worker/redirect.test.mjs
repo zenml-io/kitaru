@@ -79,6 +79,27 @@ for (const input of installCases) {
   });
 }
 
+test("fetch(/install.md) serves the installation page as Markdown", async () => {
+  const realFetch = globalThis.fetch;
+  let requested;
+  globalThis.fetch = async (url) => {
+    requested = String(url);
+    return new Response("# Installation\n", { status: 200 });
+  };
+  try {
+    const response = await worker.fetch(new Request("https://kitaru.ai/install.md"));
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "text/markdown; charset=utf-8");
+    assert.match(await response.text(), /^# Installation/);
+    assert.equal(
+      requested,
+      "https://raw.githubusercontent.com/zenml-io/kitaru/main/docs/book/getting-started/installation.md",
+    );
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+});
+
 test("fetch(/install) returns 502 when GitHub is unavailable", async () => {
   const realFetch = globalThis.fetch;
   globalThis.fetch = async () => new Response("nope", { status: 500 });
