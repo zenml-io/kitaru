@@ -50,7 +50,7 @@ class LogfireAdapter(ImporterBackedAdapter):
         self._started_at: dict[str, datetime] = {}
 
     @contextmanager
-    def trace(self) -> Iterator[str]:
+    def open_trace(self) -> Iterator[str]:
         """Activate a Logfire trace and yield its trace id.
 
         Raises:

@@ -62,7 +62,7 @@ class BraintrustAdapter(ImporterBackedAdapter):
         self._completed_rows: dict[str, list[dict[str, Any]]] = {}
 
     @contextmanager
-    def trace(self) -> Iterator[str]:
+    def open_trace(self) -> Iterator[str]:
         """Activate a Braintrust span and yield its root span id.
 
         Raises:

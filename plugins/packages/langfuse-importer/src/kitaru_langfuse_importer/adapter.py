@@ -48,7 +48,7 @@ class LangfuseAdapter(ImporterBackedAdapter):
         self._completed_traces: dict[str, TraceWithFullDetails] = {}
 
     @contextmanager
-    def trace(self) -> Iterator[str]:
+    def open_trace(self) -> Iterator[str]:
         """Activate a Langfuse trace and yield its trace id.
 
         Yields:

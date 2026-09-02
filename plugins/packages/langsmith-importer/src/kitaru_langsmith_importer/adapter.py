@@ -52,7 +52,7 @@ class LangSmithAdapter(ImporterBackedAdapter):
         self._completed_runs: dict[str, list[Run]] = {}
 
     @contextmanager
-    def trace(self) -> Iterator[str]:
+    def open_trace(self) -> Iterator[str]:
         """Activate a LangSmith trace and yield its trace id.
 
         Yields:

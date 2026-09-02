@@ -48,7 +48,7 @@ class PhoenixAdapter(ImporterBackedAdapter):
         self._spans: dict[str, list[Any]] = {}
 
     @contextmanager
-    def trace(self) -> Iterator[str]:
+    def open_trace(self) -> Iterator[str]:
         """Activate an OTel trace and yield its trace id.
 
         Raises:

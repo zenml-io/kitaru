@@ -58,7 +58,7 @@ class ImporterBackedAdapter:
         """
         self._completeness_timeout = completeness_timeout
 
-    def trace(self) -> AbstractContextManager[str]:
+    def open_trace(self) -> AbstractContextManager[str]:
         """Activate a provider trace and yield its external id.
 
         Raises:
@@ -102,7 +102,7 @@ class ImporterBackedAdapter:
         asyncio.run(self._check_replay())
         agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
         origin = self._get_origin()
-        with self.trace() as external_id:
+        with self.open_trace() as external_id:
             result = func(*args, **kwargs)
         asyncio.run(self._import_trace(external_id, agent_id, origin))
         return result
@@ -123,7 +123,7 @@ class ImporterBackedAdapter:
         await self._check_replay()
         agent_id = uuid.UUID(get_required_env("KITARU_AGENT_ID"))
         origin = self._get_origin()
-        with self.trace() as external_id:
+        with self.open_trace() as external_id:
             result = await func(*args, **kwargs)
         await self._import_trace(external_id, agent_id, origin)
         return result

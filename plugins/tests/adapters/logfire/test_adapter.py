@@ -79,7 +79,7 @@ def _adapter(
 
 def _start_trace(adapter: LogfireAdapter) -> str:
     """Enter and exit the adapter trace to pin a trace id and start time."""
-    with adapter.trace() as trace_id:
+    with adapter.open_trace() as trace_id:
         pass
     return trace_id
 

@@ -81,7 +81,7 @@ def _adapter(
 
 def _start_trace(adapter: PhoenixAdapter) -> str:
     """Enter and exit the adapter trace to pin a trace id."""
-    with adapter.trace() as trace_id:
+    with adapter.open_trace() as trace_id:
         pass
     return trace_id
 
@@ -131,7 +131,7 @@ def test_trace_requires_a_tracer_provider(monkeypatch: pytest.MonkeyPatch) -> No
 
     with (
         pytest.raises(RuntimeError, match="tracer provider"),
-        adapter.trace(),
+        adapter.open_trace(),
     ):
         pass
 

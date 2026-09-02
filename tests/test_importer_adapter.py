@@ -141,7 +141,7 @@ class _FakeAdapter(ImporterBackedAdapter):
         self.fetch_error: Exception | None = None
 
     @contextmanager
-    def trace(self) -> Iterator[str]:
+    def open_trace(self) -> Iterator[str]:
         self.events.append("trace-enter")
         yield "trace-1"
         self.events.append("trace-exit")
