@@ -25,6 +25,10 @@
 # about the system Python). Kitaru ships as a Python package, not a binary, so
 # uv is the one dependency this script will install for you.
 
+# Bash-only, but fail politely under sh/dash/zsh-as-sh. This line is POSIX so
+# it runs before the shell reaches any bash syntax below.
+if [ -z "${BASH_VERSION:-}" ]; then echo "Kitaru's installer needs bash. Run: curl -fsSL https://kitaru.ai/install | bash" >&2; exit 1; fi
+
 set -euo pipefail
 
 # ---------------------------------------------------------------------------
@@ -43,6 +47,8 @@ KITARU_PYTHON="${KITARU_PYTHON:-3.12}"        # uv-managed Python if none suitab
 KITARU_SKILLS_REPO="${KITARU_SKILLS_REPO:-zenml-io/kitaru-skills}"
 KITARU_LOCAL_URL="${KITARU_LOCAL_URL:-http://localhost:8000}"
 KITARU_MCP_MODE="${KITARU_MCP_MODE:-standard}"
+KITARU_NO_MODIFY_PATH="${KITARU_NO_MODIFY_PATH:-0}"    # leave rc files alone
+KITARU_MIN_UV="0.5.0"                                  # older uv lacks the tool flags we use
 
 usage() {
   cat <<'USAGE'
@@ -57,13 +63,15 @@ Usage: install.sh [options]
   --no-skills         Skip installing the coding-agent skills
   --no-mcp            Skip registering the MCP server with Claude Code / Codex
   --no-login          Skip `kitaru login` (just install the CLI)
+  --no-modify-path    Do not edit shell rc files; you add ~/.local/bin yourself
   --quiet             Only print errors
   --verbose           Print every command
   -h, --help          This text
 
 Environment equivalents: KITARU_VERSION, KITARU_PRE=1, KITARU_SERVER,
-KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1, KITARU_SKIP_LOGIN=1, KITARU_QUIET=1,
-KITARU_VERBOSE=1, KITARU_PYTHON (default 3.12), NO_COLOR.
+KITARU_SKIP_SKILLS=1, KITARU_SKIP_MCP=1, KITARU_SKIP_LOGIN=1,
+KITARU_NO_MODIFY_PATH=1, KITARU_QUIET=1, KITARU_VERBOSE=1,
+KITARU_PYTHON (default 3.12), NO_COLOR.
 USAGE
 }
 
@@ -79,6 +87,7 @@ while [ $# -gt 0 ]; do
     --no-skills) KITARU_SKIP_SKILLS=1 ;;
     --no-mcp) KITARU_SKIP_MCP=1 ;;
     --no-login) KITARU_SKIP_LOGIN=1 ;;
+    --no-modify-path) KITARU_NO_MODIFY_PATH=1 ;;
     --quiet) KITARU_QUIET=1 ;;
     --verbose) KITARU_VERBOSE=1 ;;
     -h|--help) usage; exit 0 ;;
@@ -152,9 +161,12 @@ ensure_path() {
 ensure_path "$HOME/.local/bin"
 ensure_path "$HOME/.cargo/bin"
 
-if have uv; then
-  ok "uv $(uv --version 2>/dev/null | awk '{print $2}') found"
-else
+version_ge() {
+  # version_ge A B → true if A >= B (dotted numerics only)
+  [ "$(printf '%s\n%s\n' "$2" "$1" | sort -t. -k1,1n -k2,2n -k3,3n | head -1)" = "$2" ]
+}
+
+install_uv() {
   step "Installing uv (Python package manager, from astral.sh)"
   # Download to a file first: `quiet` closes stdin, so piping into `sh -s`
   # would hand the installer an empty script.
@@ -167,6 +179,18 @@ else
   ensure_path "$HOME/.local/bin"
   have uv || die "uv installed but not found on PATH. Open a new terminal and re-run."
   ok "uv $(uv --version | awk '{print $2}') installed"
+}
+
+if have uv; then
+  UV_VER="$(uv --version 2>/dev/null | awk '{print $2}')"
+  if version_ge "$UV_VER" "$KITARU_MIN_UV"; then
+    ok "uv $UV_VER found"
+  else
+    note "uv $UV_VER is older than $KITARU_MIN_UV; installing a current one alongside it."
+    install_uv
+  fi
+else
+  install_uv
 fi
 
 persist_path() {
@@ -199,8 +223,12 @@ quiet uv "${UV_ARGS[@]}" "$SPEC" || die "uv tool install failed. Re-run with --v
 TOOL_BIN="$(uv tool dir --bin 2>/dev/null || echo "$HOME/.local/bin")"
 case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) TOOL_BIN="$(cygpath -u "$TOOL_BIN" 2>/dev/null || echo "$TOOL_BIN")" ;; esac
 ensure_path "$TOOL_BIN"
-quiet uv tool update-shell || true
-persist_path "$TOOL_BIN"
+if [ "$KITARU_NO_MODIFY_PATH" = "1" ]; then
+  note "Not editing shell rc files (--no-modify-path). Make sure $TOOL_BIN is on your PATH."
+else
+  quiet uv tool update-shell || true
+  persist_path "$TOOL_BIN"
+fi
 
 have kitaru || die "kitaru installed to $TOOL_BIN but is not on PATH. Add it and re-run."
 ok "kitaru $(kitaru --version 2>/dev/null) installed"

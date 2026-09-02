@@ -18,7 +18,7 @@ What it does, in order:
 3. Registers the MCP server with Claude Code and Codex.
 4. Runs `kitaru login --local`, which starts the server and PostgreSQL in Docker and logs you in. If Docker is not running, it prints that command for later instead.
 
-Nothing needs `sudo`, everything lands under your home directory, and running it again upgrades. Options: `--server https://your-team.kitaru.ai` logs in to a team server instead of starting a local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, and `--no-login`, `--no-skills`, `--no-mcp` skip steps. `bash -s -- --help` after the pipe lists everything.
+Nothing needs `sudo`, everything lands under your home directory, and running it again upgrades. Options: `--server https://your-team.kitaru.ai` logs in to a team server instead of starting a local one, `--with kitaru-pydantic-ai` adds an adapter to the same environment, `--no-login`, `--no-skills`, `--no-mcp` skip steps, and `--no-modify-path` leaves your shell rc files alone. `bash -s -- --help` after the pipe lists everything.
 
 Prefer to do it by hand? The installer is three commands, which you can run yourself:
 
