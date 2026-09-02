@@ -188,8 +188,15 @@ def _get_token_usage(value: Mapping[str, Any] | None) -> TokenUsage | None:
                 return candidate
         return None
 
+    input_tokens = integer("input_tokens", "inputTokens")
+    cache_creation_tokens = integer(
+        "cache_creation_input_tokens", "cacheCreationInputTokens"
+    )
+    if cache_creation_tokens is not None:
+        input_tokens = (input_tokens or 0) + cache_creation_tokens
+
     return TokenUsage(
-        input_tokens=integer("input_tokens", "inputTokens"),
+        input_tokens=input_tokens,
         output_tokens=integer("output_tokens", "outputTokens"),
         cached_input_tokens=integer("cache_read_input_tokens", "cacheReadInputTokens"),
     )

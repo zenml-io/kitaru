@@ -230,6 +230,31 @@ async def test_terminal_usage_is_session_aggregate_not_duplicate_llm_node(
     }
 
 
+@pytest.mark.parametrize(
+    "usage",
+    [
+        {"input_tokens": 7, "cache_creation_input_tokens": 5},
+        {"inputTokens": 7, "cacheCreationInputTokens": 5},
+    ],
+)
+async def test_cache_creation_tokens_count_toward_input_usage(
+    fake_client: FakeClient, usage: dict[str, int]
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(
+        AssistantMessage(
+            content=[TextBlock("done")],
+            model="claude-test",
+            message_id="message-1",
+            usage=usage,
+        )
+    )
+
+    model = nodes(fake_client)[-1]
+    assert model.tokens is not None
+    assert model.tokens.input_tokens == 12
+
+
 async def test_session_preserves_full_replay_input_while_root_is_bounded(
     fake_client: FakeClient,
 ) -> None:
