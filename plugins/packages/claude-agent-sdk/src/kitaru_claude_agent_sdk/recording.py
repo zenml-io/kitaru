@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from importlib.metadata import version
 from typing import Any, cast
 
@@ -429,6 +430,11 @@ class InvocationRecorder:
                 else None
             )
             metadata = _get_terminal_metadata(terminal) if terminal is not None else {}
+            cost = (
+                Decimal(str(terminal.total_cost_usd))
+                if terminal is not None and terminal.total_cost_usd is not None
+                else None
+            )
             first_failure: BaseException | None = None
             try:
                 try:
@@ -446,6 +452,7 @@ class InvocationRecorder:
                             ended_at=ended_at,
                             inputs=self.captured_inputs,
                             outputs=outputs,
+                            cost=cost,
                             attributes={"options": self.safe_options},
                             metadata=metadata,
                         )
@@ -765,17 +772,38 @@ async def _run_finalization(
     terminal: ResultMessage | None = None,
     error: BaseException | None = None,
 ) -> BaseException | None:
-    """Shield bounded persistence so caller cancellation leaves partial state."""
+    """Bound persistence while preserving caller cancellation."""
     task = asyncio.create_task(recorder.finalize(terminal=terminal, error=error))
     try:
         await asyncio.wait_for(
             asyncio.shield(task), timeout=FINALIZATION_TIMEOUT_SECONDS
         )
-    except BaseException as failure:
-        if not task.done():
-            task.cancel()
+    except asyncio.CancelledError:
+        await _cancel_and_join_finalization_task(task)
+        raise
+    except TimeoutError as failure:
+        await _cancel_and_join_finalization_task(task)
+        return failure
+    except Exception as failure:
         return failure
     return None
+
+
+async def _cancel_and_join_finalization_task(task: asyncio.Task[None]) -> None:
+    """Cancel persistence and observe it for one bounded interval."""
+    if not task.done():
+        task.cancel()
+    done, _ = await asyncio.wait({task}, timeout=FINALIZATION_TIMEOUT_SECONDS)
+    if task in done:
+        _consume_task_exception(task)
+    else:
+        task.add_done_callback(_consume_task_exception)
+
+
+def _consume_task_exception(task: asyncio.Task[None]) -> None:
+    """Retrieve a detached task result so it cannot emit a warning."""
+    with contextlib.suppress(BaseException):
+        task.result()
 
 
 async def finalize_terminal(

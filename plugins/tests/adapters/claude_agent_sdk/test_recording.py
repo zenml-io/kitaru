@@ -209,7 +209,8 @@ async def test_terminal_usage_is_session_aggregate_not_duplicate_llm_node(
         == 7
     )
     root = latest[0]
-    assert root.cost is None
+    assert root.cost == Decimal("0.25")
+    assert all(node.cost is None for index, node in latest.items() if index != 0)
     assert fake_client.sessions.updated[-1][1].metadata == {
         "terminal": {
             "session_id": "session-1",
@@ -415,6 +416,64 @@ async def test_finalization_timeout_eventually_closes_client_once(
     await asyncio.wait_for(started.wait(), timeout=1)
     await asyncio.wait_for(closed.wait(), timeout=1)
     assert fake_client.close_count == 1
+
+
+async def test_cancelling_terminal_finalization_propagates_and_closes_client(
+    fake_client: FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = await _recorder(fake_client)
+    started = asyncio.Event()
+
+    async def slow_ingest(*_: Any) -> list[Any]:
+        started.set()
+        await asyncio.Event().wait()
+        return []
+
+    monkeypatch.setattr(fake_client.sessions, "ingest_nodes", slow_ingest)
+    task = asyncio.create_task(finalize_terminal(recorder, _terminal()))
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert fake_client.close_count == 1
+
+
+async def test_cancelling_terminal_finalization_bounds_slow_cleanup(
+    fake_client: FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = await _recorder(fake_client)
+    ingest_started = asyncio.Event()
+    release_close = asyncio.Event()
+    closed = asyncio.Event()
+
+    async def slow_ingest(*_: Any) -> list[Any]:
+        ingest_started.set()
+        await asyncio.Event().wait()
+        return []
+
+    async def slow_close() -> None:
+        await release_close.wait()
+        fake_client.close_count += 1
+        closed.set()
+
+    monkeypatch.setattr(fake_client.sessions, "ingest_nodes", slow_ingest)
+    monkeypatch.setattr(fake_client, "close", slow_close)
+    monkeypatch.setattr(
+        "kitaru_claude_agent_sdk.recording.FINALIZATION_TIMEOUT_SECONDS", 0.01
+    )
+    task = asyncio.create_task(finalize_terminal(recorder, _terminal()))
+    await asyncio.wait_for(ingest_started.wait(), timeout=1)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.wait_for(task, timeout=1)
+    assert fake_client.close_count == 0
+
+    release_close.set()
+    await asyncio.wait_for(closed.wait(), timeout=1)
 
 
 async def test_post_success_finalization_failure_retains_terminal(

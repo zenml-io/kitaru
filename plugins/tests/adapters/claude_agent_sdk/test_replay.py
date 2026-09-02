@@ -19,7 +19,6 @@ from claude_agent_sdk import (
     ToolUseBlock,
     UserMessage,
 )
-from mcp import types as mcp_types
 
 import kitaru_claude_agent_sdk.runner as runner_module
 from kitaru.api_models.v1.replay import (
@@ -54,6 +53,7 @@ from kitaru_claude_agent_sdk.codec import (
     decode_tool_result,
     encode_tool_result,
 )
+from mcp import types as mcp_types
 
 from .conftest import FakeClient, nodes
 
