@@ -8,6 +8,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import partial
 from typing import Any, cast
 
 import pytest
@@ -66,6 +67,12 @@ async def _recorder(client: FakeClient, prompt: str = "hello") -> InvocationReco
         replay=False,
         safe_options={"model": "claude-test", "permission_mode": "default"},
     )
+
+
+async def _blocking_ingest(started: asyncio.Event, *_: Any) -> list[Any]:
+    started.set()
+    await asyncio.Event().wait()
+    return []
 
 
 async def test_resolves_task_input_and_replay_before_session_creation(
@@ -434,18 +441,15 @@ async def test_finalization_timeout_eventually_closes_client_once(
     started = asyncio.Event()
     closed = asyncio.Event()
 
-    async def slow_ingest(*_: Any) -> list[Any]:
-        started.set()
-        await asyncio.Event().wait()
-        return []
-
     original_close = fake_client.close
 
     async def close() -> None:
         await original_close()
         closed.set()
 
-    monkeypatch.setattr(fake_client.sessions, "ingest_nodes", slow_ingest)
+    monkeypatch.setattr(
+        fake_client.sessions, "ingest_nodes", partial(_blocking_ingest, started)
+    )
     monkeypatch.setattr(fake_client, "close", close)
     monkeypatch.setattr(
         "kitaru_claude_agent_sdk.recording.FINALIZATION_TIMEOUT_SECONDS", 0.01
@@ -465,13 +469,36 @@ async def test_cancelling_terminal_finalization_propagates_and_closes_client(
     recorder = await _recorder(fake_client)
     started = asyncio.Event()
 
-    async def slow_ingest(*_: Any) -> list[Any]:
-        started.set()
-        await asyncio.Event().wait()
-        return []
-
-    monkeypatch.setattr(fake_client.sessions, "ingest_nodes", slow_ingest)
+    monkeypatch.setattr(
+        fake_client.sessions, "ingest_nodes", partial(_blocking_ingest, started)
+    )
     task = asyncio.create_task(finalize_terminal(recorder, _terminal()))
+    await asyncio.wait_for(started.wait(), timeout=1)
+
+    task.cancel()
+
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert fake_client.close_count == 1
+
+
+async def test_cancelling_unfinished_child_finalization_closes_client(
+    fake_client: FakeClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    recorder = await _recorder(fake_client)
+    await recorder.record_message(
+        AssistantMessage(
+            content=[ToolUseBlock("tool-1", "lookup", {"query": "refund"})],
+            model="claude-test",
+            message_id="message-1",
+        )
+    )
+    started = asyncio.Event()
+
+    monkeypatch.setattr(
+        fake_client.sessions, "ingest_nodes", partial(_blocking_ingest, started)
+    )
+    task = asyncio.create_task(finalize_failure(recorder, RuntimeError("failed")))
     await asyncio.wait_for(started.wait(), timeout=1)
 
     task.cancel()
@@ -489,17 +516,16 @@ async def test_cancelling_terminal_finalization_bounds_slow_cleanup(
     release_close = asyncio.Event()
     closed = asyncio.Event()
 
-    async def slow_ingest(*_: Any) -> list[Any]:
-        ingest_started.set()
-        await asyncio.Event().wait()
-        return []
-
     async def slow_close() -> None:
         await release_close.wait()
         fake_client.close_count += 1
         closed.set()
 
-    monkeypatch.setattr(fake_client.sessions, "ingest_nodes", slow_ingest)
+    monkeypatch.setattr(
+        fake_client.sessions,
+        "ingest_nodes",
+        partial(_blocking_ingest, ingest_started),
+    )
     monkeypatch.setattr(fake_client, "close", slow_close)
     monkeypatch.setattr(
         "kitaru_claude_agent_sdk.recording.FINALIZATION_TIMEOUT_SECONDS", 0.01

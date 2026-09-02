@@ -445,20 +445,20 @@ class InvocationRecorder:
                 else None
             )
             first_failure: BaseException | None = None
-            if failed:
-                failed_nodes = self._fail_unfinished_nodes(
-                    ended_at=ended_at,
-                    error=error_text or "Query ended before this call completed",
-                )
-                if failed_nodes:
-                    try:
-                        await self.client.sessions.ingest_nodes(
-                            self.session_id,
-                            SessionNodeBatchRequest(nodes=failed_nodes),
-                        )
-                    except Exception as persistence_error:
-                        first_failure = first_failure or persistence_error
             try:
+                if failed:
+                    failed_nodes = self._fail_unfinished_nodes(
+                        ended_at=ended_at,
+                        error=error_text or "Query ended before this call completed",
+                    )
+                    if failed_nodes:
+                        try:
+                            await self.client.sessions.ingest_nodes(
+                                self.session_id,
+                                SessionNodeBatchRequest(nodes=failed_nodes),
+                            )
+                        except Exception as persistence_error:
+                            first_failure = first_failure or persistence_error
                 try:
                     await self._persist(
                         SessionNodeCreateRequest(
