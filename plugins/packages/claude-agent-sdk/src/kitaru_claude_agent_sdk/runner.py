@@ -8,7 +8,7 @@ import contextlib
 import json
 import os
 import uuid
-from collections.abc import AsyncGenerator, Mapping, Sequence
+from collections.abc import AsyncGenerator, Awaitable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from typing import Any, cast
 
@@ -77,17 +77,25 @@ class _HistoryState:
 class _ReplayAbortState:
     """Retain the first policy failure hidden by the SDK MCP boundary."""
 
-    error: ToolPolicyError | None = None
+    error: Exception | None = None
 
-    def capture(self, error: ToolPolicyError) -> None:
-        """Retain the first policy failure for the outer query boundary."""
+    def capture(self, error: Exception) -> None:
+        """Retain the first adapter failure for the outer query boundary."""
         if self.error is None:
             self.error = error
 
     def raise_if_captured(self) -> None:
-        """Raise a policy failure after the SDK returns control to Kitaru."""
+        """Raise an adapter failure after the SDK returns control to Kitaru."""
         if self.error is not None:
             raise self.error
+
+    async def run_kitaru(self, operation: Awaitable[Any]) -> Any:
+        """Retain a Kitaru operation failure that the SDK may swallow."""
+        try:
+            return await operation
+        except Exception as error:
+            self.capture(error)
+            raise
 
 
 class KitaruClaudeRunner:
@@ -516,14 +524,17 @@ async def _handle_miss(
     arguments: dict[str, Any],
     original: Any,
     recorder: InvocationRecorder,
+    replay_abort: _ReplayAbortState,
 ) -> dict[str, Any]:
     """Apply the exact shared miss behavior at the handler boundary."""
     passthrough = on_miss is ToolPolicyOnMiss.PASSTHROUGH
-    await recorder.record_tool_policy(
-        tool_name=identity,
-        arguments=arguments,
-        policy=policy_name,
-        live=passthrough,
+    await replay_abort.run_kitaru(
+        recorder.record_tool_policy(
+            tool_name=identity,
+            arguments=arguments,
+            policy=policy_name,
+            live=passthrough,
+        )
     )
     if passthrough:
         return cast(dict[str, Any], await original(arguments))
@@ -548,20 +559,24 @@ def _wrap_tool_handler(
         try:
             normalized = _normalize_arguments(identity, arguments)
             if replay is None:
-                await recorder.record_tool_policy(
-                    tool_name=identity,
-                    arguments=normalized,
-                    policy="passthrough",
-                    live=True,
+                await replay_abort.run_kitaru(
+                    recorder.record_tool_policy(
+                        tool_name=identity,
+                        arguments=normalized,
+                        policy="passthrough",
+                        live=True,
+                    )
                 )
                 return cast(dict[str, Any], await original(normalized))
             policy = _get_tool_policy(replay, identity)
             if isinstance(policy, PassthroughConfig):
-                await recorder.record_tool_policy(
-                    tool_name=identity,
-                    arguments=normalized,
-                    policy=policy.type,
-                    live=True,
+                await replay_abort.run_kitaru(
+                    recorder.record_tool_policy(
+                        tool_name=identity,
+                        arguments=normalized,
+                        policy=policy.type,
+                        live=True,
+                    )
                 )
                 return cast(dict[str, Any], await original(normalized))
             if isinstance(policy, StaticConfig):
@@ -570,11 +585,13 @@ def _wrap_tool_handler(
                     None,
                 )
                 if matching is not None:
-                    await recorder.record_tool_policy(
-                        tool_name=identity,
-                        arguments=normalized,
-                        policy=policy.type,
-                        live=False,
+                    await replay_abort.run_kitaru(
+                        recorder.record_tool_policy(
+                            tool_name=identity,
+                            arguments=normalized,
+                            policy=policy.type,
+                            live=False,
+                        )
                     )
                     return normalize_tool_result(matching.result)
                 return await _handle_miss(
@@ -584,6 +601,7 @@ def _wrap_tool_handler(
                     arguments=normalized,
                     original=original,
                     recorder=recorder,
+                    replay_abort=replay_abort,
                 )
             if isinstance(policy, HistoryConfig):
                 return await _history_result(
@@ -595,6 +613,7 @@ def _wrap_tool_handler(
                     client=client,
                     state=history,
                     recorder=recorder,
+                    replay_abort=replay_abort,
                 )
             raise ToolPolicyError(
                 f"Tool policy '{policy.type}' is not supported for '{identity}'"
@@ -616,6 +635,7 @@ async def _history_result(
     client: Any,
     state: _HistoryState,
     recorder: InvocationRecorder,
+    replay_abort: _ReplayAbortState,
 ) -> dict[str, Any]:
     """Resolve a history result without scheduler-dependent occurrence claims."""
     cache_key = compute_tool_cache_key(identity, arguments)
@@ -627,6 +647,7 @@ async def _history_result(
             arguments=arguments,
             original=original,
             recorder=recorder,
+            replay_abort=replay_abort,
         )
     track_occurrence = policy.scope is HistoryScope.BASELINE
     if track_occurrence:
@@ -641,13 +662,15 @@ async def _history_result(
     else:
         occurrence = None
     try:
-        response = await client.replays.tool_lookup(
-            replay.id,
-            ToolLookupRequest(
-                tool_name=identity,
-                cache_key=cache_key,
-                occurrence=occurrence,
-            ),
+        response = await replay_abort.run_kitaru(
+            client.replays.tool_lookup(
+                replay.id,
+                ToolLookupRequest(
+                    tool_name=identity,
+                    cache_key=cache_key,
+                    occurrence=occurrence,
+                ),
+            )
         )
         if "match" not in response.model_fields_set:
             raise ToolPolicyError(
@@ -663,6 +686,7 @@ async def _history_result(
                 arguments=arguments,
                 original=original,
                 recorder=recorder,
+                replay_abort=replay_abort,
             )
         if match.status not in {NodeStatus.COMPLETED, NodeStatus.FAILED}:
             raise ToolPolicyError(
@@ -672,11 +696,13 @@ async def _history_result(
         if track_occurrence:
             async with state.lock:
                 state.occurrences[cache_key] = cast(int, occurrence) + 1
-        await recorder.record_tool_policy(
-            tool_name=identity,
-            arguments=arguments,
-            policy=policy.type,
-            live=False,
+        await replay_abort.run_kitaru(
+            recorder.record_tool_policy(
+                tool_name=identity,
+                arguments=arguments,
+                policy=policy.type,
+                live=False,
+            )
         )
         if match.status is NodeStatus.FAILED:
             raise ToolPolicyError(

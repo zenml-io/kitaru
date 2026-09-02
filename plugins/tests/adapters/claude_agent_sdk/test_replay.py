@@ -901,6 +901,95 @@ async def test_real_sdk_server_propagates_swallowed_policy_failure(
     )
 
 
+async def test_real_sdk_server_propagates_swallowed_kitaru_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def original(_: dict[str, Any]) -> dict[str, Any]:
+        raise AssertionError("live handler must not run")
+
+    replay = _replay(
+        _policy(
+            "mcp__support__lookup",
+            HistoryConfig(
+                scope=HistoryScope.BASELINE,
+                on_miss=ToolPolicyOnMiss.FAIL,
+            ),
+        )
+    )
+    client = FakeClient()
+    client.replay = replay
+
+    async def fail_lookup(*_: Any) -> Any:
+        raise OSError("history lookup failed")
+
+    client.replays.tool_lookup = fail_lookup
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay.id))
+
+    async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
+        instance = kwargs["options"].mcp_servers["support"]["instance"]
+        request = mcp_types.CallToolRequest(
+            params=mcp_types.CallToolRequestParams(
+                name="lookup", arguments={"query": "refund"}
+            )
+        )
+        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
+        assert result.root.isError is True
+        yield _terminal()
+
+    monkeypatch.setattr(runner_module, "sdk_query", query)
+
+    with pytest.raises(OSError, match="history lookup failed"):
+        async for _ in KitaruClaudeRunner(agent_id=uuid.uuid4()).query(
+            prompt="hello",
+            options=ClaudeAgentOptions(tools=[]),
+            replayable_servers=[_server("support", original)],
+        ):
+            pass
+
+    assert client.sessions.updated[-1][1].status.value == "failed"
+
+
+async def test_real_sdk_server_leaves_passthrough_handler_failure_with_claude(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def original(_: dict[str, Any]) -> dict[str, Any]:
+        raise OSError("tool failed")
+
+    replay = _replay(_policy("mcp__support__lookup", PassthroughConfig()))
+    client = FakeClient()
+    client.replay = replay
+    monkeypatch.setattr(
+        runner_module.recording_module, "KitaruAPIClient", lambda: client
+    )
+    monkeypatch.setenv("KITARU_REPLAY_ID", str(replay.id))
+
+    async def query(**kwargs: Any) -> AsyncIterator[ResultMessage]:
+        instance = kwargs["options"].mcp_servers["support"]["instance"]
+        request = mcp_types.CallToolRequest(
+            params=mcp_types.CallToolRequestParams(name="lookup", arguments={})
+        )
+        result = await instance.request_handlers[mcp_types.CallToolRequest](request)
+        assert result.root.isError is True
+        yield _terminal()
+
+    monkeypatch.setattr(runner_module, "sdk_query", query)
+
+    messages = [
+        message
+        async for message in KitaruClaudeRunner(agent_id=uuid.uuid4()).query(
+            prompt="hello",
+            options=ClaudeAgentOptions(tools=[]),
+            replayable_servers=[_server("support", original)],
+        )
+    ]
+
+    assert messages == [_terminal()]
+    assert client.sessions.updated[-1][1].status.value == "completed"
+
+
 async def test_explicit_passthrough_is_recorded_as_live_behavior(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
