@@ -37,6 +37,7 @@ from kitaru.server.adapters.rest.mapping.replays import (
     replay_to_response,
     tool_lookup_result_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.replay_service import ReplayService
@@ -44,7 +45,9 @@ from kitaru.server.application.services.replay_service import ReplayService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_replay(
     body: ReplayCreateRequest,
@@ -55,11 +58,12 @@ async def create_replay(
 
     Clients observe HTTP 201 on success, 404 when the baseline session or
     the resolved agent version or an evaluator config does not exist, 409
-    when evaluate_baselines is set and the baseline session is not
-    finished, and 422 when the baseline session carries no agent version
-    and none was given, the resolved agent version has no run spec, the
-    tool policy uses cohort-version-scoped history, or an evaluator
-    version repeats.
+    when the baseline evaluation mode is not none and the baseline session
+    is not finished, and 422 when the baseline session carries no agent
+    version and none was given, the resolved agent version has no run spec,
+    the tool policy uses cohort-version-scoped history, the config carries
+    an override or tool policy the agent version's runtime capabilities do
+    not declare, or an evaluator version repeats.
 
     Args:
         body: Replay create request.
@@ -101,7 +105,7 @@ async def list_replays(
     )
 
 
-@router.get("/{replay_id}")
+@router.get("/{replay_id}", responses=error_responses(404))
 async def get_replay(
     replay_id: uuid.UUID,
     service: Annotated[ReplayService, Depends(get_replay_service)],
@@ -124,7 +128,11 @@ async def get_replay(
     return replay_to_response(bundle.replay, bundle.config)
 
 
-@router.delete("/{replay_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{replay_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_replay(
     replay_id: uuid.UUID,
     service: Annotated[ReplayService, Depends(get_replay_service)],
@@ -143,7 +151,7 @@ async def delete_replay(
     await service.delete_replay(replay_id, actor=actor)
 
 
-@router.post("/{replay_id}/tool-lookup")
+@router.post("/{replay_id}/tool-lookup", responses=error_responses(404))
 async def tool_lookup(
     replay_id: uuid.UUID,
     body: ToolLookupRequest,

@@ -136,21 +136,19 @@ class SessionsResource:
         )
         return [SessionNodeResponse.model_validate(item) for item in response.json()]
 
-    async def merge_evaluations(
+    async def create_evaluations(
         self, session_id: uuid.UUID, request: SessionEvaluationsRequest
     ) -> list[EvaluationResponse]:
-        """Merge manual evaluations into a session.
-
-        A resent name overwrites its score, value, data type, and
-        explanation.
+        """Create manual evaluations on a session.
 
         Args:
-            session_id: Id of the session to merge evaluations into.
+            session_id: Id of the session to create evaluations on.
             request: Session evaluations request.
 
         Raises:
             APIError: The request failed, including 404 for a missing
-                session and 422 when the request names the same evaluation
+                session, 409 when an evaluation name already exists for the
+                session, and 422 when the request names the same evaluation
                 twice.
 
         Returns:

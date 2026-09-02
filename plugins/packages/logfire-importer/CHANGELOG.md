@@ -2,6 +2,7 @@
 
 ## 0.2.0
 
+- Add the Logfire importer-backed adapter, installed through the `adapter` extra.
 - Validate parent chains with memoized depths, limiting nested span paths to 64 levels.
 - Isolate malformed costs, token counts, embedded JSON, and invalid Unicode at the existing trace or grouped-session boundaries.
 

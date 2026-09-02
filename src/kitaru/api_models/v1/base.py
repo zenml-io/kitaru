@@ -14,11 +14,13 @@
 """Shared DTO bases, pagination envelope, and error body."""
 
 import math
+import re
 import uuid
 from datetime import datetime
 from typing import Annotated, Any, Generic, TypeVar
 
 from pydantic import (
+    AfterValidator,
     AllowInfNan,
     BaseModel,
     BeforeValidator,
@@ -60,6 +62,28 @@ def _check_finite(value: Any) -> Any:
 
 
 JsonValue = Annotated[Any, BeforeValidator(_check_finite)]
+
+_CONTROL_CHAR_PATTERN = re.compile(r"[\x00-\x08\x0B\x0C\x0E-\x1F]")
+
+
+def _validate_no_control_chars(value: str) -> str:
+    """Reject NUL and other C0 control characters except tab, newline, and CR.
+
+    Args:
+        value: String to validate.
+
+    Raises:
+        ValueError: The string contains a rejected control character.
+
+    Returns:
+        Validated string.
+    """
+    if _CONTROL_CHAR_PATTERN.search(value):
+        raise ValueError("String must not contain control characters")
+    return value
+
+
+PlainStr = Annotated[str, AfterValidator(_validate_no_control_chars)]
 
 
 class RequestModel(BaseModel):
@@ -134,4 +158,20 @@ class Page(ResponseModel, Generic[ItemT]):
 class ErrorBody(ResponseModel):
     """Error body."""
 
-    detail: str
+    detail: str = Field(description="Error message.")
+
+
+class ValidationErrorItem(ResponseModel):
+    """Validation error item."""
+
+    loc: list[str | int] = Field(description="Path to the invalid input.")
+    msg: str = Field(description="Error message.")
+    type: str = Field(description="Error type identifier.")
+    input: Any = Field(default=None, description="Invalid input value.")
+    ctx: dict[str, Any] = Field(default_factory=dict, description="Error context.")
+
+
+class ValidationErrorBody(ResponseModel):
+    """Validation error body."""
+
+    detail: str | list[ValidationErrorItem] = Field(description="Error detail.")

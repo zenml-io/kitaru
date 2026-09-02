@@ -42,6 +42,9 @@ from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.models.plugin import PluginVersionFilter
 from kitaru.server.application.services.plugin_service import PluginService
 
+# Bound for version path parameters, the version column is a PostgreSQL INTEGER.
+INT32_MAX = 2_147_483_647
+
 PluginResponseT = TypeVar("PluginResponseT", bound=TimestampedResponseModel)
 PluginVersionResponseT = TypeVar(
     "PluginVersionResponseT", bound=TimestampedResponseModel

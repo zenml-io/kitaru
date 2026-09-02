@@ -17,6 +17,8 @@
 - Discriminated request unions mark the `type` discriminator as set in
   `model_post_init` so `exclude_unset` dumps keep it. The `type: Literal`
   discriminator is the one field exempt from the description rule.
+- A deprecated wire field carries `Field(deprecated=...)` and an entry in the
+  repository-root `DEPRECATIONS.md`.
 - This package imports neither server nor client code.
 
 ## Datetimes

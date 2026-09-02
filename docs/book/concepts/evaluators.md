@@ -69,7 +69,7 @@ There is no separate labeling system. A human verdict is an evaluation written d
 from kitaru.api_models.v1.evaluation import EvaluationResult
 from kitaru.api_models.v1.session import SessionEvaluationsRequest
 
-await client.sessions.merge_evaluations(
+await client.sessions.create_evaluations(
     session_id,
     SessionEvaluationsRequest(
         evaluations=[
@@ -83,7 +83,7 @@ await client.sessions.merge_evaluations(
 )
 ```
 
-Manual evaluations upsert by name: re-sending `human_quality` overwrites the earlier verdict. Rows written by evaluator runs carry their evaluator version and task; manual rows carry neither, which is how you tell them apart. Comparing your evaluator's column against the human column on the same sessions is how you calibrate the evaluator before you let it gate anything. The human column usually comes out of [the interview](investigations.md): your coding assistant authors the investigation, and your answers land as annotations to calibrate against.
+Manual evaluation names are unique per session: sending `human_quality` again fails rather than overwriting the earlier verdict. Rows written by evaluator runs carry the evaluator version that produced them, forever, even after that evaluator is deleted; manual rows carry none, which is how you tell them apart. Comparing your evaluator's column against the human column on the same sessions is how you calibrate the evaluator before you let it gate anything. The human column usually comes out of [the interview](investigations.md): your coding assistant authors the investigation, and your answers land as annotations to calibrate against.
 
 ## Running evaluators in batch
 

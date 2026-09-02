@@ -34,23 +34,21 @@ from conftest import (
     create_blob,
     create_import_task,
     create_job,
+    imported_node,
+    imported_session,
 )
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.imports import ImportFailure, ImportStats
 from kitaru.api_models.v1.session import SessionListParams, SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import (
-    NodeStatus,
-    NodeType,
     SessionNodeListParams,
 )
-from kitaru.api_models.v1.task import ImportTaskDetails
 from kitaru.client.exceptions import APIError
 from kitaru.server.domain.agent_version import RunSpec
 from kitaru.server.domain.plugin import PluginKind
 from kitaru.task.importer import (
     MAX_IMPORT_FAILURES,
     NODE_BATCH_SIZE,
-    ImportedNode,
     ImportedSession,
     SessionImportError,
     call_parser,
@@ -67,35 +65,6 @@ async def task_app() -> AsyncGenerator[TaskAppFixture, None]:
         yield value
 
 
-def _node(name: str, children: list[ImportedNode] | None = None) -> ImportedNode:
-    return ImportedNode(
-        node_type=NodeType.LLM_CALL,
-        name=name,
-        status=NodeStatus.COMPLETED,
-        inputs=None,
-        outputs=None,
-        attributes=None,
-        children=children or [],
-    )
-
-
-def _parsed_session(
-    external_id: str, nodes: list[ImportedNode] | None = None
-) -> ImportedSession:
-    return ImportedSession(
-        status=SessionStatus.COMPLETED,
-        name=external_id,
-        inputs=None,
-        outputs=None,
-        error=None,
-        started_at=None,
-        ended_at=None,
-        external_id=external_id,
-        metadata={},
-        nodes=nodes or [],
-    )
-
-
 def test_call_parser_is_lazy() -> None:
     """Not advance the parser until the caller iterates."""
     started = False
@@ -103,7 +72,7 @@ def test_call_parser_is_lazy() -> None:
     def parser(payload: bytes, params: dict) -> Any:
         nonlocal started
         started = True
-        yield _parsed_session("a")
+        yield imported_session("a")
 
     iterator = call_parser(parser, b"", {})
     assert started is False
@@ -126,7 +95,7 @@ def test_call_parser_wraps_mid_stream_crash() -> None:
     """Yield items until the parser crashes, then wrap the crash."""
 
     def parser(payload: bytes, params: dict) -> Any:
-        yield _parsed_session("a")
+        yield imported_session("a")
         raise ValueError("boom")
 
     iterator = call_parser(parser, b"", {})
@@ -149,14 +118,14 @@ def test_call_parser_rejects_unknown_item() -> None:
 def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
     """Assign indexes and parent indexes in depth-first order."""
     tree = [
-        _node(
+        imported_node(
             "root",
             children=[
-                _node("child-1", children=[_node("grandchild")]),
-                _node("child-2"),
+                imported_node("child-1", children=[imported_node("grandchild")]),
+                imported_node("child-2"),
             ],
         ),
-        _node("second-root"),
+        imported_node("second-root"),
     ]
     flattened = flatten_nodes(tree)
     by_name = {request.name: request for request in flattened}
@@ -172,8 +141,8 @@ def test_flatten_nodes_assigns_depth_first_indexes_and_parents() -> None:
 def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
     """Keep the flat Kitaru JSONL node representation unchanged."""
     nodes = [
-        _node("child").model_copy(update={"index": 7, "parent_index": 4}),
-        _node("root").model_copy(update={"index": 4}),
+        imported_node("child").model_copy(update={"index": 7, "parent_index": 4}),
+        imported_node("root").model_copy(update={"index": 4}),
     ]
 
     flattened = flatten_nodes(nodes)
@@ -184,10 +153,10 @@ def test_flatten_nodes_preserves_explicit_wire_indexes() -> None:
 
 def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
     """Flatten deep plugin trees without depending on Python recursion depth."""
-    root = _node("0")
+    root = imported_node("0")
     parent = root
     for index in range(1, 1_200):
-        child = _node(str(index))
+        child = imported_node(str(index))
         parent.children.append(child)
         parent = child
 
@@ -203,10 +172,10 @@ def test_flatten_nodes_handles_deep_acyclic_tree() -> None:
 @pytest.mark.parametrize("cycle_length", [1, 2])
 def test_flatten_nodes_rejects_object_cycles(cycle_length: int) -> None:
     """Reject cyclic plugin objects instead of traversing them forever."""
-    root = _node("root")
+    root = imported_node("root")
     tail = root
     if cycle_length == 2:
-        tail = _node("child")
+        tail = imported_node("child")
         root.children.append(tail)
     tail.children.append(root)
 
@@ -216,28 +185,22 @@ def test_flatten_nodes_rejects_object_cycles(cycle_length: int) -> None:
 
 def test_flatten_nodes_allows_shared_child_outside_ancestor_path() -> None:
     """Preserve repeated subtrees that do not form an ancestor cycle."""
-    child = _node("shared")
+    child = imported_node("shared")
 
-    flattened = flatten_nodes([_node("left", [child]), _node("right", [child])])
+    flattened = flatten_nodes(
+        [
+            imported_node("left", children=[child]),
+            imported_node("right", children=[child]),
+        ]
+    )
 
     assert [node.name for node in flattened] == ["left", "shared", "right", "shared"]
     assert [node.parent_index for node in flattened] == [None, 0, None, 2]
 
 
 def test_session_request_maps_fields() -> None:
-    """Build a session create request from importer details and a imported item."""
+    """Build a session create request from a imported item."""
     agent_id = uuid.uuid4()
-    importer = ImportTaskDetails(
-        plugin={
-            "type": "package",
-            "entrypoint": "acme.parser:parse",
-            "requirement": "acme==1.0",
-        },
-        payload={"blob_id": uuid.uuid4(), "sha256": "a" * 64},
-        provider="acme",
-        agent_id=agent_id,
-        params={},
-    )
     parsed = ImportedSession(
         status=SessionStatus.FAILED,
         name="imported-1",
@@ -252,7 +215,7 @@ def test_session_request_maps_fields() -> None:
         nodes=[],
     )
 
-    request = session_request(importer, parsed)
+    request = session_request(parsed, agent_id, "acme")
 
     assert request.agent_id == agent_id
     assert request.origin == SessionOrigin.IMPORTED
@@ -265,6 +228,16 @@ def test_session_request_maps_fields() -> None:
     assert request.metadata == {"k": "v"}
     assert request.imported_from == "acme"
     assert request.framework == "langgraph"
+
+
+def test_session_request_carries_an_explicit_origin() -> None:
+    """Use the origin the caller passes instead of the imported default."""
+    request = session_request(
+        imported_session("ext-1"), uuid.uuid4(), "acme", SessionOrigin.REPLAY
+    )
+
+    assert request.origin == SessionOrigin.REPLAY
+    assert request.imported_from == "acme"
 
 
 _PARSER_SCRIPT = """

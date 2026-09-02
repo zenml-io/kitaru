@@ -17,6 +17,27 @@ See [Import your traces](https://docs.zenml.io/kitaru/getting-started/import-you
 
 Nested span paths support up to 64 levels, counting a root as level 1. Invalid costs, token counts, embedded JSON, and text that cannot serialize reject the affected trace; unrelated traces continue. Malformed indexed message keys are ignored while valid indexed messages remain available.
 
+## Adapter
+
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-phoenix-importer[adapter]"
+```
+
+The package also ships an adapter that imports Arize Phoenix traces of wrapped agent runs. The adapter uses the OTel tracer provider Phoenix tracing already configured in your process, for example via `phoenix.otel.register()`, and the Kitaru connection from your environment.
+
+The trace fetch goes through the Phoenix client, which reads `PHOENIX_ENDPOINT` (or `PHOENIX_COLLECTOR_ENDPOINT`), `PHOENIX_API_KEY`, and the project name from `PHOENIX_PROJECT` from your environment. Fetching by trace id requires a Phoenix server >= 13.9.0. Then wrap your agent entrypoint in a `PhoenixAdapter` and run it through the adapter.
+
+```python
+from kitaru_phoenix_importer.adapter import PhoenixAdapter
+
+adapter = PhoenixAdapter()
+result = adapter.run(my_agent, "Hello")
+```
+
+The adapter runs the function inside an OTel trace, waits for Phoenix to finish ingesting the trace, fetches it, and imports it as one Kitaru session. Use `run_async` for async functions. When the trace does not complete within the completeness timeout, the adapter creates a failed session carrying the trace id.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)

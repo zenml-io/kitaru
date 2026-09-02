@@ -17,6 +17,27 @@ See the [Logfire import guide](https://docs.zenml.io/kitaru/guides/import-logfir
 
 Nested span paths support up to 64 levels, counting a root as level 1. Invalid costs, token counts, embedded JSON, and text that cannot serialize reject the affected grouped session; unrelated sessions continue. A trace rejected before grouping does not prevent a valid sibling trace from importing into the same session.
 
+## Adapter
+
+Install the package with the `adapter` extra to use the adapter, which adds the provider SDK it needs:
+
+```bash
+uv add "kitaru-logfire-importer[adapter]"
+```
+
+The package also ships an adapter that imports Logfire traces of wrapped agent runs. The adapter uses the Logfire SDK already configured in your process and the Kitaru connection from your environment. Set `LOGFIRE_TOKEN` to the write token the SDK records traces with.
+
+The trace fetch goes through the Logfire Query API, which authenticates with a read token, a separate credential from the SDK's write token. Create one under your Logfire project settings and set it as `LOGFIRE_READ_TOKEN`. Then wrap your agent entrypoint in a `LogfireAdapter` and run it through the adapter.
+
+```python
+from kitaru_logfire_importer.adapter import LogfireAdapter
+
+adapter = LogfireAdapter()
+result = adapter.run(my_agent, "Hello")
+```
+
+The adapter runs the function inside a Logfire trace, waits for Logfire to finish ingesting the trace, fetches it, and imports it as one Kitaru session. Use `run_async` for async functions. When the trace does not complete within the completeness timeout, the adapter creates a failed session carrying the trace id.
+
 ## Links
 
 - [Kitaru documentation](https://docs.zenml.io/kitaru)

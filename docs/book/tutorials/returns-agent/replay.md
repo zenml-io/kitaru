@@ -121,7 +121,7 @@ Save the experiment-run UUID printed in the receipt:
 RUN_ID="YOUR_EXPERIMENT_RUN_UUID"
 ```
 
-The worker launches the candidate command once for each cohort session and stores every new run as a session with `origin: replay`. `--evaluate-baselines` applies the same evaluator versions to both the imported sessions and their replays. Without it, you would have candidate measurements but no like-for-like baseline.
+The worker launches the candidate command once for each cohort session and stores every new run as a session with `origin: replay`. `--evaluate-baselines` applies the same evaluator versions to both the imported sessions and their replays, giving you a like-for-like baseline next to the candidate measurements.
 
 `--timeout-seconds 180` limits each agent subprocess. `--timeout 1800` limits how long the CLI waits for the complete experiment run.
 

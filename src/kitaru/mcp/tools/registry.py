@@ -32,6 +32,7 @@ from kitaru.mcp.references import (
     resolve_parent,
     resolve_plugin_version,
 )
+from kitaru.mcp.tools.params import build_list_params
 
 
 async def handle_registry_read(
@@ -44,49 +45,49 @@ async def handle_registry_read(
     if isinstance(request, RegistryGetRequest):
         return await resolve_parent(client, request.kind, request.reference)
     if isinstance(request, RegistryListRequest):
-        common = request.model_dump(include={"cursor", "size", "sort", "filter"})
         if request.kind == "tag":
-            page = await client.tags.list(TagListParams.model_validate(common))
+            page = await client.tags.list(build_list_params(TagListParams, request))
         elif request.kind == "worker":
-            page = await client.workers.list(WorkerListParams.model_validate(common))
+            page = await client.workers.list(
+                build_list_params(WorkerListParams, request)
+            )
         elif request.kind is ParentKind.AGENT:
-            page = await client.agents.list(AgentListParams.model_validate(common))
+            page = await client.agents.list(build_list_params(AgentListParams, request))
         elif request.kind is ParentKind.COHORT:
-            page = await client.cohorts.list(CohortListParams.model_validate(common))
+            page = await client.cohorts.list(
+                build_list_params(CohortListParams, request)
+            )
         elif request.kind is ParentKind.EXPERIMENT:
             page = await client.experiments.list(
-                ExperimentListParams.model_validate(common)
+                build_list_params(ExperimentListParams, request)
             )
         elif request.kind is ParentKind.IMPORTER:
             page = await client.importers.list(
-                ImporterListParams.model_validate(common)
+                build_list_params(ImporterListParams, request)
             )
         else:
             page = await client.evaluators.list(
-                EvaluatorListParams.model_validate(common)
+                build_list_params(EvaluatorListParams, request)
             )
         return build_page_data(page, request.size, PageData[RegistryItem])
     if isinstance(request, RegistryListVersionsRequest):
         kind = ParentKind(request.kind)
         parent = await resolve_parent(client, kind, request.parent_reference)
-        common = request.model_dump(include={"cursor", "size", "sort", "filter"})
         if request.kind == "agent":
             page = await client.agents.list_versions(
-                parent.id, AgentVersionListParams.model_validate(common)
+                parent.id, build_list_params(AgentVersionListParams, request)
             )
         elif request.kind == "cohort":
             page = await client.cohorts.list_versions(
-                parent.id, CohortVersionListParams.model_validate(common)
+                parent.id, build_list_params(CohortVersionListParams, request)
             )
         elif request.kind == "importer":
-            common.pop("filter", None)
             page = await client.importers.list_versions(
-                parent.id, ListParams.model_validate(common)
+                parent.id, build_list_params(ListParams, request, with_filter=False)
             )
         else:
-            common.pop("filter", None)
             page = await client.evaluators.list_versions(
-                parent.id, ListParams.model_validate(common)
+                parent.id, build_list_params(ListParams, request, with_filter=False)
             )
         return build_page_data(page, request.size, PageData[RegistryItem])
     return await _get_version(state, request)

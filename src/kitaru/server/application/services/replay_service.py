@@ -20,6 +20,9 @@ from kitaru.api_models.v1.replay_config import HistoryScope
 from kitaru.server.application.interfaces.agent_version_repository import (
     AgentVersionRepository,
 )
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationRepository,
+)
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
@@ -74,6 +77,7 @@ class ReplayService:
         experiment_run_repository: ExperimentRunRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        evaluation_repository: EvaluationRepository,
         session_repository: SessionRepository,
         session_node_repository: SessionNodeRepository,
         agent_version_repository: AgentVersionRepository,
@@ -90,6 +94,8 @@ class ReplayService:
                 lookup's cohort-version scope.
             job_repository: Job repository.
             task_repository: Task repository.
+            evaluation_repository: Evaluation repository, for the baseline
+                adoption lookup.
             session_repository: Session repository.
             session_node_repository: Session node repository, for tool
                 lookup.
@@ -104,6 +110,7 @@ class ReplayService:
         self._experiment_runs = experiment_run_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._evaluations = evaluation_repository
         self._sessions = session_repository
         self._session_nodes = session_node_repository
         self._agent_versions = agent_version_repository
@@ -149,11 +156,13 @@ class ReplayService:
             SessionNotFound: No session has the baseline session id.
             ValidationError: The baseline session carries no agent version
                 and none was given, the resolved agent version has no run
-                spec, the config uses cohort-version-scoped history, or an
-                evaluator config is scoped to another agent.
+                spec, the config uses cohort-version-scoped history, the
+                config carries an override or tool policy the agent version's
+                runtime capabilities do not declare, or an evaluator config is
+                scoped to another agent.
             AgentVersionNotFound: No agent version has the resolved id.
-            SessionNotEvaluatable: ``evaluate_baselines`` is set and the
-                baseline session is in progress.
+            SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
+                ``NONE`` and the baseline session is in progress.
             PluginNotFound: An evaluator config names an unknown evaluator.
             PluginVersionNotFound: An evaluator config names an unknown
                 version.
@@ -185,17 +194,21 @@ class ReplayService:
             evaluators=evaluators,
         )
         config.check_standalone()
+        run_spec = agent_version.run_spec
+        assert run_spec is not None
+        config.check_capabilities(run_spec.runtime_capabilities)
         config = await self._experiments.create_replay_config(config)
         replays = await create_replay_pipelines(
             baselines=[baseline],
             agent_version_id=agent_version.id,
             config=config,
-            evaluate_baselines=command.evaluate_baselines,
+            baseline_evaluation_mode=command.baseline_evaluation_mode,
             experiment_run_id=None,
             actor=actor,
             replay_repository=self._repository,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
         )
         if self._analytics is not None:

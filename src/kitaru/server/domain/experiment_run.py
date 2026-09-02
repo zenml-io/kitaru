@@ -19,6 +19,7 @@ from datetime import datetime
 from pydantic import Field
 
 from kitaru.api_models.v1.experiment_run import ExperimentRunStatus
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.server.domain.base import ConflictError, DomainModel, NotFoundError
 from kitaru.server.domain.ids import uuid7
 
@@ -90,7 +91,7 @@ class ExperimentRun(DomainModel):
     status: ExperimentRunStatus = ExperimentRunStatus.RUNNING
     cohort_version_id: uuid.UUID
     agent_version_id: uuid.UUID
-    evaluate_baselines: bool = False
+    baseline_evaluation_mode: BaselineEvaluationMode = BaselineEvaluationMode.IF_MISSING
     started_at: datetime | None = None
     ended_at: datetime | None = None
     error: str | None = None

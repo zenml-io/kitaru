@@ -95,6 +95,7 @@ async def test_replay_pipeline_completes_through_the_api(
             json={
                 "baseline_session_id": baseline_id,
                 "evaluators": [{"evaluator": "accuracy"}],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()
@@ -205,6 +206,7 @@ async def test_replay_pipeline_completes_through_the_api(
             json={
                 "baseline_session_id": other_baseline["id"],
                 "evaluators": [{"evaluator": "accuracy"}],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()
@@ -274,6 +276,7 @@ async def test_tool_lookup_baseline_scope_persists_across_requests(
             json={
                 "baseline_session_id": baseline_id,
                 "evaluators": [{"evaluator": "accuracy"}],
+                "baseline_evaluation_mode": "none",
                 "tool_policy": {
                     "default": {"type": "passthrough"},
                     "tools": {
@@ -337,6 +340,7 @@ async def test_delete_replay_removes_the_replay(client: httpx.AsyncClient) -> No
             json={
                 "baseline_session_id": baseline_id,
                 "evaluators": [{"evaluator": "accuracy"}],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()
@@ -356,6 +360,7 @@ async def test_delete_job_clears_the_replays_job_id(client: httpx.AsyncClient) -
             json={
                 "baseline_session_id": baseline_id,
                 "evaluators": [{"evaluator": "accuracy"}],
+                "baseline_evaluation_mode": "none",
             },
         )
     ).json()

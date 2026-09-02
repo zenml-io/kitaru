@@ -345,6 +345,8 @@ def test_stable_core_release_creates_a_draft_development_reset_pr() -> None:
     assert "prepare-core-development-reset" in reset_job
     assert "uv lock --check" in reset_job
     assert "uv lock --project plugins --check" in reset_job
+    assert "ref: ${{ github.sha }}" in reset_job
+    assert "ref: develop" not in reset_job
     assert "--base develop" in reset_job
     assert "--draft" in reset_job
     assert "main` contains release commit" in reset_job

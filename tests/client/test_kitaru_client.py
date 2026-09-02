@@ -40,7 +40,11 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
-from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
+from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
+    ReplayResponse,
+    ReplayStatus,
+)
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
 from kitaru.api_models.v1.session import SessionCreateRequest, SessionOrigin
 from kitaru.api_models.v1.session_node import (
@@ -120,6 +124,7 @@ def _replay_response(**overrides: Any) -> ReplayResponse:
         "tool_policy": {"default": {"type": "passthrough"}, "tools": {}},
         "evaluators": [{"evaluator": "accuracy", "version": 1, "params": {}}],
         "evaluate_baselines": False,
+        "baseline_evaluation_mode": BaselineEvaluationMode.NONE,
         "status": ReplayStatus.PENDING,
         "error": None,
         "created": now,
@@ -143,6 +148,7 @@ def _experiment_run_response(**overrides: Any) -> ExperimentRunResponse:
         "cohort_version_id": uuid.uuid4(),
         "agent_version_id": uuid.uuid4(),
         "evaluate_baselines": False,
+        "baseline_evaluation_mode": BaselineEvaluationMode.NONE,
         "started_at": None,
         "ended_at": None,
         "error": None,
@@ -405,7 +411,7 @@ async def test_run_experiment_resolves_by_name_and_waits() -> None:
         "regression",
         cohort_version_id=cohort_version_id,
         agent_version_id=agent_version_id,
-        evaluate_baselines=True,
+        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
     )
 
     assert result.status == ExperimentRunStatus.COMPLETED
@@ -414,7 +420,7 @@ async def test_run_experiment_resolves_by_name_and_waits() -> None:
         ExperimentRunCreateRequest(
             cohort_version_id=cohort_version_id,
             agent_version_id=agent_version_id,
-            evaluate_baselines=True,
+            baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         ),
     )
 

@@ -27,6 +27,7 @@ from kitaru.server.adapters.rest.dependencies import (
     get_blob_service,
 )
 from kitaru.server.adapters.rest.mapping.blobs import blob_to_response
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.blob_service import BlobService
@@ -52,7 +53,7 @@ async def _iter_upload(upload: UploadFile) -> AsyncIterator[bytes]:
         yield chunk
 
 
-@router.post("")
+@router.post("", responses=error_responses(413))
 async def upload_blob(
     response: Response,
     file: Annotated[UploadFile, File()],
@@ -81,7 +82,7 @@ async def upload_blob(
     return blob_to_response(blob)
 
 
-@router.get("/{blob_id}")
+@router.get("/{blob_id}", responses=error_responses(404))
 async def get_blob(
     blob_id: uuid.UUID,
     service: Annotated[BlobService, Depends(get_blob_service)],
@@ -103,7 +104,7 @@ async def get_blob(
     return blob_to_response(blob)
 
 
-@router.get("/{blob_id}/content")
+@router.get("/{blob_id}/content", responses=error_responses(404))
 async def download_blob(
     blob_id: uuid.UUID,
     service: Annotated[BlobService, Depends(get_blob_service)],
@@ -135,7 +136,11 @@ async def download_blob(
     )
 
 
-@router.delete("/{blob_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{blob_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_blob(
     blob_id: uuid.UUID,
     service: Annotated[BlobService, Depends(get_blob_service)],

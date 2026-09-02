@@ -30,10 +30,15 @@ from kitaru.analytics.source import (
     EventContext,
     current_event_context,
 )
+from kitaru.api_models.v1.base import ValidationErrorBody
 from kitaru.api_models.v1.info import AuthScheme
 from kitaru.headers import CLIENT_HEADER, SKILL_HEADER
 from kitaru.server.adapters.auth.control_plane import ControlPlaneClient
-from kitaru.server.adapters.db.errors import is_connection_unavailable, is_deadlock
+from kitaru.server.adapters.db.errors import (
+    is_connection_unavailable,
+    is_deadlock,
+    is_invalid_value,
+)
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -43,6 +48,7 @@ from kitaru.server.adapters.db.repositories.plugin_repository import (
 from kitaru.server.adapters.db.repositories.server_settings_repository import (
     SQLServerSettingsRepository,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.routers import (
     accounts,
     agent_versions,
@@ -101,6 +107,10 @@ from kitaru.server.domain.base import (
     UpgradeRequiredError,
     ValidationError,
 )
+
+_COMMON_ERROR_RESPONSES = error_responses(401, 403, 503) | {
+    422: {"model": ValidationErrorBody, "description": "Validation Error"}
+}
 
 
 def _register_domain_exception_handlers(app: FastAPI) -> None:
@@ -162,11 +172,12 @@ def _register_domain_exception_handlers(app: FastAPI) -> None:
 
 
 def _register_database_exception_handler(app: FastAPI) -> None:
-    """Register the JSON error response for a retryable database error.
+    """Register the JSON error response for a retryable or invalid database error.
 
     A deadlock-canceled transaction and a lost or unavailable connection both
-    yield HTTP 503 with a ``detail`` message. Any other database error
-    propagates unchanged.
+    yield HTTP 503. A value the database cannot store yields HTTP 422. Each
+    of these responses carries a ``detail`` message. Any other database
+    error propagates unchanged.
 
     Args:
         app: FastAPI application that will serve the v1 API.
@@ -182,6 +193,13 @@ def _register_database_exception_handler(app: FastAPI) -> None:
         if is_connection_unavailable(exc):
             return JSONResponse(
                 status_code=503, content={"detail": "Database connection unavailable"}
+            )
+        if is_invalid_value(exc):
+            return JSONResponse(
+                status_code=422,
+                content={
+                    "detail": "Request contained a value the database cannot store"
+                },
             )
         raise exc
 
@@ -357,59 +375,168 @@ def create_app(settings: APISettings) -> FastAPI:
     app.include_router(health.router, prefix="/health", tags=["health"])
     app.include_router(info.router, prefix="/api/v1/info", tags=["info"])
     app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
-    app.include_router(accounts.router, prefix="/api/v1/accounts", tags=["accounts"])
-    app.include_router(agents.router, prefix="/api/v1/agents", tags=["agents"])
     app.include_router(
-        agent_versions.router, prefix="/api/v1/agent-versions", tags=["agent-versions"]
+        accounts.router,
+        prefix="/api/v1/accounts",
+        tags=["accounts"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
-        annotations.router, prefix="/api/v1/annotations", tags=["annotations"]
+        agents.router,
+        prefix="/api/v1/agents",
+        tags=["agents"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
-    app.include_router(api_keys.router, prefix="/api/v1/api-keys", tags=["api-keys"])
-    app.include_router(blobs.router, prefix="/api/v1/blobs", tags=["blobs"])
-    app.include_router(cohorts.router, prefix="/api/v1/cohorts", tags=["cohorts"])
+    app.include_router(
+        agent_versions.router,
+        prefix="/api/v1/agent-versions",
+        tags=["agent-versions"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        annotations.router,
+        prefix="/api/v1/annotations",
+        tags=["annotations"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        api_keys.router,
+        prefix="/api/v1/api-keys",
+        tags=["api-keys"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        blobs.router,
+        prefix="/api/v1/blobs",
+        tags=["blobs"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        cohorts.router,
+        prefix="/api/v1/cohorts",
+        tags=["cohorts"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
     app.include_router(
         cohort_versions.router,
         prefix="/api/v1/cohort-versions",
         tags=["cohort-versions"],
-    )
-    app.include_router(devices.router, prefix="/api/v1/devices", tags=["devices"])
-    app.include_router(
-        evaluations.router, prefix="/api/v1/evaluations", tags=["evaluations"]
+        responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
-        evaluators.router, prefix="/api/v1/evaluators", tags=["evaluators"]
+        devices.router,
+        prefix="/api/v1/devices",
+        tags=["devices"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
-        experiments.router, prefix="/api/v1/experiments", tags=["experiments"]
+        evaluations.router,
+        prefix="/api/v1/evaluations",
+        tags=["evaluations"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        evaluators.router,
+        prefix="/api/v1/evaluators",
+        tags=["evaluators"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        experiments.router,
+        prefix="/api/v1/experiments",
+        tags=["experiments"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
         experiment_runs.router,
         prefix="/api/v1/experiment-runs",
         tags=["experiment-runs"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
-    app.include_router(importers.router, prefix="/api/v1/importers", tags=["importers"])
-    app.include_router(imports.router, prefix="/api/v1/imports", tags=["imports"])
     app.include_router(
-        investigations.router, prefix="/api/v1/investigations", tags=["investigations"]
+        importers.router,
+        prefix="/api/v1/importers",
+        tags=["importers"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
-    app.include_router(jobs.router, prefix="/api/v1/jobs", tags=["jobs"])
-    app.include_router(replays.router, prefix="/api/v1/replays", tags=["replays"])
-    app.include_router(secrets.router, prefix="/api/v1/secrets", tags=["secrets"])
+    app.include_router(
+        imports.router,
+        prefix="/api/v1/imports",
+        tags=["imports"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        investigations.router,
+        prefix="/api/v1/investigations",
+        tags=["investigations"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        jobs.router,
+        prefix="/api/v1/jobs",
+        tags=["jobs"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        replays.router,
+        prefix="/api/v1/replays",
+        tags=["replays"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        secrets.router,
+        prefix="/api/v1/secrets",
+        tags=["secrets"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
     app.include_router(
         service_accounts.router,
         prefix="/api/v1/service-accounts",
         tags=["service-accounts"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
     app.include_router(
-        session_runs.router, prefix="/api/v1/session-runs", tags=["session-runs"]
+        session_runs.router,
+        prefix="/api/v1/session-runs",
+        tags=["session-runs"],
+        responses=_COMMON_ERROR_RESPONSES,
     )
-    app.include_router(sessions.router, prefix="/api/v1/sessions", tags=["sessions"])
-    app.include_router(tags.router, prefix="/api/v1/tags", tags=["tags"])
-    app.include_router(tasks.router, prefix="/api/v1/tasks", tags=["tasks"])
-    app.include_router(ui.router, prefix="/api/v1/ui", tags=["ui"])
-    app.include_router(users.router, prefix="/api/v1/users", tags=["users"])
-    app.include_router(workers.router, prefix="/api/v1/workers", tags=["workers"])
+    app.include_router(
+        sessions.router,
+        prefix="/api/v1/sessions",
+        tags=["sessions"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        tags.router,
+        prefix="/api/v1/tags",
+        tags=["tags"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        tasks.router,
+        prefix="/api/v1/tasks",
+        tags=["tasks"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        ui.router,
+        prefix="/api/v1/ui",
+        tags=["ui"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        users.router,
+        prefix="/api/v1/users",
+        tags=["users"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
+    app.include_router(
+        workers.router,
+        prefix="/api/v1/workers",
+        tags=["workers"],
+        responses=_COMMON_ERROR_RESPONSES,
+    )
     app.state.ui_version = None if settings.EXTERNAL_UI else get_ui_version()
     # Register last so the UI catch-all only sees paths no API route matched.
     register_ui(app, settings)

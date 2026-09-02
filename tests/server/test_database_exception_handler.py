@@ -17,6 +17,7 @@ import httpx
 import pytest
 from asyncpg.exceptions import (
     CannotConnectNowError,
+    CharacterNotInRepertoireError,
     ConnectionDoesNotExistError,
     DeadlockDetectedError,
 )
@@ -24,10 +25,7 @@ from fastapi import FastAPI
 from sqlalchemy.exc import DBAPIError
 
 from conftest import local_settings
-from kitaru.server.api.app import (
-    _register_database_exception_handler,
-    create_app,
-)
+from kitaru.server.api.app import _register_database_exception_handler, create_app
 
 
 def _dbapi_error(cause: BaseException) -> DBAPIError:
@@ -67,6 +65,11 @@ def _handler_app() -> FastAPI:
     async def raise_recovery() -> None:
         """Raise a database error caused by the database being in recovery."""
         raise _dbapi_error(CannotConnectNowError("in recovery"))
+
+    @app.get("/probe-invalid-value")
+    async def raise_invalid_value() -> None:
+        """Raise a database error caused by a value the database cannot store."""
+        raise _dbapi_error(CharacterNotInRepertoireError("invalid byte sequence"))
 
     @app.get("/probe-other")
     async def raise_other() -> None:
@@ -109,6 +112,15 @@ async def test_database_in_recovery_maps_to_503() -> None:
     response = await _get("/probe-recovery")
     assert response.status_code == 503
     assert response.json() == {"detail": "Database connection unavailable"}
+
+
+async def test_invalid_value_maps_to_422() -> None:
+    """Turn a value the database cannot store into HTTP 422."""
+    response = await _get("/probe-invalid-value")
+    assert response.status_code == 422
+    assert response.json() == {
+        "detail": "Request contained a value the database cannot store"
+    }
 
 
 async def test_other_database_errors_propagate() -> None:

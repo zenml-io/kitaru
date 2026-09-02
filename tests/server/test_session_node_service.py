@@ -369,6 +369,24 @@ async def test_ingest_into_terminal_imported_session_allowed(
     assert len(stored) == 1
 
 
+async def test_ingest_into_terminal_import_sourced_session_allowed(
+    service: SessionNodeService,
+    session_service: SessionService,
+    session_repository: FakeSessionRepository,
+) -> None:
+    """Allow node ingest into a finished session naming an import source."""
+    session = await create_session(
+        session_repository,
+        ACTOR.account.id,
+        agent_id=uuid.uuid4(),
+        origin=SessionOrigin.REPLAY,
+        status=SessionStatus.COMPLETED,
+        imported_from="langfuse",
+    )
+    stored = await service.ingest_nodes(session.id, [_llm_node(0)], actor=ACTOR)
+    assert len(stored) == 1
+
+
 async def test_ingest_into_terminal_recorded_session_rejected(
     service: SessionNodeService,
     session_service: SessionService,

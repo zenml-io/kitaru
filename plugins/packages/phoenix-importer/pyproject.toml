@@ -22,7 +22,17 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 keywords = ["ai-agents", "arize-phoenix", "kitaru", "observability", "traces"]
-dependencies = ["kitaru>=0.22.0"]
+dependencies = [
+    "kitaru>=0.24.0",
+]
+
+[project.optional-dependencies]
+adapter = [
+    "arize-phoenix-client>=2.0,<4",
+    "httpx>=0.27,<1",
+    "opentelemetry-api>=1.12",
+    "opentelemetry-sdk>=1.12",
+]
 
 [project.urls]
 Homepage = "https://kitaru.ai"

@@ -40,6 +40,7 @@ from kitaru.server.adapters.rest.mapping.experiments import (
     experiment_to_response,
     experiment_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.experiment_service import ExperimentService
@@ -47,7 +48,9 @@ from kitaru.server.application.services.experiment_service import ExperimentServ
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_experiment(
     body: ExperimentCreateRequest,
@@ -103,7 +106,7 @@ async def list_experiments(
     )
 
 
-@router.get("/{experiment_id}")
+@router.get("/{experiment_id}", responses=error_responses(404))
 async def get_experiment(
     experiment_id: uuid.UUID,
     service: Annotated[ExperimentService, Depends(get_experiment_service)],
@@ -126,7 +129,7 @@ async def get_experiment(
     return experiment_to_response(experiment, config)
 
 
-@router.patch("/{experiment_id}")
+@router.patch("/{experiment_id}", responses=error_responses(404, 409))
 async def update_experiment(
     experiment_id: uuid.UUID,
     body: ExperimentUpdateRequest,
@@ -156,7 +159,11 @@ async def update_experiment(
     return experiment_to_response(experiment, config)
 
 
-@router.delete("/{experiment_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{experiment_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_experiment(
     experiment_id: uuid.UUID,
     service: Annotated[ExperimentService, Depends(get_experiment_service)],
@@ -175,7 +182,11 @@ async def delete_experiment(
     await service.delete_experiment(experiment_id, actor=actor)
 
 
-@router.post("/{experiment_id}/runs", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{experiment_id}/runs",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
 @idempotent
 async def start_run(
     experiment_id: uuid.UUID,
@@ -187,10 +198,11 @@ async def start_run(
 
     Clients observe HTTP 201 on success, 404 when the experiment, the
     cohort version, or the resolved agent version does not exist, 409 when
-    evaluate_baselines is set and a cohort version session is not finished,
-    and 422 when the cohort version has no sessions, the cohort version or
-    agent version belongs to another agent, or the resolved agent version
-    has no run spec.
+    the baseline evaluation mode is not none and a cohort version session
+    is not finished, and 422 when the cohort version has no sessions, the
+    cohort version or agent version belongs to another agent, the resolved
+    agent version has no run spec, or the config carries an override or
+    tool policy the agent version's runtime capabilities do not declare.
 
     Args:
         experiment_id: Id of the experiment.
