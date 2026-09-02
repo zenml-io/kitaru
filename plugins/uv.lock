@@ -1362,6 +1362,7 @@ version = "0.1.0"
 source = { editable = "packages/phoenix-importer" }
 dependencies = [
     { name = "arize-phoenix-client" },
+    { name = "httpx" },
     { name = "kitaru" },
     { name = "opentelemetry-api" },
     { name = "opentelemetry-sdk" },
@@ -1370,6 +1371,7 @@ dependencies = [
 [package.metadata]
 requires-dist = [
     { name = "arize-phoenix-client", specifier = ">=2.0,<4" },
+    { name = "httpx", specifier = ">=0.27,<1" },
     { name = "kitaru", editable = "../" },
     { name = "opentelemetry-api", specifier = ">=1.12" },
     { name = "opentelemetry-sdk", specifier = ">=1.12" },

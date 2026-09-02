@@ -18,6 +18,7 @@ import uuid
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 import pytest
 from opentelemetry.trace import NoOpTracerProvider, format_trace_id
 
@@ -150,6 +151,43 @@ async def test_wait_keeps_polling_while_the_trace_has_no_spans(
     await adapter.wait_until_complete(trace_id)
 
     assert fake_phoenix.requested == [trace_id] * 4
+
+
+def _status_error(status_code: int) -> httpx.HTTPStatusError:
+    request = httpx.Request("GET", "http://phoenix.test/v1/projects/p/spans")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError("error", request=request, response=response)
+
+
+async def test_wait_keeps_polling_while_the_project_is_missing(
+    fake_phoenix: FakePhoenix,
+) -> None:
+    """Restart the stability check when the project does not exist yet."""
+    adapter = PhoenixAdapter()
+    trace_id = _start_trace(adapter)
+    fake_phoenix.span_builders = [
+        _status_error(404),
+        build_complete_spans,
+        _status_error(404),
+        build_complete_spans,
+        build_complete_spans,
+    ]
+
+    await adapter.wait_until_complete(trace_id)
+
+    assert fake_phoenix.requested == [trace_id] * 5
+
+
+async def test_wait_raises_other_span_query_errors(
+    fake_phoenix: FakePhoenix,
+) -> None:
+    """Propagate a span query error that is not a missing project."""
+    adapter = PhoenixAdapter()
+    trace_id = _start_trace(adapter)
+    fake_phoenix.span_builders = [_status_error(500)]
+
+    with pytest.raises(httpx.HTTPStatusError):
+        await adapter.wait_until_complete(trace_id)
 
 
 async def test_wait_polls_until_the_span_count_is_stable(

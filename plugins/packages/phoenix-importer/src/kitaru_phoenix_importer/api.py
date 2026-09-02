@@ -17,6 +17,7 @@ import asyncio
 import json
 from typing import Any
 
+import httpx
 from phoenix.client import AsyncClient
 from phoenix.client.utils.config import get_env_project_name
 
@@ -49,14 +50,22 @@ async def wait_for_spans(trace_id: str) -> list[Any]:
     # and the span count is stable across two consecutive polls.
     previous_count: int | None = None
     while True:
-        spans = await client.spans.get_spans(
-            project_identifier=project,
-            trace_ids=[trace_id],
-            limit=_SPAN_LIMIT,
-        )
-        if len(spans) == previous_count and _has_root(spans):
-            return spans
-        previous_count = len(spans)
+        try:
+            spans = await client.spans.get_spans(
+                project_identifier=project,
+                trace_ids=[trace_id],
+                limit=_SPAN_LIMIT,
+            )
+        except httpx.HTTPStatusError as exc:
+            # The project only exists once its first spans land, so a
+            # missing project is a trace without spans.
+            if exc.response.status_code != httpx.codes.NOT_FOUND:
+                raise
+            previous_count = None
+        else:
+            if len(spans) == previous_count and _has_root(spans):
+                return spans
+            previous_count = len(spans)
         await asyncio.sleep(_POLL_INTERVAL)
 
 

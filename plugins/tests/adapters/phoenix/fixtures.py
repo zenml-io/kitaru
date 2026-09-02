@@ -26,7 +26,7 @@ from opentelemetry.sdk.trace.export.in_memory_span_exporter import (
 import kitaru_phoenix_importer.adapter as adapter_module
 import kitaru_phoenix_importer.api as api_module
 
-SpansBuilder = Callable[[str], list[dict[str, Any]]]
+SpansBuilder = Callable[[str], list[dict[str, Any]]] | Exception
 
 PROJECT = "test-project"
 
@@ -88,7 +88,10 @@ class _FakeSpans:
         self._fake.limits.append(limit)
         self._fake.events.append("get-spans")
         assert self._fake.span_builders, "unexpected span query"
-        return self._fake.span_builders.pop(0)(trace_ids[0])
+        builder = self._fake.span_builders.pop(0)
+        if isinstance(builder, Exception):
+            raise builder
+        return builder(trace_ids[0])
 
 
 class _FakeAsyncClient:
