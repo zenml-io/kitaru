@@ -11,7 +11,7 @@
 #  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 #  or implied. See the License for the specific language governing
 #  permissions and limitations under the License.
-"""Evaluation filter and merge command models."""
+"""Evaluation filter and create command models."""
 
 import uuid
 from collections.abc import Mapping
@@ -44,11 +44,12 @@ class EvaluationFilter(ListFilter):
         "agent_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
         "cohort_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
         "experiment_run_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
+        "replay_id": FilterField(value_type=uuid.UUID, ops=SCOPE_OPS),
     }
 
 
-class EvaluationMerge(FrozenModel):
-    """Evaluation merge command."""
+class EvaluationCreate(FrozenModel):
+    """Evaluation create command."""
 
     name: str
     data_type: EvaluationDataType
@@ -56,3 +57,6 @@ class EvaluationMerge(FrozenModel):
     value: str | None = None
     explanation: str | None = None
     passed: bool | None = None
+    min_score: float | None = None
+    max_score: float | None = None
+    target_score: float | None = None

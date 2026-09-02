@@ -36,6 +36,7 @@ from kitaru.server.adapters.rest.mapping.api_keys import (
     api_key_to_issued_response,
     api_key_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.api_key_service import ApiKeyService
@@ -43,7 +44,9 @@ from kitaru.server.application.services.api_key_service import ApiKeyService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 409)
+)
 @idempotent(encrypt_response=True)
 async def create_api_key(
     body: ApiKeyCreateRequest,
@@ -95,7 +98,7 @@ async def list_api_keys(
     )
 
 
-@router.get("/{api_key_id}")
+@router.get("/{api_key_id}", responses=error_responses(404))
 async def get_api_key(
     api_key_id: uuid.UUID,
     service: Annotated[ApiKeyService, Depends(get_api_key_service)],
@@ -118,7 +121,7 @@ async def get_api_key(
     return api_key_to_response(api_key)
 
 
-@router.patch("/{api_key_id}")
+@router.patch("/{api_key_id}", responses=error_responses(404))
 async def update_api_key(
     api_key_id: uuid.UUID,
     body: ApiKeyUpdateRequest,
@@ -143,7 +146,7 @@ async def update_api_key(
     return api_key_to_response(api_key)
 
 
-@router.post("/{api_key_id}/rotate")
+@router.post("/{api_key_id}/rotate", responses=error_responses(400, 404, 409))
 @idempotent(encrypt_response=True)
 async def rotate_api_key(
     api_key_id: uuid.UUID,
@@ -172,7 +175,11 @@ async def rotate_api_key(
     return api_key_to_issued_response(api_key, key)
 
 
-@router.delete("/{api_key_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{api_key_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_api_key(
     api_key_id: uuid.UUID,
     service: Annotated[ApiKeyService, Depends(get_api_key_service)],

@@ -203,9 +203,12 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
             "TimestampedResponseModel",
             "OwnedResponseModel",
             "ErrorBody",
+            "ValidationErrorItem",
+            "ValidationErrorBody",
             "PlainSerializedSecretStr",
             "FiniteFloat",
             "JsonValue",
+            "PlainStr",
             "ItemT",
         }
     ),
@@ -218,6 +221,9 @@ API_MODELS_DOC_EXCLUSIONS: dict[str, frozenset[str]] = {
     "kitaru.api_models.v1.imports": frozenset(
         {"ImportFailure", "ImportStats", "MAX_IMPORT_FAILURES"}
     ),
+    # Validation helper shared by the two requests carrying the deprecated
+    # evaluate_baselines bool.
+    "kitaru.api_models.v1.replay": frozenset({"check_baseline_evaluation_fields"}),
     # Annotated discriminated-union alias; the four concrete configs are the
     # developer-facing entry points.
     "kitaru.api_models.v1.replay_config": frozenset({"ToolConfig"}),

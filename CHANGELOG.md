@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Added `baseline_evaluation_mode` to replay and experiment run creation, with values `none`, `if_missing`, and `force`. `if_missing` scores baselines while skipping evaluators that already scored them, `force` always scores them fresh. A request that sets neither `baseline_evaluation_mode` nor the deprecated `evaluate_baselines` defaults to `if_missing`. `evaluate_baselines` is deprecated in favor of this field and still accepted on the wire, mapping `False` to `none` and `True` to `if_missing`. Setting both fields on one request returns HTTP 422.
+- Added `evaluator_params` to the evaluation response, the params the producing evaluator ran with, `None` on a manual row.
+- Added a `replay_id` filter to evaluation listing, matching evaluations linked to a replay.
+- Added `min_score`, `max_score`, and `target_score` to evaluation results and evaluation responses, for displaying a score against its scale and against the score it should beat. All three are only accepted on a float evaluation.
+- Added the `ImporterBackedAdapter` base class in `kitaru.importer_adapter`. Install a provider's importer package with its `adapter` extra, then wrap an agent entrypoint with `run` or `run_async` to record it through that provider: the adapter activates a provider trace around the function, waits for the provider to finish the trace, fetches it, parses it with an importer parser, and ingests it as one session with origin `recorded`, or `replay` when running under a replay. The session is created under the agent of the running task and the Kitaru connection comes from the environment. When the function raises, the trace is still imported and the exception is re-raised. When the trace does not complete within the completeness timeout, the adapter creates a failed session carrying the trace id in its metadata instead of raising. The reusable `ingest_session` helper in `kitaru.task.importer` creates a session and ingests its nodes outside an import task.
+- `kitaru worker start` now emits the worker's runtime logs, with the level selected by `--log-level`.
+- Added runtime capabilities to the agent version run spec: `overrides` and `tool_policies` declare whether the runtime can apply replay overrides and non-passthrough tool policies. Both default to true, and clients read them from the agent version response.
+
+### Changed
+
+- `client.sessions.merge_evaluations` is renamed to `create_evaluations`. Manual evaluation names are unique per session, resending a name already stored for the session now returns HTTP 409 instead of overwriting the existing row.
+- A row written by an evaluator run keeps its evaluator version id forever, even after that evaluator is deleted, rather than losing it and becoming indistinguishable from a manual row.
+- `if_missing` baseline scoring now matches a prior evaluation by evaluator version and params rather than by evaluator version alone, so a baseline scored again with different params always gets a fresh task instead of being skipped.
+- Evaluation aggregates for an experiment run now read the replay links written at creation time, so a run's aggregate is pinned to the evaluations that scored its replays and a later evaluation of the same session no longer changes it. Aggregates now group by evaluator version in addition to name and data type, and `EvaluationAggregateResponse` exposes `evaluator_version_id`, `evaluator_name`, and `evaluator_version` per group. Manual evaluations no longer appear in run aggregates, they stay visible in listings and session views.
+- The evaluation `experiment_run_id` filter now matches through the replay link table instead of the producing task's job, so a standalone evaluation job's rows no longer match a run's filter and an evaluation adopted into a run through `if_missing` does.
+- Finished sessions that name an import source now accept node ingestion regardless of origin, so importer-backed adapter runs can ingest their nodes into recorded and replay sessions.
+- Creating a replay or starting an experiment run is now rejected with HTTP 422 when the config carries an override or a non-passthrough tool policy that the agent version's runtime capabilities do not declare.
+- Importer-backed adapters now reject a replay config carrying an override or a non-passthrough tool policy with a RuntimeError before the wrapped function runs.
+- `session_request` in `kitaru.task.importer` now takes the parsed session, the agent id, the provider, and the origin instead of the import task details.
+
+### Fixed
+
+- A NUL byte or another C0 control character in a user-supplied string now returns HTTP 422 instead of HTTP 500. Request string fields reject the characters at validation, and a database error caused by a value the database cannot store maps to HTTP 422 as a backstop.
+- Getting or updating an evaluator or importer version with a version number outside PostgreSQL's 32-bit integer range now returns HTTP 422 instead of HTTP 500.
+- Reusing an `Idempotency-Key` registered on another route against `POST /api/v1/api-keys` or `POST /api/v1/api-keys/{api_key_id}/rotate` now returns HTTP 422 instead of HTTP 500. The stored response is only decrypted after the request fingerprint matches, and a stored response that cannot be decrypted returns HTTP 409.
+- `POST /api/v1/login` validation failures now carry the OAuth 2.0 `error` code their declared 400 response requires, `invalid_request` for a missing field and `unsupported_grant_type` for an unknown or rejected grant type. `POST /api/v1/device_authorization` declares its 400 response and returns the same shape when the server does not authenticate requests.
+- Fixed boolean filters in the MCP list operations of `kitaru_registry_read`, `kitaru_activity_read`, and `kitaru_review_read`. An `and`, `or`, or `not` filter reached the SDK under its Python field name and was answered with `internal_error`; filters at any nesting depth now reach the Kitaru server, and an MCP request the handler cannot marshal is reported as `invalid_arguments` instead of a server-side fault.
+
+## [0.24.0]
+
+### Added
+
 - Added native ARM64 support alongside AMD64 for the public client, server, and worker Docker images.
 - Added `DELETE /api/v1/replays/{replay_id}` to delete a standalone replay. A replay that belongs to an experiment run returns HTTP 409, since deleting the run removes its replays.
 - Added `POST /api/v1/workers/{worker_id}/token` to renew a worker token, and `kitaru worker list --include-stale` to list workers past the liveness window.

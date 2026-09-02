@@ -213,6 +213,9 @@ async def _invoke(
         else:
             json_data = redact_data(data)
             envelope = success_result(result_type, json_data)
+    # Handlers marshal their own request payloads and raise `MCPToolError` when a
+    # payload is invalid, so a `ValidationError` here comes from the remote
+    # response or from the result envelope.
     except ValidationError as error:
         envelope = error_result(result_type, MCPOutputValidationError(error))
     except Exception as error:

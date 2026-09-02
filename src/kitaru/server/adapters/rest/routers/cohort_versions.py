@@ -30,6 +30,7 @@ from kitaru.server.adapters.rest.mapping.cohort_versions import (
     cohort_version_to_response,
     cohort_version_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.cohort_version_service import (
@@ -39,7 +40,7 @@ from kitaru.server.application.services.cohort_version_service import (
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.get("/{cohort_version_id}")
+@router.get("/{cohort_version_id}", responses=error_responses(404))
 async def get_cohort_version(
     cohort_version_id: uuid.UUID,
     service: Annotated[CohortVersionService, Depends(get_cohort_version_service)],
@@ -62,7 +63,7 @@ async def get_cohort_version(
     return cohort_version_to_response(version)
 
 
-@router.patch("/{cohort_version_id}")
+@router.patch("/{cohort_version_id}", responses=error_responses(404))
 async def update_cohort_version(
     cohort_version_id: uuid.UUID,
     body: CohortVersionUpdateRequest,
@@ -88,7 +89,11 @@ async def update_cohort_version(
     return cohort_version_to_response(version)
 
 
-@router.delete("/{cohort_version_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{cohort_version_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_cohort_version(
     cohort_version_id: uuid.UUID,
     service: Annotated[CohortVersionService, Depends(get_cohort_version_service)],

@@ -11,7 +11,7 @@ Start from the closest current adapter and the target framework's public API. Do
 
 ## Choose the extension point
 
-Python adapters are independent distributions under `plugins/packages/<slug>/`, with focused tests under `plugins/tests/adapters/<slug>/`. TypeScript framework adapters are packages such as `packages/mastra/` and `packages/vercel-ai/`; shared adapter primitives live under `packages/core/src/adapter/`.
+Recording adapters are independent Python distributions under `plugins/packages/<slug>/`, with focused tests under `plugins/tests/adapters/<slug>/`. Importer-backed adapters are different: they live inside the provider's importer package as an `ImporterBackedAdapter` subclass, never intercept model or tool calls, and follow the kitaru-importer-development skill instead of this section's package rules. Agent versions running them declare `runtime_capabilities` with `overrides: false` and `tool_policies: false` on the run spec. TypeScript framework adapters are packages such as `packages/mastra/` and `packages/vercel-ai/`; shared adapter primitives live under `packages/core/src/adapter/`.
 
 Before editing, state:
 

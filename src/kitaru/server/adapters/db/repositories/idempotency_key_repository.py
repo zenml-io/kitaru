@@ -19,7 +19,7 @@ from datetime import datetime
 from sqlalchemy import CursorResult, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kitaru.server.adapters.db.encryption import AesGcmCipher
+from kitaru.server.adapters.db.encryption import AesGcmCipher, DecryptionError
 from kitaru.server.adapters.db.orm.idempotency_key import (
     IDEMPOTENCY_KEY_ACCOUNT_ID_KEY_UNIQUE_CONSTRAINT,
     IdempotencyKeyORM,
@@ -28,6 +28,7 @@ from kitaru.server.adapters.db.repositories.base import BaseSQLRepository
 from kitaru.server.domain.idempotency_key import (
     IdempotencyKey,
     IdempotencyKeyAlreadyExists,
+    IdempotencyKeyResponseUndecryptable,
 )
 
 
@@ -71,15 +72,12 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
         )
         return row.to_domain()
 
-    async def get(
-        self, account_id: uuid.UUID, key: str, encrypted: bool = False
-    ) -> IdempotencyKey | None:
+    async def get(self, account_id: uuid.UUID, key: str) -> IdempotencyKey | None:
         """Load an idempotency key by account and key.
 
         Args:
             account_id: Id of the account the key is scoped to.
             key: Idempotency key.
-            encrypted: Whether the stored response body is encrypted at rest.
 
         Returns:
             Stored idempotency key, or ``None`` when no row matches.
@@ -90,12 +88,24 @@ class SQLIdempotencyKeyRepository(BaseSQLRepository[IdempotencyKeyORM]):
         row = (await self._session.scalars(statement)).one_or_none()
         if row is None:
             return None
-        idempotency_key = row.to_domain()
-        if encrypted and idempotency_key.response_body is not None:
-            idempotency_key.response_body = self._cipher.decrypt_bytes(
-                idempotency_key.response_body
-            )
-        return idempotency_key
+        return row.to_domain()
+
+    def decrypt_response_body(self, response_body: bytes) -> bytes:
+        """Decrypt a response body stored encrypted at rest.
+
+        Args:
+            response_body: Stored response body.
+
+        Raises:
+            IdempotencyKeyResponseUndecryptable: The body cannot be decrypted.
+
+        Returns:
+            Decrypted response body.
+        """
+        try:
+            return self._cipher.decrypt_bytes(response_body)
+        except DecryptionError:
+            raise IdempotencyKeyResponseUndecryptable() from None
 
     async def store_response(
         self,

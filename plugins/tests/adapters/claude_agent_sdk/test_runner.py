@@ -21,7 +21,11 @@ from claude_agent_sdk import (
 )
 
 import kitaru_claude_agent_sdk.runner as runner_module
-from kitaru.api_models.v1.replay import ReplayResponse, ReplayStatus
+from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
+    ReplayResponse,
+    ReplayStatus,
+)
 from kitaru.api_models.v1.replay_config import (
     PassthroughConfig,
     ReplayOverride,
@@ -69,6 +73,7 @@ def _replay(
         tool_policy=tool_policy or ToolPolicy(default=PassthroughConfig(), tools={}),
         evaluators=[],
         evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         status=ReplayStatus.PENDING,
         error=None,
         created=now,

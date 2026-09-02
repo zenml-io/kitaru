@@ -42,7 +42,7 @@ from kitaru.api_models.v1.experiment_run import (
 from kitaru.api_models.v1.filter import FilterCondition, FilterOp
 from kitaru.api_models.v1.job import JobResponse
 from kitaru.api_models.v1.replay_config import EvaluatorConfig
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.client.api_client import KitaruAPIClient
 from kitaru.client.exceptions import APIError, NotFoundError
 from kitaru.server.adapters.rest.dependencies import (
@@ -132,6 +132,7 @@ async def run_request(
         agent_id=agent_id,
         agent_version_id=version.id,
         origin=SessionOrigin.RECORDED,
+        status=SessionStatus.COMPLETED,
     )
     cohort = await create_cohort(services.cohorts, ACCOUNT.id, agent_id)
     cohort_version = await create_cohort_version(

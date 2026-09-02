@@ -23,6 +23,7 @@ from mcp import types as mcp_types
 
 import kitaru_claude_agent_sdk.runner as runner_module
 from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
     ReplayResponse,
     ReplayStatus,
     ToolLookupMatch,
@@ -84,6 +85,7 @@ def _replay(policy: ToolPolicy) -> ReplayResponse:
         tool_policy=policy,
         evaluators=[],
         evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         status=ReplayStatus.PENDING,
         error=None,
         created=now,

@@ -21,7 +21,7 @@ importers are both plugin resources.
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Path, Query, status
 
 from kitaru.api_models.v1.base import ListParams, Page
 from kitaru.api_models.v1.evaluator import (
@@ -34,6 +34,7 @@ from kitaru.api_models.v1.evaluator import (
     EvaluatorVersionUpdateRequest,
 )
 from kitaru.server.adapters.rest.dependencies import authorize, get_evaluator_service
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.adapters.rest.routers import plugins
 from kitaru.server.application.models.auth import AuthContext
@@ -42,7 +43,9 @@ from kitaru.server.application.services.plugin_service import PluginService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_evaluator(
     body: EvaluatorCreateRequest,
@@ -89,7 +92,7 @@ async def list_evaluators(
     )
 
 
-@router.get("/{evaluator_id}")
+@router.get("/{evaluator_id}", responses=error_responses(404))
 async def get_evaluator(
     evaluator_id: uuid.UUID,
     service: Annotated[PluginService, Depends(get_evaluator_service)],
@@ -113,7 +116,7 @@ async def get_evaluator(
     )
 
 
-@router.patch("/{evaluator_id}")
+@router.patch("/{evaluator_id}", responses=error_responses(404))
 async def update_evaluator(
     evaluator_id: uuid.UUID,
     body: EvaluatorUpdateRequest,
@@ -139,7 +142,11 @@ async def update_evaluator(
     )
 
 
-@router.delete("/{evaluator_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{evaluator_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_evaluator(
     evaluator_id: uuid.UUID,
     service: Annotated[PluginService, Depends(get_evaluator_service)],
@@ -158,7 +165,11 @@ async def delete_evaluator(
     await plugins.delete_plugin(service, evaluator_id, actor=actor)
 
 
-@router.post("/{evaluator_id}/versions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{evaluator_id}/versions",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
 @idempotent
 async def create_evaluator_version(
     evaluator_id: uuid.UUID,
@@ -216,10 +227,10 @@ async def list_evaluator_versions(
     )
 
 
-@router.get("/{evaluator_id}/versions/{version}")
+@router.get("/{evaluator_id}/versions/{version}", responses=error_responses(404))
 async def get_evaluator_version(
     evaluator_id: uuid.UUID,
-    version: int,
+    version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
     service: Annotated[PluginService, Depends(get_evaluator_service)],
     actor: Annotated[AuthContext, Depends(authorize)],
 ) -> EvaluatorVersionResponse:
@@ -242,10 +253,10 @@ async def get_evaluator_version(
     )
 
 
-@router.patch("/{evaluator_id}/versions/{version}")
+@router.patch("/{evaluator_id}/versions/{version}", responses=error_responses(404))
 async def update_evaluator_version(
     evaluator_id: uuid.UUID,
-    version: int,
+    version: Annotated[int, Path(ge=1, le=plugins.INT32_MAX)],
     body: EvaluatorVersionUpdateRequest,
     service: Annotated[PluginService, Depends(get_evaluator_service)],
     actor: Annotated[AuthContext, Depends(authorize)],

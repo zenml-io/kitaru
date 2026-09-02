@@ -32,6 +32,7 @@ from kitaru.server.adapters.rest.mapping.jobs import (
     job_to_response,
 )
 from kitaru.server.adapters.rest.mapping.tasks import task_to_response
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.job_service import JobService
@@ -65,7 +66,7 @@ async def list_jobs(
     )
 
 
-@router.get("/{job_id}")
+@router.get("/{job_id}", responses=error_responses(404))
 async def get_job(
     job_id: uuid.UUID,
     service: Annotated[JobService, Depends(get_job_service)],
@@ -87,7 +88,7 @@ async def get_job(
     return job_to_response(job)
 
 
-@router.get("/{job_id}/tasks")
+@router.get("/{job_id}/tasks", responses=error_responses(404))
 async def list_job_tasks(
     job_id: uuid.UUID,
     service: Annotated[JobService, Depends(get_job_service)],
@@ -114,7 +115,7 @@ async def list_job_tasks(
     )
 
 
-@router.post("/{job_id}/cancel")
+@router.post("/{job_id}/cancel", responses=error_responses(404, 409))
 async def cancel_job(
     job_id: uuid.UUID,
     service: Annotated[JobService, Depends(get_job_service)],
@@ -137,7 +138,11 @@ async def cancel_job(
     return job_to_response(job)
 
 
-@router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{job_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_job(
     job_id: uuid.UUID,
     service: Annotated[JobService, Depends(get_job_service)],

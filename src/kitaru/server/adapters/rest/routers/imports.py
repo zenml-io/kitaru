@@ -22,6 +22,7 @@ from kitaru.api_models.v1.job import JobResponse
 from kitaru.server.adapters.rest.dependencies import authorize, get_job_service
 from kitaru.server.adapters.rest.mapping.imports import import_create_to_command
 from kitaru.server.adapters.rest.mapping.jobs import job_to_response
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.job_service import JobService
@@ -29,7 +30,9 @@ from kitaru.server.application.services.job_service import JobService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_import(
     body: ImportCreateRequest,

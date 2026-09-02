@@ -31,6 +31,7 @@ from kitaru.server.adapters.rest.mapping.accounts import (
     account_list_params_to_filter,
     account_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.account_service import AccountService
@@ -82,7 +83,7 @@ async def get_current_account(
     return account_to_response(actor.account)
 
 
-@router.get("/{account_id}")
+@router.get("/{account_id}", responses=error_responses(404))
 async def get_account(
     account_id: uuid.UUID,
     service: Annotated[AccountService, Depends(get_account_service)],

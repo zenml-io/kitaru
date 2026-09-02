@@ -30,6 +30,13 @@ class EvaluationValue(ResponseModel):
     )
     value: str | None = Field(default=None, description="Label or string value.")
     passed: bool | None = Field(default=None, description="Pass or fail verdict.")
+    min_score: FiniteFloat | None = Field(
+        default=None, description="Lower bound of the score scale."
+    )
+    max_score: FiniteFloat | None = Field(
+        default=None, description="Upper bound of the score scale."
+    )
+    target_score: FiniteFloat | None = Field(default=None, description="Score to beat.")
 
 
 class ReplayEvaluationValues(ResponseModel):
@@ -72,12 +79,36 @@ class EvaluationStats(ResponseModel):
         default=None,
         description="Occurrences per value, only for categorical evaluations.",
     )
+    min_score: float | None = Field(
+        default=None,
+        description="Lower bound of the score scale shared by every aggregated "
+        "evaluation, null when they differ or one lacks it.",
+    )
+    max_score: float | None = Field(
+        default=None,
+        description="Upper bound of the score scale shared by every aggregated "
+        "evaluation, null when they differ or one lacks it.",
+    )
+    target_score: float | None = Field(
+        default=None,
+        description="Score to beat shared by every aggregated evaluation, null "
+        "when they differ or one lacks it.",
+    )
 
 
 class EvaluationAggregateResponse(ResponseModel):
     """Evaluation aggregate response."""
 
     name: str = Field(description="Evaluation name.")
+    evaluator_version_id: uuid.UUID | None = Field(
+        default=None, description="Evaluator version that produced the group."
+    )
+    evaluator_name: str | None = Field(
+        default=None, description="Name of the evaluator that produced the group."
+    )
+    evaluator_version: int | None = Field(
+        default=None, description="Version of the evaluator that produced the group."
+    )
     data_type: EvaluationDataType = Field(description="Evaluation data type.")
     baseline: EvaluationStats = Field(description="Stats over the baseline sessions.")
     result: EvaluationStats = Field(description="Stats over the result sessions.")

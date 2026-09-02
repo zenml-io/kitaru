@@ -39,6 +39,7 @@ from kitaru.server.domain.account import Account
 from kitaru.server.domain.idempotency_key import (
     IdempotencyKey,
     IdempotencyKeyAlreadyExists,
+    IdempotencyKeyResponseUndecryptable,
 )
 
 Setup = tuple[IdempotencyKeyRepository, uuid.UUID, uuid.UUID]
@@ -166,7 +167,7 @@ async def test_store_response_roundtrip(setup: Setup) -> None:
 
 
 async def test_store_response_encrypted_roundtrip() -> None:
-    """Store the body encrypted at rest and decrypt it on read."""
+    """Store the body encrypted at rest, load it as stored, and decrypt it."""
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, _engine):
@@ -194,9 +195,20 @@ async def test_store_response_encrypted_roundtrip() -> None:
         assert row.response_body is not None
         assert b"secret" not in row.response_body
 
-        loaded = await repository.get(owner.id, "request-1", encrypted=True)
+        loaded = await repository.get(owner.id, "request-1")
         assert loaded is not None
-        assert loaded.response_body == b'{"key": "secret"}'
+        assert loaded.response_body == row.response_body
+        assert (
+            repository.decrypt_response_body(loaded.response_body)
+            == b'{"key": "secret"}'
+        )
+
+
+async def test_decrypt_response_body_rejects_plaintext(setup: Setup) -> None:
+    """Raise when the body was not stored encrypted."""
+    repository, _, _ = setup
+    with pytest.raises(IdempotencyKeyResponseUndecryptable):
+        repository.decrypt_response_body(b"not-encrypted")
 
 
 async def test_delete_expired_with_zero_limit_deletes_nothing(setup: Setup) -> None:

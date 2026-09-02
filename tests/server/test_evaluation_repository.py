@@ -18,6 +18,7 @@ import uuid
 from collections.abc import AsyncGenerator
 
 import pytest
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
@@ -31,6 +32,7 @@ from kitaru.api_models.v1.evaluation import EvaluationDataType, EvaluationResult
 from kitaru.api_models.v1.filter import FilterOp
 from kitaru.api_models.v1.job import JobKind, JobStatus
 from kitaru.server.adapters.db.orm.evaluation import EvaluationORM
+from kitaru.server.adapters.db.orm.replay_evaluation import ReplayEvaluationORM
 from kitaru.server.adapters.db.repositories.account_repository import (
     SQLAccountRepository,
 )
@@ -74,7 +76,11 @@ from kitaru.server.domain.agent import Agent
 from kitaru.server.domain.agent_version import AgentVersion
 from kitaru.server.domain.cohort import Cohort
 from kitaru.server.domain.cohort_version import CohortVersion
-from kitaru.server.domain.evaluation import Evaluation, EvaluationNotFound
+from kitaru.server.domain.evaluation import (
+    Evaluation,
+    EvaluationNameConflict,
+    EvaluationNotFound,
+)
 from kitaru.server.domain.experiment import Experiment
 from kitaru.server.domain.experiment_run import ExperimentRun
 from kitaru.server.domain.job import Job
@@ -82,6 +88,7 @@ from kitaru.server.domain.plugin import (
     PackagePluginSource,
     Plugin,
     PluginKind,
+    PluginVersionIdNotFound,
 )
 from kitaru.server.domain.replay import Replay
 from kitaru.server.domain.replay_config import (
@@ -92,6 +99,7 @@ from kitaru.server.domain.replay_config import (
 from kitaru.server.domain.session import Session
 from kitaru.server.domain.task import EvaluationTask
 from kitaru.server.filtering import FilterCondition, NotExpression
+from kitaru.server.utils import hash_params
 
 Setup = tuple[EvaluationRepository, uuid.UUID, uuid.UUID]
 PluginSetup = tuple[PluginRepository, EvaluationRepository, uuid.UUID, uuid.UUID]
@@ -108,10 +116,20 @@ def _evaluation(
     explanation: str | None = None,
     evaluator_version_id: uuid.UUID | None = None,
     passed: bool | None = None,
+    min_score: float | None = None,
+    max_score: float | None = None,
+    target_score: float | None = None,
 ) -> Evaluation:
     """Build an unstored evaluation, deriving data_type via EvaluationResult."""
     result = EvaluationResult(
-        name=name, score=score, value=value, explanation=explanation, passed=passed
+        name=name,
+        score=score,
+        value=value,
+        explanation=explanation,
+        passed=passed,
+        min_score=min_score,
+        max_score=max_score,
+        target_score=target_score,
     )
     return Evaluation(
         owner_id=owner_id,
@@ -123,6 +141,9 @@ def _evaluation(
         value=result.value,
         explanation=result.explanation,
         passed=result.passed,
+        min_score=result.min_score,
+        max_score=result.max_score,
+        target_score=result.target_score,
     )
 
 
@@ -175,14 +196,14 @@ async def setup(request: pytest.FixtureRequest) -> AsyncGenerator[Setup, None]:
         yield SQLEvaluationRepository(session), owner_id, session_id
 
 
-async def test_merge_inserts_new_evaluations(setup: Setup) -> None:
+async def test_create_inserts_new_evaluations(setup: Setup) -> None:
     """Insert evaluations that do not already exist."""
     repository, owner_id, session_id = setup
     evaluations = [
         _evaluation(owner_id, session_id, "accuracy", score=0.9),
         _evaluation(owner_id, session_id, "passed", score=True),
     ]
-    stored = await repository.merge_session_evaluations(session_id, evaluations)
+    stored = await repository.create_session_evaluations(session_id, evaluations)
     assert [e.name for e in stored] == ["accuracy", "passed"]
     assert stored[0].data_type == EvaluationDataType.FLOAT
     assert stored[0].score == 0.9
@@ -192,13 +213,10 @@ async def test_merge_inserts_new_evaluations(setup: Setup) -> None:
     assert stored[0].updated is not None
 
 
-async def test_merge_overwrites_matching_name_and_keeps_id(setup: Setup) -> None:
-    """Resending a name overwrites its score, value, data type, and explanation.
-
-    The row id, owner, and creation time are kept.
-    """
+async def test_create_rejects_an_existing_name(setup: Setup) -> None:
+    """Resending a name already stored for the session raises a conflict."""
     repository, owner_id, session_id = setup
-    first = await repository.merge_session_evaluations(
+    await repository.create_session_evaluations(
         session_id,
         [
             _evaluation(
@@ -206,31 +224,25 @@ async def test_merge_overwrites_matching_name_and_keeps_id(setup: Setup) -> None
             )
         ],
     )
-    second = await repository.merge_session_evaluations(
-        session_id,
-        [
-            _evaluation(
-                owner_id,
-                session_id,
-                "accuracy",
-                value="high",
-                explanation="second pass",
-            )
-        ],
-    )
-    assert second[0].id == first[0].id
-    assert second[0].owner_id == first[0].owner_id
-    assert second[0].created == first[0].created
-    assert second[0].data_type == EvaluationDataType.STR
-    assert second[0].score is None
-    assert second[0].value == "high"
-    assert second[0].explanation == "second pass"
+    with pytest.raises(EvaluationNameConflict):
+        await repository.create_session_evaluations(
+            session_id,
+            [
+                _evaluation(
+                    owner_id,
+                    session_id,
+                    "accuracy",
+                    value="high",
+                    explanation="second pass",
+                )
+            ],
+        )
 
 
-async def test_merge_round_trips_passed(setup: Setup) -> None:
+async def test_create_round_trips_passed(setup: Setup) -> None:
     """Round-trip the pass flag through both true and false, defaulting to null."""
     repository, owner_id, session_id = setup
-    stored = await repository.merge_session_evaluations(
+    stored = await repository.create_session_evaluations(
         session_id,
         [
             _evaluation(owner_id, session_id, "a", score=1.0, passed=True),
@@ -241,44 +253,54 @@ async def test_merge_round_trips_passed(setup: Setup) -> None:
     assert [e.passed for e in stored] == [True, False, None]
 
 
-async def test_merge_overwrites_passed(setup: Setup) -> None:
-    """Resending a name overwrites its pass flag, clearing it when omitted."""
+async def test_create_round_trips_score_bounds(setup: Setup) -> None:
+    """Round-trip min_score, max_score, and target_score, defaulting to null."""
     repository, owner_id, session_id = setup
-    await repository.merge_session_evaluations(
-        session_id, [_evaluation(owner_id, session_id, "a", score=1.0, passed=True)]
+    stored = await repository.create_session_evaluations(
+        session_id,
+        [
+            _evaluation(
+                owner_id,
+                session_id,
+                "a",
+                score=1.0,
+                min_score=0.0,
+                max_score=2.0,
+                target_score=1.5,
+            ),
+            _evaluation(owner_id, session_id, "b", score=1.0),
+        ],
     )
-    flipped = await repository.merge_session_evaluations(
-        session_id, [_evaluation(owner_id, session_id, "a", score=1.0, passed=False)]
-    )
-    assert flipped[0].passed is False
-    cleared = await repository.merge_session_evaluations(
-        session_id, [_evaluation(owner_id, session_id, "a", score=1.0)]
-    )
-    assert cleared[0].passed is None
+    assert stored[0].min_score == 0.0
+    assert stored[0].max_score == 2.0
+    assert stored[0].target_score == 1.5
+    assert stored[1].min_score is None
+    assert stored[1].max_score is None
+    assert stored[1].target_score is None
 
 
-async def test_merge_preserves_request_order(setup: Setup) -> None:
+async def test_create_preserves_request_order(setup: Setup) -> None:
     """Return stored evaluations in the same order the batch was sent."""
     repository, owner_id, session_id = setup
     evaluations = [
         _evaluation(owner_id, session_id, f"m{i}", score=float(i))
         for i in reversed(range(5))
     ]
-    stored = await repository.merge_session_evaluations(session_id, evaluations)
+    stored = await repository.create_session_evaluations(session_id, evaluations)
     assert [e.name for e in stored] == [f"m{i}" for i in reversed(range(5))]
 
 
-async def test_merge_empty_batch(setup: Setup) -> None:
+async def test_create_empty_batch(setup: Setup) -> None:
     """Return an empty list for an empty batch."""
     repository, _, session_id = setup
-    stored = await repository.merge_session_evaluations(session_id, [])
+    stored = await repository.create_session_evaluations(session_id, [])
     assert stored == []
 
 
 async def test_categorical_round_trips_both_channels(setup: Setup) -> None:
     """Round-trip a categorical evaluation carrying both score and value."""
     repository, owner_id, session_id = setup
-    stored = await repository.merge_session_evaluations(
+    stored = await repository.create_session_evaluations(
         session_id,
         [_evaluation(owner_id, session_id, "verdict", score=3.0, value="good")],
     )
@@ -290,7 +312,7 @@ async def test_categorical_round_trips_both_channels(setup: Setup) -> None:
 async def test_get(setup: Setup) -> None:
     """Load a stored evaluation by id."""
     repository, owner_id, session_id = setup
-    stored = await repository.merge_session_evaluations(
+    stored = await repository.create_session_evaluations(
         session_id, [_evaluation(owner_id, session_id, "a", score=1.0)]
     )
     item = await repository.get(stored[0].id)
@@ -334,10 +356,10 @@ async def test_query_filters_by_session_and_name(
 ) -> None:
     """Filter evaluations by session_id and name."""
     repository, owner_id, session_id, other_session_id = session_pair
-    await repository.merge_session_evaluations(
+    await repository.create_session_evaluations(
         session_id, [_evaluation(owner_id, session_id, "a", score=1.0)]
     )
-    await repository.merge_session_evaluations(
+    await repository.create_session_evaluations(
         other_session_id, [_evaluation(owner_id, other_session_id, "a", score=2.0)]
     )
 
@@ -363,7 +385,7 @@ async def test_query_filters_by_session_and_name(
 async def test_query_filters_by_data_type(setup: Setup) -> None:
     """Filter evaluations by data_type."""
     repository, owner_id, session_id = setup
-    await repository.merge_session_evaluations(
+    await repository.create_session_evaluations(
         session_id,
         [
             _evaluation(owner_id, session_id, "a", score=1.0),
@@ -387,7 +409,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
     evaluations = [
         _evaluation(owner_id, session_id, f"m{i}", score=float(i)) for i in range(5)
     ]
-    created = await repository.merge_session_evaluations(session_id, evaluations)
+    created = await repository.create_session_evaluations(session_id, evaluations)
     expected_order = list(reversed(created))
 
     collected: list[Evaluation] = []
@@ -414,7 +436,7 @@ async def test_query_walks_pages(setup: Setup) -> None:
 async def test_query_task_id_filter(setup: Setup) -> None:
     """Filter evaluations by task_id, which stays null for manual rows."""
     repository, owner_id, session_id = setup
-    await repository.merge_session_evaluations(
+    await repository.create_session_evaluations(
         session_id, [_evaluation(owner_id, session_id, "a", score=1.0)]
     )
     items, _ = await repository.query(
@@ -467,7 +489,7 @@ async def test_denormalized_evaluator_name_and_version(
     version = await plugin_repository.create_version(
         plugin.id, SOURCE, display_version="v1"
     )
-    stored = await evaluation_repository.merge_session_evaluations(
+    stored = await evaluation_repository.create_session_evaluations(
         session_id,
         [
             _evaluation(
@@ -495,10 +517,16 @@ async def test_denormalized_evaluator_name_and_version(
     assert items[0].evaluator_version == version.version
 
 
-async def test_evaluator_delete_nulls_stored_evaluation(
+async def test_evaluator_delete_keeps_the_stored_evaluator_version_id(
     plugin_setup: PluginSetup,
 ) -> None:
-    """Deleting an evaluator nulls the evaluator version on a stored evaluation."""
+    """Deleting an evaluator leaves its produced rows' evaluator_version_id set.
+
+    A dropped evaluator version is never a live plugin version again, so
+    creating a manual evaluation under the same (session, name) afterward
+    must not collide with this row, since it no longer pattern-matches the
+    manual discriminator.
+    """
     plugin_repository, evaluation_repository, owner_id, session_id = plugin_setup
     plugin = await plugin_repository.create(
         Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy-scorer")
@@ -506,8 +534,7 @@ async def test_evaluator_delete_nulls_stored_evaluation(
     version = await plugin_repository.create_version(
         plugin.id, SOURCE, display_version="v1"
     )
-    stored = await evaluation_repository.merge_session_evaluations(
-        session_id,
+    [stored] = await evaluation_repository.create_task_evaluations(
         [
             _evaluation(
                 owner_id,
@@ -517,12 +544,39 @@ async def test_evaluator_delete_nulls_stored_evaluation(
                 evaluator_version_id=version.id,
             )
         ],
+        replay_id=None,
     )
 
     await plugin_repository.delete(plugin.id)
 
-    item = await evaluation_repository.get(stored[0].id)
-    assert item.evaluation.evaluator_version_id is None
+    item = await evaluation_repository.get(stored.id)
+    assert item.evaluation.evaluator_version_id == version.id
+
+    manual = await evaluation_repository.create_session_evaluations(
+        session_id,
+        [_evaluation(owner_id, session_id, "accuracy", score=0.1)],
+    )
+    assert manual[0].id != stored.id
+
+
+async def test_create_task_evaluations_rejects_unknown_evaluator_version(
+    plugin_setup: PluginSetup,
+) -> None:
+    """Reject a task evaluation naming a plugin version that does not exist."""
+    _, evaluation_repository, owner_id, session_id = plugin_setup
+    with pytest.raises(PluginVersionIdNotFound):
+        await evaluation_repository.create_task_evaluations(
+            [
+                _evaluation(
+                    owner_id,
+                    session_id,
+                    "accuracy",
+                    score=0.8,
+                    evaluator_version_id=uuid.uuid4(),
+                )
+            ],
+            replay_id=None,
+        )
 
 
 async def test_check_constraint_rejects_mismatched_columns() -> None:
@@ -546,7 +600,11 @@ async def test_check_constraint_rejects_mismatched_columns() -> None:
 
 
 async def test_survives_task_delete_with_null_task_id() -> None:
-    """An evaluation survives its producing task's delete, task_id nulled."""
+    """An evaluation survives its producing task's delete, task_id nulled.
+
+    The evaluator_version_id stays set, since only the task foreign key is
+    SET NULL.
+    """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
     async with pg_session_with_engine() as (session, engine):
@@ -580,7 +638,7 @@ async def test_survives_task_delete_with_null_task_id() -> None:
             evaluator_version_id=plugin_version.id,
         )
         [stored] = await repository.create_task_evaluations(
-            [evaluation.model_copy(update={"task_id": task.id})]
+            [evaluation.model_copy(update={"task_id": task.id})], replay_id=None
         )
 
         await jobs.delete(job.id)
@@ -606,10 +664,10 @@ async def test_query_filters_by_agent() -> None:
         elsewhere = await _create_session_row(session, engine, owner.id, other_agent.id)
 
         repository = SQLEvaluationRepository(session)
-        await repository.merge_session_evaluations(
+        await repository.create_session_evaluations(
             scored, [_evaluation(owner.id, scored, "mine", score=1.0)]
         )
-        await repository.merge_session_evaluations(
+        await repository.create_session_evaluations(
             elsewhere, [_evaluation(owner.id, elsewhere, "theirs", score=1.0)]
         )
 
@@ -657,7 +715,7 @@ async def test_query_filters_by_cohort_spanning_versions() -> None:
             (in_second, "second"),
             (uncohorted, "loose"),
         ):
-            await repository.merge_session_evaluations(
+            await repository.create_session_evaluations(
                 session_id, [_evaluation(owner_id, session_id, name, score=1.0)]
             )
 
@@ -672,13 +730,14 @@ async def test_query_filters_by_cohort_spanning_versions() -> None:
 
 
 async def test_query_filters_by_experiment_run() -> None:
-    """Filter evaluations by the run whose jobs produced them.
+    """Filter evaluations by the run of the replay they are linked to.
 
-    Postgres-only: the run is three hops from the evaluation, reached through
-    the producing task's job and the replay that owns it.
+    Postgres-only: the run is reached through the replay link table.
 
-    Scoping by task rather than by session is what brings a run's baseline and
-    result evaluations into the same result set, so both are asserted here.
+    A row's producing task belonging to one of the run's replays is not
+    enough, only a replay link brings it into the result set, so a linked
+    row and an unlinked task-born row of the same run are both asserted
+    here.
     """
     if not await postgres_available():
         pytest.skip("PostgreSQL is not reachable")
@@ -738,9 +797,14 @@ async def test_query_filters_by_experiment_run() -> None:
         session_numbers = itertools.count(1)
 
         async def score_in_run(
-            experiment_run_id: uuid.UUID | None, name: str
+            experiment_run_id: uuid.UUID | None, name: str, linked: bool
         ) -> uuid.UUID:
             """Score one session through a replay's evaluator task.
+
+            Args:
+                experiment_run_id: Run the replay belongs to.
+                name: Evaluation name.
+                linked: Whether the stored row is linked to its replay.
 
             Returns:
                 Id of the scored session.
@@ -751,7 +815,7 @@ async def test_query_filters_by_experiment_run() -> None:
             baseline = await _create_session_row(
                 session, engine, owner_id, agent_id, next(session_numbers)
             )
-            await replays.create(
+            replay = await replays.create(
                 Replay(
                     owner_id=owner_id,
                     job_id=job.id,
@@ -775,13 +839,15 @@ async def test_query_filters_by_experiment_run() -> None:
                 evaluator_version_id=plugin_version.id,
             )
             await repository.create_task_evaluations(
-                [evaluation.model_copy(update={"task_id": task.id})]
+                [evaluation.model_copy(update={"task_id": task.id})],
+                replay_id=replay.id if linked else None,
             )
             return baseline
 
-        await score_in_run(run.id, "baseline")
-        await score_in_run(run.id, "result")
-        await score_in_run(None, "unrelated")
+        await score_in_run(run.id, "baseline", linked=True)
+        await score_in_run(run.id, "result", linked=True)
+        await score_in_run(run.id, "unlinked", linked=False)
+        await score_in_run(None, "unrelated", linked=True)
 
         items, _ = await repository.query(
             EvaluationFilter(
@@ -807,7 +873,7 @@ async def test_query_filters_by_experiment_run() -> None:
         loose = await _create_session_row(
             session, engine, owner_id, agent_id, next(session_numbers)
         )
-        await repository.merge_session_evaluations(
+        await repository.create_session_evaluations(
             loose, [_evaluation(owner_id, loose, "session-scoped", score=1.0)]
         )
         items, _ = await repository.query(
@@ -820,6 +886,218 @@ async def test_query_filters_by_experiment_run() -> None:
             )
         )
         assert {item.evaluation.name for item in items} == {
+            "unlinked",
             "unrelated",
             "session-scoped",
         }
+
+
+async def test_query_filters_by_replay() -> None:
+    """Filter evaluations by the replay they are linked to.
+
+    Postgres-only: the replay is reached through the replay link table.
+    """
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner_id, agent_id = await _create_owner_and_agent(session)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
+        other_session_id = await _create_session_row(
+            session, engine, owner_id, agent_id, 2
+        )
+        jobs = SQLJobRepository(session)
+        job = await jobs.create(
+            Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+        )
+        config = await SQLExperimentRepository(session).create_replay_config(
+            ReplayConfig(
+                owner_id=owner_id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        replay = await SQLReplayRepository(session).create(
+            Replay(
+                owner_id=owner_id,
+                job_id=job.id,
+                replay_config_id=config.id,
+                baseline_session_id=session_id,
+            )
+        )
+        repository = SQLEvaluationRepository(session)
+        [linked] = await repository.create_task_evaluations(
+            [_evaluation(owner_id, session_id, "linked", score=1.0)],
+            replay_id=replay.id,
+        )
+        await repository.create_task_evaluations(
+            [_evaluation(owner_id, session_id, "unlinked", score=1.0)],
+            replay_id=None,
+        )
+        await repository.create_session_evaluations(
+            other_session_id,
+            [_evaluation(owner_id, other_session_id, "elsewhere", score=1.0)],
+        )
+
+        items, _ = await repository.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="replay_id", op=FilterOp.EQ, value=replay.id
+                )
+            )
+        )
+        assert [item.evaluation.id for item in items] == [linked.id]
+
+        items, _ = await repository.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="replay_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+        assert items == []
+
+
+async def test_fake_refuses_replay_id_filter() -> None:
+    """The fake evaluation repository cannot resolve a replay_id filter."""
+    repository = FakeEvaluationRepository()
+    with pytest.raises(NotImplementedError):
+        await repository.query(
+            EvaluationFilter(
+                expression=FilterCondition(
+                    field="replay_id", op=FilterOp.EQ, value=uuid.uuid4()
+                )
+            )
+        )
+
+
+async def test_get_latest_evaluation_ids_by_identity_picks_the_latest(
+    plugin_setup: PluginSetup,
+) -> None:
+    """The identity lookup returns the most recently created matching row."""
+    plugin_repository, evaluation_repository, owner_id, session_id = plugin_setup
+    plugin = await plugin_repository.create(
+        Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy-scorer")
+    )
+    version = await plugin_repository.create_version(
+        plugin.id, SOURCE, display_version="v1"
+    )
+    params_hash = hash_params({"threshold": 0.5})
+
+    def _scored(score: float) -> Evaluation:
+        return _evaluation(
+            owner_id,
+            session_id,
+            "accuracy",
+            score=score,
+            evaluator_version_id=version.id,
+        ).model_copy(
+            update={
+                "evaluator_params": {"threshold": 0.5},
+                "params_hash": params_hash,
+            }
+        )
+
+    await evaluation_repository.create_task_evaluations([_scored(0.8)], replay_id=None)
+    [second] = await evaluation_repository.create_task_evaluations(
+        [_scored(0.9)], replay_id=None
+    )
+
+    identity_map = await evaluation_repository.get_latest_evaluation_ids_by_identity(
+        [session_id]
+    )
+    assert identity_map[(session_id, version.id, params_hash)] == second.id
+
+
+async def test_create_task_evaluations_links_the_replay() -> None:
+    """A replay id passed to create_task_evaluations links every stored row."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner_id, agent_id = await _create_owner_and_agent(session)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
+        plugins = SQLPluginRepository(session)
+        plugin = await plugins.create(
+            Plugin(owner_id=owner_id, kind=PluginKind.EVALUATOR, name="accuracy")
+        )
+        plugin_version = await plugins.create_version(
+            plugin.id, SOURCE, display_version="v1"
+        )
+        jobs = SQLJobRepository(session)
+        job = await jobs.create(
+            Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+        )
+        config = await SQLExperimentRepository(session).create_replay_config(
+            ReplayConfig(
+                owner_id=owner_id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        replay = await SQLReplayRepository(session).create(
+            Replay(
+                owner_id=owner_id,
+                job_id=job.id,
+                replay_config_id=config.id,
+                baseline_session_id=session_id,
+            )
+        )
+        repository = SQLEvaluationRepository(session)
+        evaluation = _evaluation(
+            owner_id,
+            session_id,
+            "accuracy",
+            score=1.0,
+            evaluator_version_id=plugin_version.id,
+        )
+        [stored] = await repository.create_task_evaluations(
+            [evaluation], replay_id=replay.id
+        )
+
+        links = (
+            await session.execute(
+                select(ReplayEvaluationORM.replay_id, ReplayEvaluationORM.evaluation_id)
+            )
+        ).all()
+        assert links == [(replay.id, stored.id)]
+
+
+async def test_add_replay_links_persists_to_the_join_table() -> None:
+    """add_replay_links writes rows readable straight from replay_evaluation."""
+    if not await postgres_available():
+        pytest.skip("PostgreSQL is not reachable")
+    async with pg_session_with_engine() as (session, engine):
+        owner_id, agent_id = await _create_owner_and_agent(session)
+        session_id = await _create_session_row(session, engine, owner_id, agent_id)
+        jobs = SQLJobRepository(session)
+        job = await jobs.create(
+            Job(owner_id=owner_id, kind=JobKind.REPLAY, status=JobStatus.PENDING)
+        )
+        config = await SQLExperimentRepository(session).create_replay_config(
+            ReplayConfig(
+                owner_id=owner_id,
+                tool_policy=ToolPolicy(default=PassthroughConfig()),
+                evaluators=[],
+            )
+        )
+        replay = await SQLReplayRepository(session).create(
+            Replay(
+                owner_id=owner_id,
+                job_id=job.id,
+                replay_config_id=config.id,
+                baseline_session_id=session_id,
+            )
+        )
+        repository = SQLEvaluationRepository(session)
+        [stored] = await repository.create_session_evaluations(
+            session_id,
+            [_evaluation(owner_id, session_id, "accuracy", score=0.9)],
+        )
+
+        await repository.add_replay_links([(replay.id, stored.id)])
+
+        links = (
+            await session.execute(
+                select(ReplayEvaluationORM.replay_id, ReplayEvaluationORM.evaluation_id)
+            )
+        ).all()
+        assert links == [(replay.id, stored.id)]

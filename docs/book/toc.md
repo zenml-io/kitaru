@@ -58,6 +58,7 @@
 - [Claude Agent SDK](adapters/claude-agent-sdk.md)
 - [Mastra](adapters/mastra.md)
 - [Vercel AI SDK](adapters/vercel-ai.md)
+- [Importer-backed adapters](adapters/importer-backed.md)
 - [No adapter for your framework](adapters/custom.md)
 
 ## Running in production

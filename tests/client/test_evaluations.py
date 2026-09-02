@@ -144,10 +144,10 @@ async def _create_session(
     return session.id
 
 
-async def test_merge_evaluations(api_client: KitaruAPIClient) -> None:
-    """Merge manual evaluations into a session through the SDK."""
+async def test_create_evaluations(api_client: KitaruAPIClient) -> None:
+    """Create manual evaluations on a session through the SDK."""
     session_id = await _create_session(api_client)
-    stored = await api_client.sessions.merge_evaluations(
+    stored = await api_client.sessions.create_evaluations(
         session_id,
         SessionEvaluationsRequest(
             evaluations=[
@@ -162,10 +162,10 @@ async def test_merge_evaluations(api_client: KitaruAPIClient) -> None:
     assert stored[1].value == "good"
 
 
-async def test_merge_evaluations_passed(api_client: KitaruAPIClient) -> None:
+async def test_create_evaluations_passed(api_client: KitaruAPIClient) -> None:
     """Round-trip the optional pass flag through the SDK."""
     session_id = await _create_session(api_client)
-    stored = await api_client.sessions.merge_evaluations(
+    stored = await api_client.sessions.create_evaluations(
         session_id,
         SessionEvaluationsRequest(
             evaluations=[
@@ -178,10 +178,10 @@ async def test_merge_evaluations_passed(api_client: KitaruAPIClient) -> None:
     assert [item.passed for item in stored] == [True, False, None]
 
 
-async def test_merge_evaluations_not_found(api_client: KitaruAPIClient) -> None:
+async def test_create_evaluations_not_found(api_client: KitaruAPIClient) -> None:
     """Surface HTTP 404 as a typed error."""
     with pytest.raises(NotFoundError):
-        await api_client.sessions.merge_evaluations(
+        await api_client.sessions.create_evaluations(
             uuid.uuid4(),
             SessionEvaluationsRequest(
                 evaluations=[EvaluationResult(name="accuracy", score=0.9)]
@@ -189,13 +189,13 @@ async def test_merge_evaluations_not_found(api_client: KitaruAPIClient) -> None:
         )
 
 
-async def test_merge_evaluations_duplicate_name_in_batch(
+async def test_create_evaluations_duplicate_name_in_batch(
     api_client: KitaruAPIClient,
 ) -> None:
     """Surface HTTP 422 for a request naming the same evaluation twice."""
     session_id = await _create_session(api_client)
     with pytest.raises(APIError) as exc_info:
-        await api_client.sessions.merge_evaluations(
+        await api_client.sessions.create_evaluations(
             session_id,
             SessionEvaluationsRequest(
                 evaluations=[
@@ -207,10 +207,29 @@ async def test_merge_evaluations_duplicate_name_in_batch(
     assert exc_info.value.status_code == 422
 
 
+async def test_create_evaluations_name_conflict(api_client: KitaruAPIClient) -> None:
+    """Surface HTTP 409 for a name that already exists on the session."""
+    session_id = await _create_session(api_client)
+    await api_client.sessions.create_evaluations(
+        session_id,
+        SessionEvaluationsRequest(
+            evaluations=[EvaluationResult(name="accuracy", score=0.9)]
+        ),
+    )
+    with pytest.raises(APIError) as exc_info:
+        await api_client.sessions.create_evaluations(
+            session_id,
+            SessionEvaluationsRequest(
+                evaluations=[EvaluationResult(name="accuracy", score=0.1)]
+            ),
+        )
+    assert exc_info.value.status_code == 409
+
+
 async def test_get(api_client: KitaruAPIClient) -> None:
     """Get an evaluation by id through the SDK."""
     session_id = await _create_session(api_client)
-    stored = await api_client.sessions.merge_evaluations(
+    stored = await api_client.sessions.create_evaluations(
         session_id,
         SessionEvaluationsRequest(
             evaluations=[EvaluationResult(name="accuracy", score=0.9)]
@@ -229,7 +248,7 @@ async def test_get_not_found(api_client: KitaruAPIClient) -> None:
 async def test_list_and_iter(api_client: KitaruAPIClient) -> None:
     """List and iterate evaluations through the SDK."""
     session_id = await _create_session(api_client)
-    await api_client.sessions.merge_evaluations(
+    await api_client.sessions.create_evaluations(
         session_id,
         SessionEvaluationsRequest(
             evaluations=[

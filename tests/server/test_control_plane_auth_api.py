@@ -222,7 +222,10 @@ async def test_password_grant_type_rejected(client: httpx.AsyncClient) -> None:
         "/api/v1/login", data={"username": "alice", "password": "secret"}
     )
     assert response.status_code == 400
-    assert response.json() == {"detail": "Unsupported grant type: password"}
+    assert response.json() == {
+        "error": "unsupported_grant_type",
+        "detail": "Unsupported grant type: password",
+    }
 
 
 async def test_local_api_key_rejected(

@@ -18,11 +18,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kitaru.server.adapters.rest.dependencies import get_session
+from kitaru.server.adapters.rest.responses import error_responses
 
 router = APIRouter()
 
 
-@router.get("")
+@router.get("", responses=error_responses(503))
 async def health(
     db: AsyncSession = Depends(get_session),
 ) -> dict[str, str]:

@@ -196,6 +196,26 @@ async def test_device_authorization_returns_codes(client: httpx.AsyncClient) -> 
     assert body["interval"] > 0
 
 
+async def test_device_authorization_rejects_nul_byte(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 422 for a NUL byte in a device fingerprint field."""
+    response = await client.post(
+        "/api/v1/device_authorization", data={"python_version": "3.14\x00"}
+    )
+    assert response.status_code == 422
+
+
+async def test_device_authorization_accepts_non_ascii(
+    client: httpx.AsyncClient,
+) -> None:
+    """Observe HTTP 200 for a non-ASCII device fingerprint field."""
+    response = await client.post(
+        "/api/v1/device_authorization", data={"python_version": "3.14☃"}
+    )
+    assert response.status_code == 200
+
+
 async def test_poll_before_verification_is_pending(client: httpx.AsyncClient) -> None:
     """Observe HTTP 400 with authorization_pending before an account confirms."""
     authorization = (await client.post("/api/v1/device_authorization", data={})).json()
@@ -298,5 +318,46 @@ async def test_device_grant_rejected_under_none_scheme(
         )
     assert response.status_code == 400
     assert response.json() == {
-        "detail": f"Unsupported grant type: {DEVICE_CODE_GRANT_TYPE}"
+        "error": "unsupported_grant_type",
+        "detail": f"Unsupported grant type: {DEVICE_CODE_GRANT_TYPE}",
+    }
+
+
+async def test_device_grant_missing_fields(client: httpx.AsyncClient) -> None:
+    """Observe HTTP 400 when the device grant omits the device code."""
+    authorization = (await client.post("/api/v1/device_authorization", data={})).json()
+
+    response = await client.post(
+        "/api/v1/login",
+        data={
+            "grant_type": DEVICE_CODE_GRANT_TYPE,
+            "device_id": authorization["device_id"],
+        },
+    )
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "invalid_request",
+        "detail": "Invalid request: device_id and device_code are required.",
+    }
+
+
+async def test_device_authorization_under_none_scheme(
+    account_repository: FakeAccountRepository,
+    api_key_repository: FakeApiKeyRepository,
+    device_repository: FakeDeviceRepository,
+) -> None:
+    """Observe HTTP 400 for a device authorization under the none auth scheme."""
+    settings = APISettings(
+        DB_HOST="localhost",
+        SECRET_ENCRYPTION_KEY="test-encryption-key",
+        JWT_SIGNING_KEY="test-signing-key-0123456789abcdef",
+    )
+    app = build_app(settings, account_repository, api_key_repository, device_repository)
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        response = await client.post("/api/v1/device_authorization", data={})
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "unsupported_grant_type",
+        "detail": "This server does not authenticate requests.",
     }

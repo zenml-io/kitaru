@@ -15,6 +15,7 @@
 
 import asyncio
 import json
+import logging
 import os
 import signal
 import uuid
@@ -323,11 +324,24 @@ class ForegroundWorkerProcess:
             self._signal_handlers.clear()
 
 
+def _configure_worker_logging(log_level: str) -> None:
+    """Install a root logging handler at the requested level."""
+    level = logging.getLevelNamesMapping().get(log_level.upper())
+    if level is None:
+        raise CLIError("invalid_arguments", f"Unknown log level: {log_level}")
+    logging.basicConfig(
+        level=level, format="%(asctime)s %(name)s %(levelname)s %(message)s"
+    )
+
+
 async def start_worker(
     target: ResolvedTarget,
+    log_level: str | None = None,
     **options: Any,
 ) -> CommandResult:
     """Build and run the generic worker without creating durable CLI state."""
+    if log_level is not None:
+        _configure_worker_logging(log_level)
     with worker_contract_environment(target):
         worker_type, _ = load_worker_runtime()
         config = build_worker_config(**options)

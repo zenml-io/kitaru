@@ -652,7 +652,7 @@ async def test_query_filters_by_has_evaluation(setup: Setup) -> None:
             origin=SessionOrigin.RECORDED,
         )
     )
-    await evaluations.merge_session_evaluations(
+    await evaluations.create_session_evaluations(
         scored.id,
         [
             Evaluation(

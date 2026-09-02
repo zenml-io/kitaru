@@ -26,6 +26,9 @@ from kitaru.server.application.interfaces.agent_version_repository import (
 from kitaru.server.application.interfaces.cohort_version_repository import (
     CohortVersionRepository,
 )
+from kitaru.server.application.interfaces.evaluation_repository import (
+    EvaluationRepository,
+)
 from kitaru.server.application.interfaces.experiment_repository import (
     ExperimentRepository,
 )
@@ -88,6 +91,7 @@ class ExperimentService:
         replay_repository: ReplayRepository,
         job_repository: JobRepository,
         task_repository: TaskRepository,
+        evaluation_repository: EvaluationRepository,
         transitions: TaskTransitions,
         payload_store: PayloadStore,
         analytics: ServerAnalytics | None = None,
@@ -109,6 +113,8 @@ class ExperimentService:
                 and job lookup on delete.
             job_repository: Job repository, for run fan-out.
             task_repository: Task repository, for run fan-out.
+            evaluation_repository: Evaluation repository, for run fan-out's
+                baseline adoption lookup.
             transitions: Task transition dispatch, for job cancellation.
             payload_store: Payload store, for run fan-out's baseline sessions.
             analytics: Analytics tracker, None skips tracking.
@@ -123,6 +129,7 @@ class ExperimentService:
         self._replays = replay_repository
         self._jobs = job_repository
         self._tasks = task_repository
+        self._evaluations = evaluation_repository
         self._transitions = transitions
         self._payload_store = payload_store
         self._analytics = analytics
@@ -410,18 +417,19 @@ class ExperimentService:
 
         Args:
             experiment_id: Id of the experiment.
-            command: Cohort version, agent version, and baseline scoring
-                flag for the run.
+            command: Cohort version, agent version, and baseline evaluation
+                mode for the run.
             actor: Caller context.
 
         Raises:
             ExperimentNotFound: No experiment has this id.
             CohortVersionIdNotFound: No cohort version has the given id.
             ValidationError: The cohort version has no sessions, belongs to
-                a cohort of another agent, or the resolved agent version has
-                no run spec.
-            SessionNotEvaluatable: ``evaluate_baselines`` is set and a
-                cohort version session is in progress.
+                a cohort of another agent, the resolved agent version has no
+                run spec, or the config carries an override or tool policy
+                the agent version's runtime capabilities do not declare.
+            SessionNotEvaluatable: ``baseline_evaluation_mode`` is not
+                ``NONE`` and a cohort version session is in progress.
             AgentVersionNotFound: No agent version has the given id.
             AgentVersionAgentMismatch: The agent version belongs to another
                 agent.
@@ -447,6 +455,9 @@ class ExperimentService:
             command.agent_version_id, self._agent_versions, experiment.agent_id
         )
         config = await self._repository.get_replay_config(experiment.replay_config_id)
+        run_spec = agent_version.run_spec
+        assert run_spec is not None
+        config.check_capabilities(run_spec.runtime_capabilities)
         sessions = await self._resolve_cohort_version_sessions(cohort_version.id)
 
         number = await self._experiment_runs.get_max_number(experiment_id) + 1
@@ -456,7 +467,7 @@ class ExperimentService:
             number=number,
             cohort_version_id=cohort_version.id,
             agent_version_id=agent_version.id,
-            evaluate_baselines=command.evaluate_baselines,
+            baseline_evaluation_mode=command.baseline_evaluation_mode,
         )
         run.start(datetime.now(UTC))
         run = await self._experiment_runs.create(run)
@@ -465,12 +476,13 @@ class ExperimentService:
             baselines=sessions,
             agent_version_id=agent_version.id,
             config=config,
-            evaluate_baselines=command.evaluate_baselines,
+            baseline_evaluation_mode=command.baseline_evaluation_mode,
             experiment_run_id=run.id,
             actor=actor,
             replay_repository=self._replays,
             job_repository=self._jobs,
             task_repository=self._tasks,
+            evaluation_repository=self._evaluations,
             payload_store=self._payload_store,
         )
         counts = await self._replays.count_by_status(run.id)

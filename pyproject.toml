@@ -1,6 +1,6 @@
 [project]
 name = "kitaru"
-version = "0.23.0+dev"
+version = "0.24.0+dev"
 description = "Record, replay, and improve AI agents in production."
 readme = "README.md"
 license = "Apache-2.0"
@@ -128,6 +128,9 @@ dev = [
     "griffe-typingdoc>=0.2.8,<1.0.0",
     "hypothesis>=6.165",
     "hypothesis-jsonschema>=0.23",
+]
+fuzz = [
+    "schemathesis>=4.25,<5",
 ]
 
 [tool.ruff]

@@ -32,6 +32,7 @@ from kitaru.api_models.v1.experiment_run import (
     ExperimentRunResponse,
     ExperimentRunStatus,
 )
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.cli import app as app_module
 from kitaru.cli import experiment_runs
 from kitaru.cli.output import (
@@ -65,6 +66,7 @@ def _run(
         cohort_version_id=cohort_version_id,
         agent_version_id=agent_version_id,
         evaluate_baselines=True,
+        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         started_at=now,
         ended_at=now
         if status
@@ -240,7 +242,7 @@ async def test_start_returns_exact_created_receipt() -> None:
         "regression",
         cohort_version_id=client.cohort_version.id,
         agent_reference="candidate@latest",
-        evaluate_baselines=True,
+        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
         wait=False,
         interval=None,
         timeout=None,
@@ -251,7 +253,7 @@ async def test_start_returns_exact_created_receipt() -> None:
     assert request == ExperimentRunCreateRequest(
         cohort_version_id=client.cohort_version.id,
         agent_version_id=client.agent_version.id,
-        evaluate_baselines=True,
+        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
     )
     assert result.event == "created"
     assert result.item["operation"] == "experiment_run"
@@ -292,7 +294,7 @@ async def test_waited_start_emits_executable_created_and_terminal_actions() -> N
             "regression",
             cohort_version_id=client.cohort_version.id,
             agent_reference="candidate@2",
-            evaluate_baselines=False,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
             wait=True,
             interval=1,
             timeout=2,
@@ -356,7 +358,7 @@ async def test_waited_start_preserves_actions_on_terminal_errors(
                 "regression",
                 cohort_version_id=client.cohort_version.id,
                 agent_reference="candidate@2",
-                evaluate_baselines=False,
+                baseline_evaluation_mode=BaselineEvaluationMode.NONE,
                 wait=True,
                 interval=1,
                 timeout=2,
@@ -393,7 +395,7 @@ async def test_start_validates_wait_settings_before_network_access() -> None:
             "regression",
             cohort_version_id=client.cohort_version.id,
             agent_reference="candidate@2",
-            evaluate_baselines=False,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
             wait=False,
             interval=1,
             timeout=None,
@@ -765,6 +767,36 @@ def test_public_argv_covers_every_run_leaf(
         == 0
     )
     assert json.loads(capsys.readouterr().out)["item"]["deleted"] is True
+
+
+def test_public_run_start_forwards_baseline_evaluation_mode(
+    argv_client: StubRunsClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The public start command parses and forwards --baseline-evaluation-mode."""
+    client = argv_client
+
+    assert (
+        app_module.main(
+            [
+                "experiment",
+                "run",
+                "start",
+                "regression",
+                "--cohort-version",
+                str(client.cohort_version.id),
+                "--agent",
+                "candidate@2",
+                "--baseline-evaluation-mode",
+                "force",
+                "--output",
+                "json",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    [(_, request)] = client.start_calls
+    assert request.baseline_evaluation_mode is BaselineEvaluationMode.FORCE
 
 
 def test_public_start_wait_validation_is_structured_and_non_mutating(

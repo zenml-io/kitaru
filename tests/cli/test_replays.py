@@ -15,6 +15,7 @@ from typing import Any
 import pytest
 
 from kitaru.api_models.v1.replay import (
+    BaselineEvaluationMode,
     ReplayCreateRequest,
     ReplayListParams,
     ReplayResponse,
@@ -55,6 +56,7 @@ class StubReplayClient:
             tool_policy={"default": {"type": "passthrough"}, "tools": {}},
             evaluators=[{"evaluator": "quality", "version": 3, "params": {}}],
             evaluate_baselines=False,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
             status=ReplayStatus.PENDING,
             error=None,
             created=now,
@@ -134,7 +136,7 @@ async def test_create_forwards_all_supported_fields_and_next_actions() -> None:
             '{"default":{"type":"history","scope":"baseline",'
             '"on_miss":"fail"},"tools":{}}'
         ),
-        evaluate_baselines=True,
+        baseline_evaluation_mode=BaselineEvaluationMode.IF_MISSING,
     )
 
     [request] = client.create_calls
@@ -149,7 +151,7 @@ async def test_create_forwards_all_supported_fields_and_next_actions() -> None:
         "evaluators": [
             {"evaluator": "quality", "version": 3, "params": {"threshold": 0.8}}
         ],
-        "evaluate_baselines": True,
+        "baseline_evaluation_mode": "if_missing",
     }
     assert result.item["id"] == str(client.replay_id)
     assert result.item["job_id"] == str(client.job_id)
@@ -172,14 +174,14 @@ async def test_create_omits_server_decided_optional_fields() -> None:
         agent=None,
         override=None,
         tool_policy=None,
-        evaluate_baselines=False,
+        baseline_evaluation_mode=BaselineEvaluationMode.NONE,
     )
 
     [request] = client.create_calls
     assert request.model_dump(mode="json", exclude_unset=True) == {
         "baseline_session_id": str(client.baseline_id),
         "evaluators": [{"evaluator": "quality", "version": 3, "params": {}}],
-        "evaluate_baselines": False,
+        "baseline_evaluation_mode": "none",
     }
 
 
@@ -212,7 +214,7 @@ async def test_invalid_create_inputs_do_not_mutate(
             agent=None,
             override=override,
             tool_policy=None,
-            evaluate_baselines=False,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         )
 
     assert client.create_calls == []
@@ -231,7 +233,7 @@ async def test_create_rejects_tokens_resolving_to_same_evaluator_version() -> No
             agent=None,
             override=None,
             tool_policy=None,
-            evaluate_baselines=False,
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         )
 
     assert client.create_calls == []
@@ -307,6 +309,33 @@ def test_public_replay_argv_covers_all_leaves(
 
     assert app_module.main(["replay", "get", str(client.replay_id)]) == 0
     assert json.loads(capsys.readouterr().out)["item"]["status"] == "pending"
+
+
+def test_public_replay_create_forwards_baseline_evaluation_mode(
+    argv_client: StubReplayClient, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """The public create command parses and forwards --baseline-evaluation-mode."""
+    client = argv_client
+
+    assert (
+        app_module.main(
+            [
+                "replay",
+                "create",
+                str(client.baseline_id),
+                "--evaluator",
+                "quality@3",
+                "--baseline-evaluation-mode",
+                "force",
+                "--output",
+                "json",
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    [request] = client.create_calls
+    assert request.baseline_evaluation_mode is BaselineEvaluationMode.FORCE
 
 
 def test_public_invalid_create_is_structured_and_does_not_mutate(

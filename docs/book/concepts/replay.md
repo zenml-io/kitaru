@@ -99,6 +99,8 @@ The tool policy decides what happens when the re-running agent calls a tool. The
 
 For the "nothing touches real systems" guarantee, set `default=HistoryConfig(scope="baseline", on_miss="fail")`. Recorded calls are answered from the recording and anything novel stops the replay instead of hitting production. The full matrix, including per-tool overrides and history scopes, is in [Tool policies](../guides/tool-policies.md).
 
+Overrides and non-passthrough tool policies both depend on the agent version's declared [runtime capabilities](agents-and-sessions.md). Creating a replay whose config carries one the version cannot apply is rejected with 422.
+
 ## Scale: cohorts and experiments
 
 One replay answers a question about one session. The same machinery applied to a [cohort](cohorts.md) of sessions, with the change expressed as an [experiment](experiments.md), answers the question that matters before you ship: _what does this change do to last week's production traffic?_ That is the [regression suite](../guides/regression-suite.md).

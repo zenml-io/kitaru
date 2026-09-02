@@ -34,6 +34,7 @@ from kitaru.server.adapters.rest.mapping.tags import (
     tag_list_params_to_filter,
     tag_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.tag_service import TagService
@@ -41,7 +42,9 @@ from kitaru.server.application.services.tag_service import TagService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 409)
+)
 @idempotent
 async def create_tag(
     body: TagCreateRequest,
@@ -91,7 +94,7 @@ async def list_tags(
     )
 
 
-@router.patch("/{tag_id}")
+@router.patch("/{tag_id}", responses=error_responses(404, 409))
 async def update_tag(
     tag_id: uuid.UUID,
     body: TagUpdateRequest,
@@ -116,7 +119,11 @@ async def update_tag(
     return tag_to_response(tag)
 
 
-@router.delete("/{tag_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{tag_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
+)
 async def delete_tag(
     tag_id: uuid.UUID,
     service: Annotated[TagService, Depends(get_tag_service)],
@@ -135,7 +142,11 @@ async def delete_tag(
     await service.delete_tag(tag_id, actor=actor)
 
 
-@router.post("/{tag_id}/links", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{tag_id}/links",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(404, 409),
+)
 async def create_tag_link(
     tag_id: uuid.UUID,
     body: TagLinkCreateRequest,
@@ -166,6 +177,7 @@ async def create_tag_link(
 @router.delete(
     "/{tag_id}/links/{resource_type}/{resource_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404),
 )
 async def delete_tag_link(
     tag_id: uuid.UUID,

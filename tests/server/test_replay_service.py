@@ -37,8 +37,9 @@ from conftest import (
 )
 from kitaru.analytics.events import AnalyticsEvent
 from kitaru.api_models.v1.filter import FilterOp
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.replay_config import HistoryScope, ToolPolicyOnMiss
-from kitaru.api_models.v1.session import SessionOrigin
+from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.api_models.v1.session_node import NodeStatus, NodeType
 from kitaru.api_models.v1.task import TaskKind
 from kitaru.api_models.v1.worker import WorkerClaim, WorkerScope
@@ -59,6 +60,7 @@ from kitaru.server.domain.agent_version import (
     AgentVersion,
     AgentVersionWithoutRunSpec,
     RunSpec,
+    RuntimeCapabilities,
 )
 from kitaru.server.domain.base import ValidationError
 from kitaru.server.domain.experiment_run import ExperimentRun
@@ -114,14 +116,22 @@ def services() -> ReplayServices:
 
 
 async def _agent_version(
-    services: ReplayServices, with_run_spec: bool = True, name: str = "assistant"
+    services: ReplayServices,
+    with_run_spec: bool = True,
+    name: str = "assistant",
+    runtime_capabilities: RuntimeCapabilities | None = None,
 ) -> AgentVersion:
     agent = await create_agent(services.agents, ACTOR.account.id, name=name)
     return await create_agent_version(
         services.agent_versions,
         agent_id=agent.id,
         owner_id=ACTOR.account.id,
-        run_spec=RunSpec(command="run.sh") if with_run_spec else None,
+        run_spec=RunSpec(
+            command="run.sh",
+            runtime_capabilities=runtime_capabilities or RuntimeCapabilities(),
+        )
+        if with_run_spec
+        else None,
     )
 
 
@@ -151,6 +161,7 @@ async def _session(
         "agent_id": agent_version.agent_id,
         "agent_version_id": agent_version.id,
         "origin": SessionOrigin.RECORDED,
+        "status": SessionStatus.COMPLETED,
     }
     values.update(overrides)
     return await create_session(services.sessions, ACTOR.account.id, **values)
@@ -170,6 +181,7 @@ async def test_create_replay_runs_the_named_agent_version(
             baseline_session_id=baseline.id,
             agent_version_id=replayed.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -193,6 +205,7 @@ async def test_create_replay_resolves_baseline_agent_version(
         ReplayCreate(
             baseline_session_id=baseline.id,
             evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+            baseline_evaluation_mode=BaselineEvaluationMode.NONE,
         ),
         actor=ACTOR,
     )
@@ -276,6 +289,53 @@ async def test_create_replay_rejects_cohort_version_scoped_history(
     with pytest.raises(
         ValidationError, match="cannot use cohort-version-scoped history"
     ):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                agent_version_id=agent_version.id,
+                evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+                tool_policy=tool_policy,
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_replay_rejects_an_override_outside_capabilities(
+    services: ReplayServices,
+) -> None:
+    """An override is rejected when the agent version does not support overrides."""
+    agent_version = await _agent_version(
+        services, runtime_capabilities=RuntimeCapabilities(overrides=False)
+    )
+    await _evaluator(services)
+    baseline = await _session(services, agent_version)
+    with pytest.raises(ValidationError, match="does not support replay overrides"):
+        await services.replay_service.create_replay(
+            ReplayCreate(
+                baseline_session_id=baseline.id,
+                agent_version_id=agent_version.id,
+                evaluators=[EvaluatorConfigInput(evaluator="accuracy")],
+                override=ReplayOverride(model="gpt-5"),
+            ),
+            actor=ACTOR,
+        )
+
+
+async def test_create_replay_rejects_a_tool_policy_outside_capabilities(
+    services: ReplayServices,
+) -> None:
+    """A non-passthrough policy is rejected when the agent version excludes policies."""
+    agent_version = await _agent_version(
+        services, runtime_capabilities=RuntimeCapabilities(tool_policies=False)
+    )
+    await _evaluator(services)
+    baseline = await _session(services, agent_version)
+    tool_policy = ToolPolicy(
+        default=HistoryConfig(
+            scope=HistoryScope.BASELINE, on_miss=ToolPolicyOnMiss.FAIL
+        )
+    )
+    with pytest.raises(ValidationError, match="does not support replay tool policies"):
         await services.replay_service.create_replay(
             ReplayCreate(
                 baseline_session_id=baseline.id,
@@ -869,6 +929,7 @@ def _replay_service_with_analytics(
         experiment_run_repository=services.experiment_runs,
         job_repository=services.jobs,
         task_repository=services.tasks,
+        evaluation_repository=services.evaluations,
         session_repository=services.sessions,
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,
@@ -887,6 +948,7 @@ def _replay_service_with_payload_store(
         experiment_run_repository=services.experiment_runs,
         job_repository=services.jobs,
         task_repository=services.tasks,
+        evaluation_repository=services.evaluations,
         session_repository=services.sessions,
         session_node_repository=services.session_nodes,
         agent_version_repository=services.agent_versions,

@@ -35,6 +35,7 @@ from kitaru.api_models.v1.investigation import (
     InvestigationSessionVerdict,
     InvestigationStatus,
 )
+from kitaru.api_models.v1.replay import BaselineEvaluationMode
 from kitaru.api_models.v1.session import SessionOrigin, SessionStatus
 from kitaru.cli import (
     annotations,
@@ -2568,11 +2569,11 @@ async def experiment_delete(
                 "live tools.",
             ),
             ParameterSpec(
-                "--evaluate-baselines",
-                "boolean",
+                "--baseline-evaluation-mode",
+                "none|if_missing|force",
                 "option",
                 False,
-                "Also score the baseline session.",
+                "How to score the baseline session.",
             ),
             _IDEMPOTENCY_KEY_PARAMETER,
         ),
@@ -2591,7 +2592,9 @@ async def replay_create(
     agent: str | None = None,
     override: str | None = None,
     tool_policy: str | None = None,
-    evaluate_baselines: bool = False,
+    baseline_evaluation_mode: BaselineEvaluationMode = (
+        BaselineEvaluationMode.IF_MISSING
+    ),
     idempotency_key: str | None = None,
 ) -> CommandResult:
     """Create one standalone replay without waiting for its job."""
@@ -2604,7 +2607,7 @@ async def replay_create(
             agent=agent,
             override=override,
             tool_policy=tool_policy,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
             idempotency_key=idempotency_key,
         )
 
@@ -2675,11 +2678,11 @@ async def replay_get(replay: uuid.UUID, /) -> CommandResult:
                 "Exact agent version reference.",
             ),
             ParameterSpec(
-                "--evaluate-baselines",
-                "boolean",
+                "--baseline-evaluation-mode",
+                "none|if_missing|force",
                 "option",
                 False,
-                "Also score each baseline session.",
+                "How to score each baseline session.",
             ),
             *_WAIT_PARAMETERS,
             _IDEMPOTENCY_KEY_PARAMETER,
@@ -2697,7 +2700,9 @@ async def experiment_run_start(
     *,
     cohort_version: uuid.UUID,
     agent: str,
-    evaluate_baselines: bool = False,
+    baseline_evaluation_mode: BaselineEvaluationMode = (
+        BaselineEvaluationMode.IF_MISSING
+    ),
     wait: bool = False,
     interval: float | None = None,
     timeout: float | None = None,
@@ -2710,7 +2715,7 @@ async def experiment_run_start(
             experiment,
             cohort_version_id=cohort_version,
             agent_reference=agent,
-            evaluate_baselines=evaluate_baselines,
+            baseline_evaluation_mode=baseline_evaluation_mode,
             wait=wait,
             interval=interval,
             timeout=timeout,
@@ -3911,6 +3916,13 @@ _WORKER_START_PARAMETERS = (
     ParameterSpec(
         "--metadata", "KEY=VALUE[]", "option", False, "Worker registration metadata."
     ),
+    ParameterSpec(
+        "--log-level",
+        "string",
+        "option",
+        False,
+        "Log level for worker runtime logs: debug, info, warning, or error.",
+    ),
 )
 
 
@@ -3957,12 +3969,20 @@ async def worker_start(
     blob_cache_root: Path | None = None,
     payload_cache_root: Path | None = None,
     metadata: list[str] | None = None,
+    log_level: Annotated[
+        str,
+        Parameter(
+            name="--log-level",
+            help="Log level for worker runtime logs: debug, info, warning, or error.",
+        ),
+    ] = "info",
 ) -> CommandResult:
     """Launch the existing generic worker as one foreground process."""
     invocation = _invocation()
     target = invocation.resolve_target()
     return await workers.start_worker(
         target,
+        log_level=log_level,
         name=name,
         claims=claims,
         selectors=selectors,
