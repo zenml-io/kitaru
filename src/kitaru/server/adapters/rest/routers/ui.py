@@ -50,6 +50,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_to_detail_response,
     session_to_response,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, read_only
 from kitaru.server.application.interfaces.evaluation_repository import (
     EvaluationWithEvaluator,
@@ -242,7 +243,7 @@ async def list_sessions_with_evaluations(
     )
 
 
-@router.get("/sessions/{session_id}")
+@router.get("/sessions/{session_id}", responses=error_responses(404))
 @read_only
 async def get_session_with_evaluations(
     session_id: uuid.UUID,
@@ -274,7 +275,10 @@ async def get_session_with_evaluations(
     )
 
 
-@router.get("/experiment-runs/{experiment_run_id}/evaluation-aggregates")
+@router.get(
+    "/experiment-runs/{experiment_run_id}/evaluation-aggregates",
+    responses=error_responses(404),
+)
 @read_only
 async def list_experiment_run_evaluation_aggregates(
     experiment_run_id: uuid.UUID,
@@ -392,7 +396,11 @@ async def list_experiment_run_evaluation_aggregates(
     return aggregates
 
 
-@router.post("/sample-data", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/sample-data",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(409),
+)
 async def create_sample_data(
     seeder: Annotated[SampleDataSeeder, Depends(get_sample_data_seeder)],
     session: Annotated[AsyncSession, Depends(get_session)],

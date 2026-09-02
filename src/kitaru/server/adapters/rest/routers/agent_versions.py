@@ -30,6 +30,7 @@ from kitaru.server.adapters.rest.mapping.agent_versions import (
     agent_version_to_response,
     agent_version_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.agent_version_service import (
@@ -39,7 +40,7 @@ from kitaru.server.application.services.agent_version_service import (
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.get("/{agent_version_id}")
+@router.get("/{agent_version_id}", responses=error_responses(404))
 async def get_agent_version(
     agent_version_id: uuid.UUID,
     service: Annotated[AgentVersionService, Depends(get_agent_version_service)],
@@ -62,7 +63,7 @@ async def get_agent_version(
     return agent_version_to_response(agent_version)
 
 
-@router.patch("/{agent_version_id}")
+@router.patch("/{agent_version_id}", responses=error_responses(404))
 async def update_agent_version(
     agent_version_id: uuid.UUID,
     body: AgentVersionUpdateRequest,
@@ -88,7 +89,11 @@ async def update_agent_version(
     return agent_version_to_response(agent_version)
 
 
-@router.delete("/{agent_version_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{agent_version_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_agent_version(
     agent_version_id: uuid.UUID,
     service: Annotated[AgentVersionService, Depends(get_agent_version_service)],

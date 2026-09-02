@@ -58,6 +58,7 @@ from kitaru.server.adapters.rest.mapping.sessions import (
     session_to_response,
     session_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.evaluation_service import EvaluationService
@@ -69,7 +70,9 @@ from kitaru.server.application.services.session_service import SessionService
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_session(
     body: SessionCreateRequest,
@@ -130,7 +133,7 @@ async def list_sessions(
     )
 
 
-@router.get("/{session_id}")
+@router.get("/{session_id}", responses=error_responses(404))
 async def get_session(
     session_id: uuid.UUID,
     service: Annotated[SessionService, Depends(get_session_service)],
@@ -153,7 +156,7 @@ async def get_session(
     return session_to_detail_response(session)
 
 
-@router.patch("/{session_id}")
+@router.patch("/{session_id}", responses=error_responses(404, 409))
 async def update_session(
     session_id: uuid.UUID,
     body: SessionUpdateRequest,
@@ -180,7 +183,11 @@ async def update_session(
     return session_to_response(session)
 
 
-@router.delete("/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{session_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_session(
     session_id: uuid.UUID,
     service: Annotated[SessionService, Depends(get_session_service)],
@@ -200,7 +207,7 @@ async def delete_session(
     await service.delete_session(session_id, actor=actor)
 
 
-@router.post("/{session_id}/nodes")
+@router.post("/{session_id}/nodes", responses=error_responses(404, 409))
 async def ingest_session_nodes(
     session_id: uuid.UUID,
     body: SessionNodeBatchRequest,
@@ -236,7 +243,7 @@ async def ingest_session_nodes(
     ]
 
 
-@router.get("/{session_id}/nodes")
+@router.get("/{session_id}/nodes", responses=error_responses(404))
 async def list_session_nodes(
     session_id: uuid.UUID,
     service: Annotated[SessionNodeService, Depends(get_session_node_service)],
@@ -273,7 +280,7 @@ async def list_session_nodes(
     )
 
 
-@router.get("/{session_id}/full")
+@router.get("/{session_id}/full", responses=error_responses(404))
 async def get_session_with_nodes(
     session_id: uuid.UUID,
     service: Annotated[SessionService, Depends(get_session_service)],
@@ -312,7 +319,7 @@ async def get_session_with_nodes(
     )
 
 
-@router.post("/{session_id}/evaluations")
+@router.post("/{session_id}/evaluations", responses=error_responses(404, 409))
 async def create_session_evaluations(
     session_id: uuid.UUID,
     body: SessionEvaluationsRequest,

@@ -46,6 +46,7 @@ from kitaru.server.adapters.rest.mapping.cohorts import (
     cohort_to_response,
     cohort_update_to_command,
 )
+from kitaru.server.adapters.rest.responses import error_responses
 from kitaru.server.adapters.rest.route import KitaruAPIRoute, idempotent
 from kitaru.server.application.models.auth import AuthContext
 from kitaru.server.application.services.cohort_service import CohortService
@@ -56,7 +57,9 @@ from kitaru.server.application.services.cohort_version_service import (
 router = APIRouter(route_class=KitaruAPIRoute)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "", status_code=status.HTTP_201_CREATED, responses=error_responses(400, 404, 409)
+)
 @idempotent
 async def create_cohort(
     body: CohortCreateRequest,
@@ -109,7 +112,7 @@ async def list_cohorts(
     )
 
 
-@router.get("/{cohort_id}")
+@router.get("/{cohort_id}", responses=error_responses(404))
 async def get_cohort(
     cohort_id: uuid.UUID,
     service: Annotated[CohortService, Depends(get_cohort_service)],
@@ -131,7 +134,7 @@ async def get_cohort(
     return cohort_to_response(cohort)
 
 
-@router.patch("/{cohort_id}")
+@router.patch("/{cohort_id}", responses=error_responses(404, 409))
 async def update_cohort(
     cohort_id: uuid.UUID,
     body: CohortUpdateRequest,
@@ -158,7 +161,11 @@ async def update_cohort(
     return cohort_to_response(cohort)
 
 
-@router.delete("/{cohort_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{cohort_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    responses=error_responses(404, 409),
+)
 async def delete_cohort(
     cohort_id: uuid.UUID,
     service: Annotated[CohortService, Depends(get_cohort_service)],
@@ -178,7 +185,11 @@ async def delete_cohort(
     await service.delete_cohort(cohort_id, actor=actor)
 
 
-@router.post("/{cohort_id}/versions", status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{cohort_id}/versions",
+    status_code=status.HTTP_201_CREATED,
+    responses=error_responses(400, 404, 409),
+)
 @idempotent
 async def create_cohort_version(
     cohort_id: uuid.UUID,
@@ -208,7 +219,7 @@ async def create_cohort_version(
     return cohort_version_to_response(version)
 
 
-@router.get("/{cohort_id}/versions")
+@router.get("/{cohort_id}/versions", responses=error_responses(404))
 async def list_cohort_versions(
     cohort_id: uuid.UUID,
     service: Annotated[CohortVersionService, Depends(get_cohort_version_service)],
